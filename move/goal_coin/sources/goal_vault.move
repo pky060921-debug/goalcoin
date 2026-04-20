@@ -2,9 +2,7 @@ module goal_coin::goal_vault {
     use sui::sui::SUI;
     use sui::coin::{Self, Coin};
     use sui::balance::{Self, Balance};
-    use sui::object::{Self, UID};
-    use sui::transfer;
-    use sui::tx_context::{Self, TxContext};
+    // 2024 에디션 자동 로드 기능으로 인해 불필요해진 use 구문들 삭제
 
     const FEE_BPS: u64 = 300; // 3% 플랫폼 수수료
     const DIVISOR: u64 = 10000;
@@ -31,7 +29,6 @@ module goal_coin::goal_vault {
         });
     }
 
-    // 경고 해결: entry 제거하고 public만 사용
     public fun deposit(payment: Coin<SUI>, ctx: &mut TxContext) {
         let amount = coin::value(&payment);
         assert!(amount > 0, 0);
@@ -44,7 +41,7 @@ module goal_coin::goal_vault {
         transfer::transfer(goal, tx_context::sender(ctx));
     }
 
-    // 경고 해결: 미사용 상수를 활용하는 환급 및 수수료 정산 로직 추가
+    #[allow(lint(self_transfer))] // 환급 직관성을 위해 컴포저블 경고 무시
     public fun complete_goal(
         vault: &mut Vault,
         goal: Goal,
