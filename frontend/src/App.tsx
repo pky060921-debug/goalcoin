@@ -64,8 +64,9 @@ function App() {
               <Text size="2" color="green">성공적으로 연결되었습니다! 이제 목표를 설정할 준비가 되었습니다.</Text>
             </Flex>
           ) : (
-            <Flex direction="column" alig            <Flex direction="column" a   <Button onClick={handleGoogleLogin} size="3" style={{ cursor: 'pointer', backgroundColor: '#fff', color: '#000', width: '100%' }}>
-                <Text weight="bold">Google              3초 만에 시작하기</Text>
+            <Flex direction="column" align="center" py="4" gap="3">
+              <Button onClick={handleGoogleLogin} size="3" style={{ cursor: 'pointer', backgroundColor: '#fff', color: '#000', width: '100%' }}>
+                <Text weight="bold">Google 계정으로 3초 만에 시작하기</Text>
               </Button>
               <Text size="1" style={{ color: 'var(--color-muted-foreground)' }}>확장프로그램 설치 없이 간편하게 로그인하세요.</Text>
             </Flex>
