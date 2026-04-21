@@ -1,26 +1,43 @@
 import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
 import { Box, Flex, Heading, Text, Container, Card, Button } from "@radix-ui/themes";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useEnokiFlow, useZkLoginSession } from "@mysten/enoki/react";
 
 // TODO: 구글 클라우드 콘솔에서 발급받은 Client ID를 아래에 넣으세요.
-const GOOGLE_CLIENT_ID = "536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com";
+const GOOGLE_CLIENT_ID = "여기에_GOOGLE_CLIENT_ID_입력";
 
 function App() {
   const extensionAccount = useCurrentAccount();
   const enokiFlow = useEnokiFlow();
   const zkLoginSession = useZkLoginSession();
+  
+  // 구글 로그인으로 파생된 지갑 주소를 담을 새로운 공간입니다.
+  const [zkAddress, setZkAddress] = useState<string | null>(null);
 
-  // 구글 인증 후 돌아오는 콜백 처리 (진단용 로그 추가)
+  // 1. 구글 인증 후 돌아오는 콜백 처리
   useEffect(() => {
-    enokiFlow.handleAuthCallback()
-      .then(() => console.log("✅ Enoki 인증 콜백 완료! 티켓을 무사히 받았습니다."))
-      .catch((err) => console.error("❌ 인증 콜백 에러 발생:", err));
-      
-    console.log("현재 zkLogin 상태:", zkLoginSession);
-  }, [enokiFlow, zkLoginSession]);
+    enokiFlow.handleAuthCallback().catch((err) => console.log("인증 대기 중...", err));
+  }, [enokiFlow]);
 
-  const activeAddress = zkLoginSession?.address || extensionAccount?.address;
+  // 2. 인증 티켓(JWT)이 확인되면, Enoki에 지갑 주소(Keypair) 생성을 요청합니다!
+  useEffect(() => {
+    if (zkLoginSession?.jwt) {
+      enokiFlow.getKeypair({ network: "testnet" })
+        .then((keypair) => {
+          // 키페어에서 SUI 주소를 추출하여 화면에 반영합니다.
+          const address = typeof keypair.toSuiAddress === 'function' 
+                            ? keypair.toSuiAddress() 
+                            : (keypair as any).address;
+          setZkAddress(address);
+        })
+        .catch((err) => console.error("지갑 주소 생성 실패:", err));
+    } else {
+      setZkAddress(null);
+    }
+  }, [zkLoginSession, enokiFlow]);
+
+  // 구글 지갑 주소가 있으면 그것을 우선 사용하고, 없으면 확장프로그램 주소 사용
+  const activeAddress = zkAddress || extensionAccount?.address;
 
   const handleGoogleLogin = async () => {
     try {
