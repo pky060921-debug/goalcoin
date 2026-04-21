@@ -1,3 +1,10 @@
+// 🚨 최상단에 추가
+console.log("🚀 아키님, main.tsx 파일이 로드되었습니다!");
+alert("main.tsx 실행 시작!"); // 팝업으로 강제 확인
+
+import React from "react";
+// ... (나머지 기존 코드)
+
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { createNetworkConfig, SuiClientProvider, WalletProvider } from "@mysten/dapp-kit";
