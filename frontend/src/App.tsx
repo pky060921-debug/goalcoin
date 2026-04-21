@@ -11,9 +11,14 @@ function App() {
   const enokiFlow = useEnokiFlow();
   const zkLoginSession = useZkLoginSession();
 
+  // 구글 인증 후 돌아오는 콜백 처리 (진단용 로그 추가)
   useEffect(() => {
-    enokiFlow.handleAuthCallback().catch((err) => console.log("인증 처리 중...", err));
-  }, [enokiFlow]);
+    enokiFlow.handleAuthCallback()
+      .then(() => console.log("✅ Enoki 인증 콜백 완료! 티켓을 무사히 받았습니다."))
+      .catch((err) => console.error("❌ 인증 콜백 에러 발생:", err));
+      
+    console.log("현재 zkLogin 상태:", zkLoginSession);
+  }, [enokiFlow, zkLoginSession]);
 
   const activeAddress = zkLoginSession?.address || extensionAccount?.address;
 
