@@ -26,7 +26,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 <QueryClientProvider client={queryClient}>
 <SuiClientProvider networks={networkConfig} defaultNetwork="testnet">
 <WalletProvider autoConnect>
-<EnokiFlowProvider apiKey={ENOKI_API_KEY}>
+<EnokiFlowProvider apiKey={enoki_public_08e79fba532f4b3f54e86e722297b35e}>
 <App />
 </EnokiFlowProvider>
 </WalletProvider>
