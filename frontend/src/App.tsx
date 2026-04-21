@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useEnokiFlow, useZkLoginSession } from "@mysten/enoki/react";
 
 // TODO: 구글 클라우드 콘솔에서 발급받은 Client ID를 아래에 넣으세요.
-const GOOGLE_CLIENT_ID = "여기에_GOOGLE_CLIENT_ID_입력";
+const GOOGLE_CLIENT_ID = "536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com";
 
 function App() {
   const extensionAccount = useCurrentAccount();
