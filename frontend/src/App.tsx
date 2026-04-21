@@ -1,3 +1,5 @@
+console.log("App Start");
+
 import { ConnectButton, useCurrentAccount, useSuiClientQuery, useSuiClient } from "@mysten/dapp-kit";
 import { Box, Flex, Heading, Text, Container, Card, Button, TextField } from "@radix-ui/themes";
 import { useEffect, useState } from "react";
