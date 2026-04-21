@@ -12,25 +12,24 @@ import "./index.css";
 const queryClient = new QueryClient();
 
 const { networkConfig } = createNetworkConfig({
-testnet: { url: "https://fullnode.testnet.sui.io:443" },
+	testnet: { url: "https://fullnode.testnet.sui.io:443" },
 });
 
 // TODO: 반드시 'enoki_public_key_' 로 시작하는 공개 키를 넣으세요!
 const ENOKI_API_KEY = "enoki_private_07a009182017b289c1ac6b7307f504a3";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
-<React.StrictMode>
-<Theme appearance="dark">
-<QueryClientProvider client={queryClient}>
-<SuiClientProvider networks={networkConfig} defaultNetwork="testnet">
-<WalletProvider autoConnect>
-                        {/* 바로 이 부분이 App을 감싸주어야 에러가 사라집니다! */}
+	<React.StrictMode>
+		<Theme appearance="dark">
+			<QueryClientProvider client={queryClient}>
+				<SuiClientProvider networks={networkConfig} defaultNetwork="testnet">
+					<WalletProvider autoConnect>
                         <EnokiFlowProvider apiKey={ENOKI_API_KEY}>
-    <App />
+						    <App />
                         </EnokiFlowProvider>
-</WalletProvider>
-</SuiClientProvider>
-</QueryClientProvider>
-</Theme>
-</React.StrictMode>,
+					</WalletProvider>
+				</SuiClientProvider>
+			</QueryClientProvider>
+		</Theme>
+	</React.StrictMode>,
 );
