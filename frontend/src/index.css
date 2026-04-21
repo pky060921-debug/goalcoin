@@ -1,105 +1,39 @@
-import { ConnectButton, useCurrentAccount, useSignAndExecuteTransaction } from "@mysten/dapp-kit";
-import { Transaction } from "@mysten/sui/transactions"; // 최신 SDK 기준
-import { Box, Flex, Heading, Text, Container, Card, Button, TextField } from "@radix-ui/themes";
-import { useState } from "react";
+@import "tailwindcss";
 
-// TODO: 나중에 배포된 패키지 ID로 교체해야 합니다. 지금은 구조만 잡습니다.
-const PACKAGE_ID = "0x...YOUR_PUBLISHED_PACKAGE_ID..."; 
+@theme {
+  --color-background: oklch(0.145 0 0);
+  --color-foreground: oklch(0.985 0 0);
+  --color-card: oklch(0.145 0 0);
+  --color-card-foreground: oklch(0.985 0 0);
+  --color-primary: oklch(0.985 0 0);
+  --color-primary-foreground: oklch(0.205 0 0);
+  --color-secondary: oklch(0.269 0 0);
+  --color-secondary-foreground: oklch(0.985 0 0);
+  --color-muted: oklch(0.269 0 0);
+  --color-muted-foreground: oklch(0.708 0 0);
+  --color-accent: oklch(0.269 0 0);
+  --color-accent-foreground: oklch(0.985 0 0);
+  --color-destructive: oklch(0.396 0.141 25.723);
+  --color-destructive-foreground: oklch(0.637 0.237 25.331);
+  --color-border: oklch(0.269 0 0);
+  --color-input: oklch(0.269 0 0);
+  --color-ring: oklch(0.556 0 0);
+  --color-sui: oklch(0.7 0.2 220);
 
-function App() {
-  const account = useCurrentAccount();
-  const { mutate: signAndExecute } = useSignAndExecuteTransaction();
-  const [amount, setAmount] = useState("");
-
-  // 실제 블록체인에 돈을 보내는 함수
-  const handleDeposit = async () => {
-    if (!amount || isNaN(Number(amount))) return alert("올바른 수량을 입력하세요.");
-
-    const tx = new Transaction();
-    
-    // 사용자가 입력한 SUI를 MIST(SUI의 최소단위, 10^9)로 변환
-    const [coin] = tx.splitCoins(tx.gas, [tx.pure.u64(Number(amount) * 1_000_000_000)]);
-
-    // Move 컨트랙트의 deposit 함수 호출
-    tx.moveCall({
-      target: `${PACKAGE_ID}::goal_vault::deposit`,
-      arguments: [coin],
-    });
-
-    signAndExecute(
-      { transaction: tx },
-      {
-        onSuccess: (result) => {
-          console.log("성공!", result);
-          alert("목표 예치가 완료되었습니다! 이제 실천만 남았습니다.");
-        },
-        onError: (error) => {
-          console.error("에러 발생:", error);
-          alert("트랜잭션 중 오류가 발생했습니다.");
-        }
-      }
-    );
-  };
-
-  return (
-    <Container size="2" style={{ backgroundColor: 'var(--color-background)', minHeight: '100vh' }}>
-      <Flex direction="column" gap="4" py="8">
-        <Flex justify="between" align="center">
-          <Heading size="8" style={{ color: 'var(--color-sui)' }}>🎯 Goal Coin</Heading>
-          <ConnectButton />
-        </Flex>
-
-        <Text size="4" style={{ color: 'var(--color-muted-foreground)' }}>
-          노력이 자산이 되는 Proof of Effort 생태계
-        </Text>
-
-        <Card size="3" variant="surface" style={{ 
-          marginTop: '20px', 
-          backgroundColor: 'var(--color-card)',
-          border: '1px solid var(--color-border)' 
-        }}>
-          <Heading mb="2" style={{ color: 'var(--color-foreground)' }}>나의 목표 설정</Heading>
-          
-          {account ? (
-            <Flex direction="column" gap="4">
-              <Box>
-                <Text as="label" size="2" mb="1" weight="bold">연결된 지갑</Text>
-                <Text as="p" size="1" style={{ color: 'var(--color-muted-foreground)', wordBreak: 'break-all' }}>
-                  {account.address}
-                </Text>
-              </Box>
-
-              <Box>
-                <Text as="label" size="2" mb="1" weight="bold">예치할 수량</Text>
-                <TextField.Root 
-                  placeholder="예: 10" 
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                >
-                  <TextField.Slot side="right">SUI</TextField.Slot>
-                </TextField.Root>
-              </Box>
-
-              <Button size="3" variant="solid" onClick={handleDeposit}>
-                목표 설정 및 보증금 예치하기
-              </Button>
-            </Flex>
-          ) : (
-            <Flex direction="column" align="center" py="6" gap="3">
-              <Text style={{ color: 'var(--color-muted-foreground)' }}>서비스를 이용하려면 지갑을 연결해 주세요.</Text>
-              <ConnectButton />
-            </Flex>
-          )}
-        </Card>
-
-        <Box mt="4">
-          <Text size="1" style={{ color: 'var(--color-muted-foreground)' }}>
-            * 예치 시 3%의 플랫폼 수수료가 발생하며, 목표 달성 시 97%가 환불됩니다.
-          </Text>
-        </Box>
-      </Flex>
-    </Container>
-  );
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
 }
 
-export default App;
+* {
+  border-color: var(--color-border);
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family:
+    ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+    "Segoe UI Symbol", "Noto Color Emoji";
+}
