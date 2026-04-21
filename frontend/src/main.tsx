@@ -5,15 +5,7 @@ import { getFullnodeUrl } from "@mysten/sui/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Theme } from "@radix-ui/themes";
 import { EnokiFlowProvider } from "@mysten/enoki/react";
-import "@mysten/dapp-kit/dist/index.css"; 
-import "@radix-ui/themes/styles.css";
 import App from "./App.tsx";
-import "./index.css";
-
-// 🚨 태블릿에서 에러를 확인하기 위한 긴급 코드
-window.onerror = function(message, source, lineno, colno, error) {
-    alert("에러 발생: " + message + "\n출처: " + source + ":" + lineno);
-};
 
 const queryClient = new QueryClient();
 const { networkConfig } = createNetworkConfig({
