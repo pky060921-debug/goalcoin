@@ -11,8 +11,9 @@ import "./index.css";
 
 const queryClient = new QueryClient();
 
+// 💡 여기가 핵심입니다! 깐깐한 공식 노드 대신, 관대한 우회 퍼블릭 노드로 주소 변경
 const { networkConfig } = createNetworkConfig({
-	testnet: { url: "https://fullnode.testnet.sui.io:443" },
+	testnet: { url: "https://sui-testnet-endpoint.blockvision.org" },
 });
 
 // TODO: 반드시 'enoki_public_key_' 로 시작하는 공개 키를 넣으세요!
