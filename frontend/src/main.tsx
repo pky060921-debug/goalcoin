@@ -10,12 +10,16 @@ import "@radix-ui/themes/styles.css";
 import App from "./App.tsx";
 import "./index.css";
 
+// 🚨 태블릿에서 에러를 확인하기 위한 긴급 코드
+window.onerror = function(message, source, lineno, colno, error) {
+    alert("에러 발생: " + message + "\n출처: " + source + ":" + lineno);
+};
+
 const queryClient = new QueryClient();
 const { networkConfig } = createNetworkConfig({
 	testnet: { url: getFullnodeUrl("testnet") },
 });
 
-// ⚠️ 반드시 Enoki 포털에서 가져온 'enoki_public_...' 키를 넣으세요!
 const ENOKI_API_KEY = "enoki_public_08e79fba532f4b3f54e86e722297b35e"; 
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
