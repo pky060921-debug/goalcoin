@@ -18,7 +18,7 @@ function App() {
   const handleGoogleLogin = async () => {
     await enokiFlow.createAuthorizationURL({
       provider: "google",
-      clientId: "1098670154674-72i6666v5shl7vsn4p7e296o82888qit.apps.googleusercontent.com",
+      clientId: "536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com",
       redirectUrl: "https://goalcoin.top",
       network: "testnet",
     }).then((url) => {
