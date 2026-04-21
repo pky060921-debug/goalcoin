@@ -1,26 +1,23 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { createNetworkConfig, SuiClientProvider, WalletProvider } from "@mysten/dapp-kit";
-import { getFullnodeUrl } from "@mysten/sui/client";
+// 💡 에러가 발생하는 getFullnodeUrl 임포트를 제거했습니다.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Theme } from "@radix-ui/themes";
 import { EnokiFlowProvider } from "@mysten/enoki/react";
 
-// CSS 스타일 임포트
 import "@mysten/dapp-kit/dist/index.css"; 
 import "@radix-ui/themes/styles.css";
 import App from "./App.tsx";
 import "./index.css";
 
-// React Query 클라이언트 초기화
 const queryClient = new QueryClient();
 
-// Sui 네트워크 설정 (테스트넷 공식 노드 사용)
+// 💡 도우미 함수 대신 공식 테스트넷 RPC 주소를 직접 입력하여 에러를 원천 차단합니다.
 const { networkConfig } = createNetworkConfig({
-	testnet: { url: getFullnodeUrl("testnet") },
+	testnet: { url: "https://fullnode.testnet.sui.io:443" },
 });
 
-// 💡 아키님의 Enoki Public Key (테스트넷 전용인지 꼭 확인하세요!)
 const ENOKI_API_KEY = "enoki_public_08e79fba532f4b3f54e86e722297b35e";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
