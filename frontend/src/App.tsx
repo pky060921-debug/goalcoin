@@ -16,10 +16,12 @@ function App() {
   const [goalText, setGoalText] = useState("");
   const [stakeAmount, setStakeAmount] = useState("");
 
+  // 1. 구글 인증 후 돌아오는 콜백 처리
   useEffect(() => {
     enokiFlow.handleAuthCallback().catch((err) => console.log("인증 대기 중...", err));
   }, [enokiFlow]);
 
+  // 2. 인증 티켓(JWT)이 확인되면, Enoki에 지갑 주소 생성을 요청
   useEffect(() => {
     if (zkLoginSession?.jwt) {
       enokiFlow.getKeypair({ network: "testnet" })
@@ -37,14 +39,17 @@ function App() {
 
   const activeAddress = zkAddress || extensionAccount?.address;
 
-  // SUI 잔액 실시간 조회 훅 (지갑 주소가 있을 때만 작동)
+  // 3. SUI 잔액 조회 (429 에러 방지를 위해 자동 조회를 끄고 수동 호출로 설정)
   const { data: balanceData, refetch: refetchBalance } = useSuiClientQuery(
     "getBalance",
     { owner: activeAddress as string },
-    { enabled: !!activeAddress, refetchInterval: 5000 } // 5초마다 잔액 갱신
+    { 
+      enabled: !!activeAddress,
+      refetchInterval: false // 자동 조회를 꺼서 노드 서버의 부담을 줄입니다.
+    }
   );
 
-  // MIST(최소 단위)를 SUI 단위로 변환 (1 SUI = 1,000,000,000 MIST)
+  // MIST 단위를 SUI 단위로 변환
   const suiBalance = balanceData ? (Number(balanceData.totalBalance) / 1_000_000_000).toFixed(2) : "0.00";
 
   const handleGoogleLogin = async () => {
@@ -57,7 +62,7 @@ function App() {
       });
       window.location.href = url;
     } catch (error) {
-      alert("구글 로그인 설정이 올바르지 않습니다. 키를 다시 확인해 주세요.");
+      alert("구글 로그인 설정이 올바르지 않습니다.");
     }
   };
 
@@ -66,7 +71,7 @@ function App() {
     window.location.reload();
   };
 
-  // 테스트넷 SUI 받기 (Faucet) 함수
+  // 4. 테스트넷 SUI 받기 (Faucet) 함수
   const requestTestTokens = async () => {
     if (!activeAddress) return;
     setIsFunding(true);
@@ -77,10 +82,11 @@ function App() {
         body: JSON.stringify({ FixedAmountRequest: { recipient: activeAddress } }),
       });
       if (res.ok) {
-        alert("성공적으로 테스트 SUI를 요청했습니다! 잠시 후 잔액이 업데이트됩니다.");
-        setTimeout(() => refetchBalance(), 3000);
+        alert("성공적으로 테스트 SUI를 요청했습니다! 약 5~10초 뒤 잔액을 새로고침합니다.");
+        // 블록체인 반영 시간을 고려해 7초 뒤 잔액 업데이트
+        setTimeout(() => refetchBalance(), 7000);
       } else {
-        alert("현재 테스트 코인 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.");
+        alert("Sui Faucet 서버가 바쁩니다. 잠시 후 다시 시도해 주세요.");
       }
     } catch (error) {
       console.error("Faucet 에러:", error);
@@ -102,13 +108,13 @@ function App() {
           </Flex>
         </Flex>
 
-        {/* 지갑 상태 및 잔액 카드 */}
+        {/* 내 지갑 정보 카드 */}
         <Card size="3" variant="surface" style={{ backgroundColor: 'var(--color-card)' }}>
           <Heading mb="3">내 지갑 정보</Heading>
           {activeAddress ? (
             <Flex direction="column" gap="4">
               <Box>
-                <Text as="label" size="2" weight="bold">주소</Text>
+                <Text as="label" size="2" weight="bold">내 주소</Text>
                 <Text as="p" size="1" style={{ color: 'var(--color-muted-foreground)', wordBreak: 'break-all' }}>
                   {activeAddress}
                 </Text>
@@ -118,9 +124,12 @@ function App() {
                   <Text as="label" size="2" weight="bold">현재 잔액</Text>
                   <Heading size="7" style={{ color: 'var(--color-sui)' }}>{suiBalance} SUI</Heading>
                 </Box>
-                <Button onClick={requestTestTokens} disabled={isFunding} variant="outline" size="2">
-                  {isFunding ? "요청 중..." : "💧 테스트 SUI 받기"}
-                </Button>
+                <Flex gap="2">
+                  <Button onClick={() => refetchBalance()} variant="soft" size="2">🔄 새로고침</Button>
+                  <Button onClick={requestTestTokens} disabled={isFunding} variant="outline" size="2">
+                    {isFunding ? "요청 중..." : "💧 테스트 SUI 받기"}
+                  </Button>
+                </Flex>
               </Flex>
             </Flex>
           ) : (
@@ -133,7 +142,7 @@ function App() {
           )}
         </Card>
 
-        {/* 목표 설정 카드 (지갑이 연결되었을 때만 표시) */}
+        {/* 목표 설정 카드 */}
         {activeAddress && (
           <Card size="3" variant="surface" style={{ backgroundColor: 'var(--color-card)' }}>
             <Heading mb="4">새로운 목표 설정</Heading>
@@ -144,9 +153,9 @@ function App() {
               </Box>
               <Box>
                 <Text as="label" size="2" weight="bold" mb="1" style={{ display: 'block' }}>보증금 예치 (SUI)</Text>
-                <TextField.Root size="3" placeholder="예: 5" value={stakeAmount} onChange={(e) => setStakeAmount(e.target.value)} type="number" />
+                <TextField.Root size="3" placeholder="예: 1" value={stakeAmount} onChange={(e) => setStakeAmount(e.target.value)} type="number" />
                 <Text size="1" color="gray" mt="1" style={{ display: 'block' }}>
-                  목표를 달성하면 보증금을 돌려받고 Goal Coin을 보상으로 받습니다!
+                  목표 달성 시 보증금 환급 및 Goal Coin 보상이 주어집니다.
                 </Text>
               </Box>
               <Button size="3" style={{ cursor: 'pointer', marginTop: '10px' }} disabled={!goalText || !stakeAmount}>
@@ -155,7 +164,6 @@ function App() {
             </Flex>
           </Card>
         )}
-
       </Flex>
     </Container>
   );
