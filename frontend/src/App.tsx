@@ -1,5 +1,5 @@
-import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
-import { Box, Flex, Heading, Text, Container, Card, Button } from "@radix-ui/themes";
+import { ConnectButton, useCurrentAccount, useSuiClientQuery } from "@mysten/dapp-kit";
+import { Box, Flex, Heading, Text, Container, Card, Button, TextField } from "@radix-ui/themes";
 import { useEffect, useState } from "react";
 import { useEnokiFlow, useZkLoginSession } from "@mysten/enoki/react";
 
@@ -11,20 +11,19 @@ function App() {
   const enokiFlow = useEnokiFlow();
   const zkLoginSession = useZkLoginSession();
   
-  // 구글 로그인으로 파생된 지갑 주소를 담을 새로운 공간입니다.
   const [zkAddress, setZkAddress] = useState<string | null>(null);
+  const [isFunding, setIsFunding] = useState(false);
+  const [goalText, setGoalText] = useState("");
+  const [stakeAmount, setStakeAmount] = useState("");
 
-  // 1. 구글 인증 후 돌아오는 콜백 처리
   useEffect(() => {
     enokiFlow.handleAuthCallback().catch((err) => console.log("인증 대기 중...", err));
   }, [enokiFlow]);
 
-  // 2. 인증 티켓(JWT)이 확인되면, Enoki에 지갑 주소(Keypair) 생성을 요청합니다!
   useEffect(() => {
     if (zkLoginSession?.jwt) {
       enokiFlow.getKeypair({ network: "testnet" })
         .then((keypair) => {
-          // 키페어에서 SUI 주소를 추출하여 화면에 반영합니다.
           const address = typeof keypair.toSuiAddress === 'function' 
                             ? keypair.toSuiAddress() 
                             : (keypair as any).address;
@@ -36,8 +35,17 @@ function App() {
     }
   }, [zkLoginSession, enokiFlow]);
 
-  // 구글 지갑 주소가 있으면 그것을 우선 사용하고, 없으면 확장프로그램 주소 사용
   const activeAddress = zkAddress || extensionAccount?.address;
+
+  // SUI 잔액 실시간 조회 훅 (지갑 주소가 있을 때만 작동)
+  const { data: balanceData, refetch: refetchBalance } = useSuiClientQuery(
+    "getBalance",
+    { owner: activeAddress as string },
+    { enabled: !!activeAddress, refetchInterval: 5000 } // 5초마다 잔액 갱신
+  );
+
+  // MIST(최소 단위)를 SUI 단위로 변환 (1 SUI = 1,000,000,000 MIST)
+  const suiBalance = balanceData ? (Number(balanceData.totalBalance) / 1_000_000_000).toFixed(2) : "0.00";
 
   const handleGoogleLogin = async () => {
     try {
@@ -58,9 +66,31 @@ function App() {
     window.location.reload();
   };
 
+  // 테스트넷 SUI 받기 (Faucet) 함수
+  const requestTestTokens = async () => {
+    if (!activeAddress) return;
+    setIsFunding(true);
+    try {
+      const res = await fetch("https://faucet.testnet.sui.io/gas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ FixedAmountRequest: { recipient: activeAddress } }),
+      });
+      if (res.ok) {
+        alert("성공적으로 테스트 SUI를 요청했습니다! 잠시 후 잔액이 업데이트됩니다.");
+        setTimeout(() => refetchBalance(), 3000);
+      } else {
+        alert("현재 테스트 코인 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.");
+      }
+    } catch (error) {
+      console.error("Faucet 에러:", error);
+    }
+    setIsFunding(false);
+  };
+
   return (
     <Container size="2" style={{ minHeight: '100vh', padding: '2rem' }}>
-      <Flex direction="column" gap="4">
+      <Flex direction="column" gap="5">
         <Flex justify="between" align="center">
           <Heading size="8" style={{ color: 'var(--color-sui)' }}>🎯 Goal Coin</Heading>
           <Flex gap="3" align="center">
@@ -72,18 +102,26 @@ function App() {
           </Flex>
         </Flex>
 
-        <Card size="3" variant="surface" style={{ marginTop: '20px', backgroundColor: 'var(--color-card)' }}>
-          <Heading mb="3">시작하기</Heading>
-          
+        {/* 지갑 상태 및 잔액 카드 */}
+        <Card size="3" variant="surface" style={{ backgroundColor: 'var(--color-card)' }}>
+          <Heading mb="3">내 지갑 정보</Heading>
           {activeAddress ? (
             <Flex direction="column" gap="4">
               <Box>
-                <Text as="label" size="2" weight="bold">내 지갑 주소</Text>
+                <Text as="label" size="2" weight="bold">주소</Text>
                 <Text as="p" size="1" style={{ color: 'var(--color-muted-foreground)', wordBreak: 'break-all' }}>
                   {activeAddress}
                 </Text>
               </Box>
-              <Text size="2" color="green">성공적으로 연결되었습니다! 이제 목표를 설정할 준비가 되었습니다.</Text>
+              <Flex justify="between" align="end">
+                <Box>
+                  <Text as="label" size="2" weight="bold">현재 잔액</Text>
+                  <Heading size="7" style={{ color: 'var(--color-sui)' }}>{suiBalance} SUI</Heading>
+                </Box>
+                <Button onClick={requestTestTokens} disabled={isFunding} variant="outline" size="2">
+                  {isFunding ? "요청 중..." : "💧 테스트 SUI 받기"}
+                </Button>
+              </Flex>
             </Flex>
           ) : (
             <Flex direction="column" align="center" py="4" gap="3">
@@ -94,6 +132,30 @@ function App() {
             </Flex>
           )}
         </Card>
+
+        {/* 목표 설정 카드 (지갑이 연결되었을 때만 표시) */}
+        {activeAddress && (
+          <Card size="3" variant="surface" style={{ backgroundColor: 'var(--color-card)' }}>
+            <Heading mb="4">새로운 목표 설정</Heading>
+            <Flex direction="column" gap="4">
+              <Box>
+                <Text as="label" size="2" weight="bold" mb="1" style={{ display: 'block' }}>어떤 목표를 달성하고 싶으신가요?</Text>
+                <TextField.Root size="3" placeholder="예: 매일 아침 6시 기상 후 러닝" value={goalText} onChange={(e) => setGoalText(e.target.value)} />
+              </Box>
+              <Box>
+                <Text as="label" size="2" weight="bold" mb="1" style={{ display: 'block' }}>보증금 예치 (SUI)</Text>
+                <TextField.Root size="3" placeholder="예: 5" value={stakeAmount} onChange={(e) => setStakeAmount(e.target.value)} type="number" />
+                <Text size="1" color="gray" mt="1" style={{ display: 'block' }}>
+                  목표를 달성하면 보증금을 돌려받고 Goal Coin을 보상으로 받습니다!
+                </Text>
+              </Box>
+              <Button size="3" style={{ cursor: 'pointer', marginTop: '10px' }} disabled={!goalText || !stakeAmount}>
+                🚀 목표 예치하고 시작하기
+              </Button>
+            </Flex>
+          </Card>
+        )}
+
       </Flex>
     </Container>
   );
