@@ -1,7 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { createNetworkConfig, SuiClientProvider, WalletProvider } from "@mysten/dapp-kit";
-// 💡 에러가 발생하는 getFullnodeUrl 임포트를 제거했습니다.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Theme } from "@radix-ui/themes";
 import { EnokiFlowProvider } from "@mysten/enoki/react";
@@ -13,7 +12,7 @@ import "./index.css";
 
 const queryClient = new QueryClient();
 
-// 💡 도우미 함수 대신 공식 테스트넷 RPC 주소를 직접 입력하여 에러를 원천 차단합니다.
+// 에러 원인이었던 자동 URL 생성 대신 직접 주소를 입력합니다.
 const { networkConfig } = createNetworkConfig({
 	testnet: { url: "https://fullnode.testnet.sui.io:443" },
 });
