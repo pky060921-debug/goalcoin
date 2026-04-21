@@ -1,19 +1,19 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { createNetworkConfig, SuiClientProvider, WalletProvider } from "@mysten/dapp-kit";
-import { getFullnodeUrl } from "@mysten/sui/client";
+// 에러의 원인이었던 getFullnodeUrl import를 아예 삭제합니다!
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Theme } from "@radix-ui/themes";
-import "@mysten/dapp-kit/dist/index.css"; // dApp-kit 기본 스타일
+import "@mysten/dapp-kit/dist/index.css"; 
 import "@radix-ui/themes/styles.css";
 import App from "./App.tsx";
 import "./index.css";
 
 const queryClient = new QueryClient();
 
-// 네트워크 설정
+// 함수를 쓰지 않고 테스트넷 RPC 주소를 직접 명시합니다. (완벽한 우회 방법)
 const { networkConfig } = createNetworkConfig({
-	testnet: { url: getFullnodeUrl("testnet") },
+	testnet: { url: "https://fullnode.testnet.sui.io:443" },
 });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -21,7 +21,6 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 		<Theme appearance="dark">
 			<QueryClientProvider client={queryClient}>
 				<SuiClientProvider networks={networkConfig} defaultNetwork="testnet">
-					{/* WalletProvider가 App을 완벽히 감싸야 에러가 사라집니다 */}
 					<WalletProvider autoConnect>
 						<App />
 					</WalletProvider>
