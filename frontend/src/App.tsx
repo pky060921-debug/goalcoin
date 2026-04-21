@@ -1,44 +1,39 @@
-import { ConnectButton, useCurrentAccount, useSignAndExecuteTransaction } from "@mysten/dapp-kit";
-import { Transaction } from "@mysten/sui/transactions";
-import { Box, Flex, Heading, Text, Container, Card, Button, TextField } from "@radix-ui/themes";
-import { useState } from "react";
+import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
+import { Box, Flex, Heading, Text, Container, Card, Button } from "@radix-ui/themes";
+import { useEffect } from "react";
+import { useEnokiFlow, useZkLoginSession } from "@mysten/enoki/react";
 
-// 배포된 실제 ID들
-const PACKAGE_ID = "0x3f6621b609babc6bcf9e5e0ed0f2002e4eb075bcc0c175ab3e1fb90565449b5c";
-const VAULT_ID = "0x3bd37a0ca982e4371ae24534f068c6a13843873e34503671f13b6817a14fe811";
+// TODO: 구글 클라우드 콘솔에서 발급받은 Client ID를 아래에 넣으세요.
+const GOOGLE_CLIENT_ID = "536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com";
 
 function App() {
-  const account = useCurrentAccount();
-  const { mutate: signAndExecute } = useSignAndExecuteTransaction();
-  const [amount, setAmount] = useState("");
+  const extensionAccount = useCurrentAccount();
+  const enokiFlow = useEnokiFlow();
+  const zkLoginSession = useZkLoginSession();
 
-  const handleDeposit = async () => {
-    if (!amount || isNaN(Number(amount))) return alert("올바른 수량을 입력하세요.");
+  useEffect(() => {
+    enokiFlow.handleAuthCallback().catch((err) => console.log("인증 처리 중...", err));
+  }, [enokiFlow]);
 
-    const tx = new Transaction();
-    
-    // 1. 보증금으로 보낼 SUI 코인 생성
-    const [coin] = tx.splitCoins(tx.gas, [tx.pure.u64(Number(amount) * 1_000_000_000)]);
+  const activeAddress = zkLoginSession?.address || extensionAccount?.address;
 
-    // 2. goal_vault 모듈의 deposit 함수 호출 (Vault 객체와 코인을 인자로 전달)
-    tx.moveCall({
-      target: `${PACKAGE_ID}::goal_vault::deposit`,
-      arguments: [tx.object(VAULT_ID), coin],
-    });
+  const handleGoogleLogin = async () => {
+    try {
+      const url = await enokiFlow.createAuthorizationURL({
+        provider: "google",
+        clientId: GOOGLE_CLIENT_ID,
+        redirectUrl: window.location.origin,
+        network: "testnet",
+      });
+      window.location.href = url;
+    } catch (error) {
+      alert("구글 로그인 설정이 올바르지 않습니다. 키를 다시 확인해 주세요.");
+    }
+  };
 
-    signAndExecute(
-      { transaction: tx },
-      {
-        onSuccess: (result) => {
-          console.log("성공!", result);
-          alert("성공적으로 예치되었습니다! 이제 목표를 향해 달려보세요.");
-        },
-        onError: (error) => {
-          console.error("에러:", error);
-          alert("지갑 승인이 거절되었거나 잔액이 부족합니다.");
-        }
-      }
-    );
+  const handleLogout = async () => {
+    await enokiFlow.logout();
+    window.location.reload();
   };
 
   return (
@@ -46,37 +41,33 @@ function App() {
       <Flex direction="column" gap="4">
         <Flex justify="between" align="center">
           <Heading size="8" style={{ color: 'var(--color-sui)' }}>🎯 Goal Coin</Heading>
-          <ConnectButton />
+          <Flex gap="3" align="center">
+            {activeAddress ? (
+              <Button onClick={handleLogout} variant="soft" color="red">로그아웃</Button>
+            ) : (
+              <ConnectButton />
+            )}
+          </Flex>
         </Flex>
 
         <Card size="3" variant="surface" style={{ marginTop: '20px', backgroundColor: 'var(--color-card)' }}>
-          <Heading mb="3">목표 보증금 예치</Heading>
+          <Heading mb="3">시작하기</Heading>
           
-          {account ? (
+          {activeAddress ? (
             <Flex direction="column" gap="4">
               <Box>
-                <Text as="label" size="2" weight="bold">연결된 지갑</Text>
+                <Text as="label" size="2" weight="bold">내 지갑 주소</Text>
                 <Text as="p" size="1" style={{ color: 'var(--color-muted-foreground)', wordBreak: 'break-all' }}>
-                  {account.address}
+                  {activeAddress}
                 </Text>
               </Box>
-
-              <TextField.Root 
-                placeholder="예치할 SUI 수량" 
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-              >
-                <TextField.Slot side="right">SUI</TextField.Slot>
-              </TextField.Root>
-
-              <Button size="3" variant="solid" onClick={handleDeposit}>
-                보증금 걸고 시작하기
-              </Button>
+              <Text size="2" color="green">성공적으로 연결되었습니다! 이제 목표를 설정할 준비가 되었습니다.</Text>
             </Flex>
           ) : (
-            <Flex direction="column" align="center" py="4" gap="2">
-              <Text style={{ color: 'var(--color-muted-foreground)' }}>시작하려면 지갑을 연결하세요.</Text>
-              <ConnectButton />
+            <Flex direction="column" alig            <Flex direction="column" a   <Button onClick={handleGoogleLogin} size="3" style={{ cursor: 'pointer', backgroundColor: '#fff', color: '#000', width: '100%' }}>
+                <Text weight="bold">Google              3초 만에 시작하기</Text>
+              </Button>
+              <Text size="1" style={{ color: 'var(--color-muted-foreground)' }}>확장프로그램 설치 없이 간편하게 로그인하세요.</Text>
             </Flex>
           )}
         </Card>
