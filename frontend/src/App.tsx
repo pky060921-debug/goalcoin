@@ -1,7 +1,7 @@
 import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 import { useSuiClientQuery, useSuiClient } from "@mysten/dapp-kit";
 import { useEffect, useState } from "react";
-import { Trophy, ArrowRight, Loader2, Lock } from "lucide-react"; // 🚨 Lock 아이콘 추가!
+import { Trophy, ArrowRight, Loader2, Lock, CheckCircle2 } from "lucide-react";
 import { Transaction } from "@mysten/sui/transactions";
 
 function App() {
@@ -11,12 +11,12 @@ function App() {
   
   const [goalAmount, setGoalAmount] = useState("");
   const [isDepositing, setIsDepositing] = useState(false);
+  const [withdrawingId, setWithdrawingId] = useState<string | null>(null); // 어떤 금고를 환급 중인지 추적
 
-  // 🚨 아키님의 스마트 컨트랙트(금고) 주소
-  const PACKAGE_ID = "0x4bcf8d6824087db76e120b2e27650914409f3c78b1456e4eb661270e2f9cf16b";
+  // 🚨 아키님의 V2 스마트 컨트랙트 주소 (입/출구 완비)
+  const PACKAGE_ID = "0xf2c3799a6a3e53155508770cd166deddd2df9794a4c0095c1142237333b6f473";
   const VAULT_TYPE = `${PACKAGE_ID}::goal_vault::GoalVault`;
 
-  // 구글 로그인 토큰 해독
   useEffect(() => {
     if (window.location.hash.includes("id_token=")) {
       enokiFlow.handleAuthCallback()
@@ -28,23 +28,23 @@ function App() {
     }
   }, [enokiFlow]);
 
-  // 1. 잔액 조회 (잔액이 바뀌면 자동 갱신할 수 있도록 refetch 추출)
+  // 잔액 조회
   const { data: balanceData, refetch: refetchBalance } = useSuiClientQuery("getBalance", {
     owner: address || "",
   });
   const balance = balanceData ? (Number(balanceData.totalBalance) / 1_000_000_000).toFixed(2) : "0.00";
 
-  // 2. 🚨 내 지갑에 있는 '금고(GoalVault)'만 싹 다 찾아오기!
+  // 내 금고 스캔 (V2 금고만 찾아냅니다)
   const { data: vaultData, refetch: refetchVaults } = useSuiClientQuery("getOwnedObjects", {
     owner: address || "",
-    filter: { StructType: VAULT_TYPE }, // 이 타입의 물건만 찾습니다.
+    filter: { StructType: VAULT_TYPE },
     options: { showContent: true },
   }, {
-    enabled: !!address, // 주소가 있을 때만 스캔 시작
+    enabled: !!address,
   });
 
-  // 찾아낸 금고의 총 개수
-  const vaultCount = vaultData?.data?.length || 0;
+  const vaults = vaultData?.data || [];
+  const vaultCount = vaults.length;
 
   const handleGoogleLogin = async () => {
     await enokiFlow.createAuthorizationURL({
@@ -57,21 +57,51 @@ function App() {
     });
   };
 
+  // 📥 [입구] 예치하기 로직
   const handleDeposit = async () => {
     if (!address) return alert("먼저 구글 로그인을 진행해주세요.");
     if (!goalAmount || Number(goalAmount) <= 0) return alert("정확한 수량을 입력해주세요.");
 
     try {
       setIsDepositing(true);
-      
       const tx = new Transaction();
       const depositAmountMist = BigInt(parseFloat(goalAmount) * 1_000_000_000);
-
       const [coin] = tx.splitCoins(tx.gas, [depositAmountMist]);
 
       tx.moveCall({
         target: `${PACKAGE_ID}::goal_vault::deposit`,
         arguments: [coin],
+      });
+
+      const keypair = await enokiFlow.getKeypair({ network: "testnet" });
+      await client.signAndExecuteTransaction({
+        transaction: tx,
+        signer: keypair,
+        options: { showEffects: true },
+      });
+
+      alert("🎉 보증금 예치 성공!");
+      setGoalAmount("");
+      refetchBalance();
+      refetchVaults();
+
+    } catch (error: any) {
+      alert("예치 실패: " + error.message);
+    } finally {
+      setIsDepositing(false);
+    }
+  };
+
+  // 📤 [출구] 환급받기 로직 (새로 추가됨!)
+  const handleWithdraw = async (vaultId: string) => {
+    try {
+      setWithdrawingId(vaultId); // 로딩 표시용
+      const tx = new Transaction();
+
+      // V2 금고의 withdraw 함수 호출 (금고 객체를 통째로 넘김)
+      tx.moveCall({
+        target: `${PACKAGE_ID}::goal_vault::withdraw`,
+        arguments: [tx.object(vaultId)], 
       });
 
       const keypair = await enokiFlow.getKeypair({ network: "testnet" });
@@ -81,17 +111,14 @@ function App() {
         options: { showEffects: true },
       });
 
-      alert("🎉 진짜 금고에 예치 성공!\n목표 달성을 위한 보증금이 안전하게 묶였습니다.");
-      setGoalAmount("");
-      
-      // 🚨 예치 성공 즉시 잔액과 금고 개수를 새로고침합니다!
+      alert("🏆 목표 달성 축하합니다!\n금고가 해제되어 보증금이 지갑으로 환급되었습니다.");
       refetchBalance();
       refetchVaults();
 
     } catch (error: any) {
-      alert("트랜잭션 중 오류가 발생했습니다: " + error.message);
+      alert("환급 실패: " + error.message);
     } finally {
-      setIsDepositing(false);
+      setWithdrawingId(null);
     }
   };
 
@@ -111,8 +138,7 @@ function App() {
       </header>
 
       <main className="max-w-md mx-auto space-y-8">
-        
-        {/* 잔액 표시 영역 */}
+        {/* 잔액 영역 */}
         <section className="bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl">
           <p className="text-slate-400 text-sm mb-2">현재 예치 가능 잔액</p>
           <div className="flex items-baseline gap-2">
@@ -121,22 +147,40 @@ function App() {
           </div>
         </section>
 
-        {/* 🚨 새로운 영역: 내 보증금 현황 표시 */}
+        {/* 내 금고 현황 영역 */}
         <section className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
           <div className="flex items-center gap-2 mb-4">
             <Lock className="text-blue-400 w-5 h-5" />
-            <h2 className="text-lg font-semibold text-slate-200">내 보증금 현황</h2>
+            <h2 className="text-lg font-semibold text-slate-200">내 보증금 현황 (봉인됨: {vaultCount}개)</h2>
           </div>
-          <div className="flex justify-between items-center bg-slate-950 p-4 rounded-xl border border-slate-800">
-            <span className="text-slate-400 font-medium">봉인된 금고</span>
-            <div className="flex items-baseline gap-1">
-              <span className="text-2xl font-bold text-white">{vaultCount}</span>
-              <span className="text-sm text-slate-500">개</span>
-            </div>
+          
+          <div className="space-y-3">
+            {vaultCount === 0 ? (
+              <p className="text-slate-500 text-center py-4">진행 중인 목표가 없습니다.</p>
+            ) : (
+              vaults.map((vault) => (
+                <div key={vault.data?.objectId} className="flex justify-between items-center bg-slate-950 p-4 rounded-xl border border-slate-800">
+                  <span className="text-slate-400 text-sm font-mono truncate w-24">
+                    {vault.data?.objectId.slice(0, 8)}...
+                  </span>
+                  <button 
+                    onClick={() => handleWithdraw(vault.data?.objectId as string)}
+                    disabled={withdrawingId === vault.data?.objectId}
+                    className="bg-green-600 hover:bg-green-500 disabled:bg-slate-800 text-white text-sm font-bold py-2 px-4 rounded-lg flex items-center gap-1 transition-all"
+                  >
+                    {withdrawingId === vault.data?.objectId ? (
+                      <><Loader2 className="animate-spin w-4 h-4" /> 해제 중</>
+                    ) : (
+                      <><CheckCircle2 className="w-4 h-4" /> 환급받기</>
+                    )}
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         </section>
 
-        {/* 목표 설정 영역 */}
+        {/* 목표 설정 (예치) 영역 */}
         <section className="space-y-4">
           <label className="block text-lg font-semibold ml-2">새로운 목표 설정</label>
           <div className="relative">
@@ -161,7 +205,6 @@ function App() {
             )}
           </button>
         </section>
-
       </main>
     </div>
   );
