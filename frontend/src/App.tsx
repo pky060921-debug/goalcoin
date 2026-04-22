@@ -1,12 +1,31 @@
 import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 import { useSuiClientQuery } from "@mysten/dapp-kit";
 import { useEffect, useState } from "react";
-import { Trophy, Wallet, ArrowRight, CheckCircle2 } from "lucide-react";
+import { Trophy, ArrowRight } from "lucide-react";
 
 function App() {
   const enokiFlow = useEnokiFlow();
   const { address } = useZkLogin();
   const [goalAmount, setGoalAmount] = useState("");
+
+  // 🚨 바로 이 부분! 구글이 던져준 열쇠를 줍고 해독하는 핵심 로직입니다.
+  useEffect(() => {
+    if (window.location.hash.includes("id_token=")) {
+      console.log("🔑 구글 인증 토큰 감지! 해독을 시작합니다...");
+      
+      enokiFlow.handleAuthCallback()
+        .then(() => {
+          console.log("✅ 해독 성공! 지갑이 열렸습니다.");
+          // 주소창의 지저분한 토큰을 지우고 깔끔하게 화면 갱신
+          window.history.replaceState(null, "", window.location.pathname);
+          window.location.reload(); 
+        })
+        .catch((error) => {
+          console.error("❌ 토큰 해독 실패:", error);
+          alert("로그인 실패 원인: " + error.message + "\n(Enoki 포털에 Client ID가 등록되었는지 확인하세요!)");
+        });
+    }
+  }, [enokiFlow]);
 
   // 잔액 조회 (테스트넷)
   const { data: balanceData } = useSuiClientQuery("getBalance", {
@@ -37,7 +56,8 @@ function App() {
           onClick={handleGoogleLogin}
           className="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-full text-sm font-medium transition-all"
         >
-          {address ? `${address.slice(0, 6)}...` : "구글 로그인"}
+          {/* 지갑 주소가 있으면 앞뒤 6, 4자리만 잘라서 보여줍니다 */}
+          {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : "구글 로그인"}
         </button>
       </header>
 
