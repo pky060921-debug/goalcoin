@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { FileText, Highlighter, Loader2, Pickaxe } from "lucide-react";
+import { FileText, Highlighter, Loader2, BookOpen } from "lucide-react";
 
 function App() {
   const [file, setFile] = useState<File | null>(null);
