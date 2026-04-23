@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Goal Coin Debug</title>
+    <script src="https://unpkg.com/vconsole@latest/dist/vconsole.min.js"></script>
+    <script>var vConsole = new window.VConsole();</script>
+    <style>
+      #error-overlay { position: fixed; top: 0; left: 0; width: 100%; background: red; color: white; z-index: 9999; padding: 20px; display: none; word-break: break-all; }
+    </style>
+    <script type="module" crossorigin src="/assets/index-F_vt_wcl.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BDbN8oms.css">
+  </head>
+  <body style="background-color: #000;">
+    <div id="error-overlay"></div>
+    <div id="root"></div>
+
+    <script>
+      // 브라우저의 모든 에러를 가로채서 빨간 박스에 띄움
+      window.onerror = function(msg, url, line) {
+        var overlay = document.getElementById('error-overlay');
+        overlay.style.display = 'block';
+        overlay.innerHTML = '❌ 에러 발생: ' + msg + '<br>줄 번호: ' + line + '<br>파일: ' + url;
+      };
+    </script>
+    
+  </body>
+</html>
