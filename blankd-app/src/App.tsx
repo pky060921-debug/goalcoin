@@ -36,7 +36,7 @@ function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-50 p-6 font-sans pb-24">
       <header className="max-w-md mx-auto flex items-center justify-center gap-2 mb-12">
-        <Pickaxe className="text-blue-400 w-8 h-8" />
+        <BookOpen className="text-blue-400 w-8 h-8" />
         <h1 className="text-2xl font-black tracking-tighter">빈칸차원 (BlankD)</h1>
       </header>
       <main className="max-w-md mx-auto space-y-6">
