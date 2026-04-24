@@ -4,7 +4,8 @@ import App from './App'
 import './index.css'
 import { createNetworkConfig, SuiClientProvider, WalletProvider } from '@mysten/dapp-kit';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { EnokiFlowProvider } from '@mysten/enoki';
+// 🚨 경로를 @mysten/enoki/react 로 수정 완료
+import { EnokiFlowProvider } from '@mysten/enoki/react';
 import '@mysten/dapp-kit/dist/index.css';
 
 const queryClient = new QueryClient();
@@ -14,7 +15,6 @@ const { networkConfig } = createNetworkConfig({
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    {/* 🚨 Enoki 퍼블릭 키 주입 */}
     <EnokiFlowProvider apiKey="enoki_public_08e79fba532f4b3f54e86e722297b35e">
       <QueryClientProvider client={queryClient}>
         <SuiClientProvider networks={networkConfig} defaultNetwork="testnet">
