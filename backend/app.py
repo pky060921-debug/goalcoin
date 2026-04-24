@@ -1,20 +1,21 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import fitz  # PyMuPDF
- import sqlite3
+import sqlite3
 import os
-from datetime import datetime
+import requests  # Ollama와 통신하기 위한 라이브러리
 
 app = Flask(__name__)
-CORS(app)  # 모든 오리진으로부터의 통신 허용
+CORS(app)
 
 DB_PATH = os.path.expanduser("~/goalcoin/backend/blankd.db")
+# 맥미니 내부에서 돌고 있는 Ollama의 기본 포트 주소
+OLLAMA_API_URL = "http://localhost:11434/api/generate"
 
 def init_db():
     """데이터베이스 및 테이블 초기화"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    # cards 테이블 생성: 지갑 주소, 카드 내용, 생성 시간을 저장
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS cards (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,12 +27,10 @@ def init_db():
     conn.commit()
     conn.close()
 
-# 앱 시작 시 DB 초기화 실행
 init_db()
 
 @app.route('/api/upload-pdf', methods=['POST'])
 def upload_pdf():
-    """PDF에서 텍스트를 추출하는 API"""
     if 'file' not in request.files:
         return jsonify({"error": "파일이 없습니다."}), 400
     
@@ -42,18 +41,16 @@ def upload_pdf():
         for page in doc:
             full_text += page.get_text()
         
-        # Gemma 4 등 로컬 AI 모델 분석을 위한 텍스트 준비 단계
         return jsonify({
             "message": "PDF 파싱 성공",
             "text_length": len(full_text),
-            "preview": full_text[:1000]  # UI 개선에 맞춰 미리보기 분량 확대
+            "preview": full_text[:1000]
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/save-card', methods=['POST'])
 def save_card():
-    """생성된 빈칸 카드를 DB에 저장하는 API"""
     data = request.json
     wallet_address = data.get('wallet_address')
     card_content = data.get('card_content')
@@ -76,7 +73,6 @@ def save_card():
 
 @app.route('/api/my-cards', methods=['GET'])
 def get_my_cards():
-    """특정 지갑 주소의 저장된 카드 목록을 불러오는 API (추후 확장용)"""
     wallet_address = request.args.get('wallet_address')
     if not wallet_address:
         return jsonify({"error": "지갑 주소가 필요합니다."}), 400
@@ -89,6 +85,38 @@ def get_my_cards():
     
     return jsonify({"cards": cards})
 
+@app.route('/api/generate-questions', methods=['POST'])
+def generate_questions():
+    """Gemma 4를 활용하여 텍스트 기반 객관식 문제은행 자동 생성"""
+    data = request.json
+    text_context = data.get('text_context')
+    
+    if not text_context:
+        return jsonify({"error": "문제 생성을 위한 텍스트가 없습니다."}), 400
+
+    # 실무 평가 및 시험 대비에 최적화된 프롬프트 설계
+    prompt = f"""다음 법령 및 규정 텍스트를 바탕으로, 실무 평가 및 승진 시험 대비용 객관식 문제 2개를 생성해 주세요.
+반드시 각 문제마다 4개의 보기, 정답, 그리고 상세한 해설을 포함해야 합니다.
+
+[텍스트]
+{text_context}
+"""
+    # 아키님이 지정한 gemma4 모델 호출
+    payload = {
+        "model": "gemma4",
+        "prompt": prompt,
+        "stream": False
+    }
+
+    try:
+        response = requests.post(OLLAMA_API_URL, json=payload)
+        response.raise_for_status()
+        result = response.json()
+        return jsonify({"questions": result.get("response", "")})
+    except requests.exceptions.RequestException as e:
+        return jsonify({"error": f"Ollama 연결 실패: 맥미니에 Ollama가 켜져 있는지 확인하세요. 상세 오류: {str(e)}"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
-    # 맥미니의 로컬 환경 및 터널 접속을 위해 0.0.0.0으로 개방
     app.run(host='0.0.0.0', port=5001)
