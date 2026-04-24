@@ -1,10 +1,9 @@
 import { useState, useRef } from "react";
 import { Highlighter, Loader2, BookOpen, UploadCloud, Sparkles, Layers, CheckCircle2 } from "lucide-react";
-// 🚨 지갑 연결용 라이브러리 추가
 import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
 
 function App() {
-  const account = useCurrentAccount(); // 🚨 로그인된 지갑 정보 가져오기
+  const account = useCurrentAccount();
   const [file, setFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [parsedText, setParsedText] = useState("");
@@ -19,7 +18,6 @@ function App() {
     formData.append("file", file);
 
     try {
-      // 🚨 HTTP 내부 IP 대신 외부망(HTTPS) API 터널 주소로 교체!
       const res = await fetch("https://api.blankd.top/api/upload-pdf", {
         method: "POST",
         body: formData,
@@ -34,23 +32,47 @@ function App() {
     }
   };
 
-  const handleMakeBlankCard = () => {
+  const handleMakeBlankCard = async () => {
     const selection = window.getSelection();
     if (!selection || selection.toString().trim() === "") {
       return alert("빈칸으로 만들 텍스트를 드래그해주세요!");
     }
 
+    if (!account) {
+      return alert("노력을 기록하려면 먼저 우측 상단에서 지갑을 연결해주세요!");
+    }
+
     const selectedText = selection.toString();
     const cardContent = parsedText.replace(selectedText, `[ ${"＿".repeat(selectedText.length)} ]`);
     
-    setSavedCards([...savedCards, cardContent]);
-    window.getSelection()?.removeAllRanges(); // 시각적 피드백
+    try {
+      // 🚨 백엔드(DB)로 지갑 주소와 카드 내용 전송
+      const res = await fetch("https://api.blankd.top/api/save-card", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          wallet_address: account.address,
+          card_content: cardContent
+        }),
+      });
+
+      if (res.ok) {
+        setSavedCards([...savedCards, cardContent]);
+        window.getSelection()?.removeAllRanges(); // 드래그 해제
+      } else {
+        alert("기록 실패: 서버에서 저장을 거부했습니다.");
+      }
+    } catch (error) {
+      console.error(error);
+      alert("통신 에러: api.blankd.top 서버와 연결할 수 없습니다.");
+    }
   };
 
   return (
     <div className="min-h-screen bg-[#0A0F1C] text-slate-300 font-sans selection:bg-indigo-500/40 selection:text-indigo-100 pb-24">
       
-      {/* 프리미엄 헤더 */}
       <header className="sticky top-0 z-10 backdrop-blur-md bg-[#0A0F1C]/80 border-b border-white/5 mb-8">
         <div className="max-w-3xl mx-auto px-6 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -66,15 +88,12 @@ function App() {
               <Sparkles className="w-3.5 h-3.5 text-yellow-500" />
               Effort to Earn
             </div>
-            {/* 🚨 지갑 연결 버튼 추가 */}
             <ConnectButton />
           </div>
         </div>
       </header>
 
       <main className="max-w-3xl mx-auto px-6 space-y-8">
-        
-        {/* 🚨 지갑 로그인이 안 되어 있을 때 보여줄 화면 */}
         {!account ? (
           <div className="text-center py-20 px-6 bg-[#111827]/80 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl">
             <Sparkles className="w-12 h-12 text-indigo-400 mx-auto mb-4 opacity-50" />
@@ -82,7 +101,6 @@ function App() {
             <p className="text-slate-400">BlankD에서 노력을 증명하려면 Sui 지갑 로그인이 필요합니다.</p>
           </div>
         ) : (
-          /* 🚨 로그인이 완료되면 나타나는 기존 프리미엄 UI */
           <>
             <section className="relative group">
               <div className="absolute inset-0 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 rounded-3xl blur-xl group-hover:blur-2xl transition-all duration-500 opacity-50"></div>
@@ -135,7 +153,7 @@ function App() {
                 
                 <button onClick={handleMakeBlankCard} className="w-full bg-white/5 hover:bg-indigo-500/10 border border-white/10 hover:border-indigo-500/30 text-indigo-300 font-semibold py-4 rounded-xl flex justify-center items-center gap-2 transition-all duration-300">
                   <CheckCircle2 className="w-5 h-5" />
-                  선택한 영역을 빈칸 카드로 만들기
+                  선택한 영역을 빈칸 카드로 만들기 (저장)
                 </button>
               </section>
             )}
@@ -162,7 +180,6 @@ function App() {
             )}
           </>
         )}
-
       </main>
     </div>
   );
