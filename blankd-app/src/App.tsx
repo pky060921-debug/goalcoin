@@ -1,7 +1,6 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Highlighter, Loader2, BookOpen, UploadCloud, Sparkles, Layers, CheckCircle2, BrainCircuit } from "lucide-react";
 import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
-// 🚨 경로를 @mysten/enoki/react 로 수정 완료
 import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 
 function App() {
@@ -21,6 +20,24 @@ function App() {
   const [aiQuestions, setAiQuestions] = useState("");
   
   const textRef = useRef<HTMLDivElement>(null);
+
+  // 🚨 추가된 핵심 로직: 구글 로그인 후 돌아왔을 때 토큰을 처리하는 마중물 함수
+  useEffect(() => {
+    const handleAuth = async () => {
+      try {
+        await enokiFlow.handleAuthCallback();
+        // 로그인 성공 후 URL 뒤에 지저분하게 붙은 토큰을 깔끔하게 지워줍니다.
+        window.history.replaceState(null, '', window.location.pathname);
+      } catch (error) {
+        console.error("zkLogin 처리 에러:", error);
+      }
+    };
+    
+    // URL에 토큰이 묻어있다면 마중물 함수 실행
+    if (window.location.hash.includes("id_token=")) {
+      handleAuth();
+    }
+  }, [enokiFlow]);
 
   const handleFileUpload = async () => {
     if (!file) return alert("법령 PDF 파일을 선택해주세요.");
@@ -85,16 +102,25 @@ function App() {
     const host = window.location.host;
     const redirectUrl = `${protocol}//${host}`;
 
-    const url = await enokiFlow.createAuthorizationUrl({
-      provider: 'google',
-      clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com',
-      redirectUrl,
-    });
-    window.location.href = url;
+    try {
+      const url = await enokiFlow.createAuthorizationUrl({
+        provider: 'google',
+        clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com',
+        redirectUrl,
+      });
+      window.location.href = url;
+    } catch (err) {
+      console.error("구글 로그인 URL 생성 실패:", err);
+      alert("구글 로그인 준비 중 오류가 발생했습니다.");
+    }
   };
 
   const handleLogout = async () => {
-    await enokiFlow.logout();
+    try {
+      await enokiFlow.logout();
+    } catch (e) {
+      console.error(e);
+    }
     window.location.reload();
   };
 
