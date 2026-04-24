@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { Highlighter, Loader2, BookOpen, UploadCloud, Sparkles, Layers, CheckCircle2 } from "lucide-react";
+import { Highlighter, Loader2, BookOpen, UploadCloud, Sparkles, Layers, CheckCircle2, BrainCircuit } from "lucide-react";
 import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
 
 function App() {
@@ -8,6 +8,11 @@ function App() {
   const [isUploading, setIsUploading] = useState(false);
   const [parsedText, setParsedText] = useState("");
   const [savedCards, setSavedCards] = useState<string[]>([]);
+  
+  // 🚨 AI 문제 생성 관련 상태 추가
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [aiQuestions, setAiQuestions] = useState("");
+  
   const textRef = useRef<HTMLDivElement>(null);
 
   const handleFileUpload = async () => {
@@ -46,12 +51,9 @@ function App() {
     const cardContent = parsedText.replace(selectedText, `[ ${"＿".repeat(selectedText.length)} ]`);
     
     try {
-      // 🚨 백엔드(DB)로 지갑 주소와 카드 내용 전송
       const res = await fetch("https://api.blankd.top/api/save-card", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           wallet_address: account.address,
           card_content: cardContent
@@ -60,13 +62,41 @@ function App() {
 
       if (res.ok) {
         setSavedCards([...savedCards, cardContent]);
-        window.getSelection()?.removeAllRanges(); // 드래그 해제
+        window.getSelection()?.removeAllRanges();
       } else {
         alert("기록 실패: 서버에서 저장을 거부했습니다.");
       }
     } catch (error) {
       console.error(error);
       alert("통신 에러: api.blankd.top 서버와 연결할 수 없습니다.");
+    }
+  };
+
+  // 🚨 백엔드의 Gemma 4(Ollama)에게 문제 생성을 요청하는 함수
+  const handleGenerateQuestions = async () => {
+    if (!parsedText) return alert("먼저 PDF에서 텍스트를 추출해주세요.");
+    setIsGenerating(true);
+    
+    try {
+      const res = await fetch("https://api.blankd.top/api/generate-questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // 너무 긴 텍스트로 인한 과부하를 막기 위해 최대 2000자까지만 전송
+        body: JSON.stringify({ text_context: parsedText.slice(0, 2000) }),
+      });
+      
+      const data = await res.json();
+      
+      if (res.ok) {
+        setAiQuestions(data.questions);
+      } else {
+        alert(`생성 실패: ${data.error}`);
+      }
+    } catch (error) {
+      console.error(error);
+      alert("AI 통신 에러: 백엔드와 Ollama 서버 상태를 확인하세요.");
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -116,19 +146,10 @@ function App() {
                 <div className="w-full max-w-sm flex flex-col gap-3">
                   <label className="flex items-center justify-center w-full px-4 py-3 bg-[#1F2937] border border-dashed border-slate-600 rounded-xl cursor-pointer hover:bg-[#374151] hover:border-indigo-400 transition-all text-sm text-slate-300">
                     <span className="truncate">{file ? file.name : "클릭하여 PDF 파일 선택"}</span>
-                    <input 
-                      type="file" 
-                      accept=".pdf"
-                      onChange={(e) => setFile(e.target.files?.[0] || null)}
-                      className="hidden"
-                    />
+                    <input type="file" accept=".pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" />
                   </label>
                   
-                  <button 
-                    onClick={handleFileUpload} 
-                    disabled={isUploading || !file}
-                    className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-semibold py-3.5 rounded-xl flex justify-center items-center gap-2 shadow-lg hover:shadow-indigo-500/25 transition-all duration-300"
-                  >
+                  <button onClick={handleFileUpload} disabled={isUploading || !file} className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-semibold py-3.5 rounded-xl flex justify-center items-center gap-2 shadow-lg hover:shadow-indigo-500/25 transition-all duration-300">
                     {isUploading ? <Loader2 className="animate-spin w-5 h-5" /> : "텍스트 추출 시작"}
                   </button>
                 </div>
@@ -151,10 +172,34 @@ function App() {
                   {parsedText}
                 </div>
                 
-                <button onClick={handleMakeBlankCard} className="w-full bg-white/5 hover:bg-indigo-500/10 border border-white/10 hover:border-indigo-500/30 text-indigo-300 font-semibold py-4 rounded-xl flex justify-center items-center gap-2 transition-all duration-300">
-                  <CheckCircle2 className="w-5 h-5" />
-                  선택한 영역을 빈칸 카드로 만들기 (저장)
-                </button>
+                {/* 🚨 버튼 2개를 나란히 배치 */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                  <button onClick={handleMakeBlankCard} className="w-full bg-white/5 hover:bg-indigo-500/10 border border-white/10 hover:border-indigo-500/30 text-indigo-300 font-semibold py-4 rounded-xl flex justify-center items-center gap-2 transition-all duration-300">
+                    <CheckCircle2 className="w-5 h-5" />
+                    빈칸 카드로 만들기 (저장)
+                  </button>
+                  
+                  <button onClick={handleGenerateQuestions} disabled={isGenerating} className="w-full bg-gradient-to-r from-teal-500/20 to-emerald-500/20 hover:from-teal-500/30 hover:to-emerald-500/30 border border-teal-500/30 text-teal-300 disabled:opacity-50 font-semibold py-4 rounded-xl flex justify-center items-center gap-2 transition-all duration-300">
+                    {isGenerating ? <Loader2 className="animate-spin w-5 h-5" /> : <BrainCircuit className="w-5 h-5" />}
+                    {isGenerating ? "AI가 문제 출제 중..." : "AI 모의고사 자동 생성"}
+                  </button>
+                </div>
+              </section>
+            )}
+
+            {/* 🚨 AI가 생성한 문제를 보여주는 전용 섹션 */}
+            {aiQuestions && (
+              <section className="bg-gradient-to-br from-[#0A1929] to-[#0D1B2A] border border-teal-500/20 p-6 sm:p-8 rounded-3xl shadow-[0_0_20px_rgba(20,184,166,0.1)] space-y-4">
+                <div className="flex items-center gap-3 border-b border-teal-500/20 pb-4">
+                  <div className="p-2 bg-teal-500/20 rounded-lg">
+                    <BrainCircuit className="w-6 h-6 text-teal-400" />
+                  </div>
+                  <h2 className="text-xl font-bold text-teal-50">Gemma 4 출제 모의고사</h2>
+                </div>
+                {/* 텍스트의 줄바꿈(\n)을 그대로 살려주기 위한 속성(whitespace-pre-wrap) 적용 */}
+                <div className="text-[15px] leading-relaxed text-teal-100/80 whitespace-pre-wrap pt-2">
+                  {aiQuestions}
+                </div>
               </section>
             )}
 
