@@ -1,14 +1,14 @@
 import { useState, useRef } from "react";
 import { Highlighter, Loader2, BookOpen, UploadCloud, Sparkles, Layers, CheckCircle2, BrainCircuit } from "lucide-react";
 import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
-import { useEnokiFlow, useZkLogin } from "@mysten/enoki";
+// 🚨 경로를 @mysten/enoki/react 로 수정 완료
+import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 
 function App() {
   const enokiFlow = useEnokiFlow();
   const zkLogin = useZkLogin();
   const suiWalletAccount = useCurrentAccount();
   
-  // 🚨 Web3 지갑 주소 또는 Enoki zkLogin 주소 중 하나를 계정으로 사용
   const accountAddress = suiWalletAccount?.address || zkLogin?.address;
   const account = accountAddress ? { address: accountAddress } : null;
 
@@ -80,7 +80,6 @@ function App() {
     }
   };
 
-  // 🚨 구글 zkLogin 실행 함수
   const handleGoogleZkLogin = async () => {
     const protocol = window.location.protocol;
     const host = window.location.host;
@@ -116,7 +115,7 @@ function App() {
             {account && (
               <div className="flex items-center gap-3">
                 <ConnectButton />
-                {zkLogin.address && (
+                {zkLogin?.address && (
                   <button onClick={handleLogout} className="text-xs font-bold text-slate-500 hover:text-rose-400 transition-colors">로그아웃</button>
                 )}
               </div>
