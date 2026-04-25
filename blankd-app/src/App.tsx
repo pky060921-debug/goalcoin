@@ -21,19 +21,15 @@ function App() {
   
   const textRef = useRef<HTMLDivElement>(null);
 
-  // 🚨 추가된 핵심 로직: 구글 로그인 후 돌아왔을 때 토큰을 처리하는 마중물 함수
   useEffect(() => {
     const handleAuth = async () => {
       try {
         await enokiFlow.handleAuthCallback();
-        // 로그인 성공 후 URL 뒤에 지저분하게 붙은 토큰을 깔끔하게 지워줍니다.
         window.history.replaceState(null, '', window.location.pathname);
       } catch (error) {
         console.error("zkLogin 처리 에러:", error);
       }
     };
-    
-    // URL에 토큰이 묻어있다면 마중물 함수 실행
     if (window.location.hash.includes("id_token=")) {
       handleAuth();
     }
@@ -107,11 +103,13 @@ function App() {
         provider: 'google',
         clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com',
         redirectUrl,
+        network: 'testnet' // 🚨 테스트넷 명시적 지정 추가
       });
       window.location.href = url;
-    } catch (err) {
+    } catch (err: any) {
       console.error("구글 로그인 URL 생성 실패:", err);
-      alert("구글 로그인 준비 중 오류가 발생했습니다.");
+      // 🚨 태블릿 화면에 정확히 어떤 에러인지 문구를 띄워줍니다.
+      alert(`구글 로그인 에러 발생: ${err.message || JSON.stringify(err)}`);
     }
   };
 
