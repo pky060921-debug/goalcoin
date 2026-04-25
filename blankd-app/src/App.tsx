@@ -165,21 +165,17 @@ function App() {
     }
   };
 
-  // 🚨 400 에러의 원인을 완벽하게 박멸한 새로운 로그인 함수
+  // 구글 400 에러를 해결한 가장 순수한 형태의 로그인 함수
   const handleGoogleZkLogin = async () => {
     try {
-      // Enoki SDK 버전에 따라 함수명이 다를 수 있으므로 안전하게 호출
       const createUrl = enokiFlow.createAuthorizationUrl || (enokiFlow as any).createAuthorizationURL;
-      
       if (!createUrl) throw new Error("인증 함수를 찾을 수 없습니다.");
 
-      // 구글이 튕겨냈던 비표준 파라미터(network)를 완전히 제거하고 가장 순수한 형태로 보냅니다.
       const url = await createUrl.call(enokiFlow, {
         provider: 'google',
         clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com',
-        redirectUrl: window.location.origin // https://blankd.top 과 완벽하게 일치
+        redirectUrl: window.location.origin
       });
-
       window.location.href = url;
     } catch (err: any) { 
       alert(`구글 로그인 에러: ${err.message}`); 
@@ -231,9 +227,10 @@ function App() {
           <>
             <section className="bg-[#111827]/80 border border-white/10 p-8 rounded-3xl flex flex-col items-center gap-5">
               <UploadCloud className="w-8 h-8 text-indigo-400" />
+              {/* 🚨 모든 파일 형식 허용 */}
               <label className="flex items-center justify-center w-full px-4 py-3 bg-[#1F2937] border border-dashed border-slate-600 rounded-xl cursor-pointer hover:border-indigo-400 text-sm">
-                <span>{file ? file.name : "학습할 문서 (PDF, TXT, HTML, DOCX) 선택"}</span>
-                <input type="file" accept=".pdf,.txt,.html,.htm,.docx" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" />
+                <span>{file ? file.name : "학습할 모든 문서 파일 선택"}</span>
+                <input type="file" accept="*" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" />
               </label>
               <button onClick={handleFileUpload} disabled={isUploading || !file} className="w-full bg-indigo-600 py-3.5 rounded-xl font-semibold">
                 {isUploading ? <Loader2 className="animate-spin w-5 h-5 mx-auto" /> : "문서 추출 및 카테고리 분리"}
@@ -241,7 +238,7 @@ function App() {
             </section>
 
             {parsedText && (
-              <section className="bg-[#111827] border border-teal-500/30 p-6 sm:p-8 rounded-3xl shadow-[0_0_20px_rgba(20,184,166,0.1)] space-y-5 animate-in fade-in slide-in-from-top-4">
+              <section className="bg-[#111827] border border-teal-500/30 p-6 sm:p-8 rounded-3xl shadow-[0_0_20px_rgba(20,184,166,0.1)] space-y-5">
                 <div className="flex items-center gap-2 text-teal-400 font-bold mb-2">
                   <Flame className="w-5 h-5" /> 수동 카드 제작 모드
                 </div>
