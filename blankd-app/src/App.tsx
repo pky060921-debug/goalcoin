@@ -99,16 +99,16 @@ function App() {
     const redirectUrl = `${protocol}//${host}`;
 
     try {
-      const url = await enokiFlow.createAuthorizationUrl({
+      // 🚨 범인 검거 완료: Url을 URL로 수정했습니다.
+      const url = await enokiFlow.createAuthorizationURL({
         provider: 'google',
         clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com',
         redirectUrl,
-        network: 'testnet' // 🚨 테스트넷 명시적 지정 추가
+        network: 'testnet' 
       });
       window.location.href = url;
     } catch (err: any) {
       console.error("구글 로그인 URL 생성 실패:", err);
-      // 🚨 태블릿 화면에 정확히 어떤 에러인지 문구를 띄워줍니다.
       alert(`구글 로그인 에러 발생: ${err.message || JSON.stringify(err)}`);
     }
   };
