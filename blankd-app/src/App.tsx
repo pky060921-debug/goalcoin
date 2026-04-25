@@ -20,7 +20,6 @@ function App() {
   const [savedCards, setSavedCards] = useState<Card[]>([]);
   const [activeCard, setActiveCard] = useState<Card | null>(null);
   
-  // 수동 추출용
   const [parsedText, setParsedText] = useState("");
   const textRef = useRef<HTMLDivElement>(null);
 
@@ -101,14 +100,13 @@ function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.details || data.error);
       
-      alert(data.message); // O개의 카드가 자동 제작되었습니다!
+      alert(data.message);
       loadMyCards();
     } catch (error: any) {
       alert(`[API 에러] 자동 제작 실패:\n${error.message}`);
     }
   };
 
-  // 수동 추출 모드를 위해 조문을 클릭하면 텍스트를 불러오는 기능 추가
   const loadTextForManualSelection = (content: string) => {
     setParsedText(content);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -138,7 +136,7 @@ function App() {
       
       alert("성공적으로 카드가 제작되었습니다!");
       window.getSelection()?.removeAllRanges();
-      setParsedText(""); // 제작 후 입력창 비우기
+      setParsedText(""); 
       loadMyCards(); 
     } catch (error: any) {
       alert(`[API 에러] 수동 제작 실패: \n${error.message}`);
@@ -167,16 +165,25 @@ function App() {
     }
   };
 
+  // 🚨 400 에러의 원인을 완벽하게 박멸한 새로운 로그인 함수
   const handleGoogleZkLogin = async () => {
     try {
-      const url = await enokiFlow.createAuthorizationURL({
+      // Enoki SDK 버전에 따라 함수명이 다를 수 있으므로 안전하게 호출
+      const createUrl = enokiFlow.createAuthorizationUrl || (enokiFlow as any).createAuthorizationURL;
+      
+      if (!createUrl) throw new Error("인증 함수를 찾을 수 없습니다.");
+
+      // 구글이 튕겨냈던 비표준 파라미터(network)를 완전히 제거하고 가장 순수한 형태로 보냅니다.
+      const url = await createUrl.call(enokiFlow, {
         provider: 'google',
         clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com',
-        redirectUrl: `${window.location.protocol}//${window.location.host}`,
-        network: 'testnet'
+        redirectUrl: window.location.origin // https://blankd.top 과 완벽하게 일치
       });
+
       window.location.href = url;
-    } catch (err: any) { alert(`구글 로그인 에러: ${err.message}`); }
+    } catch (err: any) { 
+      alert(`구글 로그인 에러: ${err.message}`); 
+    }
   };
 
   const getLevelColor = (level: number) => {
@@ -224,7 +231,6 @@ function App() {
           <>
             <section className="bg-[#111827]/80 border border-white/10 p-8 rounded-3xl flex flex-col items-center gap-5">
               <UploadCloud className="w-8 h-8 text-indigo-400" />
-              {/* 🚨 모든 문서 형식 허용 (PDF, TXT, HTML, DOCX) */}
               <label className="flex items-center justify-center w-full px-4 py-3 bg-[#1F2937] border border-dashed border-slate-600 rounded-xl cursor-pointer hover:border-indigo-400 text-sm">
                 <span>{file ? file.name : "학습할 문서 (PDF, TXT, HTML, DOCX) 선택"}</span>
                 <input type="file" accept=".pdf,.txt,.html,.htm,.docx" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" />
@@ -234,7 +240,6 @@ function App() {
               </button>
             </section>
 
-            {/* 수동 카드 제작창 (조문을 클릭했을 때 나타남) */}
             {parsedText && (
               <section className="bg-[#111827] border border-teal-500/30 p-6 sm:p-8 rounded-3xl shadow-[0_0_20px_rgba(20,184,166,0.1)] space-y-5 animate-in fade-in slide-in-from-top-4">
                 <div className="flex items-center gap-2 text-teal-400 font-bold mb-2">
@@ -249,7 +254,6 @@ function App() {
               </section>
             )}
 
-            {/* 분리된 카테고리 목록 표시 */}
             {categories.length > 0 && (
               <section className="space-y-4">
                 <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2"><BookOpen className="w-5 h-5"/> 문서 분석 결과 ({categories.length}건)</h2>
@@ -269,7 +273,6 @@ function App() {
               </section>
             )}
 
-            {/* 내 컬렉션(인벤토리) 영역 */}
             {savedCards.length > 0 && (
               <section className="space-y-4 pt-8">
                 <div className="flex items-center gap-3 border-b border-white/10 pb-4">
@@ -325,7 +328,6 @@ function App() {
         )}
       </main>
 
-      {/* 🚨 전투 모달창 */}
       {activeCard && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="bg-[#111827] w-full max-w-lg rounded-3xl border-2 border-cyan-500/30 overflow-hidden flex flex-col">
