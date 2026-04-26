@@ -334,5 +334,23 @@ def submit_answer():
     except Exception as e:
         return jsonify({"error": "전투 결과 처리 에러", "details": traceback.format_exc()}), 500
 
+# 🚨 일괄 삭제 기능
+@app.route('/api/delete-all', methods=['POST'])
+def delete_all():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM categories WHERE wallet_address = ?", (wallet_address,))
+        cursor.execute("DELETE FROM cards WHERE wallet_address = ?", (wallet_address,))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"message": "성공적으로 모든 차원과 카드가 소각되었습니다."})
+    except Exception as e:
+        return jsonify({"error": "데이터 삭제 에러", "details": traceback.format_exc()}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001)
