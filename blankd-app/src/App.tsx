@@ -112,14 +112,26 @@ function App() {
     }
   };
 
+  // 🚨 진단용 구글 로그인 함수
   const handleGoogleZkLogin = async () => {
-    const createUrl = (enokiFlow as any).createAuthorizationURL || enokiFlow.createAuthorizationUrl;
-    const url = await createUrl.call(enokiFlow, {
-      provider: 'google',
-      clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com',
-      redirectUrl: window.location.origin
-    });
-    window.location.href = url;
+    try {
+      const createUrl = (enokiFlow as any).createAuthorizationURL || enokiFlow.createAuthorizationUrl;
+      
+      if (!createUrl) {
+        throw new Error("Enoki 인증 함수를 불러오지 못했습니다.");
+      }
+
+      const url = await createUrl.call(enokiFlow, {
+        provider: 'google',
+        clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com',
+        redirectUrl: window.location.origin,
+        network: 'testnet'
+      });
+      
+      window.location.href = url;
+    } catch (err: any) {
+      alert(`[로그인 에러 발생!]\n원인: ${err.message || JSON.stringify(err)}\n\n이 메시지를 그대로 복사해서 알려주세요!`);
+    }
   };
 
   const loadTextForManualSelection = (content: string) => {
@@ -179,7 +191,6 @@ function App() {
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] font-sans selection:bg-neutral-800 selection:text-white p-6 sm:p-12">
-      {/* HEADER: 미니멀하고 정제된 형태 */}
       <header className="max-w-4xl mx-auto flex flex-col sm:flex-row sm:justify-between sm:items-baseline border-b border-white/10 pb-8 mb-12 gap-4">
         <div>
           <h1 className="text-2xl font-light tracking-[0.3em] text-white">BLANK_D</h1>
@@ -194,7 +205,6 @@ function App() {
 
       <main className="max-w-4xl mx-auto">
         {!account ? (
-          /* 메인 로그인: 고요한 서재의 입구 */
           <div className="flex flex-col items-center justify-center py-40">
             <p className="text-xs font-light text-white/40 mb-12 tracking-[0.2em] uppercase">Enter the Archive</p>
             <button 
@@ -206,7 +216,6 @@ function App() {
           </div>
         ) : (
           <>
-            {/* TABS: 얇은 선과 여백으로 구성된 고요한 네비게이션 */}
             <nav className="flex gap-8 mb-16 border-b border-white/5 pb-4 overflow-x-auto scrollbar-hide">
               {[
                 { id: 'dashboard', label: '열람실' },
@@ -228,7 +237,6 @@ function App() {
               ))}
             </nav>
 
-            {/* 1. DASHBOARD (열람실) */}
             {activeTab === 'dashboard' && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 animate-in fade-in duration-700">
                 <div className="border border-white/10 p-8 rounded-sm bg-white/[0.02]">
@@ -246,7 +254,6 @@ function App() {
               </div>
             )}
 
-            {/* 2. CRAFT (지식 추출) */}
             {activeTab === 'craft' && (
               <div className="space-y-12 animate-in fade-in duration-700">
                 <div className="flex justify-between items-baseline border-b border-white/5 pb-4">
@@ -295,7 +302,6 @@ function App() {
                   </div>
                 )}
                 
-                {/* 수동 제작 */}
                 {parsedText && (
                   <div className="mt-16 space-y-6">
                     <div className="text-xs font-light text-white/60 tracking-widest border-b border-white/5 pb-4">수동 추출</div>
@@ -310,7 +316,6 @@ function App() {
               </div>
             )}
 
-            {/* 3. ENHANCE (기억 강화) */}
             {activeTab === 'enhance' && (
               <div className="space-y-8 animate-in fade-in duration-700">
                 <div className="text-xs font-light tracking-widest text-white/60 border-b border-white/5 pb-4">기억 보관소</div>
@@ -355,7 +360,6 @@ function App() {
               </div>
             )}
 
-            {/* 4. MY PAGE (지갑 연결) */}
             {activeTab === 'mypage' && (
               <div className="max-w-md mx-auto space-y-12 animate-in fade-in duration-700 py-16">
                 <div className="space-y-6 border border-white/10 p-10 rounded-sm bg-white/[0.01]">
@@ -380,7 +384,6 @@ function App() {
               </div>
             )}
 
-            {/* EMPTY TABS */}
             {(activeTab === 'mission' || activeTab === 'community') && (
               <div className="py-40 text-center border border-white/5 border-dashed rounded-sm mt-8">
                 <div className="text-xs tracking-[0.3em] text-white/30 font-light">준비 중인 공간입니다.</div>
@@ -390,7 +393,6 @@ function App() {
         )}
       </main>
 
-      {/* COMBAT MODAL (강화 팝업) */}
       {activeCard && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0d0d0f]/95 backdrop-blur-sm animate-in fade-in">
           <div className="border border-white/10 bg-[#121214] w-full max-w-2xl p-10 shadow-2xl rounded-sm">
@@ -418,7 +420,6 @@ function App() {
         </div>
       )}
 
-      {/* CSS */}
       <style>{`
         .blink { animation: blink-animation 1.5s steps(2, start) infinite; }
         @keyframes blink-animation { to { visibility: hidden; } }
