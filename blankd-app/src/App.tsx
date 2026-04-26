@@ -28,7 +28,9 @@ function App() {
       try {
         await enokiFlow.handleAuthCallback();
         window.history.replaceState(null, '', window.location.pathname);
-      } catch (err: any) { console.error(err); }
+      } catch (err: any) { 
+        alert(`[Callback 에러]\n${err.message || JSON.stringify(err)}`);
+      }
     };
     if (window.location.hash.includes("id_token=")) handleAuth();
   }, [enokiFlow]);
@@ -165,20 +167,41 @@ function App() {
     }
   };
 
-  // 구글 400 에러를 해결한 가장 순수한 형태의 로그인 함수
+  // 🚨 [진단 전용] 왜 403이 뜨는지 낱낱이 파헤치는 함수
   const handleGoogleZkLogin = async () => {
+    let debugInfo = "=== 🔍 로그인 진단 정보 ===\n";
     try {
+      // 1. 브라우저가 인식하는 진짜 Origin
+      const currentOrigin = window.location.origin;
+      debugInfo += `1. Origin: [${currentOrigin}]\n`;
+      
+      // 2. 보안 환경 여부 (https 여부)
+      const isSecure = window.isSecureContext;
+      debugInfo += `2. 보안(HTTPS) 상태: ${isSecure ? '안전함' : '위험함(False)'}\n`;
+
+      // 3. 사용하려는 Client ID
+      const clientId = '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com';
+      debugInfo += `3. Client ID: ${clientId.substring(0, 15)}...\n`;
+
       const createUrl = enokiFlow.createAuthorizationUrl || (enokiFlow as any).createAuthorizationURL;
       if (!createUrl) throw new Error("인증 함수를 찾을 수 없습니다.");
 
+      // 시도하기 전에 정보부터 띄움
+      debugInfo += `\n>> Enoki 서버로 위 정보를 보냅니다.`;
+      console.log(debugInfo);
+
       const url = await createUrl.call(enokiFlow, {
         provider: 'google',
-        clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com',
-        redirectUrl: window.location.origin
+        clientId: clientId,
+        redirectUrl: currentOrigin,
+        network: 'testnet'
       });
+      
       window.location.href = url;
     } catch (err: any) { 
-      alert(`구글 로그인 에러: ${err.message}`); 
+      debugInfo += `\n\n[🚨 차단(에러) 상세 내용]\n메시지: ${err.message}\n응답: ${JSON.stringify(err)}`;
+      // 에러가 나면 화면에 팝업을 띄워서 사용자에게 보여줌
+      alert(debugInfo); 
     }
   };
 
@@ -219,7 +242,7 @@ function App() {
             <div className="space-y-4">
               <ConnectButton connectText="Splash 지갑 연결" />
               <button onClick={handleGoogleZkLogin} className="w-full bg-white text-slate-900 font-bold py-3.5 rounded-xl flex justify-center items-center gap-3">
-                 구글 이메일로 시작하기
+                 구글 이메일로 시작하기 (진단 모드)
               </button>
             </div>
           </div>
@@ -227,9 +250,8 @@ function App() {
           <>
             <section className="bg-[#111827]/80 border border-white/10 p-8 rounded-3xl flex flex-col items-center gap-5">
               <UploadCloud className="w-8 h-8 text-indigo-400" />
-              {/* 🚨 모든 파일 형식 허용 */}
               <label className="flex items-center justify-center w-full px-4 py-3 bg-[#1F2937] border border-dashed border-slate-600 rounded-xl cursor-pointer hover:border-indigo-400 text-sm">
-                <span>{file ? file.name : "학습할 모든 문서 파일 선택"}</span>
+                <span>{file ? file.name : "학습할 문서 (PDF, TXT, HTML, DOCX) 선택"}</span>
                 <input type="file" accept="*" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" />
               </label>
               <button onClick={handleFileUpload} disabled={isUploading || !file} className="w-full bg-indigo-600 py-3.5 rounded-xl font-semibold">
