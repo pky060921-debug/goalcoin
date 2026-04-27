@@ -8,12 +8,20 @@ import re
 import random
 import json
 import traceback
+import logging
+import subprocess
 from datetime import datetime, timedelta
 
 try:
     import docx
 except ImportError:
     docx = None
+
+# ==========================================
+# [추가] 1. 에러 추적 로깅 설정
+# ==========================================
+logging.basicConfig(filename='backend_error_log.txt', level=logging.ERROR, 
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
 # 50MB 대용량 업로드 및 CORS 강제 허용
@@ -30,11 +38,12 @@ GLOBAL_WORD_POOL = set()
 @app.errorhandler(Exception)
 def handle_exception(e):
     error_detail = traceback.format_exc()
+    logging.error(f"백엔드 치명적 에러:\n{error_detail}") # 로그 파일에 기록
     print(f"\n[🚨 서버 치명적 에러]\n{error_detail}")
     return jsonify({"error": "백엔드 엔진 오류", "details": error_detail}), 500
 
 # ==========================================
-# 1. DB 초기화 (법령, 카드, 모의고사 아카이브)
+# 2. DB 초기화 (법령, 카드, 모의고사, AI분석 아카이브)
 # ==========================================
 def init_db():
     try:
@@ -43,6 +52,8 @@ def init_db():
         cursor.execute('CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, title TEXT, content TEXT)')
         cursor.execute('CREATE TABLE IF NOT EXISTS cards (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, category_id INTEGER, card_content TEXT, answer_text TEXT, options_json TEXT, level INTEGER DEFAULT 0, next_review_time DATETIME, status TEXT DEFAULT "OWNED")')
         cursor.execute('CREATE TABLE IF NOT EXISTS exams (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, title TEXT, content TEXT)')
+        # [추가] AI 분석 데이터 저장 테이블
+        cursor.execute('CREATE TABLE IF NOT EXISTS ai_analysis (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, topic TEXT, summary TEXT, recommended_blanks TEXT, quiz_json TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)')
         conn.commit()
         conn.close()
     except Exception as e:
@@ -51,7 +62,7 @@ def init_db():
 init_db()
 
 # ==========================================
-# 2. 강력한 오리지널 엔진 복구 (정규식, 오답생성, Anki)
+# 강력한 오리지널 엔진 복구 (정규식, 오답생성, Anki)
 # ==========================================
 def parse_law_into_categories(text):
     pattern = r'(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)'
@@ -118,10 +129,9 @@ def get_next_review_time(level):
     else: return now + timedelta(days=7)
 
 # ==========================================
-# 3. 로컬 AI (26B 모델) 연동 로직
+# 로컬 AI (26B 모델) 연동 로직
 # ==========================================
 def get_ai_keyword(prompt):
-    """Gemma 26B 모델에게 문장의 핵심 키워드 하나를 물어봅니다."""
     try:
         payload = {
             "model": MODEL_NAME,
@@ -151,7 +161,61 @@ def extract_text(file):
         except: return raw_bytes.decode('cp949', errors='ignore')
 
 # ==========================================
-# 4. API 엔드포인트
+# [추가] 깃허브 및 AI 조력자 API 엔드포인트
+# ==========================================
+@app.route('/api/github-pull', methods=['POST'])
+def github_pull():
+    try:
+        result = subprocess.check_output(['git', 'pull', 'origin', 'main'], stderr=subprocess.STDOUT)
+        return jsonify({"message": "GitHub 코드가 최신화되었습니다.", "details": result.decode('utf-8')})
+    except subprocess.CalledProcessError as e:
+        return jsonify({"error": "GitHub 동기화 실패", "details": e.output.decode('utf-8')}), 500
+
+@app.route('/api/ai-analyze', methods=['POST'])
+def ai_analyze():
+    data = request.json
+    text = data.get('text', '')
+    wallet_address = data.get('wallet_address', 'unknown')
+    
+    if not text:
+        return jsonify({"error": "텍스트가 제공되지 않았습니다."}), 400
+        
+    prompt = f"""
+    당신은 훌륭한 법학습 조력자 인공지능 '아키'입니다. 다음 법령/모의고사 문서를 분석하여 반드시 아래 JSON 형식으로만 응답하세요. 다른 말은 덧붙이지 마세요.
+    {{
+        "topic": "해당 문서의 핵심 주제 분류",
+        "summary": "전체 내용 3줄 요약",
+        "recommended_blanks": ["시험에 자주 나오는 핵심 키워드 1", "키워드 2", "키워드 3"],
+        "quiz": {{
+            "question": "본문 내용을 바탕으로 한 4지선다형 질문",
+            "options": ["보기1", "보기2", "보기3", "정답보기"],
+            "answer": "정답보기"
+        }}
+    }}
+    분석할 텍스트: {text[:2000]}
+    """
+    try:
+        response = requests.post(OLLAMA_API_URL, json={"model": MODEL_NAME, "prompt": prompt, "stream": False}, timeout=60)
+        ai_result = json.loads(response.json().get('response', '{}'))
+        
+        # 분석 결과를 DB에 저장
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO ai_analysis (wallet_address, topic, summary, recommended_blanks, quiz_json)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (wallet_address, ai_result.get('topic'), ai_result.get('summary'), 
+              json.dumps(ai_result.get('recommended_blanks')), json.dumps(ai_result.get('quiz'))))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"message": "AI 분석 완료 및 DB 저장 성공", "data": ai_result})
+    except Exception as e:
+        logging.error(f"AI 조력자 통신 에러: {str(e)}")
+        return jsonify({"error": "AI 모듈 응답 실패", "details": str(e)}), 500
+
+# ==========================================
+# 기존 API 엔드포인트
 # ==========================================
 @app.route('/api/upload-pdf', methods=['POST'])
 def upload_law():
@@ -171,7 +235,6 @@ def upload_law():
         conn.commit()
         conn.close()
         
-        # 🚨 단어 풀 업데이트 복구
         GLOBAL_WORD_POOL.update(extract_candidates(full_text))
         return jsonify({"message": "법령 아카이브 등록 성공", "count": len(categories)})
     except Exception as e:
@@ -201,27 +264,21 @@ def auto_make_cards():
         wallet_address = data.get('wallet_address')
         category_id = data.get('category_id')
         content = data.get('content')
-        limit = 1 # AI 추출은 한 조문당 핵심 1개만
+        limit = 1 
 
-        # 1. 모의고사 빈출 단어 로드
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("SELECT content FROM exams WHERE wallet_address = ?", (wallet_address,))
         all_exams = " ".join([r[0] for r in cursor.fetchall()])
         
-        # 2. AI(Gemma 26B) 키워드 추출
         ai_target = get_ai_keyword(content)
-        
-        # 3. 🚨 복구된 정규식 스코어링 + 모의고사 가중치 + AI 가중치 결합
         candidates = extract_candidates(content)
         
         def get_hybrid_score(word):
             score = len(word) * 10
             if re.search(r'\d', word): score += 50
             if '위원회' in word or '날' in word: score += 30
-            # 모의고사에 나온 단어면 횟수당 +20점
             score += (all_exams.count(word) * 20)
-            # AI가 픽한 단어면 +200점 (절대적 우위)
             if ai_target and ai_target in word: score += 200
             return score
 
@@ -230,7 +287,6 @@ def auto_make_cards():
 
         if target:
             card_content = content.replace(target, f"[ {target} ]")
-            # 🚨 복구된 오답 생성기 사용!
             distractors = get_similar_distractors(target, 3)
             options = distractors + [target]
             random.shuffle(options)
@@ -257,7 +313,6 @@ def save_card():
         card_content = data.get('card_content')
         answer_text = data.get('answer_text')
 
-        # 🚨 복구된 오답 생성기 사용
         distractors = get_similar_distractors(answer_text, 3)
         options = distractors + [answer_text]
         random.shuffle(options)
@@ -291,7 +346,6 @@ def get_my_cards():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # 🚨 Slashing(소유권 박탈) 로직 복구
         cursor.execute("SELECT id, next_review_time, status FROM cards WHERE wallet_address = ?", (wallet_address,))
         now = datetime.utcnow()
         for row in cursor.fetchall():
@@ -304,7 +358,7 @@ def get_my_cards():
                     cursor.execute("UPDATE cards SET status = 'AT_RISK' WHERE id = ?", (card_id,))
         
         conn.commit()
-        cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status FROM cards WHERE wallet_address = ? ORDER BY created_at DESC", (wallet_address,))
+        cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status FROM cards WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
         cards = [{"id": r[0], "content": r[1], "answer": r[2], "options": json.loads(r[3]), "level": r[4], "next_review": r[5], "status": r[6]} for r in cursor.fetchall()]
         conn.close()
         return jsonify({"cards": cards})
@@ -322,7 +376,6 @@ def submit_answer():
     row = cursor.fetchone()
     if not row: return jsonify({"error": "카드가 없습니다."}), 404
     
-    # 🚨 Anki 공식 타이머 복구
     if is_correct:
         new_lv = row[0] + 1
         cursor.execute("UPDATE cards SET level = ?, next_review_time = ?, status = 'OWNED' WHERE id = ?", 
@@ -345,6 +398,7 @@ def delete_all():
     cursor.execute("DELETE FROM categories WHERE wallet_address = ?", (wallet_address,))
     cursor.execute("DELETE FROM cards WHERE wallet_address = ?", (wallet_address,))
     cursor.execute("DELETE FROM exams WHERE wallet_address = ?", (wallet_address,))
+    cursor.execute("DELETE FROM ai_analysis WHERE wallet_address = ?", (wallet_address,))
     conn.commit()
     conn.close()
     return jsonify({"message": "아카이브 초기화 성공"})
