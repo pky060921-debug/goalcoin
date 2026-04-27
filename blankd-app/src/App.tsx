@@ -15,8 +15,8 @@ function App() {
 
   // 탭 및 상태 관리
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [file, setFile] = useState<File | null>(null);             // 법령 파일
-  const [examFile, setExamFile] = useState<File | null>(null);     // 모의고사 파일
+  const [file, setFile] = useState<File | null>(null);
+  const [examFile, setExamFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isBatching, setIsBatching] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -25,7 +25,6 @@ function App() {
   const [parsedText, setParsedText] = useState("");
   const textRef = useRef<HTMLDivElement>(null);
 
-  // 초기 로그인 콜백 처리
   useEffect(() => {
     const handleAuth = async () => {
       try {
@@ -36,7 +35,6 @@ function App() {
     if (window.location.hash.includes("id_token=")) handleAuth();
   }, [enokiFlow]);
 
-  // 계정 연결 시 데이터 로드
   useEffect(() => {
     if (account) {
       loadCategories();
@@ -62,13 +60,16 @@ function App() {
     } catch (err) { console.error(err); }
   };
 
-  // 🚨 [진단용] 여기서부터 복사해서 덮어씌우세요!
+  // 🚨 [초정밀 진단용 업로드 함수] 
   const uploadFile = async (type: 'law' | 'exam') => {
     const targetFile = type === 'law' ? file : examFile;
-    if (!targetFile || !account) return alert("파일이 제대로 선택되지 않았습니다!");
+    if (!targetFile || !account) {
+      alert("⚠️ 파일이 제대로 선택되지 않았습니다. 점선 박스를 눌러 파일을 먼저 선택해주세요!");
+      return;
+    }
     
     setIsProcessing(true);
-    alert(`[진단 1단계] ${targetFile.name} 파일을 서버로 전송 시작합니다...`);
+    alert(`[진단 1단계] ${targetFile.name} 파일을 서버로 전송합니다... (확인을 누르시면 진행됩니다)`);
 
     const formData = new FormData();
     formData.append("file", targetFile);
@@ -82,20 +83,19 @@ function App() {
         body: formData,
       });
       
-      // 🚨 JSON 변환 전에 일단 텍스트로 무조건 받아서 파싱 에러를 방지합니다.
       const responseText = await res.text(); 
-      alert(`[진단 2단계] 서버 응답 도착! (상태 코드: ${res.status})`);
+      alert(`[진단 2단계] 서버에서 응답이 도착했습니다! (상태 코드: ${res.status})`);
       
       let data;
       try {
         data = JSON.parse(responseText);
       } catch (e) {
-        throw new Error(`서버가 JSON이 아닌 이상한 데이터를 보냈습니다:\n${responseText.substring(0, 100)}...`);
+        throw new Error(`백엔드가 에러 페이지(HTML 등)를 보냈습니다:\n${responseText.substring(0, 100)}...`);
       }
 
-      if (!res.ok) throw new Error(data.details || data.error || "알 수 없는 백엔드 에러");
+      if (!res.ok) throw new Error(data.details || data.error || "알 수 없는 서버 에러");
       
-      alert(type === 'law' ? "✅ 법령 문헌이 성공적으로 등록되었습니다." : "✅ 모의고사 데이터가 가중치 아카이브에 추가되었습니다.");
+      alert(type === 'law' ? "✅ 법령 문헌이 성공적으로 등록되었습니다." : "✅ 모의고사 데이터가 성공적으로 추가되었습니다.");
       if (type === 'law') loadCategories();
       
     } catch (err: any) {
@@ -104,7 +104,6 @@ function App() {
       setIsProcessing(false);
     }
   };
-  // 🚨 여기까지 덮어씌우세요!
 
   const handleAutoMakeCard = async (cat: Category, silent = false) => {
     if (!account) return;
@@ -119,7 +118,7 @@ function App() {
       if (!res.ok) throw new Error(data.details || data.error);
       
       if (!silent) {
-        alert(data.message); // AI 추출 메시지 표시
+        alert(data.message);
         loadMyCards();
       }
     } catch (err: any) {
@@ -131,7 +130,7 @@ function App() {
 
   const handleBatchAutoMake = async () => {
     if (!account || categories.length === 0) return;
-    if (!confirm("모든 문헌에서 26B 모델 기반 일괄 추출을 진행하시겠습니까?\n(문헌 수에 따라 시간이 소요될 수 있습니다.)")) return;
+    if (!confirm("모든 문헌에서 26B 모델 기반 일괄 추출을 진행하시겠습니까?\n(문헌 수에 따라 시간이 꽤 소요될 수 있습니다.)")) return;
     
     setIsBatching(true);
     for (const cat of categories) {
@@ -156,7 +155,6 @@ function App() {
     }
   };
 
-  // 🚨 진단용 구글 로그인 함수 (에러 원인 추적 강화)
   const handleGoogleZkLogin = async () => {
     try {
       const createUrl = (enokiFlow as any).createAuthorizationURL || enokiFlow.createAuthorizationUrl;
@@ -170,7 +168,7 @@ function App() {
       });
       window.location.href = url;
     } catch (err: any) {
-      alert(`[로그인 에러 발생!]\n원인: ${err.message || JSON.stringify(err)}\n\n이 메시지를 캡처해서 알려주세요!`);
+      alert(`[로그인 에러 발생!]\n원인: ${err.message}`);
     }
   };
 
@@ -308,7 +306,6 @@ function App() {
             {activeTab === 'craft' && (
               <div className="space-y-16 animate-in fade-in duration-700">
                 
-                {/* 🚨 복구된 듀얼 업로드 UI (법령 & 모의고사) */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                   {/* 법령 수집 */}
                   <div className="space-y-6">
@@ -318,13 +315,19 @@ function App() {
                         데이터 전체 소각
                       </button>
                     </div>
-                    <div className="relative border border-dashed border-white/20 p-12 text-center rounded-sm hover:border-white/40 hover:bg-white/[0.01] transition-all">
-                      <input type="file" accept="*" onChange={(e) => setFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer" />
+                    {/* 🚨 input file 변경 시 상태 업데이트 확실히 적용 */}
+                    <label className="block relative border border-dashed border-white/20 p-12 text-center rounded-sm hover:border-white/40 hover:bg-white/[0.01] transition-all cursor-pointer">
+                      <input type="file" accept="*" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" />
                       <div className="text-xs font-light text-white/40 tracking-wider">
-                        {file ? file.name : "이곳을 눌러 문서(법령 등) 업로드"}
+                        {file ? `✅ 선택됨: ${file.name}` : "이곳을 눌러 문서(법령 등) 업로드"}
                       </div>
-                    </div>
-                    <button onClick={() => uploadFile('law')} disabled={isProcessing || !file} className="w-full py-4 border border-white/10 hover:border-white/40 text-white/80 transition-all text-xs font-light tracking-widest">
+                    </label>
+                    <button 
+                      onClick={() => uploadFile('law')} 
+                      className={`w-full py-4 border transition-all text-xs font-light tracking-widest ${
+                        file ? "border-indigo-500/50 text-indigo-300 hover:bg-indigo-500/10" : "border-white/10 text-white/30 cursor-not-allowed"
+                      }`}
+                    >
                       법령 분석 개시
                     </button>
                   </div>
@@ -334,13 +337,18 @@ function App() {
                     <div className="flex justify-between items-baseline border-b border-white/5 pb-4">
                       <h3 className="text-sm font-light tracking-[0.2em] text-white/80">2. 모의고사 기출 수집</h3>
                     </div>
-                    <div className="relative border border-dashed border-white/20 p-12 text-center rounded-sm hover:border-white/40 hover:bg-white/[0.01] transition-all">
-                      <input type="file" accept="*" onChange={(e) => setExamFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer" />
+                    <label className="block relative border border-dashed border-white/20 p-12 text-center rounded-sm hover:border-white/40 hover:bg-white/[0.01] transition-all cursor-pointer">
+                      <input type="file" accept="*" onChange={(e) => setExamFile(e.target.files?.[0] || null)} className="hidden" />
                       <div className="text-xs font-light text-white/40 tracking-wider">
-                        {examFile ? examFile.name : "이곳을 눌러 문서(모의고사) 업로드"}
+                        {examFile ? `✅ 선택됨: ${examFile.name}` : "이곳을 눌러 문서(모의고사) 업로드"}
                       </div>
-                    </div>
-                    <button onClick={() => uploadFile('exam')} disabled={isProcessing || !examFile} className="w-full py-4 border border-white/10 hover:border-white/40 text-white/80 transition-all text-xs font-light tracking-widest">
+                    </label>
+                    <button 
+                      onClick={() => uploadFile('exam')} 
+                      className={`w-full py-4 border transition-all text-xs font-light tracking-widest ${
+                        examFile ? "border-teal-500/50 text-teal-300 hover:bg-teal-500/10" : "border-white/10 text-white/30 cursor-not-allowed"
+                      }`}
+                    >
                       가중치 데이터베이스에 추가
                     </button>
                   </div>
@@ -496,7 +504,7 @@ function App() {
 
       {/* 처리 중(로딩) 알림 인디케이터 */}
       {isProcessing && (
-        <div className="fixed bottom-10 right-10 flex items-center gap-3 bg-black/80 px-4 py-2 border border-white/20 rounded-sm">
+        <div className="fixed bottom-10 right-10 flex items-center gap-3 bg-black/80 px-4 py-2 border border-white/20 rounded-sm z-50">
           <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
           <span className="text-[10px] text-white/60 tracking-widest uppercase">System Processing...</span>
         </div>
