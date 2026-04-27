@@ -13,11 +13,11 @@ function App() {
   const accountAddress = suiWalletAccount?.address || zkLogin?.address;
   const account = accountAddress ? { address: accountAddress } : null;
 
-  // 탭 관리: dashboard, craft, enhance, mission, community, mypage
+  // 탭 및 상태 관리
   const [activeTab, setActiveTab] = useState('dashboard');
-
-  const [file, setFile] = useState<File | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
+  const [file, setFile] = useState<File | null>(null);             // 법령 파일
+  const [examFile, setExamFile] = useState<File | null>(null);     // 모의고사 파일
+  const [isProcessing, setIsProcessing] = useState(false);
   const [isBatching, setIsBatching] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [savedCards, setSavedCards] = useState<Card[]>([]);
@@ -25,6 +25,7 @@ function App() {
   const [parsedText, setParsedText] = useState("");
   const textRef = useRef<HTMLDivElement>(null);
 
+  // 초기 로그인 콜백 처리
   useEffect(() => {
     const handleAuth = async () => {
       try {
@@ -35,6 +36,7 @@ function App() {
     if (window.location.hash.includes("id_token=")) handleAuth();
   }, [enokiFlow]);
 
+  // 계정 연결 시 데이터 로드
   useEffect(() => {
     if (account) {
       loadCategories();
@@ -60,47 +62,74 @@ function App() {
     } catch (err) { console.error(err); }
   };
 
-  const handleFileUpload = async () => {
-    if (!file || !account) return alert("파일을 선택해주세요.");
-    setIsUploading(true);
+  // 🚨 [복구됨] 통합 업로드 함수 (법령 & 모의고사 분기 처리)
+  const uploadFile = async (type: 'law' | 'exam') => {
+    const targetFile = type === 'law' ? file : examFile;
+    if (!targetFile || !account) return alert("파일을 선택하십시오.");
+    
+    setIsProcessing(true);
     const formData = new FormData();
-    formData.append("file", file);
+    formData.append("file", targetFile);
     formData.append("wallet_address", account.address);
+    
     try {
-      const res = await fetch("https://api.blankd.top/api/upload-pdf", { method: "POST", body: formData });
-      if (res.ok) {
-        alert("기록 보관소에 문서가 추가되었습니다.");
-        loadCategories();
-      }
-    } finally { setIsUploading(false); }
+      const endpoint = type === 'law' ? 'upload-pdf' : 'upload-exam';
+      const res = await fetch(`https://api.blankd.top/api/${endpoint}`, {
+        method: "POST",
+        body: formData,
+      });
+      
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.details || data.error || "업로드 실패");
+      
+      alert(type === 'law' ? "법령 문헌이 등록되었습니다." : "모의고사 데이터가 가중치 아카이브에 추가되었습니다.");
+      if (type === 'law') loadCategories();
+    } catch (err: any) {
+      alert(`[오류] 업로드 실패: ${err.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleAutoMakeCard = async (cat: Category, silent = false) => {
     if (!account) return;
-    const res = await fetch("https://api.blankd.top/api/auto-make-cards", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ wallet_address: account.address, category_id: cat.id, content: cat.content }),
-    });
-    if (res.ok && !silent) {
-      alert("지식이 카드로 추출되었습니다.");
-      loadMyCards();
+    setIsProcessing(true);
+    try {
+      const res = await fetch("https://api.blankd.top/api/auto-make-cards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: account.address, category_id: cat.id, content: cat.content }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.details || data.error);
+      
+      if (!silent) {
+        alert(data.message); // AI 추출 메시지 표시
+        loadMyCards();
+      }
+    } catch (err: any) {
+      if (!silent) alert(`[오류] AI 추출 실패: ${err.message}`);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
   const handleBatchAutoMake = async () => {
     if (!account || categories.length === 0) return;
-    if (!confirm("모든 문헌에서 일괄적으로 지식을 추출하시겠습니까?")) return;
+    if (!confirm("모든 문헌에서 26B 모델 기반 일괄 추출을 진행하시겠습니까?\n(문헌 수에 따라 시간이 소요될 수 있습니다.)")) return;
+    
     setIsBatching(true);
-    for (const cat of categories) await handleAutoMakeCard(cat, true);
+    for (const cat of categories) {
+      await handleAutoMakeCard(cat, true);
+    }
     setIsBatching(false);
-    alert("일괄 추출이 완료되었습니다.");
+    alert("모든 문헌의 일괄 추출이 완료되었습니다.");
     loadMyCards();
     setActiveTab('enhance');
   };
 
   const handleDeleteAll = async () => {
-    if (!account || !confirm("보관소의 모든 데이터를 영구적으로 지우시겠습니까?")) return;
+    if (!account || !confirm("보관소의 모든 데이터(법령, 카드, 모의고사)를 영구적으로 지우시겠습니까?")) return;
     const res = await fetch("https://api.blankd.top/api/delete-all", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -108,18 +137,15 @@ function App() {
     });
     if (res.ok) {
       alert("모든 기록이 소각되었습니다.");
-      setCategories([]); setSavedCards([]); setParsedText("");
+      setCategories([]); setSavedCards([]); setParsedText(""); setFile(null); setExamFile(null);
     }
   };
 
-  // 🚨 진단용 구글 로그인 함수
+  // 🚨 진단용 구글 로그인 함수 (에러 원인 추적 강화)
   const handleGoogleZkLogin = async () => {
     try {
       const createUrl = (enokiFlow as any).createAuthorizationURL || enokiFlow.createAuthorizationUrl;
-      
-      if (!createUrl) {
-        throw new Error("Enoki 인증 함수를 불러오지 못했습니다.");
-      }
+      if (!createUrl) throw new Error("Enoki 인증 함수를 찾을 수 없습니다.");
 
       const url = await createUrl.call(enokiFlow, {
         provider: 'google',
@@ -127,10 +153,9 @@ function App() {
         redirectUrl: window.location.origin,
         network: 'testnet'
       });
-      
       window.location.href = url;
     } catch (err: any) {
-      alert(`[로그인 에러 발생!]\n원인: ${err.message || JSON.stringify(err)}\n\n이 메시지를 그대로 복사해서 알려주세요!`);
+      alert(`[로그인 에러 발생!]\n원인: ${err.message || JSON.stringify(err)}\n\n이 메시지를 캡처해서 알려주세요!`);
     }
   };
 
@@ -141,21 +166,26 @@ function App() {
 
   const handleMakeBlankCard = async () => {
     const selection = window.getSelection();
-    if (!selection || selection.toString().trim() === "" || !account) return;
+    if (!selection || selection.toString().trim() === "" || !account) return alert("추출할 텍스트를 드래그하세요.");
 
     const answerText = selection.toString().trim();
     const cardContent = parsedText.replace(answerText, `[ ${"＿".repeat(answerText.length)} ]`);
     
-    const res = await fetch("https://api.blankd.top/api/save-card", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ wallet_address: account.address, card_content: cardContent, answer_text: answerText }),
-    });
-    if (res.ok) {
-      alert("선택하신 지식이 카드로 기록되었습니다.");
-      window.getSelection()?.removeAllRanges();
-      setParsedText(""); 
-      loadMyCards(); 
+    setIsProcessing(true);
+    try {
+      const res = await fetch("https://api.blankd.top/api/save-card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: account.address, card_content: cardContent, answer_text: answerText }),
+      });
+      if (res.ok) {
+        alert("선택하신 지식이 카드로 기록되었습니다.");
+        window.getSelection()?.removeAllRanges();
+        setParsedText(""); 
+        loadMyCards(); 
+      }
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -190,11 +220,13 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] font-sans selection:bg-neutral-800 selection:text-white p-6 sm:p-12">
-      <header className="max-w-4xl mx-auto flex flex-col sm:flex-row sm:justify-between sm:items-baseline border-b border-white/10 pb-8 mb-12 gap-4">
+    <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] font-sans selection:bg-neutral-800 selection:text-white p-6 sm:p-12 relative">
+      
+      {/* HEADER */}
+      <header className="max-w-5xl mx-auto flex flex-col sm:flex-row sm:justify-between sm:items-baseline border-b border-white/10 pb-8 mb-12 gap-4">
         <div>
-          <h1 className="text-2xl font-light tracking-[0.3em] text-white">BLANK_D</h1>
-          <p className="text-[10px] text-white/30 mt-2 uppercase tracking-widest">Effort To Earn Archive</p>
+          <h1 className="text-2xl font-light tracking-[0.3em] text-white uppercase">Blank_D</h1>
+          <p className="text-[10px] text-white/30 mt-2 uppercase tracking-widest">AI & Mock-Exam Driven Archive</p>
         </div>
         {account && (
           <div className="text-right text-[10px] text-white/30 tracking-wider">
@@ -203,8 +235,9 @@ function App() {
         )}
       </header>
 
-      <main className="max-w-4xl mx-auto">
+      <main className="max-w-5xl mx-auto">
         {!account ? (
+          /* 로그인 화면 */
           <div className="flex flex-col items-center justify-center py-40">
             <p className="text-xs font-light text-white/40 mb-12 tracking-[0.2em] uppercase">Enter the Archive</p>
             <button 
@@ -216,6 +249,7 @@ function App() {
           </div>
         ) : (
           <>
+            {/* TABS 네비게이션 */}
             <nav className="flex gap-8 mb-16 border-b border-white/5 pb-4 overflow-x-auto scrollbar-hide">
               {[
                 { id: 'dashboard', label: '열람실' },
@@ -237,14 +271,15 @@ function App() {
               ))}
             </nav>
 
+            {/* 1. DASHBOARD */}
             {activeTab === 'dashboard' && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 animate-in fade-in duration-700">
                 <div className="border border-white/10 p-8 rounded-sm bg-white/[0.02]">
-                  <div className="text-[10px] text-white/30 mb-4 tracking-widest uppercase">보유 지식</div>
+                  <div className="text-[10px] text-white/30 mb-4 tracking-widest uppercase">보유 지식 (카드)</div>
                   <div className="text-4xl font-light text-white/90">{savedCards.length}</div>
                 </div>
                 <div className="border border-rose-900/30 p-8 rounded-sm bg-rose-950/10">
-                  <div className="text-[10px] text-rose-400/50 mb-4 tracking-widest uppercase">망각 경고</div>
+                  <div className="text-[10px] text-rose-400/50 mb-4 tracking-widest uppercase">망각 경고 (위험)</div>
                   <div className="text-4xl font-light text-rose-400/80">{savedCards.filter(c => c.status === 'AT_RISK').length}</div>
                 </div>
                 <div className="border border-amber-900/30 p-8 rounded-sm bg-amber-950/10">
@@ -254,36 +289,55 @@ function App() {
               </div>
             )}
 
+            {/* 2. CRAFT (지식 추출) */}
             {activeTab === 'craft' && (
-              <div className="space-y-12 animate-in fade-in duration-700">
-                <div className="flex justify-between items-baseline border-b border-white/5 pb-4">
-                  <h3 className="text-sm font-light tracking-[0.2em] text-white/80">문헌 수집</h3>
-                  <button onClick={handleDeleteAll} className="text-[10px] text-rose-500/60 hover:text-rose-400 transition-all tracking-widest">
-                    전체 기록 소각
-                  </button>
-                </div>
+              <div className="space-y-16 animate-in fade-in duration-700">
                 
-                <div className="relative border border-dashed border-white/20 p-12 text-center rounded-sm hover:border-white/40 hover:bg-white/[0.01] transition-all">
-                  <input type="file" accept="*" onChange={(e) => setFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer" />
-                  <div className="text-xs font-light text-white/40 tracking-wider">
-                    {file ? file.name : "이곳을 눌러 문서(PDF, DOCX 등)를 업로드하십시오"}
+                {/* 🚨 복구된 듀얼 업로드 UI (법령 & 모의고사) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                  {/* 법령 수집 */}
+                  <div className="space-y-6">
+                    <div className="flex justify-between items-baseline border-b border-white/5 pb-4">
+                      <h3 className="text-sm font-light tracking-[0.2em] text-white/80">1. 법령 문헌 수집</h3>
+                      <button onClick={handleDeleteAll} className="text-[10px] text-rose-500/60 hover:text-rose-400 transition-all tracking-widest">
+                        데이터 전체 소각
+                      </button>
+                    </div>
+                    <div className="relative border border-dashed border-white/20 p-12 text-center rounded-sm hover:border-white/40 hover:bg-white/[0.01] transition-all">
+                      <input type="file" accept="*" onChange={(e) => setFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer" />
+                      <div className="text-xs font-light text-white/40 tracking-wider">
+                        {file ? file.name : "이곳을 눌러 문서(법령 등) 업로드"}
+                      </div>
+                    </div>
+                    <button onClick={() => uploadFile('law')} disabled={isProcessing || !file} className="w-full py-4 border border-white/10 hover:border-white/40 text-white/80 transition-all text-xs font-light tracking-widest">
+                      법령 분석 개시
+                    </button>
+                  </div>
+
+                  {/* 모의고사 수집 */}
+                  <div className="space-y-6">
+                    <div className="flex justify-between items-baseline border-b border-white/5 pb-4">
+                      <h3 className="text-sm font-light tracking-[0.2em] text-white/80">2. 모의고사 기출 수집</h3>
+                    </div>
+                    <div className="relative border border-dashed border-white/20 p-12 text-center rounded-sm hover:border-white/40 hover:bg-white/[0.01] transition-all">
+                      <input type="file" accept="*" onChange={(e) => setExamFile(e.target.files?.[0] || null)} className="absolute inset-0 opacity-0 cursor-pointer" />
+                      <div className="text-xs font-light text-white/40 tracking-wider">
+                        {examFile ? examFile.name : "이곳을 눌러 문서(모의고사) 업로드"}
+                      </div>
+                    </div>
+                    <button onClick={() => uploadFile('exam')} disabled={isProcessing || !examFile} className="w-full py-4 border border-white/10 hover:border-white/40 text-white/80 transition-all text-xs font-light tracking-widest">
+                      가중치 데이터베이스에 추가
+                    </button>
                   </div>
                 </div>
-                
-                <button 
-                  onClick={handleFileUpload} 
-                  disabled={isUploading || !file}
-                  className="w-full py-4 border border-white/10 hover:border-white/40 text-white/80 transition-all text-xs font-light tracking-widest"
-                >
-                  {isUploading ? "추출 중..." : "문헌 분석 시작"}
-                </button>
 
+                {/* 카테고리 목록 & 일괄 제작 */}
                 {categories.length > 0 && (
                   <div className="mt-16 space-y-6">
                     <div className="flex justify-between items-baseline border-b border-white/5 pb-4">
-                      <div className="text-xs font-light tracking-widest text-white/60">분석된 문헌 ({categories.length})</div>
+                      <div className="text-xs font-light tracking-widest text-white/60">분석된 문헌 리스트 ({categories.length})</div>
                       <button onClick={handleBatchAutoMake} className="text-[10px] text-blue-400/70 hover:text-blue-300 tracking-widest">
-                        {isBatching ? "일괄 추출 진행 중..." : "일괄 자동 추출"}
+                        {isBatching ? "일괄 추출 진행 중..." : "AI 일괄 자동 추출"}
                       </button>
                     </div>
                     <div className="grid grid-cols-1 gap-3 max-h-[400px] overflow-y-auto scrollbar-hide pr-2">
@@ -293,8 +347,8 @@ function App() {
                             <div className="text-sm font-medium text-white/80 tracking-wide">{cat.title}</div>
                             <div className="text-[11px] text-white/30 truncate mt-2 font-light">{cat.content}</div>
                           </div>
-                          <button onClick={() => handleAutoMakeCard(cat)} className="text-[10px] text-white/40 group-hover:text-white/80 border border-white/10 px-4 py-2 hover:border-white/40 transition-all rounded-sm ml-4">
-                            개별 추출
+                          <button onClick={() => handleAutoMakeCard(cat)} className="text-[10px] text-white/40 group-hover:text-white/80 border border-white/10 px-4 py-2 hover:border-white/40 transition-all rounded-sm ml-4 whitespace-nowrap">
+                            AI 26B 추출
                           </button>
                         </div>
                       ))}
@@ -302,26 +356,28 @@ function App() {
                   </div>
                 )}
                 
+                {/* 수동 제작기 */}
                 {parsedText && (
                   <div className="mt-16 space-y-6">
-                    <div className="text-xs font-light text-white/60 tracking-widest border-b border-white/5 pb-4">수동 추출</div>
+                    <div className="text-xs font-light text-white/60 tracking-widest border-b border-white/5 pb-4">수동 추출 터미널</div>
                     <div ref={textRef} className="font-serif text-[15px] leading-relaxed text-white/70 h-64 overflow-y-auto border border-white/10 p-8 bg-[#0a0a0c] rounded-sm scrollbar-hide">
                       {parsedText}
                     </div>
                     <button onClick={handleMakeBlankCard} className="w-full py-4 border border-white/10 hover:border-white/40 transition-all text-xs font-light tracking-widest text-white/80">
-                      선택한 구절을 지식으로 변환
+                      선택한 구절을 지식으로 변환 (수동 제작)
                     </button>
                   </div>
                 )}
               </div>
             )}
 
+            {/* 3. ENHANCE (기억 강화) */}
             {activeTab === 'enhance' && (
               <div className="space-y-8 animate-in fade-in duration-700">
-                <div className="text-xs font-light tracking-widest text-white/60 border-b border-white/5 pb-4">기억 보관소</div>
+                <div className="text-xs font-light tracking-widest text-white/60 border-b border-white/5 pb-4">기억 보관소 (덱)</div>
                 
                 {savedCards.length === 0 ? (
-                  <div className="py-32 text-center text-white/20 text-xs tracking-widest font-light">보관된 지식이 없습니다.</div>
+                  <div className="py-32 text-center text-white/20 text-xs tracking-widest font-light">보관된 지식이 없습니다. 지식 추출을 먼저 진행하십시오.</div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {savedCards.map((card) => {
@@ -342,7 +398,7 @@ function App() {
                           </div>
                           
                           {isBurned && <div className="absolute inset-0 flex items-center justify-center font-light tracking-[0.5em] text-white/20">DELETED</div>}
-                          {isAtRisk && <div className="text-[10px] text-rose-400/80 tracking-widest mb-3 blink">! 복습 요망</div>}
+                          {isAtRisk && <div className="text-[10px] text-rose-400/80 tracking-widest mb-3 blink">! 방어 요망</div>}
 
                           <div className="text-[13px] leading-loose font-serif text-white/80 line-clamp-3 mb-6">
                             {card.content}
@@ -360,6 +416,7 @@ function App() {
               </div>
             )}
 
+            {/* 4. MY PAGE (지갑 연결) */}
             {activeTab === 'mypage' && (
               <div className="max-w-md mx-auto space-y-12 animate-in fade-in duration-700 py-16">
                 <div className="space-y-6 border border-white/10 p-10 rounded-sm bg-white/[0.01]">
@@ -384,6 +441,7 @@ function App() {
               </div>
             )}
 
+            {/* EMPTY TABS */}
             {(activeTab === 'mission' || activeTab === 'community') && (
               <div className="py-40 text-center border border-white/5 border-dashed rounded-sm mt-8">
                 <div className="text-xs tracking-[0.3em] text-white/30 font-light">준비 중인 공간입니다.</div>
@@ -393,6 +451,7 @@ function App() {
         )}
       </main>
 
+      {/* COMBAT MODAL (강화 팝업) */}
       {activeCard && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0d0d0f]/95 backdrop-blur-sm animate-in fade-in">
           <div className="border border-white/10 bg-[#121214] w-full max-w-2xl p-10 shadow-2xl rounded-sm">
@@ -420,6 +479,15 @@ function App() {
         </div>
       )}
 
+      {/* 처리 중(로딩) 알림 인디케이터 */}
+      {isProcessing && (
+        <div className="fixed bottom-10 right-10 flex items-center gap-3 bg-black/80 px-4 py-2 border border-white/20 rounded-sm">
+          <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
+          <span className="text-[10px] text-white/60 tracking-widest uppercase">System Processing...</span>
+        </div>
+      )}
+
+      {/* CSS */}
       <style>{`
         .blink { animation: blink-animation 1.5s steps(2, start) infinite; }
         @keyframes blink-animation { to { visibility: hidden; } }
