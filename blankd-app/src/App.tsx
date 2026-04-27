@@ -62,34 +62,49 @@ function App() {
     } catch (err) { console.error(err); }
   };
 
-  // 🚨 [복구됨] 통합 업로드 함수 (법령 & 모의고사 분기 처리)
+  // 🚨 [진단용] 여기서부터 복사해서 덮어씌우세요!
   const uploadFile = async (type: 'law' | 'exam') => {
     const targetFile = type === 'law' ? file : examFile;
-    if (!targetFile || !account) return alert("파일을 선택하십시오.");
+    if (!targetFile || !account) return alert("파일이 제대로 선택되지 않았습니다!");
     
     setIsProcessing(true);
+    alert(`[진단 1단계] ${targetFile.name} 파일을 서버로 전송 시작합니다...`);
+
     const formData = new FormData();
     formData.append("file", targetFile);
     formData.append("wallet_address", account.address);
     
     try {
       const endpoint = type === 'law' ? 'upload-pdf' : 'upload-exam';
+      
       const res = await fetch(`https://api.blankd.top/api/${endpoint}`, {
         method: "POST",
         body: formData,
       });
       
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.details || data.error || "업로드 실패");
+      // 🚨 JSON 변환 전에 일단 텍스트로 무조건 받아서 파싱 에러를 방지합니다.
+      const responseText = await res.text(); 
+      alert(`[진단 2단계] 서버 응답 도착! (상태 코드: ${res.status})`);
       
-      alert(type === 'law' ? "법령 문헌이 등록되었습니다." : "모의고사 데이터가 가중치 아카이브에 추가되었습니다.");
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        throw new Error(`서버가 JSON이 아닌 이상한 데이터를 보냈습니다:\n${responseText.substring(0, 100)}...`);
+      }
+
+      if (!res.ok) throw new Error(data.details || data.error || "알 수 없는 백엔드 에러");
+      
+      alert(type === 'law' ? "✅ 법령 문헌이 성공적으로 등록되었습니다." : "✅ 모의고사 데이터가 가중치 아카이브에 추가되었습니다.");
       if (type === 'law') loadCategories();
+      
     } catch (err: any) {
-      alert(`[오류] 업로드 실패: ${err.message}`);
+      alert(`[🚨 업로드 치명적 오류]\n${err.message}`);
     } finally {
       setIsProcessing(false);
     }
   };
+  // 🚨 여기까지 덮어씌우세요!
 
   const handleAutoMakeCard = async (cat: Category, silent = false) => {
     if (!account) return;
