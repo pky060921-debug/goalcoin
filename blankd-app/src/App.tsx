@@ -9,7 +9,6 @@ function App() {
   const enokiFlow = useEnokiFlow();
   const zkLogin = useZkLogin();
   const suiWalletAccount = useCurrentAccount();
-  
   const accountAddress = suiWalletAccount?.address || zkLogin?.address;
   const account = accountAddress ? { address: accountAddress } : null;
 
@@ -22,7 +21,14 @@ function App() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [savedCards, setSavedCards] = useState<Card[]>([]);
   const [activeCard, setActiveCard] = useState<Card | null>(null);
+  
+  // [추가] AI 조력자 상태 관리
+  const [aiText, setAiText] = useState("");
+  const [aiResult, setAiResult] = useState<any>(null);
+
+  // [수정] 터치형 수동 빈칸 제작 상태 관리
   const [parsedText, setParsedText] = useState("");
+  const [selectedWordIndices, setSelectedWordIndices] = useState<Set<number>>(new Set());
   const textRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -60,7 +66,6 @@ function App() {
     } catch (err) { console.error(err); }
   };
 
-  // 🚨 [초정밀 진단용 업로드 함수] 
   const uploadFile = async (type: 'law' | 'exam') => {
     const targetFile = type === 'law' ? file : examFile;
     if (!targetFile || !account) {
@@ -70,19 +75,16 @@ function App() {
     
     setIsProcessing(true);
     alert(`[진단 1단계] ${targetFile.name} 파일을 서버로 전송합니다... (확인을 누르시면 진행됩니다)`);
-
     const formData = new FormData();
     formData.append("file", targetFile);
     formData.append("wallet_address", account.address);
     
     try {
       const endpoint = type === 'law' ? 'upload-pdf' : 'upload-exam';
-      
       const res = await fetch(`https://api.blankd.top/api/${endpoint}`, {
         method: "POST",
         body: formData,
       });
-      
       const responseText = await res.text(); 
       alert(`[진단 2단계] 서버에서 응답이 도착했습니다! (상태 코드: ${res.status})`);
       
@@ -94,10 +96,8 @@ function App() {
       }
 
       if (!res.ok) throw new Error(data.details || data.error || "알 수 없는 서버 에러");
-      
       alert(type === 'law' ? "✅ 법령 문헌이 성공적으로 등록되었습니다." : "✅ 모의고사 데이터가 성공적으로 추가되었습니다.");
       if (type === 'law') loadCategories();
-      
     } catch (err: any) {
       alert(`[🚨 업로드 치명적 오류]\n${err.message}`);
     } finally {
@@ -116,7 +116,6 @@ function App() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.details || data.error);
-      
       if (!silent) {
         alert(data.message);
         loadMyCards();
@@ -143,7 +142,7 @@ function App() {
   };
 
   const handleDeleteAll = async () => {
-    if (!account || !confirm("보관소의 모든 데이터(법령, 카드, 모의고사)를 영구적으로 지우시겠습니까?")) return;
+    if (!account || !confirm("보관소의 모든 데이터(법령, 카드, 모의고사, AI분석)를 영구적으로 지우시겠습니까?")) return;
     const res = await fetch("https://api.blankd.top/api/delete-all", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -151,7 +150,7 @@ function App() {
     });
     if (res.ok) {
       alert("모든 기록이 소각되었습니다.");
-      setCategories([]); setSavedCards([]); setParsedText(""); setFile(null); setExamFile(null);
+      setCategories([]); setSavedCards([]); setParsedText(""); setFile(null); setExamFile(null); setAiResult(null);
     }
   };
 
@@ -159,7 +158,6 @@ function App() {
     try {
       const createUrl = (enokiFlow as any).createAuthorizationURL || enokiFlow.createAuthorizationUrl;
       if (!createUrl) throw new Error("Enoki 인증 함수를 찾을 수 없습니다.");
-
       const url = await createUrl.call(enokiFlow, {
         provider: 'google',
         clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com',
@@ -172,19 +170,77 @@ function App() {
     }
   };
 
+  // [추가] 깃허브 코드 동기화
+  const handleGithubPull = async () => {
+    if (!confirm("GitHub에서 최신 코드를 다운로드(Pull) 하여 서버를 업데이트 하시겠습니까?")) return;
+    setIsProcessing(true);
+    try {
+      const res = await fetch("https://api.blankd.top/api/github-pull", { method: 'POST' });
+      const data = await res.json();
+      alert(data.message || data.error);
+    } catch (err) {
+      alert("서버 연결 실패");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // [추가] 능동형 AI 조력자 분석
+  const handleAiAnalyze = async () => {
+    if (!aiText || !account) return alert("분석할 텍스트를 입력하세요.");
+    setIsProcessing(true);
+    try {
+      const res = await fetch("https://api.blankd.top/api/ai-analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: account.address, text: aiText }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setAiResult(data.data);
+        alert("AI 분석이 완료되고 문제은행에 저장되었습니다!");
+      } else {
+        throw new Error(data.error);
+      }
+    } catch (err: any) {
+      alert(`[AI 분석 오류]\n${err.message}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // [수정] 터치 기반 수동 빈칸 렌더링 로직
   const loadTextForManualSelection = (content: string) => {
     setParsedText(content);
+    setSelectedWordIndices(new Set()); // 단어 선택 초기화
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleMakeBlankCard = async () => {
-    const selection = window.getSelection();
-    if (!selection || selection.toString().trim() === "" || !account) return alert("추출할 텍스트를 드래그하세요.");
+  const toggleWordSelection = (index: number) => {
+    const newSet = new Set(selectedWordIndices);
+    if (newSet.has(index)) newSet.delete(index);
+    else newSet.add(index);
+    setSelectedWordIndices(newSet);
+  };
 
-    const answerText = selection.toString().trim();
-    const cardContent = parsedText.replace(answerText, `[ ${"＿".repeat(answerText.length)} ]`);
-    
+  const handleMakeBlankCard = async () => {
+    if (!account) return;
+    if (selectedWordIndices.size === 0) return alert("빈칸으로 만들 단어를 터치하여 선택해주세요.");
+
     setIsProcessing(true);
+    const words = parsedText.split(/(\s+)/);
+    let cardContent = "";
+    let answerText = ""; // 콤마로 이어붙이거나 첫단어 기준
+
+    words.forEach((word, index) => {
+      if (selectedWordIndices.has(index) && word.trim() !== "") {
+        cardContent += `[ ${word} ]`;
+        answerText += answerText ? ` ${word}` : word; // 여러개 선택 시 합치기
+      } else {
+        cardContent += word;
+      }
+    });
+
     try {
       const res = await fetch("https://api.blankd.top/api/save-card", {
         method: "POST",
@@ -192,10 +248,10 @@ function App() {
         body: JSON.stringify({ wallet_address: account.address, card_content: cardContent, answer_text: answerText }),
       });
       if (res.ok) {
-        alert("선택하신 지식이 카드로 기록되었습니다.");
-        window.getSelection()?.removeAllRanges();
+        alert("선택하신 지식이 터치 카드로 기록되었습니다.");
+        setSelectedWordIndices(new Set());
         setParsedText(""); 
-        loadMyCards(); 
+        loadMyCards();
       }
     } finally {
       setIsProcessing(false);
@@ -224,7 +280,7 @@ function App() {
     if (level === 2) return "영웅 (Epic)";
     return "전설 (Legend)";
   };
-
+  
   const getTierClass = (level: number) => {
     if (level === 0) return "border-neutral-800 text-neutral-400";
     if (level === 1) return "border-blue-900/50 text-blue-300/80";
@@ -241,6 +297,7 @@ function App() {
           <h1 className="text-2xl font-light tracking-[0.3em] text-white uppercase">Blank_D</h1>
           <p className="text-[10px] text-white/30 mt-2 uppercase tracking-widest">AI & Mock-Exam Driven Archive</p>
         </div>
+    
         {account && (
           <div className="text-right text-[10px] text-white/30 tracking-wider">
             ID: {account.address.substring(0, 12)}...
@@ -306,6 +363,38 @@ function App() {
             {activeTab === 'craft' && (
               <div className="space-y-16 animate-in fade-in duration-700">
                 
+                {/* [추가] 능동형 AI 조력자 분석기 */}
+                <div className="border border-indigo-900/30 p-8 rounded-sm bg-indigo-950/10 space-y-6">
+                  <h3 className="text-sm font-light tracking-[0.2em] text-indigo-300">0. AI 조력자 능동 분석실</h3>
+                  <textarea 
+                    value={aiText} 
+                    onChange={(e) => setAiText(e.target.value)}
+                    rows={4} 
+                    className="w-full bg-[#0a0a0c] border border-white/10 p-4 text-[13px] text-white/70 font-serif"
+                    placeholder="모의고사나 법령 텍스트를 입력하면 AI가 분류, 요약, 핵심 빈칸을 추출하여 저장합니다."
+                  />
+                  <button onClick={handleAiAnalyze} className="w-full py-4 border border-indigo-500/50 text-indigo-300 hover:bg-indigo-500/10 transition-all text-xs font-light tracking-widest">
+                    AI 분석 및 문제은행 등록
+                  </button>
+                  
+                  {aiResult && (
+                    <div className="mt-6 p-6 border border-white/10 bg-black/40 text-[13px] text-white/80 space-y-2">
+                      <p><strong className="text-indigo-400">주제:</strong> {aiResult.topic}</p>
+                      <p><strong className="text-indigo-400">요약:</strong> {aiResult.summary}</p>
+                      <p><strong className="text-teal-400">추천 빈칸:</strong> {aiResult.recommended_blanks?.join(", ")}</p>
+                      {aiResult.quiz && (
+                        <div className="mt-4 p-4 border border-white/5 bg-white/[0.02]">
+                          <p className="text-amber-400 font-bold mb-2">Q. {aiResult.quiz.question}</p>
+                          <ul className="pl-4">
+                            {aiResult.quiz.options?.map((opt: string, i: number) => <li key={i}>{i+1}. {opt}</li>)}
+                          </ul>
+                          <p className="mt-2 text-white/50">정답: {aiResult.quiz.answer}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                   {/* 법령 수집 */}
                   <div className="space-y-6">
@@ -315,7 +404,6 @@ function App() {
                         데이터 전체 소각
                       </button>
                     </div>
-                    {/* 🚨 input file 변경 시 상태 업데이트 확실히 적용 */}
                     <label className="block relative border border-dashed border-white/20 p-12 text-center rounded-sm hover:border-white/40 hover:bg-white/[0.01] transition-all cursor-pointer">
                       <input type="file" accept="*" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" />
                       <div className="text-xs font-light text-white/40 tracking-wider">
@@ -325,7 +413,7 @@ function App() {
                     <button 
                       onClick={() => uploadFile('law')} 
                       className={`w-full py-4 border transition-all text-xs font-light tracking-widest ${
-                        file ? "border-indigo-500/50 text-indigo-300 hover:bg-indigo-500/10" : "border-white/10 text-white/30 cursor-not-allowed"
+                        file ? "border-white/50 text-white hover:bg-white/10" : "border-white/10 text-white/30 cursor-not-allowed"
                       }`}
                     >
                       법령 분석 개시
@@ -379,15 +467,27 @@ function App() {
                   </div>
                 )}
                 
-                {/* 수동 제작기 */}
+                {/* [수정] 수동 제작기 (터치 기반) */}
                 {parsedText && (
                   <div className="mt-16 space-y-6">
-                    <div className="text-xs font-light text-white/60 tracking-widest border-b border-white/5 pb-4">수동 추출 터미널</div>
+                    <div className="text-xs font-light text-white/60 tracking-widest border-b border-white/5 pb-4">수동 추출 터미널 (단어 터치)</div>
                     <div ref={textRef} className="font-serif text-[15px] leading-relaxed text-white/70 h-64 overflow-y-auto border border-white/10 p-8 bg-[#0a0a0c] rounded-sm scrollbar-hide">
-                      {parsedText}
+                      {parsedText.split(/(\s+)/).map((word, idx) => {
+                        if (word.trim() === '') return <span key={idx}>{word}</span>;
+                        const isSelected = selectedWordIndices.has(idx);
+                        return (
+                          <span 
+                            key={idx} 
+                            onClick={() => toggleWordSelection(idx)}
+                            className={`cursor-pointer px-1 mx-[1px] rounded transition-colors ${isSelected ? 'bg-amber-500/80 text-black font-bold' : 'hover:bg-white/10'}`}
+                          >
+                            {word}
+                          </span>
+                        );
+                      })}
                     </div>
                     <button onClick={handleMakeBlankCard} className="w-full py-4 border border-white/10 hover:border-white/40 transition-all text-xs font-light tracking-widest text-white/80">
-                      선택한 구절을 지식으로 변환 (수동 제작)
+                      선택한 단어들을 빈칸 지식으로 변환 저장
                     </button>
                   </div>
                 )}
@@ -439,9 +539,19 @@ function App() {
               </div>
             )}
 
-            {/* 4. MY PAGE (지갑 연결) */}
+            {/* 4. MY PAGE (설정) */}
             {activeTab === 'mypage' && (
               <div className="max-w-md mx-auto space-y-12 animate-in fade-in duration-700 py-16">
+                
+                {/* [추가] 깃허브 관리 패널 */}
+                <div className="space-y-6 border border-teal-900/30 p-10 rounded-sm bg-teal-950/10">
+                  <h3 className="text-xs font-light tracking-widest text-teal-400 border-b border-teal-500/20 pb-4">시스템 관리자 전용</h3>
+                  <p className="text-[11px] text-white/40 leading-relaxed font-light">GitHub 저장소의 최신 커밋 내역을 서버로 동기화(Pull) 합니다.</p>
+                  <button onClick={handleGithubPull} className="w-full py-4 border border-teal-500/50 text-teal-300 hover:bg-teal-500/20 font-light text-xs tracking-widest transition-all rounded-sm">
+                    GitHub 최신 코드 강제 적용 (Pull)
+                  </button>
+                </div>
+
                 <div className="space-y-6 border border-white/10 p-10 rounded-sm bg-white/[0.01]">
                   <h3 className="text-xs font-light tracking-widest text-white/60 border-b border-white/5 pb-4">외부 자산 연결</h3>
                   <p className="text-[11px] text-white/40 leading-relaxed font-light">
@@ -510,7 +620,6 @@ function App() {
         </div>
       )}
 
-      {/* CSS */}
       <style>{`
         .blink { animation: blink-animation 1.5s steps(2, start) infinite; }
         @keyframes blink-animation { to { visibility: hidden; } }
