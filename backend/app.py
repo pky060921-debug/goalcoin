@@ -32,7 +32,7 @@ DB_PATH = os.path.expanduser("~/goalcoin/backend/blankd.db")
 
 # 🚨 아키님의 강력한 로컬 26B 모델 연결 세팅
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "gemma4:26b" 
+MODEL_NAME = "gemma4:27b" 
 GLOBAL_WORD_POOL = set()
 
 @app.errorhandler(Exception)
