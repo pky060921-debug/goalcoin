@@ -9,8 +9,10 @@ function App() {
   const enokiFlow = useEnokiFlow();
   const zkLogin = useZkLogin();
   const suiWalletAccount = useCurrentAccount();
-  const accountAddress = suiWalletAccount?.address || zkLogin?.address;
-  const account = accountAddress ? { address: accountAddress } : null;
+  
+  // 🚨 [핵심 수술 부위] null 에러를 완벽하게 차단하는 방탄 주소 추출기
+  const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
+  const isLoggedIn = safeAddress.length > 0;
 
   // 탭 및 상태 관리
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -22,11 +24,11 @@ function App() {
   const [savedCards, setSavedCards] = useState<Card[]>([]);
   const [activeCard, setActiveCard] = useState<Card | null>(null);
   
-  // [추가] AI 조력자 상태 관리
+  // [유지됨] AI 조력자 상태 관리
   const [aiText, setAiText] = useState("");
   const [aiResult, setAiResult] = useState<any>(null);
 
-  // [수정] 터치형 수동 빈칸 제작 상태 관리
+  // [유지됨] 터치형 수동 빈칸 제작 상태 관리
   const [parsedText, setParsedText] = useState("");
   const [selectedWordIndices, setSelectedWordIndices] = useState<Set<number>>(new Set());
   const textRef = useRef<HTMLDivElement>(null);
@@ -42,25 +44,25 @@ function App() {
   }, [enokiFlow]);
 
   useEffect(() => {
-    if (account) {
+    if (isLoggedIn) {
       loadCategories();
       loadMyCards();
     }
-  }, [account]);
+  }, [isLoggedIn, safeAddress]);
 
   const loadCategories = async () => {
-    if (!account) return;
+    if (!isLoggedIn) return;
     try {
-      const res = await fetch(`https://api.blankd.top/api/get-categories?wallet_address=${account.address}`);
+      const res = await fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`);
       const data = await res.json();
       if (res.ok) setCategories(data.categories || []);
     } catch (err) { console.error(err); }
   };
 
   const loadMyCards = async () => {
-    if (!account) return;
+    if (!isLoggedIn) return;
     try {
-      const res = await fetch(`https://api.blankd.top/api/my-cards?wallet_address=${account.address}`);
+      const res = await fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`);
       const data = await res.json();
       if (res.ok) setSavedCards(data.cards || []);
     } catch (err) { console.error(err); }
@@ -68,16 +70,14 @@ function App() {
 
   const uploadFile = async (type: 'law' | 'exam') => {
     const targetFile = type === 'law' ? file : examFile;
-    if (!targetFile || !account) {
-      alert("⚠️ 파일이 제대로 선택되지 않았습니다. 점선 박스를 눌러 파일을 먼저 선택해주세요!");
-      return;
-    }
+    if (!targetFile) return alert("⚠️ 파일이 제대로 선택되지 않았습니다. 점선 박스를 눌러 파일을 먼저 선택해주세요!");
+    if (!isLoggedIn) return alert("⚠️ 로그인 정보(지갑 주소)를 찾을 수 없습니다.");
     
     setIsProcessing(true);
     alert(`[진단 1단계] ${targetFile.name} 파일을 서버로 전송합니다... (확인을 누르시면 진행됩니다)`);
     const formData = new FormData();
     formData.append("file", targetFile);
-    formData.append("wallet_address", account.address);
+    formData.append("wallet_address", safeAddress); // 🚨 null 에러 방지
     
     try {
       const endpoint = type === 'law' ? 'upload-pdf' : 'upload-exam';
@@ -99,20 +99,20 @@ function App() {
       alert(type === 'law' ? "✅ 법령 문헌이 성공적으로 등록되었습니다." : "✅ 모의고사 데이터가 성공적으로 추가되었습니다.");
       if (type === 'law') loadCategories();
     } catch (err: any) {
-      alert(`[🚨 업로드 치명적 오류]\n${err.message}`);
+      alert(`[🚨 문제은행 업로드 치명적 오류]\n${err.message}`);
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleAutoMakeCard = async (cat: Category, silent = false) => {
-    if (!account) return;
+    if (!isLoggedIn) return;
     setIsProcessing(true);
     try {
       const res = await fetch("https://api.blankd.top/api/auto-make-cards", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: account.address, category_id: cat.id, content: cat.content }),
+        body: JSON.stringify({ wallet_address: safeAddress, category_id: cat.id, content: cat.content }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.details || data.error);
@@ -128,7 +128,7 @@ function App() {
   };
 
   const handleBatchAutoMake = async () => {
-    if (!account || categories.length === 0) return;
+    if (!isLoggedIn || categories.length === 0) return;
     if (!confirm("모든 문헌에서 26B 모델 기반 일괄 추출을 진행하시겠습니까?\n(문헌 수에 따라 시간이 꽤 소요될 수 있습니다.)")) return;
     
     setIsBatching(true);
@@ -142,11 +142,11 @@ function App() {
   };
 
   const handleDeleteAll = async () => {
-    if (!account || !confirm("보관소의 모든 데이터(법령, 카드, 모의고사, AI분석)를 영구적으로 지우시겠습니까?")) return;
+    if (!isLoggedIn || !confirm("보관소의 모든 데이터(법령, 카드, 모의고사, AI분석)를 영구적으로 지우시겠습니까?")) return;
     const res = await fetch("https://api.blankd.top/api/delete-all", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ wallet_address: account.address }),
+      body: JSON.stringify({ wallet_address: safeAddress }),
     });
     if (res.ok) {
       alert("모든 기록이 소각되었습니다.");
@@ -170,7 +170,7 @@ function App() {
     }
   };
 
-  // [추가] 깃허브 코드 동기화
+  // [유지됨] 깃허브 코드 동기화
   const handleGithubPull = async () => {
     if (!confirm("GitHub에서 최신 코드를 다운로드(Pull) 하여 서버를 업데이트 하시겠습니까?")) return;
     setIsProcessing(true);
@@ -185,15 +185,16 @@ function App() {
     }
   };
 
-  // [추가] 능동형 AI 조력자 분석
+  // [유지됨] 능동형 AI 조력자 분석
   const handleAiAnalyze = async () => {
-    if (!aiText || !account) return alert("분석할 텍스트를 입력하세요.");
+    if (!aiText) return alert("분석할 텍스트를 입력하세요.");
+    if (!isLoggedIn) return alert("⚠️ 로그인 정보가 없습니다.");
     setIsProcessing(true);
     try {
       const res = await fetch("https://api.blankd.top/api/ai-analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: account.address, text: aiText }),
+        body: JSON.stringify({ wallet_address: safeAddress, text: aiText }), // 🚨 null 방지
       });
       const data = await res.json();
       if (res.ok) {
@@ -209,10 +210,10 @@ function App() {
     }
   };
 
-  // [수정] 터치 기반 수동 빈칸 렌더링 로직
+  // [유지됨] 터치 기반 수동 빈칸 렌더링 로직
   const loadTextForManualSelection = (content: string) => {
     setParsedText(content);
-    setSelectedWordIndices(new Set()); // 단어 선택 초기화
+    setSelectedWordIndices(new Set()); 
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -224,18 +225,18 @@ function App() {
   };
 
   const handleMakeBlankCard = async () => {
-    if (!account) return;
+    if (!isLoggedIn) return;
     if (selectedWordIndices.size === 0) return alert("빈칸으로 만들 단어를 터치하여 선택해주세요.");
 
     setIsProcessing(true);
     const words = parsedText.split(/(\s+)/);
     let cardContent = "";
-    let answerText = ""; // 콤마로 이어붙이거나 첫단어 기준
+    let answerText = ""; 
 
     words.forEach((word, index) => {
       if (selectedWordIndices.has(index) && word.trim() !== "") {
         cardContent += `[ ${word} ]`;
-        answerText += answerText ? ` ${word}` : word; // 여러개 선택 시 합치기
+        answerText += answerText ? ` ${word}` : word; 
       } else {
         cardContent += word;
       }
@@ -245,7 +246,7 @@ function App() {
       const res = await fetch("https://api.blankd.top/api/save-card", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: account.address, card_content: cardContent, answer_text: answerText }),
+        body: JSON.stringify({ wallet_address: safeAddress, card_content: cardContent, answer_text: answerText }),
       });
       if (res.ok) {
         alert("선택하신 지식이 터치 카드로 기록되었습니다.");
@@ -273,7 +274,6 @@ function App() {
     }
   };
 
-  // UI 헬퍼
   const getLevelTier = (level: number) => {
     if (level === 0) return "일반 (Normal)";
     if (level === 1) return "희귀 (Rare)";
@@ -291,23 +291,21 @@ function App() {
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] font-sans selection:bg-neutral-800 selection:text-white p-6 sm:p-12 relative">
       
-      {/* HEADER */}
       <header className="max-w-5xl mx-auto flex flex-col sm:flex-row sm:justify-between sm:items-baseline border-b border-white/10 pb-8 mb-12 gap-4">
         <div>
           <h1 className="text-2xl font-light tracking-[0.3em] text-white uppercase">Blank_D</h1>
           <p className="text-[10px] text-white/30 mt-2 uppercase tracking-widest">AI & Mock-Exam Driven Archive</p>
         </div>
     
-        {account && (
+        {isLoggedIn && (
           <div className="text-right text-[10px] text-white/30 tracking-wider">
-            ID: {account.address.substring(0, 12)}...
+            ID: {safeAddress.substring(0, 12)}...
           </div>
         )}
       </header>
 
       <main className="max-w-5xl mx-auto">
-        {!account ? (
-          /* 로그인 화면 */
+        {!isLoggedIn ? (
           <div className="flex flex-col items-center justify-center py-40">
             <p className="text-xs font-light text-white/40 mb-12 tracking-[0.2em] uppercase">Enter the Archive</p>
             <button 
@@ -319,7 +317,6 @@ function App() {
           </div>
         ) : (
           <>
-            {/* TABS 네비게이션 */}
             <nav className="flex gap-8 mb-16 border-b border-white/5 pb-4 overflow-x-auto scrollbar-hide">
               {[
                 { id: 'dashboard', label: '열람실' },
@@ -341,7 +338,6 @@ function App() {
               ))}
             </nav>
 
-            {/* 1. DASHBOARD */}
             {activeTab === 'dashboard' && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 animate-in fade-in duration-700">
                 <div className="border border-white/10 p-8 rounded-sm bg-white/[0.02]">
@@ -359,11 +355,9 @@ function App() {
               </div>
             )}
 
-            {/* 2. CRAFT (지식 추출) */}
             {activeTab === 'craft' && (
               <div className="space-y-16 animate-in fade-in duration-700">
                 
-                {/* [추가] 능동형 AI 조력자 분석기 */}
                 <div className="border border-indigo-900/30 p-8 rounded-sm bg-indigo-950/10 space-y-6">
                   <h3 className="text-sm font-light tracking-[0.2em] text-indigo-300">0. AI 조력자 능동 분석실</h3>
                   <textarea 
@@ -396,7 +390,6 @@ function App() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                  {/* 법령 수집 */}
                   <div className="space-y-6">
                     <div className="flex justify-between items-baseline border-b border-white/5 pb-4">
                       <h3 className="text-sm font-light tracking-[0.2em] text-white/80">1. 법령 문헌 수집</h3>
@@ -420,7 +413,6 @@ function App() {
                     </button>
                   </div>
 
-                  {/* 모의고사 수집 */}
                   <div className="space-y-6">
                     <div className="flex justify-between items-baseline border-b border-white/5 pb-4">
                       <h3 className="text-sm font-light tracking-[0.2em] text-white/80">2. 모의고사 기출 수집</h3>
@@ -442,13 +434,12 @@ function App() {
                   </div>
                 </div>
 
-                {/* 카테고리 목록 & 일괄 제작 */}
                 {categories.length > 0 && (
                   <div className="mt-16 space-y-6">
                     <div className="flex justify-between items-baseline border-b border-white/5 pb-4">
                       <div className="text-xs font-light tracking-widest text-white/60">분석된 문헌 리스트 ({categories.length})</div>
                       <button onClick={handleBatchAutoMake} className="text-[10px] text-blue-400/70 hover:text-blue-300 tracking-widest">
-                        {isBatching ? "일괄 추출 진행 중..." : "AI 일괄 자동 추출"}
+                        AI 일괄 자동 추출
                       </button>
                     </div>
                     <div className="grid grid-cols-1 gap-3 max-h-[400px] overflow-y-auto scrollbar-hide pr-2">
@@ -467,7 +458,6 @@ function App() {
                   </div>
                 )}
                 
-                {/* [수정] 수동 제작기 (터치 기반) */}
                 {parsedText && (
                   <div className="mt-16 space-y-6">
                     <div className="text-xs font-light text-white/60 tracking-widest border-b border-white/5 pb-4">수동 추출 터미널 (단어 터치)</div>
@@ -494,7 +484,6 @@ function App() {
               </div>
             )}
 
-            {/* 3. ENHANCE (기억 강화) */}
             {activeTab === 'enhance' && (
               <div className="space-y-8 animate-in fade-in duration-700">
                 <div className="text-xs font-light tracking-widest text-white/60 border-b border-white/5 pb-4">기억 보관소 (덱)</div>
@@ -539,11 +528,9 @@ function App() {
               </div>
             )}
 
-            {/* 4. MY PAGE (설정) */}
             {activeTab === 'mypage' && (
               <div className="max-w-md mx-auto space-y-12 animate-in fade-in duration-700 py-16">
                 
-                {/* [추가] 깃허브 관리 패널 */}
                 <div className="space-y-6 border border-teal-900/30 p-10 rounded-sm bg-teal-950/10">
                   <h3 className="text-xs font-light tracking-widest text-teal-400 border-b border-teal-500/20 pb-4">시스템 관리자 전용</h3>
                   <p className="text-[11px] text-white/40 leading-relaxed font-light">GitHub 저장소의 최신 커밋 내역을 서버로 동기화(Pull) 합니다.</p>
@@ -574,7 +561,6 @@ function App() {
               </div>
             )}
 
-            {/* EMPTY TABS */}
             {(activeTab === 'mission' || activeTab === 'community') && (
               <div className="py-40 text-center border border-white/5 border-dashed rounded-sm mt-8">
                 <div className="text-xs tracking-[0.3em] text-white/30 font-light">준비 중인 공간입니다.</div>
@@ -584,7 +570,6 @@ function App() {
         )}
       </main>
 
-      {/* COMBAT MODAL (강화 팝업) */}
       {activeCard && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0d0d0f]/95 backdrop-blur-sm animate-in fade-in">
           <div className="border border-white/10 bg-[#121214] w-full max-w-2xl p-10 shadow-2xl rounded-sm">
@@ -612,7 +597,6 @@ function App() {
         </div>
       )}
 
-      {/* 처리 중(로딩) 알림 인디케이터 */}
       {isProcessing && (
         <div className="fixed bottom-10 right-10 flex items-center gap-3 bg-black/80 px-4 py-2 border border-white/20 rounded-sm z-50">
           <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
