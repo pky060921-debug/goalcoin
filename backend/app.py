@@ -24,12 +24,12 @@ logging.basicConfig(filename='backend_error_log.txt', level=logging.ERROR,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
+# 🚨 CORS 정책 전면 개방 (Failed to fetch 방지)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
 DB_PATH = os.path.expanduser("~/goalcoin/backend/blankd.db")
 
-# 아키님의 강력한 로컬 26B 모델 연결 세팅
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = "gemma4:26b" 
 
@@ -39,6 +39,11 @@ def handle_exception(e):
     logging.error(f"백엔드 치명적 에러:\n{error_detail}")
     print(f"\n[🚨 서버 치명적 에러]\n{error_detail}")
     return jsonify({"error": "백엔드 엔진 오류", "details": error_detail}), 500
+
+# 🚨 [신규 진단 기능] 프론트엔드가 백엔드 생존 여부를 확인하는 핑(Ping) 엔드포인트
+@app.route('/api/health', methods=['GET', 'OPTIONS'])
+def health_check():
+    return jsonify({"status": "alive", "message": "백엔드 서버가 정상적으로 응답하고 있습니다."}), 200
 
 # ==========================================
 # 2. DB 초기화 
@@ -85,8 +90,11 @@ def extract_text(file):
     filename = file.filename.lower()
     raw_bytes = file.read()
     if filename.endswith('.pdf'):
-        doc = fitz.open(stream=raw_bytes, filetype="pdf")
-        return "".join([page.get_text() for page in doc])
+        try:
+            doc = fitz.open(stream=raw_bytes, filetype="pdf")
+            return "".join([page.get_text() for page in doc])
+        except Exception as e:
+            raise Exception(f"PDF 파싱 실패 (파일이 손상되었거나 암호화됨): {str(e)}")
     elif filename.endswith('.docx') and docx:
         import io
         doc_file = docx.Document(io.BytesIO(raw_bytes))
@@ -96,7 +104,7 @@ def extract_text(file):
         except: return raw_bytes.decode('cp949', errors='ignore')
 
 # ==========================================
-# 4. API 엔드포인트 (AI 조력자 & 깃허브)
+# 4. API 엔드포인트
 # ==========================================
 @app.route('/api/github-pull', methods=['POST'])
 def github_pull():
@@ -148,14 +156,14 @@ def ai_analyze():
     except Exception as e:
         return jsonify({"error": "AI 모듈 응답 실패", "details": str(e)}), 500
 
-# ==========================================
-# 5. 문헌 및 모의고사 업로드
-# ==========================================
 @app.route('/api/upload-pdf', methods=['POST'])
 def upload_law():
     try:
         wallet_address = request.form.get('wallet_address')
         file = request.files.get('file')
+        if not file:
+            return jsonify({"error": "업로드된 파일이 없습니다."}), 400
+            
         full_text = extract_text(file)
         categories = parse_law_into_categories(full_text)
         
@@ -169,13 +177,16 @@ def upload_law():
         
         return jsonify({"message": "법령 아카이브 등록 성공", "count": len(categories)})
     except Exception as e:
-        return jsonify({"error": "법령 분석 실패", "details": traceback.format_exc()}), 500
+        return jsonify({"error": "법령 분석 중 치명적 오류 발생", "details": traceback.format_exc()}), 500
 
 @app.route('/api/upload-exam', methods=['POST'])
 def upload_exam():
     try:
         wallet_address = request.form.get('wallet_address')
         file = request.files.get('file')
+        if not file:
+            return jsonify({"error": "업로드된 파일이 없습니다."}), 400
+            
         text = extract_text(file)
         
         conn = sqlite3.connect(DB_PATH)
@@ -188,9 +199,6 @@ def upload_exam():
     except Exception as e:
         return jsonify({"error": "모의고사 분석 실패", "details": traceback.format_exc()}), 500
 
-# ==========================================
-# 🚨 6. [핵심] 26B 모델을 활용한 고효율 JSON 빈칸 추출
-# ==========================================
 @app.route('/api/auto-make-cards', methods=['POST'])
 def auto_make_cards():
     try:
@@ -202,19 +210,16 @@ def auto_make_cards():
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         
-        # 저장된 모의고사 데이터 불러오기 (프롬프트 컨텍스트용)
         cursor.execute("SELECT content FROM exams WHERE wallet_address = ?", (wallet_address,))
-        all_exams = " ".join([r[0] for r in cursor.fetchall()])[:1000] # 최신 모의고사 일부 참고
+        all_exams = " ".join([r[0] for r in cursor.fetchall()])[:1000]
         
         prompt = f"""
         당신은 대한민국 최고 수준의 법령 시험 출제위원 AI입니다.
-        다음 '법령 텍스트'를 분석하여, 시험에 가장 자주 출제되는 핵심 개념, 숫자, 기한 등을 빈칸으로 뚫어 학습 카드를 만드세요.
-        참고할 기출문제 데이터가 있다면 이를 바탕으로 중요한 단어를 우선 선정하세요.
+        다음 '법령 텍스트'를 분석하여 핵심 개념을 빈칸으로 뚫어 학습 카드를 만드세요.
 
         [조건]
         1. 1~2개의 핵심 카드만 만드세요.
-        2. 오답(distractors)은 정답과 헷갈릴 만큼 정교해야 합니다. (예: 7일 -> 14일, 30일)
-        3. 반드시 아래의 JSON 배열 형식으로만 대답하세요. 다른 말은 절대 금지합니다.
+        2. 반드시 아래의 JSON 배열 형식으로만 대답하세요. 다른 말은 절대 금지합니다.
         [
             {{
                 "card_content": "본문 내용 중 정답 부분이 [ 정답 ] 형태로 치환된 문장",
@@ -229,7 +234,6 @@ def auto_make_cards():
         {content[:1500]}
         """
         
-        # Ollama에 JSON 모드(format: json) 강제 요청
         response = requests.post(OLLAMA_API_URL, json={
             "model": MODEL_NAME, 
             "prompt": prompt, 
@@ -243,7 +247,7 @@ def auto_make_cards():
         count = 0
         for card in cards_data:
             options = card.get('options', [])
-            random.shuffle(options) # 옵션 순서 섞기
+            random.shuffle(options)
             cursor.execute('''
                 INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, next_review_time)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -253,13 +257,10 @@ def auto_make_cards():
         conn.commit()
         conn.close()
         
-        return jsonify({"message": f"AI가 정밀 분석하여 {count}개의 카드를 제작했습니다."})
+        return jsonify({"message": f"AI 분석 성공! {count}개의 카드가 추가되었습니다."})
     except Exception as e:
         return jsonify({"error": "AI 카드 제작 실패", "details": traceback.format_exc()}), 500
 
-# ==========================================
-# 7. 수동 카드 저장 및 기타 유틸리티
-# ==========================================
 @app.route('/api/save-card', methods=['POST'])
 def save_card():
     try:
@@ -268,7 +269,6 @@ def save_card():
         card_content = data.get('card_content')
         answer_text = data.get('answer_text')
 
-        # 수동 저장 시 간단한 오답 생성기 (Ollama를 활용해도 좋지만 속도를 위해 하드코딩 + 랜덤풀 사용)
         options = [answer_text, "대통령령으로 정한다", "7일 이내", "보건복지부장관"] 
         random.shuffle(options)
         
