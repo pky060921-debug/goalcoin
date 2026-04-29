@@ -24,7 +24,7 @@ logging.basicConfig(filename='backend_error_log.txt', level=logging.ERROR,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
-# 🚨 CORS 정책 전면 개방 (Failed to fetch 방지)
+# 50MB 대용량 업로드 및 CORS 강제 허용 (Failed to fetch 완벽 차단)
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
@@ -32,7 +32,9 @@ DB_PATH = os.path.expanduser("~/goalcoin/backend/blankd.db")
 
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = "gemma4:26b" 
+GLOBAL_WORD_POOL = set()
 
+# 🚨 [모든 오류를 낚아채는 진단 코드]
 @app.errorhandler(Exception)
 def handle_exception(e):
     error_detail = traceback.format_exc()
@@ -40,13 +42,13 @@ def handle_exception(e):
     print(f"\n[🚨 서버 치명적 에러]\n{error_detail}")
     return jsonify({"error": "백엔드 엔진 오류", "details": error_detail}), 500
 
-# 🚨 [신규 진단 기능] 프론트엔드가 백엔드 생존 여부를 확인하는 핑(Ping) 엔드포인트
+# 프론트엔드 연결 진단용 Ping 테스트 엔드포인트
 @app.route('/api/health', methods=['GET', 'OPTIONS'])
 def health_check():
     return jsonify({"status": "alive", "message": "백엔드 서버가 정상적으로 응답하고 있습니다."}), 200
 
 # ==========================================
-# 2. DB 초기화 
+# 2. DB 초기화
 # ==========================================
 def init_db():
     try:
@@ -54,7 +56,16 @@ def init_db():
         cursor = conn.cursor()
         cursor.execute('CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, title TEXT, content TEXT)')
         cursor.execute('CREATE TABLE IF NOT EXISTS cards (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, category_id INTEGER, card_content TEXT, answer_text TEXT, options_json TEXT, level INTEGER DEFAULT 0, next_review_time DATETIME, status TEXT DEFAULT "OWNED")')
-        cursor.execute('CREATE TABLE IF NOT EXISTS exams (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, title TEXT, content TEXT)')
+        # 구조적 모의고사 테이블 (문제, 정답, 해설)
+        cursor.execute('''CREATE TABLE IF NOT EXISTS exams (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            wallet_address TEXT, 
+            title TEXT, 
+            question TEXT, 
+            answer TEXT, 
+            explanation TEXT,
+            related_law_keywords TEXT
+        )''')
         cursor.execute('CREATE TABLE IF NOT EXISTS ai_analysis (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, topic TEXT, summary TEXT, recommended_blanks TEXT, quiz_json TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)')
         conn.commit()
         conn.close()
@@ -64,7 +75,7 @@ def init_db():
 init_db()
 
 # ==========================================
-# 3. 법령 파싱 및 망각 곡선 로직
+# 3. 법령 파싱 & 단어 추출 & 하이브리드 엔진
 # ==========================================
 def parse_law_into_categories(text):
     pattern = r'(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)'
@@ -78,6 +89,50 @@ def parse_law_into_categories(text):
             content = parts[i+1].strip() if i+1 < len(parts) else ""
             categories.append({"title": title, "content": content})
     return categories if categories else [{"title": "문서 전체", "content": text}]
+
+def extract_candidates(text):
+    candidates = []
+    titles = re.findall(r'\(([^)]+)\)', text)
+    for t in titles:
+        if len(t) >= 2 and not re.match(r'^\d+$', t): candidates.append(t.strip())
+
+    complex_patterns = [
+        r'(?:즉시|특별한|1건당|특히|모든|최초로|미리|지체\s*없이)\s+[가-힣]+',
+        r'(?:대통령령|보건복지부령|공단|공단의 이사장|보건복지부장관|정관|심사평가원장)(?:으로|이)\s*정(?:한다|하여 고시한다)',
+        r'[가-힣\s]*위원회',
+        r'\d+(?:일|개월|년)\s*이내|\d+개월의\s*범위',
+        r'(?:1천|1만|100)분의\s*\d+'
+    ]
+    for p in complex_patterns:
+        for m in re.findall(p, text): candidates.append(m.strip())
+
+    words = re.findall(r'[가-힣0-9]{2,}', re.sub(r'\([^)]+\)', ' ', text))
+    for w in words:
+        if len(w) >= 2 and w not in candidates: candidates.append(w)
+    return list(set(candidates))
+
+def get_similar_distractors(target, count=3):
+    global GLOBAL_WORD_POOL
+    target = target.strip()
+    static_map = {
+        '위원회': ["보건의료정책심의위원회", "건강보험정책심의위원회", "재정운영위원회", "업무정지처분심의위원회"],
+        '이내': ["7일 이내", "14일 이내", "30일 이내", "3개월 이내"],
+        '정한다': ["대통령령으로 정한다", "보건복지부령으로 정한다", "보건복지부장관이 정한다", "공단이 정한다"]
+    }
+    for k, v in static_map.items():
+        if k in target:
+            pool = [p for p in v if p.replace(" ", "") != target.replace(" ", "")]
+            if pool:
+                others = list(GLOBAL_WORD_POOL)
+                pool += random.sample(others, min(len(others), max(0, count - len(pool))))
+                return random.sample(pool, min(len(pool), count))
+
+    same_len = [w for w in GLOBAL_WORD_POOL if len(w) == len(target) and w != target]
+    distractors = random.sample(same_len, min(len(same_len), count))
+    if len(distractors) < count:
+        others = list(GLOBAL_WORD_POOL)
+        distractors += random.sample(others, min(len(others), max(0, count - len(distractors))))
+    return distractors
 
 def get_next_review_time(level):
     now = datetime.utcnow()
@@ -103,6 +158,32 @@ def extract_text(file):
         try: return raw_bytes.decode('utf-8')
         except: return raw_bytes.decode('cp949', errors='ignore')
 
+def get_ai_keyword(prompt_text, exams_context):
+    try:
+        exams_context = exams_context[:1000] if exams_context else "기출 문제 없음"
+        payload = {
+            "model": MODEL_NAME,
+            "prompt": f"""
+            너는 법령 시험 출제관이야. 
+            아래 [기출 모의고사] 데이터를 바탕으로, [법령 본문]에서 시험에 가장 나올 법한 핵심 단어(명사, 기한, 숫자 등) 딱 1개만 골라서 대답해.
+            다른 설명은 절대 하지마. 정답 단어만 말해.
+
+            [기출 모의고사]:
+            {exams_context}
+
+            [법령 본문]:
+            {prompt_text}
+            """,
+            "stream": False
+        }
+        response = requests.post(OLLAMA_API_URL, json=payload, timeout=45)
+        if response.status_code == 200:
+            result = response.json().get('response', '').strip()
+            return re.sub(r'[^\w\s]', '', result.split('\n')[0]).strip()
+    except Exception as e:
+        logging.error(f"Ollama 통신 오류: {str(e)}")
+    return None
+
 # ==========================================
 # 4. API 엔드포인트
 # ==========================================
@@ -114,57 +195,15 @@ def github_pull():
     except subprocess.CalledProcessError as e:
         return jsonify({"error": "GitHub 동기화 실패", "details": e.output.decode('utf-8')}), 500
 
-@app.route('/api/ai-analyze', methods=['POST'])
-def ai_analyze():
-    data = request.json
-    text = data.get('text', '')
-    wallet_address = data.get('wallet_address', 'unknown')
-    
-    if not text:
-        return jsonify({"error": "텍스트가 제공되지 않았습니다."}), 400
-        
-    prompt = f"""
-    당신은 훌륭한 법학습 조력자 인공지능 '아키'입니다.
-    다음 법령/모의고사 문서를 분석하여 반드시 아래 JSON 형식으로만 응답하세요.
-    {{
-        "topic": "문서 핵심 주제",
-        "summary": "3줄 요약",
-        "recommended_blanks": ["키워드1", "키워드2"],
-        "quiz": {{
-            "question": "4지선다형 질문",
-            "options": ["보기1", "보기2", "보기3", "정답보기"],
-            "answer": "정답보기"
-        }}
-    }}
-    텍스트: {text[:2000]}
-    """
-    try:
-        response = requests.post(OLLAMA_API_URL, json={"model": MODEL_NAME, "prompt": prompt, "format": "json", "stream": False}, timeout=60)
-        ai_result = json.loads(response.json().get('response', '{}'))
-        
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO ai_analysis (wallet_address, topic, summary, recommended_blanks, quiz_json)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (wallet_address, ai_result.get('topic'), ai_result.get('summary'), 
-              json.dumps(ai_result.get('recommended_blanks')), json.dumps(ai_result.get('quiz'))))
-        conn.commit()
-        conn.close()
-        
-        return jsonify({"message": "AI 분석 완료 및 DB 저장 성공", "data": ai_result})
-    except Exception as e:
-        return jsonify({"error": "AI 모듈 응답 실패", "details": str(e)}), 500
-
 @app.route('/api/upload-pdf', methods=['POST'])
 def upload_law():
+    global GLOBAL_WORD_POOL
     try:
         wallet_address = request.form.get('wallet_address')
         file = request.files.get('file')
-        if not file:
-            return jsonify({"error": "업로드된 파일이 없습니다."}), 400
-            
+        if not file: return jsonify({"error": "업로드된 파일이 없습니다."}), 400
         full_text = extract_text(file)
+        
         categories = parse_law_into_categories(full_text)
         
         conn = sqlite3.connect(DB_PATH)
@@ -175,29 +214,85 @@ def upload_law():
         conn.commit()
         conn.close()
         
+        GLOBAL_WORD_POOL.update(extract_candidates(full_text))
         return jsonify({"message": "법령 아카이브 등록 성공", "count": len(categories)})
     except Exception as e:
-        return jsonify({"error": "법령 분석 중 치명적 오류 발생", "details": traceback.format_exc()}), 500
+        return jsonify({"error": "법령 분석 실패", "details": traceback.format_exc()}), 500
 
 @app.route('/api/upload-exam', methods=['POST'])
 def upload_exam():
     try:
         wallet_address = request.form.get('wallet_address')
         file = request.files.get('file')
-        if not file:
-            return jsonify({"error": "업로드된 파일이 없습니다."}), 400
-            
-        text = extract_text(file)
+        if not file: return jsonify({"error": "업로드된 파일이 없습니다."}), 400
+        
+        raw_text = extract_text(file)
+        
+        prompt = f"""
+        당신은 법률 시험지 파서입니다. 다음 텍스트에서 문제, 정답, 해설을 추출하여 반드시 아래의 JSON 배열 형식으로만 출력하세요.
+        [
+            {{"question": "문제 내용", "answer": "정답", "explanation": "해설 내용"}}
+        ]
+        텍스트: {raw_text[:3000]}
+        """
+        response = requests.post(OLLAMA_API_URL, json={"model": MODEL_NAME, "prompt": prompt, "format": "json", "stream": False}, timeout=120)
+        exam_data = json.loads(response.json().get('response', '[]'))
         
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("INSERT INTO exams (wallet_address, title, content) VALUES (?, ?, ?)", 
-                       (wallet_address, file.filename, text))
+        for item in exam_data:
+            cursor.execute("INSERT INTO exams (wallet_address, title, question, answer, explanation) VALUES (?, ?, ?, ?, ?)",
+                           (wallet_address, file.filename, item.get('question', ''), item.get('answer', ''), item.get('explanation', '')))
         conn.commit()
         conn.close()
-        return jsonify({"message": "모의고사 데이터 동기화 완료"})
+        return jsonify({"message": f"{len(exam_data)}개의 모의고사 문항이 구조화되어 저장되었습니다."})
     except Exception as e:
-        return jsonify({"error": "모의고사 분석 실패", "details": traceback.format_exc()}), 500
+        return jsonify({"error": "모의고사 파싱 실패", "details": traceback.format_exc()}), 500
+
+@app.route('/api/get-related-exams', methods=['POST'])
+def get_related_exams():
+    try:
+        data = request.json
+        law_content = data.get('content', '')
+        wallet_address = data.get('wallet_address')
+        
+        keywords = re.findall(r'[가-힣]{2,}', law_content)[:5]
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        related_qs = []
+        for kw in keywords:
+            cursor.execute("SELECT id, question, answer, explanation FROM exams WHERE wallet_address=? AND question LIKE ?", 
+                           (wallet_address, f'%{kw}%'))
+            rows = cursor.fetchall()
+            for r in rows:
+                if r[0] not in [x['id'] for x in related_qs]:
+                    related_qs.append({"id": r[0], "question": r[1], "answer": r[2], "explanation": r[3]})
+        
+        conn.close()
+        return jsonify({"related_exams": related_qs[:3]})
+    except Exception as e:
+        return jsonify({"error": "관련 기출 검색 에러", "details": traceback.format_exc()}), 500
+
+@app.route('/api/generate-explanation', methods=['POST'])
+def generate_ai_explanation():
+    try:
+        data = request.json
+        law_text = data.get('law_text')
+        question = data.get('question')
+        answer = data.get('answer')
+        
+        prompt = f"""
+        당신은 훌륭한 법률 강사입니다. 아래 [법령 본문]을 근거로 하여, 이 [문제]의 [정답]이 왜 정답인지 수험생이 이해하기 쉽게 해설을 작성해 주세요.
+        
+        [법령 본문]: {law_text}
+        [문제]: {question}
+        [정답]: {answer}
+        """
+        response = requests.post(OLLAMA_API_URL, json={"model": MODEL_NAME, "prompt": prompt, "stream": False}, timeout=60)
+        return jsonify({"explanation": response.json()['response']})
+    except Exception as e:
+        return jsonify({"error": "해설 생성 에러", "details": traceback.format_exc()}), 500
 
 @app.route('/api/auto-make-cards', methods=['POST'])
 def auto_make_cards():
@@ -209,57 +304,42 @@ def auto_make_cards():
 
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
+        cursor.execute("SELECT question, answer FROM exams WHERE wallet_address = ?", (wallet_address,))
+        all_exams = " ".join([f"Q:{r[0]} A:{r[1]}" for r in cursor.fetchall()])
         
-        cursor.execute("SELECT content FROM exams WHERE wallet_address = ?", (wallet_address,))
-        all_exams = " ".join([r[0] for r in cursor.fetchall()])[:1000]
+        ai_target = get_ai_keyword(content, all_exams)
+        candidates = extract_candidates(content)
         
-        prompt = f"""
-        당신은 대한민국 최고 수준의 법령 시험 출제위원 AI입니다.
-        다음 '법령 텍스트'를 분석하여 핵심 개념을 빈칸으로 뚫어 학습 카드를 만드세요.
+        def get_hybrid_score(word):
+            score = len(word) * 10
+            if re.search(r'\d', word): score += 50
+            if '위원회' in word or '날' in word: score += 30
+            score += (all_exams.count(word) * 20)
+            if ai_target and ai_target in word: score += 200
+            return score
 
-        [조건]
-        1. 1~2개의 핵심 카드만 만드세요.
-        2. 반드시 아래의 JSON 배열 형식으로만 대답하세요. 다른 말은 절대 금지합니다.
-        [
-            {{
-                "card_content": "본문 내용 중 정답 부분이 [ 정답 ] 형태로 치환된 문장",
-                "answer_text": "정답단어",
-                "options": ["매력적인 오답1", "오답2", "오답3", "정답단어"]
-            }}
-        ]
+        scored_candidates = sorted(candidates, key=lambda w: get_hybrid_score(w), reverse=True)
+        target = scored_candidates[0] if scored_candidates else None
 
-        [기출/모의고사 참고 데이터]: {all_exams}
-
-        [분석할 법령 텍스트]:
-        {content[:1500]}
-        """
-        
-        response = requests.post(OLLAMA_API_URL, json={
-            "model": MODEL_NAME, 
-            "prompt": prompt, 
-            "format": "json", 
-            "stream": False
-        }, timeout=120)
-        
-        ai_result = response.json().get('response', '[]')
-        cards_data = json.loads(ai_result)
-        
-        count = 0
-        for card in cards_data:
-            options = card.get('options', [])
+        if target:
+            card_content = content.replace(target, f"[ {target} ]")
+            distractors = get_similar_distractors(target, 3)
+            options = distractors + [target]
             random.shuffle(options)
+            
             cursor.execute('''
                 INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, next_review_time)
                 VALUES (?, ?, ?, ?, ?, ?)
-            ''', (wallet_address, category_id, card['card_content'], card['answer_text'], json.dumps(options), get_next_review_time(0)))
-            count += 1
+            ''', (wallet_address, category_id, card_content, target, json.dumps(options), get_next_review_time(0)))
+            conn.commit()
+            msg = f"AI가 모의고사를 바탕으로 [{target}] 빈칸을 추천하여 제작했습니다."
+        else:
+            msg = "추출 가능한 유효 단어가 없습니다."
             
-        conn.commit()
         conn.close()
-        
-        return jsonify({"message": f"AI 분석 성공! {count}개의 카드가 추가되었습니다."})
+        return jsonify({"message": msg})
     except Exception as e:
-        return jsonify({"error": "AI 카드 제작 실패", "details": traceback.format_exc()}), 500
+        return jsonify({"error": "카드 제작 실패", "details": traceback.format_exc()}), 500
 
 @app.route('/api/save-card', methods=['POST'])
 def save_card():
@@ -269,7 +349,8 @@ def save_card():
         card_content = data.get('card_content')
         answer_text = data.get('answer_text')
 
-        options = [answer_text, "대통령령으로 정한다", "7일 이내", "보건복지부장관"] 
+        distractors = get_similar_distractors(answer_text, 3)
+        options = distractors + [answer_text]
         random.shuffle(options)
         
         conn = sqlite3.connect(DB_PATH)
@@ -333,12 +414,10 @@ def submit_answer():
     
     if is_correct:
         new_lv = row[0] + 1
-        cursor.execute("UPDATE cards SET level = ?, next_review_time = ?, status = 'OWNED' WHERE id = ?", 
-                       (new_lv, get_next_review_time(new_lv), card_id))
+        cursor.execute("UPDATE cards SET level = ?, next_review_time = ?, status = 'OWNED' WHERE id = ?", (new_lv, get_next_review_time(new_lv), card_id))
         msg = f"방어 성공! 레벨이 {new_lv}로 올랐습니다."
     else:
-        cursor.execute("UPDATE cards SET level = 0, next_review_time = ?, status = 'AT_RISK' WHERE id = ?", 
-                       (get_next_review_time(0), card_id))
+        cursor.execute("UPDATE cards SET level = 0, next_review_time = ?, status = 'AT_RISK' WHERE id = ?", (get_next_review_time(0), card_id))
         msg = "방어 실패! 레벨이 0으로 초기화되었습니다."
         
     conn.commit()
