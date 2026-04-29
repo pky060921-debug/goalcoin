@@ -16,8 +16,15 @@ function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [file, setFile] = useState<File | null>(null);
   const [examFile, setExamFile] = useState<File | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isBatching, setIsBatching] = useState(false);
+  
+  // 🚨 [새로 추가된 핵심 상태] 상세 진행 상황을 추적하는 상태 객체
+  const [loadingState, setLoadingState] = useState({
+    active: false,
+    message: "",
+    current: 0,
+    total: 0
+  });
+
   const [categories, setCategories] = useState<Category[]>([]);
   const [savedCards, setSavedCards] = useState<Card[]>([]);
   const [activeCard, setActiveCard] = useState<Card | null>(null);
@@ -28,6 +35,14 @@ function App() {
   const [parsedText, setParsedText] = useState("");
   const [selectedWordIndices, setSelectedWordIndices] = useState<Set<number>>(new Set());
   const textRef = useRef<HTMLDivElement>(null);
+
+  // 진행 상태 업데이트 헬퍼 함수
+  const startLoading = (message: string, current = 0, total = 0) => {
+    setLoadingState({ active: true, message, current, total });
+  };
+  const stopLoading = () => {
+    setLoadingState({ active: false, message: "", current: 0, total: 0 });
+  };
 
   useEffect(() => {
     const handleAuth = async () => {
@@ -69,8 +84,7 @@ function App() {
     if (!targetFile) return alert("⚠️ 파일이 제대로 선택되지 않았습니다. 점선 박스를 눌러 파일을 먼저 선택해주세요!");
     if (!isLoggedIn) return alert("⚠️ 로그인 정보(지갑 주소)를 찾을 수 없습니다.");
     
-    setIsProcessing(true);
-    alert(`[진단 1단계] ${targetFile.name} 파일을 서버로 전송합니다... (확인을 누르시면 진행됩니다)`);
+    startLoading(`[1/2] ${targetFile.name} 파일을 서버로 전송 및 파싱 중입니다...`);
     const formData = new FormData();
     formData.append("file", targetFile);
     formData.append("wallet_address", safeAddress);
@@ -81,29 +95,29 @@ function App() {
         method: "POST",
         body: formData,
       });
+      
+      startLoading(`[2/2] 서버에서 문서 분석을 마무리하고 있습니다...`);
       const responseText = await res.text(); 
-      alert(`[진단 2단계] 서버에서 응답이 도착했습니다! (상태 코드: ${res.status})`);
       
       let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (e) {
-        throw new Error(`백엔드가 에러 페이지(HTML 등)를 보냈습니다:\n${responseText.substring(0, 100)}...`);
-      }
+      try { data = JSON.parse(responseText); } 
+      catch (e) { throw new Error(`서버 응답 오류`); }
 
       if (!res.ok) throw new Error(data.details || data.error || "알 수 없는 서버 에러");
       alert(type === 'law' ? "✅ 법령 문헌이 성공적으로 등록되었습니다." : "✅ 모의고사 데이터가 성공적으로 추가되었습니다.");
       if (type === 'law') loadCategories();
     } catch (err: any) {
-      alert(`[🚨 문제은행 업로드 치명적 오류]\n${err.message}`);
+      alert(`[🚨 업로드 오류]\n${err.message}`);
     } finally {
-      setIsProcessing(false);
+      stopLoading();
+      if (type === 'law') setFile(null); else setExamFile(null);
     }
   };
 
   const handleAutoMakeCard = async (cat: Category, silent = false) => {
     if (!isLoggedIn) return;
-    setIsProcessing(true);
+    if (!silent) startLoading(`26B AI가 [${cat.title}]의 핵심 지식을 추출하고 있습니다...`);
+    
     try {
       const res = await fetch("https://api.blankd.top/api/auto-make-cards", {
         method: "POST",
@@ -119,7 +133,7 @@ function App() {
     } catch (err: any) {
       if (!silent) alert(`[오류] AI 추출 실패: ${err.message}`);
     } finally {
-      setIsProcessing(false);
+      if (!silent) stopLoading();
     }
   };
 
@@ -127,12 +141,14 @@ function App() {
     if (!isLoggedIn || categories.length === 0) return;
     if (!confirm("모든 문헌에서 26B 모델 기반 일괄 추출을 진행하시겠습니까?\n(문헌 수에 따라 시간이 꽤 소요될 수 있습니다.)")) return;
     
-    setIsBatching(true);
-    for (const cat of categories) {
-      await handleAutoMakeCard(cat, true);
+    // 일괄 추출 시 진행률(Progress) 표시 시작
+    for (let i = 0; i < categories.length; i++) {
+      startLoading(`26B AI 일괄 추출 진행 중... (${categories[i].title})`, i + 1, categories.length);
+      await handleAutoMakeCard(categories[i], true);
     }
-    setIsBatching(false);
-    alert("모든 문헌의 일괄 추출이 완료되었습니다.");
+    
+    stopLoading();
+    alert("모든 문헌의 AI 일괄 추출이 완료되었습니다.");
     loadMyCards();
     setActiveTab('enhance');
   };
@@ -153,7 +169,6 @@ function App() {
   const handleGoogleZkLogin = async () => {
     try {
       const createUrl = (enokiFlow as any).createAuthorizationURL || enokiFlow.createAuthorizationUrl;
-      if (!createUrl) throw new Error("Enoki 인증 함수를 찾을 수 없습니다.");
       const url = await createUrl.call(enokiFlow, {
         provider: 'google',
         clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com',
@@ -161,29 +176,24 @@ function App() {
         network: 'testnet'
       });
       window.location.href = url;
-    } catch (err: any) {
-      alert(`[로그인 에러 발생!]\n원인: ${err.message}`);
-    }
+    } catch (err: any) { alert(`[로그인 에러 발생!]\n원인: ${err.message}`); }
   };
 
   const handleGithubPull = async () => {
-    if (!confirm("GitHub에서 최신 코드를 다운로드(Pull) 하여 서버를 업데이트 하시겠습니까?")) return;
-    setIsProcessing(true);
+    if (!confirm("GitHub에서 최신 코드를 다운로드(Pull) 하시겠습니까?")) return;
+    startLoading("GitHub에서 최신 코드를 동기화하고 있습니다...");
     try {
       const res = await fetch("https://api.blankd.top/api/github-pull", { method: 'POST' });
       const data = await res.json();
       alert(data.message || data.error);
-    } catch (err) {
-      alert("서버 연결 실패");
-    } finally {
-      setIsProcessing(false);
-    }
+    } catch (err) { alert("서버 연결 실패"); } finally { stopLoading(); }
   };
 
   const handleAiAnalyze = async () => {
     if (!aiText) return alert("분석할 텍스트를 입력하세요.");
     if (!isLoggedIn) return alert("⚠️ 로그인 정보가 없습니다.");
-    setIsProcessing(true);
+    
+    startLoading("AI 조력자가 문맥을 파악하고 문제은행에 등록 중입니다...");
     try {
       const res = await fetch("https://api.blankd.top/api/ai-analyze", {
         method: "POST",
@@ -194,14 +204,9 @@ function App() {
       if (res.ok) {
         setAiResult(data.data);
         alert("AI 분석이 완료되고 문제은행에 저장되었습니다!");
-      } else {
-        throw new Error(data.error);
-      }
-    } catch (err: any) {
-      alert(`[AI 분석 오류]\n${err.message}`);
-    } finally {
-      setIsProcessing(false);
-    }
+      } else { throw new Error(data.error); }
+    } catch (err: any) { alert(`[AI 분석 오류]\n${err.message}`); } 
+    finally { stopLoading(); }
   };
 
   const loadTextForManualSelection = (content: string) => {
@@ -221,7 +226,7 @@ function App() {
     if (!isLoggedIn) return;
     if (selectedWordIndices.size === 0) return alert("빈칸으로 만들 단어를 터치하여 선택해주세요.");
 
-    setIsProcessing(true);
+    startLoading("선택하신 단어를 빈칸 지식 카드로 변환하여 각인 중입니다...");
     const words = parsedText.split(/(\s+)/);
     let cardContent = "";
     let answerText = ""; 
@@ -230,9 +235,7 @@ function App() {
       if (selectedWordIndices.has(index) && word.trim() !== "") {
         cardContent += `[ ${word} ]`;
         answerText += answerText ? ` ${word}` : word; 
-      } else {
-        cardContent += word;
-      }
+      } else { cardContent += word; }
     });
 
     try {
@@ -247,9 +250,7 @@ function App() {
         setParsedText(""); 
         loadMyCards();
       }
-    } finally {
-      setIsProcessing(false);
-    }
+    } finally { stopLoading(); }
   };
 
   const submitCombatAnswer = async (selectedOption: string) => {
@@ -289,7 +290,6 @@ function App() {
           <h1 className="text-2xl font-light tracking-[0.3em] text-white uppercase">Blank_D</h1>
           <p className="text-[10px] text-white/30 mt-2 uppercase tracking-widest">AI & Mock-Exam Driven Archive</p>
         </div>
-    
         {isLoggedIn && (
           <div className="text-right text-[10px] text-white/30 tracking-wider">
             ID: {safeAddress.substring(0, 12)}...
@@ -385,13 +385,13 @@ function App() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
                   <div className="space-y-6">
                     <div className="flex justify-between items-baseline border-b border-white/5 pb-4">
-                      <h3 className="text-sm font-light tracking-[0.2em] text-white/80">1. 법령 문헌 수집</h3>
+                      <h3 className="text-sm font-light tracking-[0.2em] text-white/80">1. 법령/규정 문헌 수집</h3>
                       <button onClick={handleDeleteAll} className="text-[10px] text-rose-500/60 hover:text-rose-400 transition-all tracking-widest">
                         데이터 전체 소각
                       </button>
                     </div>
                     <label className="block relative border border-dashed border-white/20 p-12 text-center rounded-sm hover:border-white/40 hover:bg-white/[0.01] transition-all cursor-pointer">
-                      <input type="file" accept="*" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" />
+                      <input type="file" accept=".pdf,.txt,.docx" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" />
                       <div className="text-xs font-light text-white/40 tracking-wider">
                         {file ? `✅ 선택됨: ${file.name}` : "이곳을 눌러 문서(법령 등) 업로드"}
                       </div>
@@ -411,7 +411,7 @@ function App() {
                       <h3 className="text-sm font-light tracking-[0.2em] text-white/80">2. 모의고사 기출 수집</h3>
                     </div>
                     <label className="block relative border border-dashed border-white/20 p-12 text-center rounded-sm hover:border-white/40 hover:bg-white/[0.01] transition-all cursor-pointer">
-                      <input type="file" accept="*" onChange={(e) => setExamFile(e.target.files?.[0] || null)} className="hidden" />
+                      <input type="file" accept=".pdf,.txt,.docx" onChange={(e) => setExamFile(e.target.files?.[0] || null)} className="hidden" />
                       <div className="text-xs font-light text-white/40 tracking-wider">
                         {examFile ? `✅ 선택됨: ${examFile.name}` : "이곳을 눌러 문서(모의고사) 업로드"}
                       </div>
@@ -523,7 +523,6 @@ function App() {
 
             {activeTab === 'mypage' && (
               <div className="max-w-md mx-auto space-y-12 animate-in fade-in duration-700 py-16">
-                
                 <div className="space-y-6 border border-teal-900/30 p-10 rounded-sm bg-teal-950/10">
                   <h3 className="text-xs font-light tracking-widest text-teal-400 border-b border-teal-500/20 pb-4">시스템 관리자 전용</h3>
                   <p className="text-[11px] text-white/40 leading-relaxed font-light">GitHub 저장소의 최신 커밋 내역을 서버로 동기화(Pull) 합니다.</p>
@@ -534,9 +533,6 @@ function App() {
 
                 <div className="space-y-6 border border-white/10 p-10 rounded-sm bg-white/[0.01]">
                   <h3 className="text-xs font-light tracking-widest text-white/60 border-b border-white/5 pb-4">외부 자산 연결</h3>
-                  <p className="text-[11px] text-white/40 leading-relaxed font-light">
-                    Slush 지갑 또는 PC 확장 프로그램을 연결하여 온체인 데이터를 동기화합니다.
-                  </p>
                   <div className="[&>button]:!w-full [&>button]:!bg-transparent [&>button]:!border [&>button]:!border-white/20 [&>button]:!text-white/80 [&>button]:!font-light [&>button]:!text-xs [&>button]:!tracking-widest [&>button]:!rounded-sm hover:[&>button]:!border-white/60 hover:[&>button]:!text-white">
                     <ConnectButton connectText="지갑 연결하기" />
                   </div>
@@ -553,16 +549,11 @@ function App() {
                 </div>
               </div>
             )}
-
-            {(activeTab === 'mission' || activeTab === 'community') && (
-              <div className="py-40 text-center border border-white/5 border-dashed rounded-sm mt-8">
-                <div className="text-xs tracking-[0.3em] text-white/30 font-light">준비 중인 공간입니다.</div>
-              </div>
-            )}
           </>
         )}
       </main>
 
+      {/* 강화 팝업 모달 */}
       {activeCard && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0d0d0f]/95 backdrop-blur-sm animate-in fade-in">
           <div className="border border-white/10 bg-[#121214] w-full max-w-2xl p-10 shadow-2xl rounded-sm">
@@ -590,10 +581,34 @@ function App() {
         </div>
       )}
 
-      {isProcessing && (
-        <div className="fixed bottom-10 right-10 flex items-center gap-3 bg-black/80 px-4 py-2 border border-white/20 rounded-sm z-50">
-          <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div>
-          <span className="text-[10px] text-white/60 tracking-widest uppercase">System Processing...</span>
+      {/* 🚨 [새로 추가된 핵심 컴포넌트] 정밀한 로딩 및 진행률 오버레이 UI */}
+      {loadingState.active && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0d0d0f]/85 backdrop-blur-sm animate-in fade-in">
+          <div className="border border-white/10 bg-[#121214] p-10 w-full max-w-md rounded-sm shadow-2xl">
+            <div className="flex items-center justify-center mb-6">
+              <div className="w-2 h-2 bg-indigo-500 rounded-full animate-ping"></div>
+            </div>
+            
+            <div className="text-white/80 font-light tracking-widest text-[11px] leading-relaxed text-center mb-8 break-keep">
+              {loadingState.message}
+            </div>
+
+            {/* 진행률 바 (일괄 추출처럼 전체 개수가 있을 때만 나타남) */}
+            {loadingState.total > 0 && (
+              <div className="w-full">
+                <div className="w-full bg-white/5 h-1.5 mb-3 rounded-full overflow-hidden">
+                  <div 
+                    className="bg-indigo-500 h-full transition-all duration-700 ease-out" 
+                    style={{ width: `${Math.round((loadingState.current / loadingState.total) * 100)}%` }}
+                  ></div>
+                </div>
+                <div className="flex justify-between text-[9px] text-white/40 tracking-widest">
+                  <span>PROCESSING</span>
+                  <span>{Math.round((loadingState.current / loadingState.total) * 100)}% ({loadingState.current}/{loadingState.total})</span>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
