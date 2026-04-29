@@ -17,9 +17,9 @@ function App() {
   const [file, setFile] = useState<File | null>(null);
   const [examFile, setExamFile] = useState<File | null>(null);
   
-  // 🚨 [UI 개편] 우측 진행 상황 패널을 위한 상태 관리
+  // 우측 진행 상황 및 기출문제 패널 상태 관리
   const [panelState, setPanelState] = useState({
-    status: 'idle', // 'idle' | 'loading' | 'success' | 'error'
+    status: 'idle', 
     title: '시스템 대기 중',
     message: '법령 문헌을 선택하거나 분석 개시 버튼을 눌러주세요.',
     current: 0,
@@ -30,12 +30,13 @@ function App() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [savedCards, setSavedCards] = useState<Card[]>([]);
   const [activeCard, setActiveCard] = useState<Card | null>(null);
-  const [aiText, setAiText] = useState("");
+  const [relatedExams, setRelatedExams] = useState<any[]>([]);
+  const [aiExplanation, setAiExplanation] = useState("");
+  
   const [parsedText, setParsedText] = useState("");
   const [selectedWordIndices, setSelectedWordIndices] = useState<Set<number>>(new Set());
   const textRef = useRef<HTMLDivElement>(null);
 
-  // 우측 터미널 패널 조작 함수
   const updatePanel = (status: string, title: string, message: string, current=0, total=0) => {
     setPanelState(prev => ({
       status, title, message, current, total,
@@ -78,24 +79,21 @@ function App() {
     } catch (err) { console.error(err); }
   };
 
-  // 🚨 [진단 시스템 탑재] 파일 업로드 및 Failed to Fetch 진단
   const uploadFile = async (type: 'law' | 'exam') => {
     const targetFile = type === 'law' ? file : examFile;
     if (!targetFile) return alert("⚠️ 업로드할 파일을 먼저 선택해주세요.");
     
     updatePanel('loading', '통신 상태 확인 중', '백엔드 서버와 연결이 가능한지 핑(Ping) 테스트를 진행합니다...');
     
-    // 1단계 진단: 백엔드 생존 여부 핑 테스트
     try {
       const healthCheck = await fetch("https://api.blankd.top/api/health");
-      if (!healthCheck.ok) throw new Error("서버가 응답하지만 에러를 반환했습니다.");
+      if (!healthCheck.ok) throw new Error("서버 응답 오류");
     } catch (error: any) {
-      updatePanel('error', '네트워크 연결 끊김 (Failed to Fetch)', `백엔드 서버(맥미니)가 꺼져있거나, 클라우드플레어 터널 설정 오류, 혹은 CORS 정책에 의해 연결이 강제로 차단되었습니다. 자세한 에러: ${error.message}`);
-      alert(`[🚨 치명적 연결 오류]\n서버와 통신할 수 없습니다. 터미널에서 pm2 status를 확인하거나 ngrok/cloudflare 터널이 켜져 있는지 확인하세요.`);
+      updatePanel('error', '네트워크 연결 끊김 (Failed to Fetch)', `백엔드 서버와 통신할 수 없습니다: ${error.message}`);
+      alert(`[🚨 치명적 연결 오류]\n서버와 통신할 수 없습니다.`);
       return;
     }
 
-    // 2단계 진단: 본격적인 업로드 시작
     updatePanel('loading', '파일 전송 및 파싱 중', `${targetFile.name} 파일을 분석 엔진으로 전송하고 있습니다...`);
     const formData = new FormData();
     formData.append("file", targetFile);
@@ -111,26 +109,22 @@ function App() {
       const responseText = await res.text(); 
       let data;
       try { data = JSON.parse(responseText); } 
-      catch (e) { throw new Error(`백엔드 엔진이 JSON 대신 알 수 없는 응답을 보냈습니다:\n${responseText.substring(0,200)}`); }
+      catch (e) { throw new Error(`알 수 없는 백엔드 응답:\n${responseText.substring(0,200)}`); }
 
-      if (!res.ok) throw new Error(data.details || data.error || "알 수 없는 서버 에러");
+      if (!res.ok) throw new Error(data.details || data.error || "서버 에러");
       
-      updatePanel('success', '업로드 및 파싱 완료', `성공적으로 데이터가 등록되었습니다! 이제 문헌 리스트에서 AI 분석을 개시할 수 있습니다.`);
-      if (type === 'law') {
-        setFile(null);
-        loadCategories();
-      } else {
-        setExamFile(null);
-      }
+      updatePanel('success', '완료', type === 'law' ? `법령이 등록되었습니다.` : `모의고사가 파싱 및 저장되었습니다.`);
+      if (type === 'law') { setFile(null); loadCategories(); } 
+      else { setExamFile(null); }
     } catch (err: any) {
-      updatePanel('error', '분석 엔진 치명적 오류', `코드 실행 중 에러가 발생했습니다: ${err.message}`);
-      alert(`[🚨 엔진 오류 발생]\n${err.message}`);
+      updatePanel('error', '오류 발생', err.message);
+      alert(`[🚨 오류 발생]\n${err.message}`);
     }
   };
 
   const handleAutoMakeCard = async (cat: Category, silent = false) => {
     if (!isLoggedIn) return;
-    updatePanel('loading', 'AI 로컬 엔진 구동 중', `[${cat.title}] 조항을 26B 파라미터 모델이 분석하여 핵심 빈칸을 추출하고 있습니다...`);
+    updatePanel('loading', 'AI 빈칸 추천 중', `[${cat.title}] 모의고사를 바탕으로 최적의 빈칸을 추출합니다...`);
     
     try {
       const res = await fetch("https://api.blankd.top/api/auto-make-cards", {
@@ -141,23 +135,23 @@ function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.details || data.error);
       
-      updatePanel('success', 'AI 추출 완료', `[${cat.title}] 분석 성공: ${data.message}`);
+      updatePanel('success', 'AI 추출 완료', data.message);
       loadMyCards();
     } catch (err: any) {
-      updatePanel('error', 'AI 분석 실패', `[${cat.title}] 분석 중 오류가 발생했습니다: ${err.message}`);
+      updatePanel('error', '추출 실패', err.message);
     }
   };
 
   const handleBatchAutoMake = async () => {
     if (!isLoggedIn || categories.length === 0) return;
-    if (!confirm("모든 문헌에서 일괄 추출을 진행하시겠습니까? 시간이 소요될 수 있습니다.")) return;
+    if (!confirm("모든 문헌에서 일괄 추출을 진행하시겠습니까?")) return;
     
     for (let i = 0; i < categories.length; i++) {
-      updatePanel('loading', 'AI 일괄 추출 진행 중', `전체 문헌을 순차적으로 분석하고 있습니다...`, i + 1, categories.length);
+      updatePanel('loading', '일괄 추출 중', `전체 문헌을 분석하고 있습니다...`, i + 1, categories.length);
       await handleAutoMakeCard(categories[i], true);
     }
     
-    updatePanel('success', '일괄 추출 대성공', `모든 문헌의 AI 분석이 완료되었습니다. 기억 강화 탭에서 확인하세요.`);
+    updatePanel('success', '일괄 완료', `모든 분석이 완료되었습니다.`);
     loadMyCards();
   };
 
@@ -169,9 +163,9 @@ function App() {
       body: JSON.stringify({ wallet_address: safeAddress }),
     });
     if (res.ok) {
-      alert("모든 기록이 소각되었습니다.");
+      alert("초기화되었습니다.");
       setCategories([]); setSavedCards([]); setParsedText(""); setFile(null); setExamFile(null);
-      updatePanel('idle', '초기화 완료', '시스템이 성공적으로 리셋되었습니다.');
+      updatePanel('idle', '초기화 완료', '데이터가 리셋되었습니다.');
     }
   };
 
@@ -185,12 +179,50 @@ function App() {
         network: 'testnet'
       });
       window.location.href = url;
-    } catch (err: any) { alert(`[로그인 에러 발생!]\n원인: ${err.message}`); }
+    } catch (err: any) { alert(`로그인 에러: ${err.message}`); }
   };
 
-  const loadTextForManualSelection = (content: string) => {
-    setParsedText(content);
+  const handleGithubPull = async () => {
+    try {
+      const res = await fetch("https://api.blankd.top/api/github-pull", { method: 'POST' });
+      const data = await res.json();
+      alert(data.message || data.error);
+    } catch (err) { alert("서버 연결 실패"); }
+  };
+
+  const loadTextForManualSelection = async (cat: Category) => {
+    setParsedText(cat.content);
     setSelectedWordIndices(new Set()); 
+    setAiExplanation("");
+    updatePanel('loading', '기출 검색 중', '해당 조항과 관련된 문제를 검색합니다...');
+
+    try {
+      const res = await fetch("https://api.blankd.top/api/get-related-exams", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: cat.content, wallet_address: safeAddress }),
+      });
+      const data = await res.json();
+      setRelatedExams(data.related_exams || []);
+      updatePanel('idle', '준비 완료', '조항 분석 및 검색이 완료되었습니다.');
+    } catch (err) {
+      updatePanel('error', '검색 실패', '관련 기출문제 로드 중 에러가 발생했습니다.');
+    }
+  };
+
+  const getAiExplanation = async (exam: any) => {
+    setAiExplanation("AI가 법령을 근거로 해설을 작성하고 있습니다. 잠시만 기다려주세요...");
+    try {
+      const res = await fetch("https://api.blankd.top/api/generate-explanation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ law_text: parsedText, question: exam.question, answer: exam.answer }),
+      });
+      const data = await res.json();
+      setAiExplanation(data.explanation || "해설 생성에 실패했습니다.");
+    } catch (err) {
+      setAiExplanation("서버와의 통신 오류로 해설을 가져오지 못했습니다.");
+    }
   };
 
   const toggleWordSelection = (index: number) => {
@@ -202,7 +234,7 @@ function App() {
 
   const handleMakeBlankCard = async () => {
     if (!isLoggedIn || selectedWordIndices.size === 0) return alert("단어를 선택해주세요.");
-    updatePanel('loading', '수동 지식 저장 중', '선택하신 단어를 빈칸 카드로 변환하여 저장합니다...');
+    updatePanel('loading', '수동 저장 중', '카드를 저장하고 있습니다...');
     
     const words = parsedText.split(/(\s+)/);
     let cardContent = ""; let answerText = ""; 
@@ -223,10 +255,10 @@ function App() {
         setSelectedWordIndices(new Set());
         setParsedText(""); 
         loadMyCards();
-        updatePanel('success', '지식 각인 완료', '수동으로 선택하신 단어가 성공적으로 저장되었습니다.');
+        updatePanel('success', '저장 완료', '카드가 성공적으로 추가되었습니다.');
       }
     } catch(err:any) {
-      updatePanel('error', '저장 오류', err.message);
+      updatePanel('error', '저장 실패', err.message);
     }
   };
 
@@ -265,7 +297,7 @@ function App() {
       <header className="max-w-6xl mx-auto flex flex-col sm:flex-row sm:justify-between sm:items-baseline border-b border-white/10 pb-8 mb-12 gap-4">
         <div>
           <h1 className="text-2xl font-light tracking-[0.3em] text-white uppercase">Blank_D</h1>
-          <p className="text-[10px] text-white/30 mt-2 uppercase tracking-widest">AI Driven Legal Archive</p>
+          <p className="text-[10px] text-white/30 mt-2 uppercase tracking-widest">AI & Mock-Exam Driven Archive</p>
         </div>
         {isLoggedIn && <div className="text-right text-[10px] text-white/30 tracking-wider">ID: {safeAddress.substring(0, 12)}...</div>}
       </header>
@@ -300,8 +332,8 @@ function App() {
 
             {activeTab === 'craft' && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in fade-in duration-700">
-                {/* 🚨 [좌측 패널]: 업로드 및 파일 목록 */}
-                <div className="lg:col-span-7 space-y-12">
+                {/* 좌측 패널: 업로드 및 목록 */}
+                <div className="lg:col-span-6 space-y-12">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <div className="space-y-4">
                       <h3 className="text-sm font-light tracking-[0.2em] text-white/80 border-b border-white/5 pb-2">1. 법령 문헌 업로드</h3>
@@ -313,12 +345,12 @@ function App() {
                     </div>
 
                     <div className="space-y-4">
-                      <h3 className="text-sm font-light tracking-[0.2em] text-teal-500/80 border-b border-white/5 pb-2">2. 모의고사 가중치 추가</h3>
+                      <h3 className="text-sm font-light tracking-[0.2em] text-teal-500/80 border-b border-white/5 pb-2">2. 모의고사 구조화</h3>
                       <label className="block border border-dashed border-teal-900/40 p-8 text-center hover:border-teal-500/40 cursor-pointer">
                         <input type="file" accept=".pdf,.txt,.docx" onChange={(e) => setExamFile(e.target.files?.[0] || null)} className="hidden" />
-                        <div className="text-[10px] text-teal-500/40">{examFile ? `✅ ${examFile.name}` : "모의고사 파일 선택"}</div>
+                        <div className="text-[10px] text-teal-500/40">{examFile ? `✅ ${examFile.name}` : "파일 선택"}</div>
                       </label>
-                      <button onClick={() => uploadFile('exam')} className="w-full py-3 border border-teal-900/30 hover:bg-teal-900/20 text-teal-500/80 text-xs">기출문제 등록</button>
+                      <button onClick={() => uploadFile('exam')} className="w-full py-3 border border-teal-900/30 hover:bg-teal-900/20 text-teal-500/80 text-xs">문제/정답/해설 DB 등록</button>
                     </div>
                   </div>
 
@@ -331,7 +363,7 @@ function App() {
                       <div className="grid grid-cols-1 gap-2 max-h-[350px] overflow-y-auto scrollbar-hide">
                         {categories.map(cat => (
                           <div key={cat.id} className="border border-white/5 p-4 flex justify-between items-center group bg-white/[0.01]">
-                            <div className="flex-1 cursor-pointer pr-4" onClick={() => loadTextForManualSelection(cat.content)}>
+                            <div className="flex-1 cursor-pointer pr-4" onClick={() => loadTextForManualSelection(cat)}>
                               <div className="text-xs text-white/80">{cat.title}</div>
                               <div className="text-[10px] text-white/30 truncate mt-1">{cat.content}</div>
                             </div>
@@ -362,45 +394,76 @@ function App() {
                   )}
                 </div>
 
-                {/* 🚨 [우측 패널]: AI 진행 상황 및 터미널 모니터 */}
-                <div className="lg:col-span-5 h-[600px] border border-indigo-900/30 bg-indigo-950/5 flex flex-col rounded-sm overflow-hidden sticky top-12">
-                  <div className="border-b border-indigo-900/30 p-4 bg-indigo-950/20 flex justify-between items-center">
-                    <span className="text-[10px] tracking-widest text-indigo-400 font-bold uppercase">AI Analysis Terminal</span>
-                    <div className="flex gap-1.5">
+                {/* 우측 패널: 기출문제, AI 해설 및 시스템 터미널 */}
+                <div className="lg:col-span-6 flex flex-col space-y-6">
+                  
+                  {/* 터미널 모니터 */}
+                  <div className="border border-indigo-900/30 bg-indigo-950/5 rounded-sm overflow-hidden sticky top-12 flex-shrink-0">
+                    <div className="border-b border-indigo-900/30 p-4 bg-indigo-950/20 flex justify-between items-center">
+                      <span className="text-[10px] tracking-widest text-indigo-400 font-bold uppercase">System Terminal</span>
                       <div className={`w-2 h-2 rounded-full ${panelState.status === 'loading' ? 'bg-indigo-500 animate-ping' : panelState.status === 'error' ? 'bg-rose-500' : 'bg-teal-500'}`}></div>
                     </div>
+                    <div className="p-6 text-center space-y-3">
+                      <div className={`text-sm tracking-widest ${panelState.status === 'error' ? 'text-rose-400' : 'text-white'}`}>{panelState.title}</div>
+                      <div className="text-[11px] text-white/50 leading-relaxed font-light">{panelState.message}</div>
+                      {panelState.total > 0 && (
+                        <div className="w-full px-8 pt-2">
+                          <div className="w-full bg-white/5 h-1 mb-2 rounded-full overflow-hidden">
+                            <div className="bg-indigo-500 h-full transition-all duration-500" style={{ width: `${(panelState.current / panelState.total) * 100}%` }}></div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <div className="h-20 bg-[#070709] border-t border-indigo-900/30 p-3 overflow-y-auto font-mono text-[9px] text-white/30 flex flex-col-reverse">
+                      {panelState.logs.map((log, i) => <div key={i}>{log}</div>)}
+                    </div>
                   </div>
-                  
-                  <div className="p-8 flex-1 flex flex-col justify-center items-center text-center space-y-6">
-                    <div className={`text-sm font-light tracking-widest ${panelState.status === 'error' ? 'text-rose-400' : 'text-white'}`}>
-                      {panelState.title}
-                    </div>
-                    
-                    <div className="text-[11px] text-white/50 leading-relaxed font-light break-keep px-4">
-                      {panelState.message}
-                    </div>
 
-                    {panelState.total > 0 && (
-                      <div className="w-full max-w-[80%] pt-4">
-                        <div className="w-full bg-white/5 h-1 mb-2 rounded-full overflow-hidden">
-                          <div className="bg-indigo-500 h-full transition-all duration-500" style={{ width: `${(panelState.current / panelState.total) * 100}%` }}></div>
-                        </div>
-                        <div className="text-[9px] text-white/30 flex justify-between">
-                          <span>PROGRESS</span>
-                          <span>{panelState.current} / {panelState.total}</span>
-                        </div>
+                  {/* 관련 기출문제 & AI 해설 영역 */}
+                  <div className="flex-1 border border-indigo-900/30 bg-black/40 p-6 rounded-sm min-h-[300px]">
+                    <h3 className="text-xs font-bold text-indigo-400 mb-6 tracking-widest uppercase">Related Mock-Exams</h3>
+                    {relatedExams.length > 0 ? (
+                      <div className="space-y-6 overflow-y-auto max-h-[500px] scrollbar-hide pr-2">
+                        {relatedExams.map((exam, i) => (
+                          <div key={i} className="p-4 bg-white/5 border border-white/10 rounded-sm">
+                            <p className="text-xs text-amber-400 mb-2 leading-relaxed">Q. {exam.question}</p>
+                            <p className="text-[11px] text-white/60 mb-4">A. {exam.answer}</p>
+                            
+                            {exam.explanation && exam.explanation.trim() !== "" && (
+                              <p className="text-[10px] text-white/40 mb-4 bg-black/50 p-2 border border-white/5">
+                                기존 해설: {exam.explanation}
+                              </p>
+                            )}
+
+                            <button 
+                              onClick={() => getAiExplanation(exam)}
+                              className="text-[9px] px-3 py-1.5 border border-indigo-500/50 text-indigo-300 hover:bg-indigo-500/10 tracking-widest uppercase"
+                            >
+                              Gemma 26B 법령근거 해설 요청
+                            </button>
+                          </div>
+                        ))}
+                        
+                        {aiExplanation && (
+                          <div className="mt-6 p-5 border border-indigo-500/30 bg-indigo-950/20 rounded-sm">
+                            <div className="text-[10px] text-indigo-300 mb-3 font-bold uppercase">AI Rationale Explanation</div>
+                            <div className="text-[11px] leading-relaxed text-white/80 font-serif">
+                              {aiExplanation}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="h-40 flex items-center justify-center text-[10px] text-white/20 uppercase tracking-widest">
+                        관련된 기출문제가 없습니다.
                       </div>
                     )}
-                  </div>
-
-                  <div className="h-40 bg-[#070709] border-t border-indigo-900/30 p-4 overflow-y-auto scrollbar-hide font-mono text-[9px] text-white/30 flex flex-col-reverse">
-                    {panelState.logs.map((log, i) => <div key={i} className="mb-1">{log}</div>)}
                   </div>
                 </div>
               </div>
             )}
 
-            {/* (Dashboard, Enhance, Mypage, Modal 코드는 기존 구조 완벽 유지) */}
+            {/* Dashboard 탭 */}
             {activeTab === 'dashboard' && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 animate-in fade-in">
                 <div className="border border-white/10 p-8 rounded-sm bg-white/[0.02]">
@@ -418,6 +481,7 @@ function App() {
               </div>
             )}
 
+            {/* Enhance 탭 */}
             {activeTab === 'enhance' && (
               <div className="space-y-8 animate-in fade-in">
                 {savedCards.length === 0 ? (
@@ -440,9 +504,11 @@ function App() {
               </div>
             )}
 
+            {/* Mypage 탭 */}
             {activeTab === 'mypage' && (
-              <div className="max-w-md mx-auto space-y-6 py-16 animate-in fade-in">
-                <button onClick={handleDeleteAll} className="w-full py-4 border border-rose-900/30 text-rose-500/70 text-xs">전체 데이터 초기화</button>
+              <div className="max-w-md mx-auto space-y-8 py-16 animate-in fade-in">
+                <button onClick={handleGithubPull} className="w-full py-4 border border-teal-500/30 hover:border-teal-500/80 text-teal-300 text-xs">최신 코드 강제 동기화 (Pull)</button>
+                <button onClick={handleDeleteAll} className="w-full py-4 border border-rose-900/30 text-rose-500/70 text-xs">전체 데이터 영구 초기화</button>
                 <div className="[&>button]:!w-full [&>button]:!bg-transparent [&>button]:!border [&>button]:!border-white/20 [&>button]:!text-white/80 [&>button]:!font-light [&>button]:!text-xs [&>button]:!tracking-widest [&>button]:!rounded-sm"><ConnectButton /></div>
               </div>
             )}
@@ -450,6 +516,7 @@ function App() {
         )}
       </main>
 
+      {/* 학습 강화 모달 */}
       {activeCard && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0d0d0f]/95 backdrop-blur-sm animate-in fade-in">
           <div className="border border-white/10 bg-[#121214] w-full max-w-2xl p-10 shadow-2xl rounded-sm">
