@@ -17,7 +17,6 @@ function App() {
   const [file, setFile] = useState<File | null>(null);
   const [examFile, setExamFile] = useState<File | null>(null);
   
-  // 우측 진행 상황 및 기출문제 패널 상태 관리
   const [panelState, setPanelState] = useState({
     status: 'idle', 
     title: '시스템 대기 중',
