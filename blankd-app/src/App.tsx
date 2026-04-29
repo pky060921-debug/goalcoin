@@ -10,11 +10,9 @@ function App() {
   const zkLogin = useZkLogin();
   const suiWalletAccount = useCurrentAccount();
   
-  // 🚨 [핵심 수술 부위] null 에러를 완벽하게 차단하는 방탄 주소 추출기
   const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
   const isLoggedIn = safeAddress.length > 0;
 
-  // 탭 및 상태 관리
   const [activeTab, setActiveTab] = useState('dashboard');
   const [file, setFile] = useState<File | null>(null);
   const [examFile, setExamFile] = useState<File | null>(null);
@@ -24,11 +22,9 @@ function App() {
   const [savedCards, setSavedCards] = useState<Card[]>([]);
   const [activeCard, setActiveCard] = useState<Card | null>(null);
   
-  // [유지됨] AI 조력자 상태 관리
   const [aiText, setAiText] = useState("");
   const [aiResult, setAiResult] = useState<any>(null);
 
-  // [유지됨] 터치형 수동 빈칸 제작 상태 관리
   const [parsedText, setParsedText] = useState("");
   const [selectedWordIndices, setSelectedWordIndices] = useState<Set<number>>(new Set());
   const textRef = useRef<HTMLDivElement>(null);
@@ -77,7 +73,7 @@ function App() {
     alert(`[진단 1단계] ${targetFile.name} 파일을 서버로 전송합니다... (확인을 누르시면 진행됩니다)`);
     const formData = new FormData();
     formData.append("file", targetFile);
-    formData.append("wallet_address", safeAddress); // 🚨 null 에러 방지
+    formData.append("wallet_address", safeAddress);
     
     try {
       const endpoint = type === 'law' ? 'upload-pdf' : 'upload-exam';
@@ -170,7 +166,6 @@ function App() {
     }
   };
 
-  // [유지됨] 깃허브 코드 동기화
   const handleGithubPull = async () => {
     if (!confirm("GitHub에서 최신 코드를 다운로드(Pull) 하여 서버를 업데이트 하시겠습니까?")) return;
     setIsProcessing(true);
@@ -185,7 +180,6 @@ function App() {
     }
   };
 
-  // [유지됨] 능동형 AI 조력자 분석
   const handleAiAnalyze = async () => {
     if (!aiText) return alert("분석할 텍스트를 입력하세요.");
     if (!isLoggedIn) return alert("⚠️ 로그인 정보가 없습니다.");
@@ -194,7 +188,7 @@ function App() {
       const res = await fetch("https://api.blankd.top/api/ai-analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: safeAddress, text: aiText }), // 🚨 null 방지
+        body: JSON.stringify({ wallet_address: safeAddress, text: aiText }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -210,7 +204,6 @@ function App() {
     }
   };
 
-  // [유지됨] 터치 기반 수동 빈칸 렌더링 로직
   const loadTextForManualSelection = (content: string) => {
     setParsedText(content);
     setSelectedWordIndices(new Set()); 
