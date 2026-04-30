@@ -5,9 +5,9 @@ import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 interface Category { id: number; title: string; content: string; }
 interface Card { id: number; content: string; answer: string; options: string[]; level: number; next_review: string; status: string; }
 
-// 🚨 [핵심 업데이트] 한국어 조사 및 법령 기호 초정밀 분리 정규식
-// (공백, 기호, 지정된 조사가 단어 끝에 올 때만 분리하여 '의미'의 '의'처럼 중간에서 쪼개지는 것을 방지합니다.)
-const SPLIT_REGEX = /(\s+|[ㆍ\.,!?()[\]{}<>"']|(?:은|는|이|가|을|를|의|에|에게|과|와|로서|로|으로|도|만|부터|까지|이다|한다|함|됨|됨을|함을|함으로써|대하여|대해|대한|등|및)(?=\s|$|[ㆍ\.,!?()[\]{}<>"']))/g;
+// 🚨 [초정밀 업데이트] 대한민국 법령 3단 비교표 전용 조사 및 특수기호 분리 엔진
+// 「」, 『』, ㆍ, ①~⑮ 등의 법제처 기호와 '에서는', '로부터' 등의 복합 조사를 완벽하게 발라냅니다.
+const SPLIT_REGEX = /(\s+|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]+|(?:은|는|이|가|을|를|의|에|에게|과|와|로서|로써|로|으로|도|만|부터|까지|이다|한다|함|됨|됨을|함을|함으로써|대하여|대해|대한|등|및|에서|에서는|에서의|로부터|에의|로부터의|에도|에는|이나|나|라도|이라도)(?=\s|$|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]))/g;
 
 function App() {
   const enokiFlow = useEnokiFlow();
@@ -265,7 +265,6 @@ function App() {
     setSelectedWordIndices(newSet);
   };
 
-  // 🚨 [핵심 업데이트] 분리된 단어들을 병합하는 스마트 빈칸 생성 로직
   const handleMakeBlankCard = async () => {
     if (!isLoggedIn || selectedWordIndices.size === 0) return alert("단어를 선택해주세요.");
     updatePanel('loading', '수동 저장 중', '카드를 저장하고 있습니다...');
@@ -273,7 +272,7 @@ function App() {
     const words = parsedText.split(SPLIT_REGEX);
     let cardContent = ""; 
     let answerText = ""; 
-    let isBlanking = false; // 현재 빈칸 블록 안에 있는지 추적
+    let isBlanking = false;
 
     words.forEach((word, index) => {
       if (word === undefined || word === '') return;
@@ -281,17 +280,14 @@ function App() {
 
       if (isSelected) {
         if (!isBlanking) {
-          // 새로운 빈칸 시작
           cardContent += "[ ";
-          if (answerText.length > 0) answerText += ", "; // 여러 개의 독립된 빈칸인 경우 콤마로 구분
+          if (answerText.length > 0) answerText += ", "; 
           isBlanking = true;
         }
-        // 빈칸 진행 중 (단어가 이어짐)
         cardContent += word;
         answerText += word;
       } else {
         if (isBlanking) {
-          // 빈칸 종료
           cardContent += " ]";
           isBlanking = false;
         }
@@ -299,7 +295,6 @@ function App() {
       }
     });
     
-    // 텍스트 끝에서 빈칸이 열려있는 상태로 끝난 경우 닫아주기
     if (isBlanking) {
       cardContent += " ]";
     }
@@ -440,7 +435,6 @@ function App() {
                     </div>
                   )}
 
-                  {/* 🚨 [핵심 업데이트] 개선된 수동 추출 터미널 UI */}
                   {parsedText && (
                     <div className="space-y-4">
                       <div className="text-xs text-white/60 border-b border-white/5 pb-2">수동 터미널 (단어 및 조사 개별 터치)</div>
