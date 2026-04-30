@@ -154,15 +154,47 @@ function App() {
     loadMyCards();
   };
 
+  // 🚨 개별 카테고리(문헌) 삭제 기능
+  const handleDeleteCategory = async (cat_id: number) => {
+    if (!isLoggedIn || !confirm("이 문헌을 개별 삭제하시겠습니까?")) return;
+    try {
+      const res = await fetch("https://api.blankd.top/api/delete-category", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, id: cat_id }),
+      });
+      if (res.ok) {
+        alert("삭제되었습니다.");
+        loadCategories();
+      }
+    } catch (err) { alert("삭제 실패"); }
+  };
+
+  // 🚨 개별 카드 삭제 기능
+  const handleDeleteCard = async (card_id: number) => {
+    if (!isLoggedIn || !confirm("이 카드를 영구 삭제하시겠습니까?")) return;
+    try {
+      const res = await fetch("https://api.blankd.top/api/delete-card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, id: card_id }),
+      });
+      if (res.ok) {
+        alert("카드가 삭제되었습니다.");
+        loadMyCards();
+      }
+    } catch (err) { alert("삭제 실패"); }
+  };
+
   const handleDeleteAll = async () => {
-    if (!isLoggedIn || !confirm("보관소의 모든 데이터를 영구적으로 지우시겠습니까?")) return;
+    if (!isLoggedIn || !confirm("보관소의 모든 데이터를 일괄 삭제하시겠습니까?")) return;
     const res = await fetch("https://api.blankd.top/api/delete-all", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ wallet_address: safeAddress }),
     });
     if (res.ok) {
-      alert("초기화되었습니다.");
+      alert("전체 초기화되었습니다.");
       setCategories([]); setSavedCards([]); setParsedText(""); setFile(null); setExamFile(null);
       updatePanel('idle', '초기화 완료', '데이터가 리셋되었습니다.');
     }
@@ -337,9 +369,8 @@ function App() {
                     <div className="space-y-4">
                       <h3 className="text-sm font-light tracking-[0.2em] text-white/80 border-b border-white/5 pb-2">1. 법령 문헌 업로드</h3>
                       <label className="block border border-dashed border-white/20 p-8 text-center hover:border-white/40 cursor-pointer">
-                        {/* 🚨 HTML 파일 선택 허용 */}
                         <input type="file" accept=".pdf,.txt,.docx,.html,.htm" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" />
-                        <div className="text-[10px] text-white/40">{file ? `✅ ${file.name}` : "파일 선택 (.pdf, .html)"}</div>
+                        <div className="text-[10px] text-white/40">{file ? `✅ ${file.name}` : "파일 선택 (.html 지원)"}</div>
                       </label>
                       <button onClick={() => uploadFile('law')} className="w-full py-3 border border-white/10 hover:bg-white/10 text-xs">법령분석 개시</button>
                     </div>
@@ -348,7 +379,7 @@ function App() {
                       <h3 className="text-sm font-light tracking-[0.2em] text-teal-500/80 border-b border-white/5 pb-2">2. 모의고사 구조화</h3>
                       <label className="block border border-dashed border-teal-900/40 p-8 text-center hover:border-teal-500/40 cursor-pointer">
                         <input type="file" accept=".pdf,.txt,.docx,.html,.htm" onChange={(e) => setExamFile(e.target.files?.[0] || null)} className="hidden" />
-                        <div className="text-[10px] text-teal-500/40">{examFile ? `✅ ${examFile.name}` : "파일 선택 (.pdf, .html)"}</div>
+                        <div className="text-[10px] text-teal-500/40">{examFile ? `✅ ${examFile.name}` : "파일 선택"}</div>
                       </label>
                       <button onClick={() => uploadFile('exam')} className="w-full py-3 border border-teal-900/30 hover:bg-teal-900/20 text-teal-500/80 text-xs">문제/정답/해설 DB 등록</button>
                     </div>
@@ -367,9 +398,14 @@ function App() {
                               <div className="text-xs text-white/80">{cat.title}</div>
                               <div className="text-[10px] text-white/30 truncate mt-1">{cat.content}</div>
                             </div>
-                            <button onClick={() => handleAutoMakeCard(cat)} className="text-[10px] border border-white/10 px-3 py-1.5 hover:border-white/40 whitespace-nowrap">
-                              분석
-                            </button>
+                            <div className="flex gap-2">
+                              <button onClick={() => handleDeleteCategory(cat.id)} className="text-[10px] border border-rose-900/30 text-rose-500/60 px-3 py-1.5 hover:border-rose-500/50 hover:bg-rose-900/20 whitespace-nowrap">
+                                삭제
+                              </button>
+                              <button onClick={() => handleAutoMakeCard(cat)} className="text-[10px] border border-white/10 px-3 py-1.5 hover:border-white/40 whitespace-nowrap">
+                                분석
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -493,8 +529,19 @@ function App() {
                         className={`border p-6 transition-all cursor-pointer relative bg-white/[0.01] rounded-sm
                           ${card.status === "BURNED" ? "border-white/5 opacity-30" : getTierClass(card.level)}`}
                       >
-                        <div className="flex justify-between mb-6 text-[10px] tracking-widest font-light">
-                          <span>{getLevelTier(card.level)}</span><span className="text-white/40">LV.{card.level}</span>
+                        <div className="flex justify-between items-start mb-6">
+                          <span className="text-[10px] tracking-widest font-light">{getLevelTier(card.level)}</span>
+                          <div className="flex items-center gap-4">
+                            <span className="text-[10px] tracking-widest font-light text-white/40">LV.{card.level}</span>
+                            {card.status !== "BURNED" && (
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); handleDeleteCard(card.id); }} 
+                                className="text-[10px] text-rose-500/60 hover:text-rose-400 tracking-widest"
+                              >
+                                삭제
+                              </button>
+                            )}
+                          </div>
                         </div>
                         <div className="text-[13px] leading-loose font-serif text-white/80 line-clamp-3 mb-6">{card.content}</div>
                       </div>
@@ -508,7 +555,7 @@ function App() {
             {activeTab === 'mypage' && (
               <div className="max-w-md mx-auto space-y-8 py-16 animate-in fade-in">
                 <button onClick={handleGithubPull} className="w-full py-4 border border-teal-500/30 hover:border-teal-500/80 text-teal-300 text-xs">최신 코드 강제 동기화 (Pull)</button>
-                <button onClick={handleDeleteAll} className="w-full py-4 border border-rose-900/30 text-rose-500/70 text-xs">전체 데이터 영구 초기화</button>
+                <button onClick={handleDeleteAll} className="w-full py-4 border border-rose-900/30 text-rose-500/70 text-xs">전체 데이터 일괄 초기화</button>
                 <div className="[&>button]:!w-full [&>button]:!bg-transparent [&>button]:!border [&>button]:!border-white/20 [&>button]:!text-white/80 [&>button]:!font-light [&>button]:!text-xs [&>button]:!tracking-widest [&>button]:!rounded-sm"><ConnectButton /></div>
               </div>
             )}
