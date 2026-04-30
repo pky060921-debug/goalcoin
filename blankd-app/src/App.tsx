@@ -337,8 +337,9 @@ function App() {
                     <div className="space-y-4">
                       <h3 className="text-sm font-light tracking-[0.2em] text-white/80 border-b border-white/5 pb-2">1. 법령 문헌 업로드</h3>
                       <label className="block border border-dashed border-white/20 p-8 text-center hover:border-white/40 cursor-pointer">
-                        <input type="file" accept=".pdf,.txt,.docx" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" />
-                        <div className="text-[10px] text-white/40">{file ? `✅ ${file.name}` : "파일 선택"}</div>
+                        {/* 🚨 HTML 파일 선택 허용 */}
+                        <input type="file" accept=".pdf,.txt,.docx,.html,.htm" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" />
+                        <div className="text-[10px] text-white/40">{file ? `✅ ${file.name}` : "파일 선택 (.pdf, .html)"}</div>
                       </label>
                       <button onClick={() => uploadFile('law')} className="w-full py-3 border border-white/10 hover:bg-white/10 text-xs">법령분석 개시</button>
                     </div>
@@ -346,8 +347,8 @@ function App() {
                     <div className="space-y-4">
                       <h3 className="text-sm font-light tracking-[0.2em] text-teal-500/80 border-b border-white/5 pb-2">2. 모의고사 구조화</h3>
                       <label className="block border border-dashed border-teal-900/40 p-8 text-center hover:border-teal-500/40 cursor-pointer">
-                        <input type="file" accept=".pdf,.txt,.docx" onChange={(e) => setExamFile(e.target.files?.[0] || null)} className="hidden" />
-                        <div className="text-[10px] text-teal-500/40">{examFile ? `✅ ${examFile.name}` : "파일 선택"}</div>
+                        <input type="file" accept=".pdf,.txt,.docx,.html,.htm" onChange={(e) => setExamFile(e.target.files?.[0] || null)} className="hidden" />
+                        <div className="text-[10px] text-teal-500/40">{examFile ? `✅ ${examFile.name}` : "파일 선택 (.pdf, .html)"}</div>
                       </label>
                       <button onClick={() => uploadFile('exam')} className="w-full py-3 border border-teal-900/30 hover:bg-teal-900/20 text-teal-500/80 text-xs">문제/정답/해설 DB 등록</button>
                     </div>
