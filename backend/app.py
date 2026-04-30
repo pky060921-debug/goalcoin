@@ -40,7 +40,7 @@ OLLAMA_API_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = "gemma4:26b" 
 GLOBAL_WORD_POOL = set()
 
-# 🚨 [오류 진단 코드] 
+# 🚨 [오류 진단 코드] 모든 치명적 에러를 캐치하고 프론트엔드로 반환
 @app.errorhandler(Exception)
 def handle_exception(e):
     error_detail = traceback.format_exc()
@@ -79,7 +79,7 @@ def init_db():
 init_db()
 
 # ==========================================
-# 3. 데이터 클렌징 및 법령 파싱 엔진
+# 3. 데이터 클렌징 및 3단 비교표 파싱 엔진
 # ==========================================
 def clean_korean_law_text(text):
     text = re.sub(r'-\s*\d+\s*-', '\n', text)
@@ -97,6 +97,7 @@ def normalize_text(text):
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
+# 아키님 오리지널 HTML 3단 비교표 파싱 코드 기반 복원
 def parse_html_3col_law(raw_text):
     unescaped = html.unescape(raw_text)
     pre_clean = re.sub(r'<(br|p|div|li)[^>]*>', '\n', unescaped, flags=re.IGNORECASE)
