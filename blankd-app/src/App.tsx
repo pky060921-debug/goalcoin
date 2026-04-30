@@ -5,6 +5,10 @@ import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 interface Category { id: number; title: string; content: string; }
 interface Card { id: number; content: string; answer: string; options: string[]; level: number; next_review: string; status: string; }
 
+// 🚨 [핵심 업데이트] 한국어 조사 및 법령 기호 초정밀 분리 정규식
+// (공백, 기호, 지정된 조사가 단어 끝에 올 때만 분리하여 '의미'의 '의'처럼 중간에서 쪼개지는 것을 방지합니다.)
+const SPLIT_REGEX = /(\s+|[ㆍ\.,!?()[\]{}<>"']|(?:은|는|이|가|을|를|의|에|에게|과|와|로서|로|으로|도|만|부터|까지|이다|한다|함|됨|됨을|함을|함으로써|대하여|대해|대한|등|및)(?=\s|$|[ㆍ\.,!?()[\]{}<>"']))/g;
+
 function App() {
   const enokiFlow = useEnokiFlow();
   const zkLogin = useZkLogin();
@@ -154,7 +158,6 @@ function App() {
     loadMyCards();
   };
 
-  // 🚨 개별 카테고리(문헌) 삭제 기능
   const handleDeleteCategory = async (cat_id: number) => {
     if (!isLoggedIn || !confirm("이 문헌을 개별 삭제하시겠습니까?")) return;
     try {
@@ -170,7 +173,6 @@ function App() {
     } catch (err) { alert("삭제 실패"); }
   };
 
-  // 🚨 개별 카드 삭제 기능
   const handleDeleteCard = async (card_id: number) => {
     if (!isLoggedIn || !confirm("이 카드를 영구 삭제하시겠습니까?")) return;
     try {
@@ -187,14 +189,14 @@ function App() {
   };
 
   const handleDeleteAll = async () => {
-    if (!isLoggedIn || !confirm("보관소의 모든 데이터를 일괄 삭제하시겠습니까?")) return;
+    if (!isLoggedIn || !confirm("보관소의 모든 데이터를 영구적으로 지우시겠습니까?")) return;
     const res = await fetch("https://api.blankd.top/api/delete-all", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ wallet_address: safeAddress }),
     });
     if (res.ok) {
-      alert("전체 초기화되었습니다.");
+      alert("초기화되었습니다.");
       setCategories([]); setSavedCards([]); setParsedText(""); setFile(null); setExamFile(null);
       updatePanel('idle', '초기화 완료', '데이터가 리셋되었습니다.');
     }
@@ -263,18 +265,44 @@ function App() {
     setSelectedWordIndices(newSet);
   };
 
+  // 🚨 [핵심 업데이트] 분리된 단어들을 병합하는 스마트 빈칸 생성 로직
   const handleMakeBlankCard = async () => {
     if (!isLoggedIn || selectedWordIndices.size === 0) return alert("단어를 선택해주세요.");
     updatePanel('loading', '수동 저장 중', '카드를 저장하고 있습니다...');
     
-    const words = parsedText.split(/(\s+)/);
-    let cardContent = ""; let answerText = ""; 
+    const words = parsedText.split(SPLIT_REGEX);
+    let cardContent = ""; 
+    let answerText = ""; 
+    let isBlanking = false; // 현재 빈칸 블록 안에 있는지 추적
+
     words.forEach((word, index) => {
-      if (selectedWordIndices.has(index) && word.trim() !== "") {
-        cardContent += `[ ${word} ]`;
-        answerText += answerText ? ` ${word}` : word; 
-      } else { cardContent += word; }
+      if (word === undefined || word === '') return;
+      const isSelected = selectedWordIndices.has(index) && word.trim() !== "";
+
+      if (isSelected) {
+        if (!isBlanking) {
+          // 새로운 빈칸 시작
+          cardContent += "[ ";
+          if (answerText.length > 0) answerText += ", "; // 여러 개의 독립된 빈칸인 경우 콤마로 구분
+          isBlanking = true;
+        }
+        // 빈칸 진행 중 (단어가 이어짐)
+        cardContent += word;
+        answerText += word;
+      } else {
+        if (isBlanking) {
+          // 빈칸 종료
+          cardContent += " ]";
+          isBlanking = false;
+        }
+        cardContent += word;
+      }
     });
+    
+    // 텍스트 끝에서 빈칸이 열려있는 상태로 끝난 경우 닫아주기
+    if (isBlanking) {
+      cardContent += " ]";
+    }
 
     try {
       const res = await fetch("https://api.blankd.top/api/save-card", {
@@ -370,7 +398,7 @@ function App() {
                       <h3 className="text-sm font-light tracking-[0.2em] text-white/80 border-b border-white/5 pb-2">1. 법령 문헌 업로드</h3>
                       <label className="block border border-dashed border-white/20 p-8 text-center hover:border-white/40 cursor-pointer">
                         <input type="file" accept=".pdf,.txt,.docx,.html,.htm" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" />
-                        <div className="text-[10px] text-white/40">{file ? `✅ ${file.name}` : "파일 선택 (.html 지원)"}</div>
+                        <div className="text-[10px] text-white/40">{file ? `✅ ${file.name}` : "파일 선택 (.pdf, .html)"}</div>
                       </label>
                       <button onClick={() => uploadFile('law')} className="w-full py-3 border border-white/10 hover:bg-white/10 text-xs">법령분석 개시</button>
                     </div>
@@ -379,7 +407,7 @@ function App() {
                       <h3 className="text-sm font-light tracking-[0.2em] text-teal-500/80 border-b border-white/5 pb-2">2. 모의고사 구조화</h3>
                       <label className="block border border-dashed border-teal-900/40 p-8 text-center hover:border-teal-500/40 cursor-pointer">
                         <input type="file" accept=".pdf,.txt,.docx,.html,.htm" onChange={(e) => setExamFile(e.target.files?.[0] || null)} className="hidden" />
-                        <div className="text-[10px] text-teal-500/40">{examFile ? `✅ ${examFile.name}` : "파일 선택"}</div>
+                        <div className="text-[10px] text-teal-500/40">{examFile ? `✅ ${examFile.name}` : "파일 선택 (.pdf, .html)"}</div>
                       </label>
                       <button onClick={() => uploadFile('exam')} className="w-full py-3 border border-teal-900/30 hover:bg-teal-900/20 text-teal-500/80 text-xs">문제/정답/해설 DB 등록</button>
                     </div>
@@ -412,20 +440,28 @@ function App() {
                     </div>
                   )}
 
+                  {/* 🚨 [핵심 업데이트] 개선된 수동 추출 터미널 UI */}
                   {parsedText && (
                     <div className="space-y-4">
-                      <div className="text-xs text-white/60 border-b border-white/5 pb-2">수동 터미널 (단어 터치)</div>
-                      <div ref={textRef} className="font-serif text-[13px] leading-relaxed text-white/70 h-40 overflow-y-auto border border-white/10 p-4 bg-[#0a0a0c] scrollbar-hide">
-                        {parsedText.split(/(\s+)/).map((word, idx) => {
-                          if (word.trim() === '') return <span key={idx}>{word}</span>;
+                      <div className="text-xs text-white/60 border-b border-white/5 pb-2">수동 터미널 (단어 및 조사 개별 터치)</div>
+                      <div ref={textRef} className="font-serif text-[14px] leading-[2.5] text-white/70 h-48 overflow-y-auto border border-white/10 p-5 bg-[#0a0a0c] scrollbar-hide break-all">
+                        {parsedText.split(SPLIT_REGEX).map((word, idx) => {
+                          if (word === undefined || word === '') return null;
+                          if (/^\s+$/.test(word)) return <span key={idx}>{word}</span>;
+                          
+                          const isSelected = selectedWordIndices.has(idx);
                           return (
-                            <span key={idx} onClick={() => toggleWordSelection(idx)} className={`cursor-pointer px-1 mx-[1px] rounded ${selectedWordIndices.has(idx) ? 'bg-amber-500/80 text-black font-bold' : 'hover:bg-white/10'}`}>
+                            <span 
+                              key={idx} 
+                              onClick={() => toggleWordSelection(idx)} 
+                              className={`cursor-pointer px-[1px] py-[2px] mx-[1px] rounded transition-colors duration-150 ${isSelected ? 'bg-amber-500 text-black font-bold shadow-[0_0_8px_rgba(245,158,11,0.6)]' : 'hover:bg-white/20'}`}
+                            >
                               {word}
                             </span>
                           );
                         })}
                       </div>
-                      <button onClick={handleMakeBlankCard} className="w-full py-3 border border-white/10 hover:border-white/40 text-xs">선택 단어 추출</button>
+                      <button onClick={handleMakeBlankCard} className="w-full py-3 border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 text-xs tracking-widest">선택 지식 병합 및 추출</button>
                     </div>
                   )}
                 </div>
