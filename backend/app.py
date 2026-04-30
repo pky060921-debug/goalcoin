@@ -173,7 +173,7 @@ def parse_html_3col_law(raw_text):
                     
                     clean_content = re.sub(r'「?국민건강보험법\s*시행(?:령|규칙)」?', '', clean_content)
                     clean_content = re.sub(r'([^\n])\s*(\d+\.)', r'\1\n\2', clean_content)
-                    clean_content = re.sub(r'[①-⑮\[<].*?[\d\.]+.*?[\]>]', '', clean_content)
+                    clean_content = re.sub(r'[①-⑮\[<].*?[\d\.]+.*?\]>]', '', clean_content)
                     clean_content = clean_content.replace("시행령", "").replace("시행규칙", "")
                     clean_content = re.sub(r'[ \t]+', ' ', clean_content)
                     clean_content = re.sub(r'\n\s*\n', '\n', clean_content).strip()
@@ -271,12 +271,15 @@ def get_ai_keyword(prompt_text, exams_context):
             """,
             "stream": False
         }
-        response = requests.post(OLLAMA_API_URL, json=payload, timeout=45)
+        # 🚨 Timeout 600초 (10분) 연장
+        response = requests.post(OLLAMA_API_URL, json=payload, timeout=600)
         if response.status_code == 200:
             result = response.json().get('response', '').strip()
             return re.sub(r'[^\w\s]', '', result.split('\n')[0]).strip()
     except requests.exceptions.ConnectionError:
         logging.error("Ollama AI 엔진 연결 거부됨 (포트 11434).")
+    except requests.exceptions.ReadTimeout:
+        logging.error("Ollama AI 추천 타임아웃 발생 (대기 시간 초과).")
     except Exception as e:
         logging.error(f"Ollama 통신 오류: {str(e)}")
     return None
@@ -391,7 +394,8 @@ def upload_exam():
         ]
         텍스트: {raw_text[:3000]}
         """
-        response = requests.post(OLLAMA_API_URL, json={"model": MODEL_NAME, "prompt": prompt, "format": "json", "stream": False}, timeout=120)
+        # 🚨 Timeout 600초 (10분) 연장: 26B 모델이 충분히 고민할 시간을 줍니다.
+        response = requests.post(OLLAMA_API_URL, json={"model": MODEL_NAME, "prompt": prompt, "format": "json", "stream": False}, timeout=600)
         exam_data = json.loads(response.json().get('response', '[]'))
         
         conn = sqlite3.connect(DB_PATH)
@@ -407,6 +411,11 @@ def upload_exam():
         return jsonify({
             "error": "AI 엔진(Ollama) 연결 거부됨", 
             "details": "맥미니에서 Ollama가 꺼져 있습니다. 터미널에서 'ollama serve' 명령어를 실행하거나 응용 프로그램에서 Ollama 앱을 켜주세요."
+        }), 500
+    except requests.exceptions.ReadTimeout:
+        return jsonify({
+            "error": "Ollama 응답 지연 (Timeout)", 
+            "details": "Gemma 26B 모델이 답변을 생성하는 데 너무 오랜 시간이 걸려 연결이 끊겼습니다. 문서의 양을 줄여서 업로드하거나, 더 가벼운 모델(gemma:7b 등) 사용을 권장합니다."
         }), 500
     except Exception as e:
         return jsonify({"error": "모의고사 파싱 실패", "details": traceback.format_exc()}), 500
@@ -451,10 +460,13 @@ def generate_ai_explanation():
         [문제]: {question}
         [정답]: {answer}
         """
-        response = requests.post(OLLAMA_API_URL, json={"model": MODEL_NAME, "prompt": prompt, "stream": False}, timeout=60)
+        # 🚨 Timeout 600초 (10분) 연장
+        response = requests.post(OLLAMA_API_URL, json={"model": MODEL_NAME, "prompt": prompt, "stream": False}, timeout=600)
         return jsonify({"explanation": response.json()['response']})
     except requests.exceptions.ConnectionError:
         return jsonify({"error": "Ollama 연결 거부", "details": "맥미니에서 Ollama가 꺼져 있습니다."}), 500
+    except requests.exceptions.ReadTimeout:
+        return jsonify({"error": "Ollama 응답 지연", "details": "해설을 생성하는 데 시간이 초과되었습니다."}), 500
     except Exception as e:
         return jsonify({"error": "해설 생성 에러", "details": traceback.format_exc()}), 500
 
@@ -504,6 +516,8 @@ def auto_make_cards():
         return jsonify({"message": msg})
     except requests.exceptions.ConnectionError:
         return jsonify({"error": "Ollama 연결 거부", "details": "맥미니 터미널에서 'ollama serve'를 실행하세요."}), 500
+    except requests.exceptions.ReadTimeout:
+        return jsonify({"error": "Ollama 응답 지연", "details": "빈칸 추천을 계산하는 데 시간이 초과되었습니다."}), 500
     except Exception as e:
         return jsonify({"error": "카드 제작 실패", "details": traceback.format_exc()}), 500
 
