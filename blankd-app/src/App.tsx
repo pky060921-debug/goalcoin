@@ -265,6 +265,7 @@ function App() {
     setSelectedWordIndices(newSet);
   };
 
+  // 🚨 [핵심 업데이트] 분리된 단어들을 병합하는 스마트 빈칸 생성 로직
   const handleMakeBlankCard = async () => {
     if (!isLoggedIn || selectedWordIndices.size === 0) return alert("단어를 선택해주세요.");
     updatePanel('loading', '수동 저장 중', '카드를 저장하고 있습니다...');
@@ -272,7 +273,7 @@ function App() {
     const words = parsedText.split(SPLIT_REGEX);
     let cardContent = ""; 
     let answerText = ""; 
-    let isBlanking = false;
+    let isBlanking = false; // 현재 빈칸 블록 안에 있는지 추적
 
     words.forEach((word, index) => {
       if (word === undefined || word === '') return;
@@ -280,14 +281,17 @@ function App() {
 
       if (isSelected) {
         if (!isBlanking) {
+          // 새로운 빈칸 시작
           cardContent += "[ ";
-          if (answerText.length > 0) answerText += ", "; 
+          if (answerText.length > 0) answerText += ", "; // 여러 개의 독립된 빈칸인 경우 콤마로 구분
           isBlanking = true;
         }
+        // 빈칸 진행 중 (단어가 이어짐)
         cardContent += word;
         answerText += word;
       } else {
         if (isBlanking) {
+          // 빈칸 종료
           cardContent += " ]";
           isBlanking = false;
         }
@@ -295,6 +299,7 @@ function App() {
       }
     });
     
+    // 텍스트 끝에서 빈칸이 열려있는 상태로 끝난 경우 닫아주기
     if (isBlanking) {
       cardContent += " ]";
     }
@@ -402,7 +407,7 @@ function App() {
                       <h3 className="text-sm font-light tracking-[0.2em] text-teal-500/80 border-b border-white/5 pb-2">2. 모의고사 구조화</h3>
                       <label className="block border border-dashed border-teal-900/40 p-8 text-center hover:border-teal-500/40 cursor-pointer">
                         <input type="file" accept=".pdf,.txt,.docx,.html,.htm" onChange={(e) => setExamFile(e.target.files?.[0] || null)} className="hidden" />
-                        <div className="text-[10px] text-teal-500/40">{examFile ? `✅ ${examFile.name}` : "파일 선택 (.pdf, .html)"}</div>
+                        <div className="text-[10px] text-teal-500/40">{examFile ? `✅ ${examFile.name}` : "파일 선택"}</div>
                       </label>
                       <button onClick={() => uploadFile('exam')} className="w-full py-3 border border-teal-900/30 hover:bg-teal-900/20 text-teal-500/80 text-xs">문제/정답/해설 DB 등록</button>
                     </div>
@@ -435,6 +440,7 @@ function App() {
                     </div>
                   )}
 
+                  {/* 🚨 [핵심 업데이트] 개선된 수동 추출 터미널 UI */}
                   {parsedText && (
                     <div className="space-y-4">
                       <div className="text-xs text-white/60 border-b border-white/5 pb-2">수동 터미널 (단어 및 조사 개별 터치)</div>
@@ -563,6 +569,7 @@ function App() {
                           <span className="text-[10px] tracking-widest font-light">{getLevelTier(card.level)}</span>
                           <div className="flex items-center gap-4">
                             <span className="text-[10px] tracking-widest font-light text-white/40">LV.{card.level}</span>
+                            {/* 🚨 개별 카드 삭제 버튼 복구 */}
                             {card.status !== "BURNED" && (
                               <button 
                                 onClick={(e) => { e.stopPropagation(); handleDeleteCard(card.id); }} 
