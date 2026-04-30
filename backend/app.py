@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import fitz  # PyMuPDF (PDF용)
+import fitz  # PyMuPDF
 import sqlite3
 import os
 import requests
@@ -12,6 +12,11 @@ import logging
 import subprocess
 import html
 from datetime import datetime, timedelta
+
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    BeautifulSoup = None
 
 try:
     import docx
@@ -48,7 +53,7 @@ def health_check():
     return jsonify({"status": "alive", "message": "백엔드 서버 정상 작동 중."}), 200
 
 # ==========================================
-# 2. DB 초기화 (수정된 exams 스키마 포함)
+# 2. DB 초기화
 # ==========================================
 def init_db():
     try:
@@ -74,8 +79,24 @@ def init_db():
 init_db()
 
 # ==========================================
-# 3. 아키님의 오리지널 HTML 3단 비교표 파싱 로직 복구
+# 3. 데이터 클렌징 및 법령 파싱 엔진
 # ==========================================
+def clean_korean_law_text(text):
+    text = re.sub(r'-\s*\d+\s*-', '\n', text)
+    text = re.sub(r'/?\d{4}\.\d{1,2}\.\d{1,2}\s*\d{2}:\d{2}.*', '\n', text)
+    text = re.sub(r'\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2}:\d{2}', '\n', text)
+    text = re.sub(r'(?:국민건강보험법|시행령|시행규칙)[\sㆍ]*', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+def normalize_text(text):
+    text = re.sub(r'(\s*)(제\s*\d+\s*조)', r'\n\n\2', text)
+    text = re.sub(r'(\s*)(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)', r'\n\2', text)
+    text = re.sub(r'([^\n다까요\.])\n(?!(제\s*\d+\s*조|①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩))', r'\1 ', text)
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
 def parse_html_3col_law(raw_text):
     unescaped = html.unescape(raw_text)
     pre_clean = re.sub(r'<(br|p|div|li)[^>]*>', '\n', unescaped, flags=re.IGNORECASE)
@@ -253,6 +274,8 @@ def get_ai_keyword(prompt_text, exams_context):
         if response.status_code == 200:
             result = response.json().get('response', '').strip()
             return re.sub(r'[^\w\s]', '', result.split('\n')[0]).strip()
+    except requests.exceptions.ConnectionError:
+        logging.error("Ollama AI 엔진 연결 거부됨 (포트 11434).")
     except Exception as e:
         logging.error(f"Ollama 통신 오류: {str(e)}")
     return None
@@ -278,7 +301,6 @@ def upload_law():
         
         filename = file.filename.lower()
         
-        # 🚨 [아키님 맞춤] HTML 파싱 로직 적용
         if filename.endswith('.html') or filename.endswith('.htm'):
             raw_bytes = file.read()
             raw_text = ""
@@ -292,10 +314,34 @@ def upload_law():
                 raw_text = raw_bytes.decode('utf-8', errors='ignore')
             categories = parse_html_3col_law(raw_text)
         else:
-            # 기본 PDF 텍스트 추출
-            doc = fitz.open(stream=file.read(), filetype="pdf")
-            text = "".join([page.get_text() for page in doc])
-            categories = [{"title": "문서 전체", "content": text}] # 단순 추출
+            raw_bytes = file.read()
+            text = ""
+            if filename.endswith('.pdf'):
+                doc = fitz.open(stream=raw_bytes, filetype="pdf")
+                for page in doc:
+                    text += page.get_text("text") + "\n"
+            elif filename.endswith('.docx') and docx:
+                import io
+                doc_file = docx.Document(io.BytesIO(raw_bytes))
+                text = "\n".join([p.text for p in doc_file.paragraphs])
+            else:
+                try: text = raw_bytes.decode('utf-8')
+                except: text = raw_bytes.decode('cp949', errors='ignore')
+
+            cleaned_text = clean_korean_law_text(text)
+            normalized_text = normalize_text(cleaned_text)
+            
+            categories = []
+            parts = re.split(r'(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)', normalized_text)
+            if parts and len(parts) > 1:
+                if parts[0].strip():
+                    categories.append({"title": "총칙 및 서론", "content": parts[0].strip()})
+                for i in range(1, len(parts), 2):
+                    title = parts[i].strip()
+                    content = parts[i+1].strip() if i+1 < len(parts) else ""
+                    categories.append({"title": title, "content": content})
+            else:
+                categories = [{"title": "문서 전체", "content": normalized_text}]
             
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -320,11 +366,22 @@ def upload_exam():
         if not file: return jsonify({"error": "업로드된 파일이 없습니다."}), 400
         
         filename = file.filename.lower()
+        raw_bytes = file.read()
+        raw_text = ""
+        
         if filename.endswith('.pdf'):
-            doc = fitz.open(stream=file.read(), filetype="pdf")
-            raw_text = "".join([page.get_text() for page in doc])
+            doc = fitz.open(stream=raw_bytes, filetype="pdf")
+            for page in doc:
+                raw_text += page.get_text("text") + "\n"
+        elif filename.endswith('.html') or filename.endswith('.htm'):
+            if BeautifulSoup:
+                soup = BeautifulSoup(raw_bytes, 'html.parser')
+                raw_text = soup.get_text(separator='\n', strip=True)
         else:
-            raw_text = file.read().decode('utf-8', errors='ignore')
+            try: raw_text = raw_bytes.decode('utf-8')
+            except: raw_text = raw_bytes.decode('cp949', errors='ignore')
+            
+        raw_text = normalize_text(clean_korean_law_text(raw_text))
         
         prompt = f"""
         당신은 법률 시험지 파서입니다. 다음 텍스트에서 문제, 정답, 해설을 추출하여 반드시 아래의 JSON 배열 형식으로만 출력하세요.
@@ -344,6 +401,12 @@ def upload_exam():
         conn.commit()
         conn.close()
         return jsonify({"message": f"{len(exam_data)}개의 모의고사 문항이 구조화되어 저장되었습니다."})
+    
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            "error": "AI 엔진(Ollama) 연결 거부됨", 
+            "details": "맥미니에서 Ollama가 꺼져 있습니다. 터미널에서 'ollama serve' 명령어를 실행하거나 응용 프로그램에서 Ollama 앱을 켜주세요."
+        }), 500
     except Exception as e:
         return jsonify({"error": "모의고사 파싱 실패", "details": traceback.format_exc()}), 500
 
@@ -389,6 +452,8 @@ def generate_ai_explanation():
         """
         response = requests.post(OLLAMA_API_URL, json={"model": MODEL_NAME, "prompt": prompt, "stream": False}, timeout=60)
         return jsonify({"explanation": response.json()['response']})
+    except requests.exceptions.ConnectionError:
+        return jsonify({"error": "Ollama 연결 거부", "details": "맥미니에서 Ollama가 꺼져 있습니다."}), 500
     except Exception as e:
         return jsonify({"error": "해설 생성 에러", "details": traceback.format_exc()}), 500
 
@@ -436,6 +501,8 @@ def auto_make_cards():
             
         conn.close()
         return jsonify({"message": msg})
+    except requests.exceptions.ConnectionError:
+        return jsonify({"error": "Ollama 연결 거부", "details": "맥미니 터미널에서 'ollama serve'를 실행하세요."}), 500
     except Exception as e:
         return jsonify({"error": "카드 제작 실패", "details": traceback.format_exc()}), 500
 
@@ -522,7 +589,6 @@ def submit_answer():
     conn.close()
     return jsonify({"message": msg})
 
-# 🚨 [추가된 부분] 개별 문헌 및 카드 삭제 라우트
 @app.route('/api/delete-category', methods=['POST'])
 def delete_category():
     try:
