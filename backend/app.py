@@ -13,6 +13,11 @@ import subprocess
 from datetime import datetime, timedelta
 
 try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    BeautifulSoup = None
+
+try:
     import docx
 except ImportError:
     docx = None
@@ -24,7 +29,7 @@ logging.basicConfig(filename='backend_error_log.txt', level=logging.ERROR,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
-# 50MB 대용량 업로드 및 CORS 강제 허용 (Failed to fetch 완벽 차단)
+# 50MB 대용량 업로드 및 CORS 강제 허용
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
 
@@ -34,7 +39,7 @@ OLLAMA_API_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = "gemma4:26b" 
 GLOBAL_WORD_POOL = set()
 
-# 🚨 [모든 오류를 낚아채는 진단 코드]
+# [모든 오류를 낚아채는 진단 코드]
 @app.errorhandler(Exception)
 def handle_exception(e):
     error_detail = traceback.format_exc()
@@ -56,7 +61,6 @@ def init_db():
         cursor = conn.cursor()
         cursor.execute('CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, title TEXT, content TEXT)')
         cursor.execute('CREATE TABLE IF NOT EXISTS cards (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, category_id INTEGER, card_content TEXT, answer_text TEXT, options_json TEXT, level INTEGER DEFAULT 0, next_review_time DATETIME, status TEXT DEFAULT "OWNED")')
-        # 구조적 모의고사 테이블 (문제, 정답, 해설)
         cursor.execute('''CREATE TABLE IF NOT EXISTS exams (
             id INTEGER PRIMARY KEY AUTOINCREMENT, 
             wallet_address TEXT, 
@@ -75,8 +79,21 @@ def init_db():
 init_db()
 
 # ==========================================
-# 3. 법령 파싱 & 단어 추출 & 하이브리드 엔진
+# 3. 데이터 클렌징 및 법령 파싱 엔진
 # ==========================================
+def clean_korean_law_text(text):
+    """법제처 PDF/HTML 파일 특유의 불순물(페이지 번호, 출력일시, 헤더 등)을 완벽하게 제거합니다."""
+    # 1. 페이지 번호 제거 (예: - 1 -, - 12 -)
+    text = re.sub(r'-\s*\d+\s*-', '\n', text)
+    # 2. 출력 일시 및 바코드 찌꺼기 제거 (예: /2025.12.05 09:50/130268/***.*)
+    text = re.sub(r'/?\d{4}\.\d{1,2}\.\d{1,2}\s*\d{2}:\d{2}.*', '\n', text)
+    text = re.sub(r'\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2}:\d{2}', '\n', text)
+    # 3. 법령 3단 비교표 상단 반복 텍스트 제거
+    text = re.sub(r'(?:국민건강보험법|시행령|시행규칙)[\sㆍ]*', ' ', text)
+    # 4. 쓸데없는 공백 및 연속 줄바꿈 압축
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
 def parse_law_into_categories(text):
     pattern = r'(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)'
     parts = re.split(pattern, text)
@@ -144,19 +161,39 @@ def get_next_review_time(level):
 def extract_text(file):
     filename = file.filename.lower()
     raw_bytes = file.read()
-    if filename.endswith('.pdf'):
+    
+    # 🚨 [핵심 업데이트] HTML 파일 지원 추가
+    if filename.endswith('.html') or filename.endswith('.htm'):
+        if not BeautifulSoup:
+            raise Exception("HTML 파싱을 위해 beautifulsoup4 라이브러리가 필요합니다. (pip install beautifulsoup4)")
+        try:
+            # HTML 구조를 무시하고 눈에 보이는 텍스트만 깔끔하게 뽑아냅니다.
+            soup = BeautifulSoup(raw_bytes, 'html.parser')
+            text = soup.get_text(separator='\n', strip=True)
+            return clean_korean_law_text(text)
+        except Exception as e:
+            raise Exception(f"HTML 파싱 실패: {str(e)}")
+            
+    elif filename.endswith('.pdf'):
         try:
             doc = fitz.open(stream=raw_bytes, filetype="pdf")
-            return "".join([page.get_text() for page in doc])
+            # 단순히 텍스트만 긁어오는 것이 아니라 블록 단위로 읽어 혼선을 방지합니다.
+            text = ""
+            for page in doc:
+                text += page.get_text("text") + "\n"
+            return clean_korean_law_text(text)
         except Exception as e:
-            raise Exception(f"PDF 파싱 실패 (파일이 손상되었거나 암호화됨): {str(e)}")
+            raise Exception(f"PDF 파싱 실패: {str(e)}")
+            
     elif filename.endswith('.docx') and docx:
         import io
         doc_file = docx.Document(io.BytesIO(raw_bytes))
-        return "\n".join([p.text for p in doc_file.paragraphs])
+        text = "\n".join([p.text for p in doc_file.paragraphs])
+        return clean_korean_law_text(text)
     else:
-        try: return raw_bytes.decode('utf-8')
-        except: return raw_bytes.decode('cp949', errors='ignore')
+        try: text = raw_bytes.decode('utf-8')
+        except: text = raw_bytes.decode('cp949', errors='ignore')
+        return clean_korean_law_text(text)
 
 def get_ai_keyword(prompt_text, exams_context):
     try:
@@ -202,8 +239,8 @@ def upload_law():
         wallet_address = request.form.get('wallet_address')
         file = request.files.get('file')
         if not file: return jsonify({"error": "업로드된 파일이 없습니다."}), 400
-        full_text = extract_text(file)
         
+        full_text = extract_text(file)
         categories = parse_law_into_categories(full_text)
         
         conn = sqlite3.connect(DB_PATH)
