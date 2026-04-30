@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import fitz  # PyMuPDF
+import fitz  # PyMuPDF (PDF용)
 import sqlite3
 import os
 import requests
@@ -10,12 +10,8 @@ import json
 import traceback
 import logging
 import subprocess
+import html
 from datetime import datetime, timedelta
-
-try:
-    from bs4 import BeautifulSoup
-except ImportError:
-    BeautifulSoup = None
 
 try:
     import docx
@@ -39,7 +35,7 @@ OLLAMA_API_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = "gemma4:26b" 
 GLOBAL_WORD_POOL = set()
 
-# [모든 오류를 낚아채는 진단 코드]
+# 🚨 [오류 진단 코드] 
 @app.errorhandler(Exception)
 def handle_exception(e):
     error_detail = traceback.format_exc()
@@ -47,13 +43,12 @@ def handle_exception(e):
     print(f"\n[🚨 서버 치명적 에러]\n{error_detail}")
     return jsonify({"error": "백엔드 엔진 오류", "details": error_detail}), 500
 
-# 프론트엔드 연결 진단용 Ping 테스트 엔드포인트
 @app.route('/api/health', methods=['GET', 'OPTIONS'])
 def health_check():
-    return jsonify({"status": "alive", "message": "백엔드 서버가 정상적으로 응답하고 있습니다."}), 200
+    return jsonify({"status": "alive", "message": "백엔드 서버 정상 작동 중."}), 200
 
 # ==========================================
-# 2. DB 초기화
+# 2. DB 초기화 (수정된 exams 스키마 포함)
 # ==========================================
 def init_db():
     try:
@@ -79,33 +74,111 @@ def init_db():
 init_db()
 
 # ==========================================
-# 3. 데이터 클렌징 및 법령 파싱 엔진
+# 3. 아키님의 오리지널 HTML 3단 비교표 파싱 로직 복구
 # ==========================================
-def clean_korean_law_text(text):
-    """법제처 PDF/HTML 파일 특유의 불순물(페이지 번호, 출력일시, 헤더 등)을 완벽하게 제거합니다."""
-    # 1. 페이지 번호 제거 (예: - 1 -, - 12 -)
-    text = re.sub(r'-\s*\d+\s*-', '\n', text)
-    # 2. 출력 일시 및 바코드 찌꺼기 제거 (예: /2025.12.05 09:50/130268/***.*)
-    text = re.sub(r'/?\d{4}\.\d{1,2}\.\d{1,2}\s*\d{2}:\d{2}.*', '\n', text)
-    text = re.sub(r'\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2}:\d{2}', '\n', text)
-    # 3. 법령 3단 비교표 상단 반복 텍스트 제거
-    text = re.sub(r'(?:국민건강보험법|시행령|시행규칙)[\sㆍ]*', ' ', text)
-    # 4. 쓸데없는 공백 및 연속 줄바꿈 압축
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    return text.strip()
-
-def parse_law_into_categories(text):
-    pattern = r'(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)'
-    parts = re.split(pattern, text)
+def parse_html_3col_law(raw_text):
+    unescaped = html.unescape(raw_text)
+    pre_clean = re.sub(r'<(br|p|div|li)[^>]*>', '\n', unescaped, flags=re.IGNORECASE)
+    pre_clean = re.sub(r'</(p|div|li|td|tr)>', '\n', pre_clean, flags=re.IGNORECASE)
+    rows = re.split(r'<tr[^>]*>', pre_clean, flags=re.IGNORECASE)
+    
     categories = []
-    if parts:
-        if parts[0].strip():
-            categories.append({"title": "총칙 및 서론", "content": parts[0].strip()})
-        for i in range(1, len(parts), 2):
-            title = parts[i].strip()
-            content = parts[i+1].strip() if i+1 < len(parts) else ""
-            categories.append({"title": title, "content": content})
-    return categories if categories else [{"title": "문서 전체", "content": text}]
+    
+    if len(rows) > 1:
+        current_chapter = "1. 미분류"
+        current_law_num = "000조"
+        type_names = {0: '법', 1: '령', 2: '규'}
+        
+        for row_html in rows[1:]:
+            try:
+                row_text = re.sub(r'<[^>]+>', ' ', row_html).strip()
+                row_text = re.sub(r'\s+', ' ', row_text)
+                
+                chap_match = re.search(r'제\s*(\d+)\s*장\s*(.*)', row_text)
+                if chap_match:
+                    c_num = chap_match.group(1)
+                    c_name = re.sub(r'[^\w\s]', '', chap_match.group(2).split('(')[0]).strip()[:15] or "총칙"
+                    current_chapter = f"{int(c_num)}. {c_name}"
+                    if len(row_text) < 40 and "조" not in row_text:
+                        continue
+
+                cols = re.split(r'<td[^>]*>', row_html, flags=re.IGNORECASE)[1:]
+                if not cols:
+                    continue
+                
+                c0_raw = re.sub(r'<[^>]+>', '', cols[0]).strip()
+                is_act_cell = bool(re.match(r'^\s*제\s*\d+\s*조(?:\s*의\s*\d+)?', c0_raw))
+                
+                mapped_cols = ["", "", ""]
+                if len(cols) >= 3:
+                    mapped_cols = cols[:3]
+                elif len(cols) == 2:
+                    if is_act_cell:
+                        mapped_cols[0], mapped_cols[1] = cols[0], cols[1]
+                    else:
+                        mapped_cols[1], mapped_cols[2] = cols[0], cols[1]
+                elif len(cols) == 1:
+                    if is_act_cell:
+                        mapped_cols[0] = cols[0]
+                    else:
+                        mapped_cols[1] = cols[0]
+
+                if mapped_cols[0].strip():
+                    law_match = re.search(r'제\s*(\d+)\s*조(?:\s*의\s*(\d+))?', re.sub(r'<[^>]+>', '', mapped_cols[0]))
+                    if law_match:
+                        main_num, ext_part = law_match.group(1), law_match.group(2)
+                        current_law_num = f"{int(main_num):03d}조"
+                        if ext_part:
+                            current_law_num += f"의{ext_part}"
+                
+                if current_law_num == "000조":
+                    fallback = re.search(r'제\s*(\d+)\s*조(?:\s*의\s*(\d+))?', row_text)
+                    if fallback:
+                        main_num, ext_part = fallback.group(1), fallback.group(2)
+                        current_law_num = f"{int(main_num):03d}조"
+                        if ext_part:
+                            current_law_num += f"의{ext_part}"
+
+                for col_idx in range(3):
+                    html_content = mapped_cols[col_idx]
+                    if not html_content or len(html_content) < 5:
+                        continue
+                    
+                    clean_content = re.sub(r'<[^>]+>', '', html_content)
+                    
+                    if re.search(r'국민건강보험\s*요양급여의\s*기준', clean_content):
+                        continue
+                    
+                    clean_content = re.sub(r'「?국민건강보험법\s*시행(?:령|규칙)」?', '', clean_content)
+                    clean_content = re.sub(r'([^\n])\s*(\d+\.)', r'\1\n\2', clean_content)
+                    clean_content = re.sub(r'[①-⑮\[<].*?[\d\.]+.*?[\]>]', '', clean_content)
+                    clean_content = clean_content.replace("시행령", "").replace("시행규칙", "")
+                    clean_content = re.sub(r'[ \t]+', ' ', clean_content)
+                    clean_content = re.sub(r'\n\s*\n', '\n', clean_content).strip()
+                    
+                    if len(clean_content) < 2: continue
+                    if clean_content in ["시행규칙", "법률", "내용없음", ".", "-"]: continue
+                    
+                    article_match = re.search(r'제\s*(\d+)\s*조(?:\s*의\s*(\d+))?', clean_content)
+                    if article_match:
+                        main_n, ext_n = article_match.group(1), article_match.group(2)
+                        article_num_str = f"제{main_n}조" + (f"의{ext_n}" if ext_n else "")
+                    else:
+                        article_num_str = current_law_num.lstrip('0')
+                    
+                    title_text = ""
+                    title_match = re.search(r'\((.*?)\)', clean_content)
+                    if title_match:
+                        title_text = title_match.group(1).strip()
+                    else:
+                        first_line = clean_content.replace(article_num_str, "").strip().split('\n')[0]
+                        title_text = first_line[:15]
+                    
+                    clean_title = f"[{type_names.get(col_idx, '법')}] {article_num_str} {title_text}"
+                    categories.append({"title": clean_title, "content": clean_content})
+            except Exception as e:
+                continue
+    return categories
 
 def extract_candidates(text):
     candidates = []
@@ -158,43 +231,6 @@ def get_next_review_time(level):
     elif level == 2: return now + timedelta(days=3)
     else: return now + timedelta(days=7)
 
-def extract_text(file):
-    filename = file.filename.lower()
-    raw_bytes = file.read()
-    
-    # 🚨 [핵심 업데이트] HTML 파일 지원 추가
-    if filename.endswith('.html') or filename.endswith('.htm'):
-        if not BeautifulSoup:
-            raise Exception("HTML 파싱을 위해 beautifulsoup4 라이브러리가 필요합니다. (pip install beautifulsoup4)")
-        try:
-            # HTML 구조를 무시하고 눈에 보이는 텍스트만 깔끔하게 뽑아냅니다.
-            soup = BeautifulSoup(raw_bytes, 'html.parser')
-            text = soup.get_text(separator='\n', strip=True)
-            return clean_korean_law_text(text)
-        except Exception as e:
-            raise Exception(f"HTML 파싱 실패: {str(e)}")
-            
-    elif filename.endswith('.pdf'):
-        try:
-            doc = fitz.open(stream=raw_bytes, filetype="pdf")
-            # 단순히 텍스트만 긁어오는 것이 아니라 블록 단위로 읽어 혼선을 방지합니다.
-            text = ""
-            for page in doc:
-                text += page.get_text("text") + "\n"
-            return clean_korean_law_text(text)
-        except Exception as e:
-            raise Exception(f"PDF 파싱 실패: {str(e)}")
-            
-    elif filename.endswith('.docx') and docx:
-        import io
-        doc_file = docx.Document(io.BytesIO(raw_bytes))
-        text = "\n".join([p.text for p in doc_file.paragraphs])
-        return clean_korean_law_text(text)
-    else:
-        try: text = raw_bytes.decode('utf-8')
-        except: text = raw_bytes.decode('cp949', errors='ignore')
-        return clean_korean_law_text(text)
-
 def get_ai_keyword(prompt_text, exams_context):
     try:
         exams_context = exams_context[:1000] if exams_context else "기출 문제 없음"
@@ -240,18 +276,38 @@ def upload_law():
         file = request.files.get('file')
         if not file: return jsonify({"error": "업로드된 파일이 없습니다."}), 400
         
-        full_text = extract_text(file)
-        categories = parse_law_into_categories(full_text)
+        filename = file.filename.lower()
         
+        # 🚨 [아키님 맞춤] HTML 파싱 로직 적용
+        if filename.endswith('.html') or filename.endswith('.htm'):
+            raw_bytes = file.read()
+            raw_text = ""
+            for enc in ['utf-8', 'utf-8-sig', 'cp949', 'latin-1']:
+                try:
+                    raw_text = raw_bytes.decode(enc)
+                    break
+                except:
+                    continue
+            if not raw_text:
+                raw_text = raw_bytes.decode('utf-8', errors='ignore')
+            categories = parse_html_3col_law(raw_text)
+        else:
+            # 기본 PDF 텍스트 추출
+            doc = fitz.open(stream=file.read(), filetype="pdf")
+            text = "".join([page.get_text() for page in doc])
+            categories = [{"title": "문서 전체", "content": text}] # 단순 추출
+            
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
+        full_pool_text = ""
         for cat in categories:
             cursor.execute("INSERT INTO categories (wallet_address, title, content) VALUES (?, ?, ?)", 
                            (wallet_address, cat['title'], cat['content']))
+            full_pool_text += cat['content'] + " "
         conn.commit()
         conn.close()
         
-        GLOBAL_WORD_POOL.update(extract_candidates(full_text))
+        GLOBAL_WORD_POOL.update(extract_candidates(full_pool_text))
         return jsonify({"message": "법령 아카이브 등록 성공", "count": len(categories)})
     except Exception as e:
         return jsonify({"error": "법령 분석 실패", "details": traceback.format_exc()}), 500
@@ -263,7 +319,12 @@ def upload_exam():
         file = request.files.get('file')
         if not file: return jsonify({"error": "업로드된 파일이 없습니다."}), 400
         
-        raw_text = extract_text(file)
+        filename = file.filename.lower()
+        if filename.endswith('.pdf'):
+            doc = fitz.open(stream=file.read(), filetype="pdf")
+            raw_text = "".join([page.get_text() for page in doc])
+        else:
+            raw_text = file.read().decode('utf-8', errors='ignore')
         
         prompt = f"""
         당신은 법률 시험지 파서입니다. 다음 텍스트에서 문제, 정답, 해설을 추출하여 반드시 아래의 JSON 배열 형식으로만 출력하세요.
@@ -460,6 +521,37 @@ def submit_answer():
     conn.commit()
     conn.close()
     return jsonify({"message": msg})
+
+# 🚨 [추가된 부분] 개별 문헌 및 카드 삭제 라우트
+@app.route('/api/delete-category', methods=['POST'])
+def delete_category():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        cat_id = data.get('id')
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM categories WHERE wallet_address = ? AND id = ?", (wallet_address, cat_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "해당 문헌이 개별 삭제되었습니다."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/delete-card', methods=['POST'])
+def delete_card():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        card_id = data.get('id')
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM cards WHERE wallet_address = ? AND id = ?", (wallet_address, card_id))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "해당 카드가 영구 삭제되었습니다."})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/delete-all', methods=['POST'])
 def delete_all():
