@@ -88,18 +88,28 @@ function MainApp() {
   const [elapsed, setElapsed] = useState<number>(0);
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0); 
   
-  // 🚨 [신규] 빈칸 추천(x표시) 문헌 노출 설정 상태 추가
-  const [blankRecommendationActive, setBlankRecommendationActive] = useState(false);
+  // 🚨 [신규] 기능 토글 설정 상태 추가
+  const [blankRecommendationActive, setBlankRecommendationActive] = useState(false); // 기존 x표시 관련
+  const [isAiRecommendEnabled, setIsAiRecommendEnabled] = useState(true); // AI 빈칸 추천 버튼 표시 여부
 
   useEffect(() => {
     try {
       const sCols = localStorage.getItem('cardColumns'); if (sCols) setCardColumns(JSON.parse(sCols));
       const sNames = localStorage.getItem('columnNames'); if (sNames) setColumnNames(JSON.parse(sNames));
       const sColCount = localStorage.getItem('colCount'); if (sColCount) setColCount(parseInt(sColCount) || 3);
+      
+      const sAiEnabled = localStorage.getItem('isAiRecommendEnabled'); 
+      if (sAiEnabled !== null) setIsAiRecommendEnabled(sAiEnabled === 'true');
     } catch(e) {}
   }, []); 
 
   const updateColCount = (num: number) => { setColCount(num); localStorage.setItem('colCount', num.toString()); };
+  
+  const toggleAiRecommend = () => {
+    const nextState = !isAiRecommendEnabled;
+    setIsAiRecommendEnabled(nextState);
+    localStorage.setItem('isAiRecommendEnabled', String(nextState));
+  };
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -198,7 +208,7 @@ function MainApp() {
 
   const handleMakeBlankCard = async (cat: Category) => {
     if (!isLoggedIn || selectedWordIndices.size === 0) return alert("단어를 선택해주세요.");
-    updatePanel('loading', '저장 및 삭제 중', '카드를 만들고 원본을 삭제합니다...', 50);
+    updatePanel('loading', '저장 및 삭제 중', '카드를 만들고 원본 문헌을 삭제합니다...', 50);
     const words = cat.content ? String(cat.content).split(SPLIT_REGEX) : [];
     let cardContent = ""; let answerText = ""; let isBlanking = false;
     words.forEach((word, index) => {
@@ -215,30 +225,50 @@ function MainApp() {
 
     try {
       const res = await fetch("https://api.blankd.top/api/save-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, card_content: cardContent, answer_text: answerText }) });
-      if (res.ok) {
-        await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
-        setSelectedWordIndices(new Set()); setExpandedCategoryId(null);
-        loadCategories(); loadMyCards(); updatePanel('success', '완료', '추출 및 삭제됨.', 100); setActiveTab('enhance');
-      }
-    } catch(err) {}
+      if (!res.ok) throw new Error('서버에서 카드 저장을 거부했습니다.');
+      
+      const delRes = await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
+      if (!delRes.ok) throw new Error('원본 문헌 삭제에 실패했습니다.');
+      
+      setSelectedWordIndices(new Set()); setExpandedCategoryId(null);
+      await loadCategories(); await loadMyCards(); 
+      updatePanel('success', '완료', '추출 및 삭제됨.', 100); 
+      setActiveTab('enhance');
+    } catch(err: any) {
+      console.error("추출 에러:", err);
+      updatePanel('error', '추출 실패', err.message || '네트워크 오류가 발생했습니다.', 0);
+      alert("추출 중 오류가 발생했습니다: " + err.message);
+    }
   }; 
 
   const handleDeleteCategory = async (cat_id: number) => {
     if (!confirm("이 문헌을 영구 삭제하시겠습니까?")) return;
-    const res = await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat_id }) });
-    if (res.ok) loadCategories();
+    try {
+      const res = await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat_id }) });
+      if (res.ok) loadCategories();
+    } catch(e) { alert("삭제 실패"); }
   }; 
 
   const handleDeleteCard = async (card_id: number) => {
     if (!confirm("이 카드를 영구 삭제하시겠습니까?")) return;
-    const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card_id }) });
-    if (res.ok) { setActiveCard(null); loadMyCards(); }
+    try {
+      const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card_id }) });
+      if (res.ok) { setActiveCard(null); loadMyCards(); }
+    } catch(e) { alert("삭제 실패"); }
   }; 
 
   const handleDeleteAll = async () => {
-    if (!confirm("보관소의 모든 데이터를 영구 지우시겠습니까?")) return;
-    const res = await fetch("https://api.blankd.top/api/delete-all", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress }) });
-    if (res.ok) { setCategories([]); setSavedCards([]); setExams([]); setExpandedCategoryId(null); updatePanel('idle', '초기화', '데이터 리셋됨', 0); }
+    if (!confirm("보관소의 모든 데이터를 영구 지우시겠습니까? 복구할 수 없습니다!")) return;
+    try {
+      const res = await fetch("https://api.blankd.top/api/delete-all", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress }) });
+      if (!res.ok) throw new Error('데이터 삭제 중 서버 오류');
+      setCategories([]); setSavedCards([]); setExams([]); setExpandedCategoryId(null); 
+      updatePanel('idle', '초기화', '데이터 리셋됨', 0); 
+      alert("데이터가 완전히 초기화되었습니다.");
+    } catch(e) {
+      console.error("전체 삭제 에러:", e);
+      alert("데이터 초기화에 실패했습니다. 네트워크를 확인해주세요.");
+    }
   }; 
 
   const handleMoveCraftFolders = async () => {
@@ -365,8 +395,20 @@ function MainApp() {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const safeExams = Array.isArray(exams) ? exams : [];
 
-  const craftFolders = Array.from(new Set(safeCategories.map(c => c?.folder_name || '기본 폴더'))).reverse();
-  const enhanceFolders = Array.from(new Set(safeCards.map(c => c?.folder_name || '기본 폴더'))).reverse(); 
+  // 🚨 [신규] 1장, 2장, 3장 등 숫자를 추출하여 오름차순(위에서 아래로) 정렬하는 알고리즘
+  const sortFolders = (a: string, b: string) => {
+    if (a === '기본 폴더') return -1;
+    if (b === '기본 폴더') return 1;
+    const matchA = String(a).match(/제\s*(\d+)\s*장/);
+    const matchB = String(b).match(/제\s*(\d+)\s*장/);
+    if (matchA && matchB) {
+      return parseInt(matchA[1], 10) - parseInt(matchB[1], 10);
+    }
+    return String(a).localeCompare(String(b));
+  };
+
+  const craftFolders = Array.from(new Set(safeCategories.map(c => c?.folder_name || '기본 폴더'))).sort(sortFolders);
+  const enhanceFolders = Array.from(new Set(safeCards.map(c => c?.folder_name || '기본 폴더'))).sort(sortFolders); 
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] font-sans selection:bg-neutral-800 selection:text-white p-6 sm:p-12 relative">
@@ -445,7 +487,6 @@ function MainApp() {
                           {safeCategories
                             .filter(c => c && (c.folder_name || '기본 폴더') === folder)
                             .filter(c => {
-                              // 🚨 [신규] x표시 숨김/노출 설정 로직 적용
                               if (c?.is_x_marked && !blankRecommendationActive) return false;
                               return true;
                             })
@@ -465,7 +506,10 @@ function MainApp() {
                                   ) : ( 
                                     <div className="w-full animate-in fade-in flex flex-col gap-3 p-6 bg-[#0a0a0c] border border-indigo-500/50 shadow-2xl rounded-sm"> 
                                       <div className="flex justify-between items-center mb-2"> 
-                                        <button onClick={() => handleAiRecommend(cat)} className="text-[10px] bg-teal-900/40 text-teal-400 px-2 py-1 rounded">✨ Gemma 26B 빈칸 추천</button> 
+                                        {/* 🚨 [신규] 토글 상태에 따라 AI 빈칸 추천 버튼 표시/숨김 처리 */}
+                                        {isAiRecommendEnabled ? (
+                                          <button onClick={() => handleAiRecommend(cat)} className="text-[10px] bg-teal-900/40 text-teal-400 px-2 py-1 rounded">✨ AI 빈칸 추천</button> 
+                                        ) : <div></div>}
                                         <button onClick={(e) => { e.stopPropagation(); setExpandedCategoryId(null); }} className="text-white/40 text-xs">닫기</button> 
                                       </div> 
                                       <textarea value={parsedText} onChange={(e) => { setParsedText(e.target.value); setSelectedWordIndices(new Set()); }} className="w-full h-24 bg-black/40 text-white/80 border border-white/10 p-4 text-[13px] font-serif outline-none scrollbar-hide" /> 
@@ -575,7 +619,6 @@ function MainApp() {
               </div>
             )} 
 
-            {/* 🚨 설정 탭에 빈칸 추천 문헌 노출 설정 추가 완료 */}
             {activeTab === 'mypage' && (
               <div className="max-w-md mx-auto space-y-8 py-16 animate-in fade-in">
                 <div className="border border-white/10 p-6 rounded-sm">
@@ -592,7 +635,13 @@ function MainApp() {
                     ))}
                   </div>
 
-                  <div className="text-xs text-white/60 mb-4">지식 관리 설정</div>
+                  <div className="text-xs text-white/60 mb-4">AI 보조 기능 및 필터 설정</div>
+                  <button 
+                    onClick={toggleAiRecommend}
+                    className={`w-full py-3 mb-2 text-[10px] border transition-all rounded-sm ${isAiRecommendEnabled ? 'bg-indigo-900/30 border-indigo-500/50 text-indigo-300' : 'border-white/10 text-white/40'}`}
+                  >
+                    AI 빈칸 추천 버튼 표시: {isAiRecommendEnabled ? "ON" : "OFF"}
+                  </button>
                   <button 
                     onClick={() => setBlankRecommendationActive(!blankRecommendationActive)}
                     className={`w-full py-3 text-[10px] border transition-all rounded-sm ${blankRecommendationActive ? 'bg-teal-900/30 border-teal-500/50 text-teal-300' : 'border-white/10 text-white/40'}`}
