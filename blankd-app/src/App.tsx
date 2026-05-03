@@ -2,7 +2,7 @@ import React, { Component, ErrorInfo, ReactNode, useState, useEffect, useRef } f
 import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
 import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 
-// [오류 진단] 최상위 에러 바운더리: 흰 화면(WSOD) 방지 및 오류 원인 출력
+// 최상위 에러 바운더리
 class ErrorBoundary extends Component<{children: ReactNode}, {hasError: boolean, error: Error | null, errorInfo: ErrorInfo | null}> {
   constructor(props: any) { super(props); this.state = { hasError: false, error: null, errorInfo: null }; }
   static getDerivedStateFromError(error: Error) { return { hasError: true, error }; }
@@ -12,7 +12,7 @@ class ErrorBoundary extends Component<{children: ReactNode}, {hasError: boolean,
       return (
         <div className="min-h-screen bg-black text-rose-500 p-10 font-mono">
           <h1 className="text-2xl font-bold mb-4 border-b border-rose-500/50 pb-2">🚨 치명적 렌더링 오류 감지됨</h1>
-          <p className="mb-4 text-white/80">흰 화면(Crash)을 방지하고 오류 진단 결과를 표시합니다. 백엔드 데이터 형식 문제일 가능성이 높습니다.</p>
+          <p className="mb-4 text-white/80">흰 화면(Crash)을 방지하고 오류 진단 결과를 표시합니다.</p>
           <div className="bg-rose-950/30 p-4 rounded border border-rose-900/50 mb-4 overflow-auto max-h-64">
             <p className="font-bold">{this.state.error?.toString()}</p>
             <pre className="text-xs text-rose-300 mt-2">{this.state.errorInfo?.componentStack}</pre>
@@ -78,12 +78,12 @@ function MainApp() {
 
   const [blankRecommendationActive, setBlankRecommendationActive] = useState(false);
 
-  // 롱프레스 터치 커스텀 훅
-  const useLongPress = (callback: () => void, ms = 800) => {
-    const timerRef = useRef<any>(null);
-    const start = () => { timerRef.current = setTimeout(callback, ms); };
-    const clear = () => { clearTimeout(timerRef.current); };
-    return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
+  // [핵심 교체] Hook(useRef)을 제거하고 순수 클로저로 동작하는 롱프레스 함수 생성기 (에러 310 완벽 해결)
+  const createLongPress = (callback: () => void, ms = 800) => {
+    let timer: any = null;
+    const start = () => { timer = setTimeout(callback, ms); };
+    const clear = () => { if (timer) clearTimeout(timer); };
+    return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e: any) => { e.preventDefault(); callback(); } };
   };
 
   useEffect(() => {
@@ -111,7 +111,6 @@ function MainApp() {
 
   useEffect(() => { if (isLoggedIn) { loadCategories(); loadMyCards(); loadExams(); } }, [isLoggedIn, safeAddress]);
 
-  // [강력 방어] API 데이터가 무조건 배열(Array)인지 검증. 객체나 HTML 에러 메시지가 오면 빈 배열 처리.
   const loadCategories = async () => {
     try {
       const res = await fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`);
@@ -408,7 +407,6 @@ function MainApp() {
     } catch (e) { return <span>렌더링 오류</span>; }
   };
 
-  // [강력 방어] 빈 배열을 보장하여 .map() 충돌 방지
   const safeCategories = Array.isArray(categories) ? categories : [];
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const safeExams = Array.isArray(exams) ? exams : [];
@@ -513,7 +511,7 @@ function MainApp() {
                                 <input type="checkbox" className="absolute top-2 right-2 z-10 w-4 h-4 cursor-pointer" checked={selectedCraftIds.has(cat.id)} onChange={() => { const s = new Set(selectedCraftIds); if(s.has(cat.id)) s.delete(cat.id); else s.add(cat.id); setSelectedCraftIds(s); }} />
                                 {!isExpanded ? (
                                   <button 
-                                    {...useLongPress(() => handleDeleteCategory(cat.id), 800)}
+                                    {...createLongPress(() => handleDeleteCategory(cat.id), 800)}
                                     onClick={() => { setExpandedCategoryId(cat.id); setSelectedWordIndices(new Set()); setParsedText(cat.content || ""); }} 
                                     className="w-full h-full text-[13px] font-serif font-bold text-center text-indigo-300 bg-indigo-900/20 py-4 px-3 rounded-sm border border-indigo-500/30 shadow-[0_0_10px_rgba(99,102,241,0.1)] transition-all hover:bg-indigo-900/40"
                                   >
@@ -532,7 +530,7 @@ function MainApp() {
                                         if (/^\s+$/.test(word)) return <span key={idx}>{word}</span>;
                                         const isSelected = selectedWordIndices.has(idx);
                                         return (
-                                          <span key={idx} onClick={() => toggleWordSelection(idx)} {...useLongPress(() => handleSplitCategory(cat, idx, arr), 800)} className={`cursor-pointer px-[2px] rounded select-none ${isSelected ? 'bg-amber-500 text-black font-bold' : 'hover:bg-white/20'}`}>{word}</span>
+                                          <span key={idx} onClick={() => toggleWordSelection(idx)} {...createLongPress(() => handleSplitCategory(cat, idx, arr), 800)} className={`cursor-pointer px-[2px] rounded select-none ${isSelected ? 'bg-amber-500 text-black font-bold' : 'hover:bg-white/20'}`}>{word}</span>
                                         )
                                       })}
                                     </div>
@@ -596,7 +594,7 @@ function MainApp() {
                             <div key={card.id} className="relative expandable-card">
                               <input type="checkbox" className="absolute top-2 right-2 z-10 w-4 h-4 cursor-pointer" checked={selectedEnhanceIds.has(card.id)} onChange={() => { const s = new Set(selectedEnhanceIds); if(s.has(card.id)) s.delete(card.id); else s.add(card.id); setSelectedEnhanceIds(s); }} />
                               <button 
-                                {...useLongPress(() => handleDeleteCard(card.id), 800)}
+                                {...createLongPress(() => handleDeleteCard(card.id), 800)}
                                 onClick={() => setActiveCard(card)}
                                 className={`w-full relative text-[13px] font-serif font-bold text-center py-5 px-3 rounded-sm border shadow-[0_0_10px_rgba(0,0,0,0.5)] transition-all select-none ${card.status === "BURNED" ? "border-white/5 text-white/30" : "border-indigo-500/30 text-indigo-300 bg-indigo-900/20 hover:bg-indigo-900/40"}`}
                               >
