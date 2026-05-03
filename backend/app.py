@@ -40,7 +40,7 @@ TASK_STATUS = {}
 @app.errorhandler(Exception)
 def handle_exception(e):
     error_info = traceback.format_exc()
-    logging.error(f"백엔드 치명적 에러:\n{error_info}")
+    logging.error(f"[오류 진단] 백엔드 치명적 에러:\n{error_info}")
     return jsonify({"error": "백엔드 오류", "details": error_info}), 500
 
 @app.route('/api/health', methods=['GET', 'OPTIONS'])
@@ -58,7 +58,14 @@ def init_db():
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute('CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, title TEXT, content TEXT, folder_name TEXT DEFAULT "기본 폴더")')
+        cursor.execute('''CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            wallet_address TEXT, 
+            title TEXT, 
+            content TEXT, 
+            folder_name TEXT DEFAULT "기본 폴더",
+            is_x_marked INTEGER DEFAULT 0
+        )''')
         cursor.execute('CREATE TABLE IF NOT EXISTS cards (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, category_id INTEGER, card_content TEXT, answer_text TEXT, options_json TEXT, level INTEGER DEFAULT 0, next_review_time DATETIME, status TEXT DEFAULT "OWNED", best_time REAL DEFAULT NULL, folder_name TEXT DEFAULT "기본 폴더")')
         cursor.execute('''CREATE TABLE IF NOT EXISTS exams (
             id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, title TEXT, question TEXT, answer TEXT, explanation TEXT, related_law_keywords TEXT
@@ -71,11 +78,13 @@ def init_db():
         except: pass
         try: cursor.execute('ALTER TABLE cards ADD COLUMN folder_name TEXT DEFAULT "기본 폴더"')
         except: pass
+        try: cursor.execute('ALTER TABLE categories ADD COLUMN is_x_marked INTEGER DEFAULT 0')
+        except: pass
             
         conn.commit()
         conn.close()
     except Exception as e:
-        logging.error(f"DB 초기화 실패: {e}")
+        logging.error(f"[오류 진단] DB 초기화 실패: {e}\n{traceback.format_exc()}")
 
 init_db()
 
@@ -161,7 +170,9 @@ def parse_html_3col_law(raw_text):
                     
                     clean_title = f"[{type_names.get(col_idx, '법')}] {article_num_str} {title_text}"
                     categories.append({"title": clean_title, "content": clean_content})
-            except: continue
+            except Exception as e:
+                logging.error(f"[오류 진단] HTML 파싱 행 오류: {e}")
+                continue
     return categories
 
 def extract_candidates(text):
@@ -232,7 +243,7 @@ def upload_law():
                 conn = sqlite3.connect(DB_PATH)
                 cursor = conn.cursor()
                 for cat in categories:
-                    cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, '기본 폴더')", 
+                    cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name, is_x_marked) VALUES (?, ?, ?, '기본 폴더', 0)", 
                                    (wallet_address, cat['title'], cat['content']))
                 conn.commit()
                 conn.close()
@@ -241,13 +252,15 @@ def upload_law():
                 TASK_STATUS[task_id]["status"] = "completed"
                 TASK_STATUS[task_id]["message"] = "법령 아카이브 등록 성공"
             except Exception as e:
-                logging.error(f"[오류 진단] 법령 업로드 처리 실패: {e}")
+                logging.error(f"[오류 진단] 법령 업로드 처리 실패: {e}\n{traceback.format_exc()}")
                 TASK_STATUS[task_id]["status"] = "error"
                 TASK_STATUS[task_id]["message"] = f"분석 실패: {str(e)}"
                 
         threading.Thread(target=process_law).start()
         return jsonify({"task_id": task_id, "message": "업로드 완료, 백그라운드 처리 시작"})
-    except Exception as e: return jsonify({"error": "전송 실패"}), 500
+    except Exception as e: 
+        logging.error(f"[오류 진단] 전송 실패: {e}")
+        return jsonify({"error": "전송 실패"}), 500
 
 @app.route('/api/upload-exam', methods=['POST'])
 def upload_exam():
@@ -287,24 +300,29 @@ def upload_exam():
                 TASK_STATUS[task_id]["status"] = "completed"
                 TASK_STATUS[task_id]["message"] = f"{len(exam_data)}개의 문항이 저장되었습니다."
             except Exception as e:
-                logging.error(f"[오류 진단] 모의고사 업로드 처리 실패: {e}")
+                logging.error(f"[오류 진단] 모의고사 업로드 처리 실패: {e}\n{traceback.format_exc()}")
                 TASK_STATUS[task_id]["status"] = "error"
                 TASK_STATUS[task_id]["message"] = f"모의고사 파싱 실패: {str(e)}"
                 
         threading.Thread(target=process_exam).start()
         return jsonify({"task_id": task_id, "message": "모의고사 처리 시작"})
     except Exception as e:
+        logging.error(f"[오류 진단] 모의고사 전송 요청 실패: {e}")
         return jsonify({"error": "요청 실패"}), 500
 
 @app.route('/api/get-all-exams')
 def get_all_exams():
-    wallet_address = request.args.get('wallet_address')
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title, question, answer, explanation FROM exams WHERE wallet_address = ?", (wallet_address,))
-    exams = [{"id": r[0], "title": r[1], "question": r[2], "answer": r[3], "explanation": r[4]} for r in cursor.fetchall()]
-    conn.close()
-    return jsonify({"exams": exams})
+    try:
+        wallet_address = request.args.get('wallet_address')
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, title, question, answer, explanation FROM exams WHERE wallet_address = ?", (wallet_address,))
+        exams = [{"id": r[0], "title": r[1], "question": r[2], "answer": r[3], "explanation": r[4]} for r in cursor.fetchall()]
+        conn.close()
+        return jsonify({"exams": exams})
+    except Exception as e:
+        logging.error(f"[오류 진단] 모의고사 로드 실패: {e}")
+        return jsonify({"error": "조회 실패"}), 500
 
 @app.route('/api/recommend-blank', methods=['POST'])
 def recommend_blank():
@@ -351,7 +369,7 @@ def recommend_blank():
                 TASK_STATUS[task_id]["result"] = result
                 TASK_STATUS[task_id]["message"] = "AI 추천 완료!"
             except Exception as e:
-                logging.error(f"[오류 진단] AI 추천 실패: {e}")
+                logging.error(f"[오류 진단] AI 추천 실패: {e}\n{traceback.format_exc()}")
                 TASK_STATUS[task_id]["status"] = "error"
                 TASK_STATUS[task_id]["message"] = f"AI 연산 실패: {str(e)}"
                 
@@ -367,133 +385,171 @@ def split_category():
         cat_id, text1, text2, wallet_address = data.get('id'), data.get('text1'), data.get('text2'), data.get('wallet_address')
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("SELECT title, folder_name FROM categories WHERE id = ? AND wallet_address = ?", (cat_id, wallet_address))
+        cursor.execute("SELECT title, folder_name, is_x_marked FROM categories WHERE id = ? AND wallet_address = ?", (cat_id, wallet_address))
         row = cursor.fetchone()
         if not row: return jsonify({"error": "문헌을 찾을 수 없습니다."}), 404
-        title, folder_name = row[0], row[1]
+        title, folder_name, is_x_marked = row[0], row[1], row[2]
         
         cursor.execute("UPDATE categories SET content = ? WHERE id = ? AND wallet_address = ?", (text1, cat_id, wallet_address))
         match = re.search(r'-(\d+)$', title)
         new_title = f"{title[:match.start()]}-{int(match.group(1))+1}" if match else f"{title}-2"
             
-        cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", (wallet_address, new_title, text2, folder_name))
+        cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name, is_x_marked) VALUES (?, ?, ?, ?, ?)", (wallet_address, new_title, text2, folder_name, is_x_marked))
         conn.commit()
         conn.close()
         return jsonify({"message": "분할 완료"})
-    except Exception as e: return jsonify({"error": str(e)}), 500
+    except Exception as e: 
+        logging.error(f"[오류 진단] 분할 오류: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/move-categories', methods=['POST'])
 def move_categories():
-    data = request.json
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    for cat_id in data.get('ids', []):
-        cursor.execute("UPDATE categories SET folder_name = ? WHERE id = ? AND wallet_address = ?", (data.get('folder_name'), cat_id, data.get('wallet_address')))
-    conn.commit()
-    conn.close()
-    return jsonify({"message": "이동 완료"})
+    try:
+        data = request.json
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        for cat_id in data.get('ids', []):
+            cursor.execute("UPDATE categories SET folder_name = ? WHERE id = ? AND wallet_address = ?", (data.get('folder_name'), cat_id, data.get('wallet_address')))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "이동 완료"})
+    except Exception as e:
+        logging.error(f"[오류 진단] 카테고리 이동 오류: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/move-cards', methods=['POST'])
 def move_cards():
-    data = request.json
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    for card_id in data.get('ids', []):
-        cursor.execute("UPDATE cards SET folder_name = ? WHERE id = ? AND wallet_address = ?", (data.get('folder_name'), card_id, data.get('wallet_address')))
-    conn.commit()
-    conn.close()
-    return jsonify({"message": "이동 완료"})
+    try:
+        data = request.json
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        for card_id in data.get('ids', []):
+            cursor.execute("UPDATE cards SET folder_name = ? WHERE id = ? AND wallet_address = ?", (data.get('folder_name'), card_id, data.get('wallet_address')))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "이동 완료"})
+    except Exception as e:
+        logging.error(f"[오류 진단] 카드 이동 오류: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/get-categories')
 def get_categories():
-    wallet_address = request.args.get('wallet_address')
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ?", (wallet_address,))
-    cats = [{"id": r[0], "title": r[1], "content": r[2], "folder_name": r[3]} for r in cursor.fetchall()]
-    conn.close()
-    return jsonify({"categories": cats})
+    try:
+        wallet_address = request.args.get('wallet_address')
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, title, content, folder_name, is_x_marked FROM categories WHERE wallet_address = ?", (wallet_address,))
+        cats = [{"id": r[0], "title": r[1], "content": r[2], "folder_name": r[3], "is_x_marked": bool(r[4])} for r in cursor.fetchall()]
+        conn.close()
+        return jsonify({"categories": cats})
+    except Exception as e:
+        logging.error(f"[오류 진단] 카테고리 로드 오류: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/save-card', methods=['POST'])
 def save_card():
-    data = request.json
-    wallet_address, card_content, answer_text = data.get('wallet_address'), data.get('card_content'), data.get('answer_text')
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''INSERT INTO cards (wallet_address, card_content, answer_text, options_json, next_review_time, folder_name) VALUES (?, ?, ?, '[]', ?, "기본 폴더")''', (wallet_address, card_content, answer_text, get_next_review_time(0)))
-    conn.commit()
-    conn.close()
-    return jsonify({"message": "카드 제작 완료"}), 201
+    try:
+        data = request.json
+        wallet_address, card_content, answer_text = data.get('wallet_address'), data.get('card_content'), data.get('answer_text')
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('''INSERT INTO cards (wallet_address, card_content, answer_text, options_json, next_review_time, folder_name) VALUES (?, ?, ?, '[]', ?, "기본 폴더")''', (wallet_address, card_content, answer_text, get_next_review_time(0)))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "카드 제작 완료"}), 201
+    except Exception as e:
+        logging.error(f"[오류 진단] 카드 저장 오류: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/my-cards')
 def get_my_cards():
-    wallet_address = request.args.get('wallet_address')
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, next_review_time, status FROM cards WHERE wallet_address = ?", (wallet_address,))
-    now = datetime.utcnow()
-    for row in cursor.fetchall():
-        card_id, next_review_str, current_status = row
-        if next_review_str and current_status != 'BURNED':
-            next_review = datetime.strptime(next_review_str.split('.')[0], '%Y-%m-%d %H:%M:%S')
-            if now > next_review: cursor.execute("UPDATE cards SET status = 'BURNED', level = 0 WHERE id = ?", (card_id,))
-            elif (next_review - now).total_seconds() < 7200: cursor.execute("UPDATE cards SET status = 'AT_RISK' WHERE id = ?", (card_id,))
-    conn.commit()
-    cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name FROM cards WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
-    cards = [{"id": r[0], "content": r[1], "answer": r[2], "options": json.loads(r[3]), "level": r[4], "next_review": r[5], "status": r[6], "best_time": r[7], "folder_name": r[8]} for r in cursor.fetchall()]
-    conn.close()
-    return jsonify({"cards": cards})
+    try:
+        wallet_address = request.args.get('wallet_address')
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, next_review_time, status FROM cards WHERE wallet_address = ?", (wallet_address,))
+        now = datetime.utcnow()
+        for row in cursor.fetchall():
+            card_id, next_review_str, current_status = row
+            if next_review_str and current_status != 'BURNED':
+                next_review = datetime.strptime(next_review_str.split('.')[0], '%Y-%m-%d %H:%M:%S')
+                if now > next_review: cursor.execute("UPDATE cards SET status = 'BURNED', level = 0 WHERE id = ?", (card_id,))
+                elif (next_review - now).total_seconds() < 7200: cursor.execute("UPDATE cards SET status = 'AT_RISK' WHERE id = ?", (card_id,))
+        conn.commit()
+        cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name FROM cards WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
+        cards = [{"id": r[0], "content": r[1], "answer": r[2], "options": json.loads(r[3]), "level": r[4], "next_review": r[5], "status": r[6], "best_time": r[7], "folder_name": r[8]} for r in cursor.fetchall()]
+        conn.close()
+        return jsonify({"cards": cards})
+    except Exception as e:
+        logging.error(f"[오류 진단] 내 카드 로드 오류: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/submit-answer', methods=['POST'])
 def submit_answer():
-    data = request.json
-    card_id, is_correct, clear_time = data.get('card_id'), data.get('is_correct'), data.get('clear_time', 999.0)
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT level, best_time FROM cards WHERE id = ?", (card_id,))
-    row = cursor.fetchone()
-    if not row: return jsonify({"error": "카드가 없습니다."}), 404
-    current_lv, best_time = row[0], row[1]
-    
-    if is_correct:
-        new_lv = min(current_lv + 1, 50)
-        new_best = clear_time if best_time is None else min(best_time, clear_time)
-        cursor.execute("UPDATE cards SET level = ?, next_review_time = ?, status = 'OWNED', best_time = ? WHERE id = ?", (new_lv, get_next_review_time(new_lv), new_best, card_id))
-        msg = f"방어 성공! 레벨이 {new_lv}로 올랐습니다."
-    else:
-        cursor.execute("UPDATE cards SET level = 0, next_review_time = ?, status = 'AT_RISK' WHERE id = ?", (get_next_review_time(0), card_id))
-        msg = "방어 실패! 레벨이 0으로 초기화되었습니다."
-    conn.commit()
-    conn.close()
-    return jsonify({"message": msg})
+    try:
+        data = request.json
+        card_id, is_correct, clear_time = data.get('card_id'), data.get('is_correct'), data.get('clear_time', 999.0)
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT level, best_time FROM cards WHERE id = ?", (card_id,))
+        row = cursor.fetchone()
+        if not row: return jsonify({"error": "카드가 없습니다."}), 404
+        current_lv, best_time = row[0], row[1]
+        
+        if is_correct:
+            new_lv = min(current_lv + 1, 50)
+            new_best = clear_time if best_time is None else min(best_time, clear_time)
+            cursor.execute("UPDATE cards SET level = ?, next_review_time = ?, status = 'OWNED', best_time = ? WHERE id = ?", (new_lv, get_next_review_time(new_lv), new_best, card_id))
+            msg = f"방어 성공! 레벨이 {new_lv}로 올랐습니다."
+        else:
+            cursor.execute("UPDATE cards SET level = 0, next_review_time = ?, status = 'AT_RISK' WHERE id = ?", (get_next_review_time(0), card_id))
+            msg = "방어 실패! 레벨이 0으로 초기화되었습니다."
+        conn.commit()
+        conn.close()
+        return jsonify({"message": msg})
+    except Exception as e:
+        logging.error(f"[오류 진단] 답안 제출 오류: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/delete-category', methods=['POST'])
 def delete_category():
-    data = request.json
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM categories WHERE wallet_address = ? AND id = ?", (data.get('wallet_address'), data.get('id')))
-    conn.commit()
-    conn.close()
-    return jsonify({"message": "삭제되었습니다."})
+    try:
+        data = request.json
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("DELETE FROM categories WHERE wallet_address = ? AND id = ?", (data.get('wallet_address'), data.get('id')))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "삭제되었습니다."})
+    except Exception as e:
+        logging.error(f"[오류 진단] 카테고리 삭제 오류: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/delete-card', methods=['POST'])
 def delete_card():
-    data = request.json
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM cards WHERE wallet_address = ? AND id = ?", (data.get('wallet_address'), data.get('id')))
-    conn.commit()
-    conn.close()
-    return jsonify({"message": "삭제되었습니다."})
+    try:
+        data = request.json
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("DELETE FROM cards WHERE wallet_address = ? AND id = ?", (data.get('wallet_address'), data.get('id')))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "삭제되었습니다."})
+    except Exception as e:
+        logging.error(f"[오류 진단] 카드 삭제 오류: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/delete-all', methods=['POST'])
 def delete_all():
-    wallet_address = request.json.get('wallet_address')
-    conn = sqlite3.connect(DB_PATH)
-    for table in ['categories', 'cards', 'exams', 'ai_analysis']:
-        conn.execute(f"DELETE FROM {table} WHERE wallet_address = ?", (wallet_address,))
-    conn.commit()
-    conn.close()
-    return jsonify({"message": "초기화 성공"})
+    try:
+        wallet_address = request.json.get('wallet_address')
+        conn = sqlite3.connect(DB_PATH)
+        for table in ['categories', 'cards', 'exams', 'ai_analysis']:
+            conn.execute(f"DELETE FROM {table} WHERE wallet_address = ?", (wallet_address,))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "초기화 성공"})
+    except Exception as e:
+        logging.error(f"[오류 진단] 전체 삭제 오류: {e}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001)
