@@ -6,21 +6,9 @@ interface Category { id: number; title: string; content: string; }
 interface Card { id: number; content: string; answer: string; options: string[]; level: number; next_review: string; status: string; }
 
 // 🚨 [초정밀 업데이트] 대한민국 법령 3단 비교표 전용 조사 및 특수기호 분리 엔진
-// 「」, 『』, ㆍ, ①~⑮ 등의 법제처 기호와 '에서는', '로부터' 등의 복합 조사를 완벽하게 발라냅니다.
 const SPLIT_REGEX = /(\s+|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]+|(?:은|는|이|가|을|를|의|에|에게|과|와|로서|로써|로|으로|도|만|부터|까지|이다|한다|함|됨|됨을|함을|함으로써|대하여|대해|대한|등|및|에서|에서는|에서의|로부터|에의|로부터의|에도|에는|이나|나|라도|이라도)(?=\s|$|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]))/g;
 
 function App() {
-
-  const renderMaskedContent = (text: string) => {
-    const parts = text.split(/(\[.*?\])/g);
-    return parts.map((part, i) => {
-      if (part.startsWith('[') && part.endsWith(']')) {
-        return <span key={i} className="inline-block min-w-[60px] h-6 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
-      }
-      return part;
-    });
-  };
-
   const enokiFlow = useEnokiFlow();
   const zkLogin = useZkLogin();
   const suiWalletAccount = useCurrentAccount();
@@ -49,8 +37,49 @@ function App() {
   
   const [parsedText, setParsedText] = useState("");
   const [selectedWordIndices, setSelectedWordIndices] = useState<Set<number>>(new Set());
-    const [viewMode, setViewMode] = useState<'all' | '법' | '령' | '칙'>('all');
+  
+  // 🚨 [신규 추가] 레이아웃 설정 및 타이핑 모드 관련 State
+  const [viewMode, setViewMode] = useState<'all' | '법' | '령' | '칙'>('all');
+  const [colCount, setColCount] = useState<number>(3);
+  const [cardColumns, setCardColumns] = useState<Record<number, number>>({});
+  const [expandedCardId, setExpandedCardId] = useState<number | null>(null);
+  const [answerInput, setAnswerInput] = useState("");
   const textRef = useRef<HTMLDivElement>(null);
+
+  // 로컬 스토리지에서 카드 컬럼 상태 불러오기
+  useEffect(() => {
+    const savedCols = localStorage.getItem('cardColumns');
+    if (savedCols) {
+      try { setCardColumns(JSON.parse(savedCols)); } catch(e) {}
+    }
+  }, []);
+
+  const updateCardColumn = (cardId: number, colIndex: number) => {
+    const newCols = { ...cardColumns, [cardId]: colIndex };
+    setCardColumns(newCols);
+    localStorage.setItem('cardColumns', JSON.stringify(newCols));
+  };
+
+  // 배경 클릭 시 확장된 카드 축소
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (!(e.target as Element).closest('.expandable-card')) {
+        setExpandedCardId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const renderMaskedContent = (text: string) => {
+    const parts = text.split(/(\[.*?\])/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('[') && part.endsWith(']')) {
+        return <span key={i} className="inline-block min-w-[60px] h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
+      }
+      return part;
+    });
+  };
 
   const updatePanel = (status: string, title: string, message: string, current=0, total=0) => {
     setPanelState(prev => ({
@@ -277,7 +306,6 @@ function App() {
     setSelectedWordIndices(newSet);
   };
 
-  // 🚨 [핵심 업데이트] 분리된 단어들을 병합하는 스마트 빈칸 생성 로직
   const handleMakeBlankCard = async () => {
     if (!isLoggedIn || selectedWordIndices.size === 0) return alert("단어를 선택해주세요.");
     updatePanel('loading', '수동 저장 중', '카드를 저장하고 있습니다...');
@@ -285,7 +313,7 @@ function App() {
     const words = parsedText.split(SPLIT_REGEX);
     let cardContent = ""; 
     let answerText = ""; 
-    let isBlanking = false; // 현재 빈칸 블록 안에 있는지 추적
+    let isBlanking = false; 
 
     words.forEach((word, index) => {
       if (word === undefined || word === '') return;
@@ -293,17 +321,14 @@ function App() {
 
       if (isSelected) {
         if (!isBlanking) {
-          // 새로운 빈칸 시작
           cardContent += "[ ";
-          if (answerText.length > 0) answerText += ", "; // 여러 개의 독립된 빈칸인 경우 콤마로 구분
+          if (answerText.length > 0) answerText += ", ";
           isBlanking = true;
         }
-        // 빈칸 진행 중 (단어가 이어짐)
         cardContent += word;
         answerText += word;
       } else {
         if (isBlanking) {
-          // 빈칸 종료
           cardContent += " ]";
           isBlanking = false;
         }
@@ -311,7 +336,6 @@ function App() {
       }
     });
     
-    // 텍스트 끝에서 빈칸이 열려있는 상태로 끝난 경우 닫아주기
     if (isBlanking) {
       cardContent += " ]";
     }
@@ -333,16 +357,19 @@ function App() {
     }
   };
 
-  const submitCombatAnswer = async (selectedOption: string) => {
+  const submitCombatAnswer = async (inputAnswer: string) => {
     if (!activeCard) return;
-    const isCorrect = selectedOption === activeCard.answer;
+    
+    // 단순 공백 제거 및 소문자화 후 비교 (관대한 채점)
+    const isCorrect = inputAnswer.replace(/\s+/g, '').toLowerCase() === activeCard.answer.replace(/\s+/g, '').toLowerCase();
+    
     const res = await fetch("https://api.blankd.top/api/submit-answer", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ card_id: activeCard.id, is_correct: isCorrect }),
     });
     if (res.ok) {
-      alert(isCorrect ? "지식 보존 성공" : `지식 보존 실패. 정답: [${activeCard.answer}]`);
+      alert(isCorrect ? "지식 보존 성공! 정답입니다." : `지식 보존 실패. 정답: [${activeCard.answer}]`);
       setActiveCard(null);
       loadMyCards();
     }
@@ -419,7 +446,7 @@ function App() {
                       <h3 className="text-sm font-light tracking-[0.2em] text-teal-500/80 border-b border-white/5 pb-2">2. 모의고사 구조화</h3>
                       <label className="block border border-dashed border-teal-900/40 p-8 text-center hover:border-teal-500/40 cursor-pointer">
                         <input type="file" accept=".pdf,.txt,.docx,.html,.htm" onChange={(e) => setExamFile(e.target.files?.[0] || null)} className="hidden" />
-                        <div className="text-[10px] text-teal-500/40">{examFile ? `✅ ${examFile.name}` : "파일 선택"}</div>
+                        <div className="text-[10px] text-teal-500/40">{examFile ? `✅ ${examFile.name}` : "파일 선택 (.pdf, .html)"}</div>
                       </label>
                       <button onClick={() => uploadFile('exam')} className="w-full py-3 border border-teal-900/30 hover:bg-teal-900/20 text-teal-500/80 text-xs">문제/정답/해설 DB 등록</button>
                     </div>
@@ -431,7 +458,6 @@ function App() {
                         <div className="text-xs font-light text-white/60 tracking-widest">분석된 문헌 리스트</div>
                         <button onClick={handleBatchAutoMake} className="text-[10px] text-indigo-400">일괄 자동 추출</button>
                       </div>
-                      
                       <div className="flex gap-2 mb-4 mt-2">
                         <button onClick={() => setViewMode('all')} className={`px-3 py-1 text-[10px] rounded-sm transition-all ${viewMode === 'all' ? 'bg-white/20 text-white' : 'border border-white/10 text-white/40 hover:text-white/80'}`}>전체</button>
                         <button onClick={() => setViewMode('법')} className={`px-3 py-1 text-[10px] rounded-sm transition-all ${viewMode === '법' ? 'bg-white/20 text-white' : 'border border-white/10 text-white/40 hover:text-white/80'}`}>법률</button>
@@ -439,7 +465,6 @@ function App() {
                         <button onClick={() => setViewMode('칙')} className={`px-3 py-1 text-[10px] rounded-sm transition-all ${viewMode === '칙' ? 'bg-white/20 text-white' : 'border border-white/10 text-white/40 hover:text-white/80'}`}>시행규칙</button>
                       </div>
                       <div className="grid grid-cols-1 gap-2 max-h-[350px] overflow-y-auto scrollbar-hide">
-
                         {categories.filter(c => viewMode === 'all' || c.title.includes(`[${viewMode}]`)).map(cat => (
                           <div key={cat.id} className="border border-white/5 p-4 flex justify-between items-center group bg-white/[0.01]">
                             <div className="flex-1 cursor-pointer pr-4" onClick={() => loadTextForManualSelection(cat)}>
@@ -460,7 +485,7 @@ function App() {
                     </div>
                   )}
 
-                  {/* 🚨 [핵심 업데이트] 개선된 수동 추출 터미널 UI */}
+                  {/* 🚨 수동 터미널 */}
                   {parsedText && (
                     <div className="space-y-4">
                       <div className="text-xs text-white/60 border-b border-white/5 pb-2">수동 터미널 (단어 및 조사 개별 터치)</div>
@@ -486,10 +511,8 @@ function App() {
                   )}
                 </div>
 
-                {/* 우측 패널: 기출문제, AI 해설 및 시스템 터미널 */}
+                {/* 우측 패널 */}
                 <div className="lg:col-span-6 flex flex-col space-y-6">
-                  
-                  {/* 터미널 모니터 */}
                   <div className="border border-indigo-900/30 bg-indigo-950/5 rounded-sm overflow-hidden sticky top-12 flex-shrink-0">
                     <div className="border-b border-indigo-900/30 p-4 bg-indigo-950/20 flex justify-between items-center">
                       <span className="text-[10px] tracking-widest text-indigo-400 font-bold uppercase">System Terminal</span>
@@ -511,7 +534,6 @@ function App() {
                     </div>
                   </div>
 
-                  {/* 관련 기출문제 & AI 해설 영역 */}
                   <div className="flex-1 border border-indigo-900/30 bg-black/40 p-6 rounded-sm min-h-[300px]">
                     <h3 className="text-xs font-bold text-indigo-400 mb-6 tracking-widest uppercase">Related Mock-Exams</h3>
                     {relatedExams.length > 0 ? (
@@ -576,31 +598,77 @@ function App() {
             {/* Enhance 탭 */}
             {activeTab === 'enhance' && (
               <div className="space-y-8 animate-in fade-in">
+                <div className="flex justify-between items-center mb-4">
+                  <div className="text-xs text-white/60">레이아웃 단수 설정</div>
+                  <div className="flex gap-2">
+                    {[2, 3, 4].map(num => (
+                      <button key={num} onClick={() => setColCount(num)} className={`px-3 py-1 text-[10px] rounded-sm transition-all ${colCount === num ? 'bg-white/20 text-white' : 'border border-white/10 text-white/40 hover:text-white/80'}`}>{num}단</button>
+                    ))}
+                  </div>
+                </div>
                 {savedCards.length === 0 ? (
                   <div className="py-32 text-center text-white/20 text-xs tracking-widest">보관된 지식이 없습니다.</div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {savedCards.map((card) => (
-                      <div key={card.id} onClick={() => card.status !== "BURNED" && setActiveCard(card)}
-                        className={`border p-6 transition-all cursor-pointer relative bg-white/[0.01] rounded-sm
-                          ${card.status === "BURNED" ? "border-white/5 opacity-30" : getTierClass(card.level)}`}
+                  <div className="grid gap-6" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
+                    {Array.from({ length: colCount }).map((_, colIndex) => (
+                      <div 
+                        key={colIndex} 
+                        className="min-h-[300px] border border-white/5 bg-white/[0.005] p-2 rounded-sm"
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          const cardId = parseInt(e.dataTransfer.getData('cardId'));
+                          if (!isNaN(cardId)) updateCardColumn(cardId, colIndex);
+                        }}
                       >
-                        <div className="flex justify-between items-start mb-6">
-                          <span className="text-[10px] tracking-widest font-light">{getLevelTier(card.level)}</span>
-                          <div className="flex items-center gap-4">
-                            <span className="text-[10px] tracking-widest font-light text-white/40">LV.{card.level}</span>
-                            {/* 🚨 개별 카드 삭제 버튼 복구 */}
-                            {card.status !== "BURNED" && (
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); handleDeleteCard(card.id); }} 
-                                className="text-[10px] text-rose-500/60 hover:text-rose-400 tracking-widest"
+                        <div className="text-[10px] text-white/30 mb-4 text-center border-b border-white/5 pb-2">COLUMN {colIndex + 1}</div>
+                        <div className="flex flex-col gap-4">
+                          {savedCards.filter(c => (cardColumns[c.id] || 0) % colCount === colIndex).map((card) => {
+                            const isExpanded = expandedCardId === card.id;
+                            const displayTitle = card.content.substring(0, 20).replace(/\[.*?\]/g, '___') + "...";
+                            return (
+                              <div 
+                                key={card.id} 
+                                draggable 
+                                onDragStart={(e) => e.dataTransfer.setData('cardId', card.id.toString())}
+                                onClick={(e) => { e.stopPropagation(); setExpandedCardId(isExpanded ? null : card.id); }}
+                                className={`expandable-card border p-5 transition-all cursor-pointer relative bg-white/[0.01] rounded-sm
+                                  ${card.status === "BURNED" ? "border-white/5 opacity-30" : getTierClass(card.level)}`}
                               >
-                                삭제
-                              </button>
-                            )}
-                          </div>
+                                <div className="flex justify-between items-start mb-4">
+                                  <span className="text-[10px] tracking-widest font-light">{getLevelTier(card.level)}</span>
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-[10px] tracking-widest font-light text-white/40">LV.{card.level}</span>
+                                    {card.status !== "BURNED" && (
+                                      <button 
+                                        onClick={(e) => { e.stopPropagation(); handleDeleteCard(card.id); }} 
+                                        className="text-[10px] text-rose-500/60 hover:text-rose-400 tracking-widest"
+                                      >
+                                        삭제
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                                
+                                {!isExpanded ? (
+                                  <div className="text-[13px] font-serif text-white/80">{displayTitle}</div>
+                                ) : (
+                                  <div className="animate-in fade-in zoom-in-95 duration-200">
+                                    <div className="text-[13px] leading-loose font-serif text-white/80 mb-6">
+                                       {renderMaskedContent(card.content)}
+                                    </div>
+                                    <button 
+                                       onClick={(e) => { e.stopPropagation(); setAnswerInput(""); setActiveCard(card); setExpandedCardId(null); }}
+                                       className="w-full py-2 border border-white/10 text-[11px] text-white/60 hover:bg-white/10 hover:text-white transition-all"
+                                    >
+                                       기억 복원 도전 (타이핑)
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })}
                         </div>
-                        <div className="text-[13px] leading-loose font-serif text-white/80 line-clamp-3 mb-6">{renderMaskedContent(card.content)}</div>
                       </div>
                     ))}
                   </div>
@@ -620,7 +688,7 @@ function App() {
         )}
       </main>
 
-      {/* 학습 강화 모달 */}
+      {/* 학습 강화 모달 (타이핑 버전) */}
       {activeCard && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0d0d0f]/95 backdrop-blur-sm animate-in fade-in">
           <div className="border border-white/10 bg-[#121214] w-full max-w-2xl p-10 shadow-2xl rounded-sm">
@@ -628,13 +696,25 @@ function App() {
               <span className="font-light tracking-[0.2em] text-sm text-white/80">기억 복원 (LV.{activeCard.level})</span>
               <button onClick={() => setActiveCard(null)} className="text-white/40 hover:text-white text-sm font-light"> 닫기 </button>
             </div>
-            <div className="p-8 border border-white/5 bg-[#0a0a0c] text-[15px] leading-loose font-serif text-white/90 mb-8 rounded-sm">{renderMaskedContent(activeCard.content)}</div>
-            <div className="grid grid-cols-1 gap-4">
-              {activeCard.options?.map((opt, idx) => (
-                <button key={idx} onClick={() => submitCombatAnswer(opt)} className="text-left px-8 py-5 border border-white/10 hover:border-white/50 text-[13px] text-white/80 hover:bg-white/[0.02]">
-                  <span className="inline-block w-8 text-white/30">{idx + 1}.</span> {opt}
-                </button>
-              ))}
+            <div className="p-8 border border-white/5 bg-[#0a0a0c] text-[15px] leading-loose font-serif text-white/90 mb-8 rounded-sm">
+              {renderMaskedContent(activeCard.content)}
+            </div>
+            <div className="flex flex-col gap-4">
+              <input 
+                type="text" 
+                autoFocus
+                value={answerInput} 
+                onChange={(e) => setAnswerInput(e.target.value)} 
+                onKeyDown={(e) => e.key === 'Enter' && submitCombatAnswer(answerInput)}
+                placeholder="빈칸에 들어갈 정답을 정확히 타이핑하세요"
+                className="w-full bg-black/50 border border-white/20 p-4 text-white text-sm outline-none focus:border-indigo-500 transition-all"
+              />
+              <button 
+                onClick={() => submitCombatAnswer(answerInput)} 
+                className="w-full py-4 bg-indigo-600/20 border border-indigo-500/50 hover:bg-indigo-600/40 text-indigo-300 text-sm tracking-widest transition-all"
+              >
+                정답 제출
+              </button>
             </div>
           </div>
         </div>
