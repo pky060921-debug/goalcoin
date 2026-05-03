@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
 import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 
-interface Category { id: number; title: string; content: string; folder_name?: string; }
+interface Category { id: number; title: string; content: string; folder_name?: string; is_x_marked?: boolean; }
 interface Card { id: number; content: string; answer: string; options: string[]; level: number; next_review: string; status: string; best_time?: number; folder_name?: string; }
 interface Exam { id: number; title: string; question: string; answer: string; explanation: string; }
 
@@ -18,9 +18,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [examFile, setExamFile] = useState<File | null>(null);
-  
   const [panelState, setPanelState] = useState({ status: 'idle', title: '대기 중', message: '작업을 선택하세요.', progress: 0, logs: [] as string[] });
-  
   const [categories, setCategories] = useState<Category[]>([]);
   const [savedCards, setSavedCards] = useState<Card[]>([]);
   const [exams, setExams] = useState<Exam[]>([]);
@@ -55,6 +53,9 @@ function App() {
   const [elapsed, setElapsed] = useState<number>(0);
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
+  // 설정 탭: 빈칸 추천 활성화 여부
+  const [blankRecommendationActive, setBlankRecommendationActive] = useState(false);
+
   // [오류 진단] 롱프레스 터치 커스텀 훅
   const useLongPress = (callback: () => void, ms = 800) => {
     const timerRef = useRef<any>(null);
@@ -64,9 +65,9 @@ function App() {
   };
 
   useEffect(() => {
-    const sCols = localStorage.getItem('cardColumns'); if (sCols) try { setCardColumns(JSON.parse(sCols)); } catch(e) {}
-    const sNames = localStorage.getItem('columnNames'); if (sNames) try { setColumnNames(JSON.parse(sNames)); } catch(e) {}
-    const sColCount = localStorage.getItem('colCount'); if (sColCount) try { setColCount(parseInt(sColCount)); } catch(e) {}
+    const sCols = localStorage.getItem('cardColumns'); if (sCols) try { setCardColumns(JSON.parse(sCols)); } catch(e) { console.error("[오류 진단] LocalStorage 파싱 에러:", e); }
+    const sNames = localStorage.getItem('columnNames'); if (sNames) try { setColumnNames(JSON.parse(sNames)); } catch(e) { console.error("[오류 진단] LocalStorage 파싱 에러:", e); }
+    const sColCount = localStorage.getItem('colCount'); if (sColCount) try { setColCount(parseInt(sColCount)); } catch(e) { console.error("[오류 진단] LocalStorage 파싱 에러:", e); }
   }, []);
 
   const updateColCount = (num: number) => { setColCount(num); localStorage.setItem('colCount', num.toString()); };
@@ -84,7 +85,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const handleAuth = async () => { try { await enokiFlow.handleAuthCallback(); window.history.replaceState(null, '', window.location.pathname); } catch (err) { console.error("[진단] 인증콜백 오류:", err); } };
+    const handleAuth = async () => { try { await enokiFlow.handleAuthCallback(); window.history.replaceState(null, '', window.location.pathname); } catch (err) { console.error("[오류 진단] 인증콜백 오류:", err); } };
     if (window.location.hash.includes("id_token=")) handleAuth();
   }, [enokiFlow]);
 
@@ -95,7 +96,7 @@ function App() {
       const res = await fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`);
       const data = await res.json();
       if (res.ok) setCategories(data.categories || []);
-    } catch (err) { console.error("[진단] 카테고리 로드 에러:", err); }
+    } catch (err) { console.error("[오류 진단] 카테고리 로드 에러:", err); }
   };
 
   const loadMyCards = async () => {
@@ -103,7 +104,7 @@ function App() {
       const res = await fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`);
       const data = await res.json();
       if (res.ok) setSavedCards(data.cards || []);
-    } catch (err) { console.error("[진단] 카드 로드 에러:", err); }
+    } catch (err) { console.error("[오류 진단] 카드 로드 에러:", err); }
   };
 
   const loadExams = async () => {
@@ -111,7 +112,7 @@ function App() {
       const res = await fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`);
       const data = await res.json();
       if (res.ok) setExams(data.exams || []);
-    } catch (err) { console.error("[진단] 모의고사 로드 에러:", err); }
+    } catch (err) { console.error("[오류 진단] 모의고사 로드 에러:", err); }
   };
 
   const updatePanel = (status: string, title: string, msg: string, progress: number = 0) => {
@@ -133,7 +134,7 @@ function App() {
         } else {
           updatePanel('loading', '백그라운드 처리 중', data.message, data.progress);
         }
-      } catch(e) { console.error("[진단] 폴링 실패", e); }
+      } catch(e) { console.error("[오류 진단] 폴링 실패", e); }
     }, 1500);
   };
 
@@ -176,7 +177,7 @@ function App() {
         const data = await res.json();
         pollTaskProgress(data.task_id, () => {});
       }
-    } catch(e) { updatePanel('error', '연결 실패', 'AI 통신 오류', 0); }
+    } catch(e) { updatePanel('error', '연결 실패', 'AI 통신 오류', 0); console.error("[오류 진단] AI 추천 실패:", e); }
   };
 
   const handleSplitCategory = async (cat: Category, splitIdx: number, wordsArray: string[]) => {
@@ -189,14 +190,16 @@ function App() {
         body: JSON.stringify({ id: cat.id, text1, text2, wallet_address: safeAddress })
       });
       if (res.ok) { setExpandedCategoryId(null); setSelectedWordIndices(new Set()); loadCategories(); updatePanel('success', '완료', '분할되었습니다.', 100); }
-    } catch(e) { console.error("[진단] 분할 에러", e); }
+    } catch(e) { console.error("[오류 진단] 분할 에러", e); }
   };
 
+  // [기능] 지식 추출 및 원본 삭제 -> 기억강화 탭으로 이동
   const handleMakeBlankCard = async (cat: Category) => {
     if (!isLoggedIn || selectedWordIndices.size === 0) return alert("단어를 선택해주세요.");
     updatePanel('loading', '저장 및 삭제 중', '카드를 만들고 원본 문헌을 삭제합니다...', 50);
     const words = cat.content ? cat.content.split(SPLIT_REGEX) : [];
-    let cardContent = ""; let answerText = ""; let isBlanking = false; 
+    let cardContent = ""; let answerText = ""; let isBlanking = false;
+    
     words.forEach((word, index) => {
       if (!word) return;
       if (selectedWordIndices.has(index) && word.trim() !== "") {
@@ -208,7 +211,7 @@ function App() {
       }
     });
     if (isBlanking) cardContent += " ]";
-
+    
     try {
       const res = await fetch("https://api.blankd.top/api/save-card", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -220,45 +223,60 @@ function App() {
           body: JSON.stringify({ wallet_address: safeAddress, id: cat.id })
         });
         setSelectedWordIndices(new Set()); setExpandedCategoryId(null);
-        loadCategories(); loadMyCards(); updatePanel('success', '완료', '추출 및 삭제됨.', 100); setActiveTab('enhance');
+        loadCategories(); loadMyCards(); 
+        updatePanel('success', '완료', '추출 및 삭제됨.', 100); 
+        setActiveTab('enhance'); // 자동으로 기억강화 탭으로 이동
       }
-    } catch(err) { console.error("[진단] 추출 에러", err); }
+    } catch(err) { console.error("[오류 진단] 추출 에러", err); }
   };
 
   const handleDeleteCategory = async (cat_id: number) => {
     if (!confirm("이 문헌을 영구 삭제하시겠습니까?")) return;
-    const res = await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat_id }) });
-    if (res.ok) loadCategories();
+    try {
+      const res = await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat_id }) });
+      if (res.ok) loadCategories();
+    } catch(err) { console.error("[오류 진단] 삭제 에러:", err); }
   };
 
   const handleDeleteCard = async (card_id: number) => {
     if (!confirm("이 카드를 영구 삭제하시겠습니까?")) return;
-    const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card_id }) });
-    if (res.ok) { setActiveCard(null); loadMyCards(); }
+    try {
+      const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card_id }) });
+      if (res.ok) { setActiveCard(null); loadMyCards(); }
+    } catch(err) { console.error("[오류 진단] 카드 삭제 에러:", err); }
   };
 
   const handleMoveCraftFolders = async () => {
     if (selectedCraftIds.size === 0 || !targetFolderName) return;
-    await fetch('/api/move-categories', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: Array.from(selectedCraftIds), folder_name: targetFolderName, wallet_address: safeAddress})});
-    setSelectedCraftIds(new Set()); setTargetFolderName(''); loadCategories(); setOpenCraftFolders(prev => ({...prev, [targetFolderName]: true}));
+    try {
+      await fetch('/api/move-categories', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: Array.from(selectedCraftIds), folder_name: targetFolderName, wallet_address: safeAddress})});
+      setSelectedCraftIds(new Set()); setTargetFolderName(''); loadCategories();
+      setOpenCraftFolders(prev => ({...prev, [targetFolderName]: true}));
+    } catch(err) { console.error("[오류 진단] 폴더 이동 에러:", err); }
   };
 
   const handleMoveEnhanceFolders = async () => {
     if (selectedEnhanceIds.size === 0 || !targetFolderName) return;
-    await fetch('/api/move-cards', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: Array.from(selectedEnhanceIds), folder_name: targetFolderName, wallet_address: safeAddress})});
-    setSelectedEnhanceIds(new Set()); setTargetFolderName(''); loadMyCards(); setOpenEnhanceFolders(prev => ({...prev, [targetFolderName]: true}));
+    try {
+      await fetch('/api/move-cards', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: Array.from(selectedEnhanceIds), folder_name: targetFolderName, wallet_address: safeAddress})});
+      setSelectedEnhanceIds(new Set()); setTargetFolderName(''); loadMyCards();
+      setOpenEnhanceFolders(prev => ({...prev, [targetFolderName]: true}));
+    } catch(err) { console.error("[오류 진단] 폴더 이동 에러:", err); }
   };
 
   const submitCombatAnswer = async (isCorrect: boolean, time: number = 999.0) => {
     if (!activeCard) return;
-    const res = await fetch("https://api.blankd.top/api/submit-answer", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ card_id: activeCard.id, is_correct: isCorrect, clear_time: time }),
-    });
-    if (res.ok) {
-      alert(isCorrect ? `성공! 기록: ${time.toFixed(1)}초` : `실패! 시간 초과 또는 오답입니다.`);
-      setActiveCard(null); loadMyCards();
-    }
+    try {
+      const res = await fetch("https://api.blankd.top/api/submit-answer", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ card_id: activeCard.id, is_correct: isCorrect, clear_time: time }),
+      });
+      if (res.ok) {
+        alert(isCorrect ? `성공! 기록: ${time.toFixed(1)}초` : `실패! 시간 초과 또는 오답입니다.`);
+        setActiveCard(null);
+        loadMyCards();
+      }
+    } catch(err) { console.error("[오류 진단] 정답 제출 에러:", err); }
   };
 
   const handleGoogleZkLogin = async () => {
@@ -272,7 +290,7 @@ function App() {
         network: 'testnet'
       });
       window.location.href = url;
-    } catch (err: any) { alert(`로그인 에러: ${err.message}`); }
+    } catch (err: any) { alert(`로그인 에러: ${err.message}`); console.error("[오류 진단] 로그인 에러:", err); }
   };
 
   const toggleWordSelection = (index: number) => {
@@ -282,7 +300,6 @@ function App() {
     setSelectedWordIndices(newSet);
   };
 
-  // 모달 안의 타이핑 및 타이머 로직
   useEffect(() => {
     if (activeCard) {
       const foundBlanks: {answer: string, correct: boolean}[] = [];
@@ -292,6 +309,7 @@ function App() {
       while((match = regex.exec(safeContent)) !== null) foundBlanks.push({ answer: match[1].trim(), correct: false });
       if(foundBlanks.length === 0 && activeCard.answer) foundBlanks.push(...activeCard.answer.split(',').map(a => ({answer: a.trim(), correct: false})));
       setBlanks(foundBlanks); setCurrentBlankIdx(0); setAnswerInput(""); setInputStatus('idle');
+ 
       const timePerBlank = Math.max(1.0, 5.0 - Math.floor(activeCard.level / 5) * 0.5);
       setTotalTimeLimit(timePerBlank * foundBlanks.length); setStartTime(Date.now()); setElapsed(0);
     }
@@ -313,7 +331,6 @@ function App() {
     if (!blanks[currentBlankIdx]) return;
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     const actual = answerInput.replace(/\s+/g, '').toLowerCase();
-    
     if (expected === actual) {
       setInputStatus('correct');
       const newBlanks = [...blanks]; newBlanks[currentBlankIdx].correct = true; setBlanks(newBlanks);
@@ -328,17 +345,22 @@ function App() {
     }
   };
 
-  // [오류 진단] 안전한 문자열 추출 및 정렬 처리
   const getStrictCardTitle = (text?: string) => {
     if (!text) return "제목 없음";
     const match = text.match(/^(\[.*?\]\s*제\s*\d+\s*조(?:의\s*\d+)?(?:\([^)]+\))?)/);
     return match ? match[1] : text.split('\n')[0].substring(0, 15) + "...";
   };
 
+  // [기능] 장(Chapter) -> 조(Article) 순으로 정밀 정렬
   const getSortNumber = (text?: string) => {
     if (!text) return 999999;
-    const match = text.match(/제\s*(\d+)\s*조/);
-    return match ? parseInt(match[1]) : 999999;
+    const chapterMatch = text.match(/(\d+)장/);
+    const articleMatch = text.match(/제\s*(\d+)\s*조/);
+    let score = 0;
+    // 1장 = 10000, 2장 = 20000 가중치 부여를 통해 항상 장 단위 우선 정렬 보장
+    if (chapterMatch) score += parseInt(chapterMatch[1]) * 10000;
+    if (articleMatch) score += parseInt(articleMatch[1]);
+    return score || 999999;
   };
 
   const renderSequentialMaskedContent = (text?: string) => {
@@ -359,14 +381,15 @@ function App() {
   const craftFolders = Array.from(new Set(categories.map(c => c.folder_name || '기본 폴더'))).reverse();
   const enhanceFolders = Array.from(new Set(savedCards.map(c => c.folder_name || '기본 폴더'))).reverse();
 
-  // 대시보드 완전 삭제 방어 (초기화)
   const handleDeleteAll = async () => {
     if (!confirm("보관소의 모든 데이터를 영구 지우시겠습니까?")) return;
-    const res = await fetch("https://api.blankd.top/api/delete-all", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ wallet_address: safeAddress }),
-    });
-    if (res.ok) { setCategories([]); setSavedCards([]); setExams([]); setExpandedCategoryId(null); updatePanel('idle', '초기화', '데이터 리셋됨', 0); }
+    try {
+      const res = await fetch("https://api.blankd.top/api/delete-all", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress }),
+      });
+      if (res.ok) { setCategories([]); setSavedCards([]); setExams([]); setExpandedCategoryId(null); updatePanel('idle', '초기화', '데이터 리셋됨', 0); }
+    } catch(err) { console.error("[오류 진단] 전체 삭제 에러:", err); }
   };
 
   return (
@@ -389,7 +412,7 @@ function App() {
               ))}
             </nav>
 
-            {/* 🚨 열람실 대시보드 탭 (복구 완료) */}
+            {/* 열람실 대시보드 탭 */}
             {activeTab === 'dashboard' && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 animate-in fade-in">
                 <div className="border border-white/10 p-8 rounded-sm bg-white/[0.02]">
@@ -440,7 +463,16 @@ function App() {
                       
                       {openCraftFolders[folder] && (
                         <div className="grid gap-4 mt-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-                          {categories.filter(c => (c.folder_name || '기본 폴더') === folder).sort((a, b) => getSortNumber(a.title) - getSortNumber(b.title)).map(cat => {
+                          {categories
+                            .filter(c => (c.folder_name || '기본 폴더') === folder)
+                            .filter(c => {
+                              // [기능] 설정에서 빈칸 추천 비활성화 시 x표시 항목 숨김
+                              if (c.is_x_marked && !blankRecommendationActive) return false;
+                              return true;
+                            })
+                            // [기능] 장/조 우선순위 정렬 적용
+                            .sort((a, b) => getSortNumber(a.title) - getSortNumber(b.title))
+                            .map(cat => {
                             const isExpanded = expandedCategoryId === cat.id;
                             return (
                               <div key={cat.id} className="expandable-card relative flex items-center justify-center">
@@ -470,7 +502,9 @@ function App() {
                                         )
                                       })}
                                     </div>
-                                    <button onClick={() => handleMakeBlankCard(cat)} className="w-full py-3 bg-amber-500/20 text-amber-400 text-xs">지식 추출 및 원본 삭제</button>
+                                    <button onClick={() => handleMakeBlankCard(cat)} className="w-full py-3 bg-amber-500/20 text-amber-400 text-xs hover:bg-amber-500/30 transition-all">
+                                      지식 추출 및 원본 삭제
+                                    </button>
                                   </div>
                                 )}
                               </div>
@@ -570,7 +604,7 @@ function App() {
               </div>
             )}
 
-            {/* 설정 탭 (삭제 기능 복원) */}
+            {/* 설정 탭 */}
             {activeTab === 'mypage' && (
               <div className="max-w-md mx-auto space-y-8 py-16 animate-in fade-in">
                 <div className="border border-white/10 p-6 rounded-sm">
@@ -581,11 +615,20 @@ function App() {
                     ))}
                   </div>
                   <div className="text-xs text-white/60 mb-4">컬럼 단수 설정 (지식추출 & 기억강화)</div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 mb-8">
                     {[2, 3, 4].map(num => (
                       <button key={num} onClick={() => updateColCount(num)} className={`px-3 py-1 text-[10px] rounded-sm ${colCount === num ? 'bg-white/20 text-white' : 'border border-white/10 text-white/40'}`}>{num}단</button>
                     ))}
                   </div>
+
+                  <div className="text-xs text-white/60 mb-4">지식 관리 설정</div>
+                  {/* [기능] 빈칸 추천(x표시) 토글 버튼 */}
+                  <button 
+                    onClick={() => setBlankRecommendationActive(!blankRecommendationActive)}
+                    className={`w-full py-3 text-[10px] border transition-all rounded-sm ${blankRecommendationActive ? 'bg-teal-900/30 border-teal-500/50 text-teal-300' : 'border-white/10 text-white/40'}`}
+                  >
+                    빈칸 추천 활성화 (x표시 문헌 노출): {blankRecommendationActive ? "ON" : "OFF"}
+                  </button>
                 </div>
                 <button onClick={handleDeleteAll} className="w-full py-4 border border-rose-900/30 text-rose-500/70 text-xs transition-all hover:bg-rose-900/20">데이터 완전 초기화 (전체 삭제)</button>
               </div>
@@ -635,4 +678,3 @@ function App() {
   );
 }
 export default App;
-EOF
