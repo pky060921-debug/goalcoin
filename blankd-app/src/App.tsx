@@ -2,250 +2,269 @@ import { useState, useEffect, useRef } from "react";
 import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
 import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 
-interface Category { id: number; title: string; content: string; }
-interface Card { id: number; content: string; answer: string; options: string[]; level: number; next_review: string; status: string; }
+interface Category { id: number; title: string; content: string; folder_name?: string; }
+interface Card { id: number; content: string; answer: string; options: string[]; level: number; next_review: string; status: string; best_time?: number; folder_name?: string; }
+interface Exam { id: number; title: string; question: string; answer: string; explanation: string; }
 
-// 🚨 [초정밀 업데이트] 대한민국 법령 3단 비교표 전용 조사 및 특수기호 분리 엔진
 const SPLIT_REGEX = /(\s+|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]+|(?:은|는|이|가|을|를|의|에|에게|과|와|로서|로써|로|으로|도|만|부터|까지|이다|한다|함|됨|됨을|함을|함으로써|대하여|대해|대한|등|및|에서|에서는|에서의|로부터|에의|로부터의|에도|에는|이나|나|라도|이라도)(?=\s|$|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]))/g;
 
 function App() {
   const enokiFlow = useEnokiFlow();
   const zkLogin = useZkLogin();
   const suiWalletAccount = useCurrentAccount();
-  
   const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
   const isLoggedIn = safeAddress.length > 0;
 
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [file, setFile] = useState<File | null>(null);
+  const [lawFile, setLawFile] = useState<File | null>(null);
   const [examFile, setExamFile] = useState<File | null>(null);
   
-  const [panelState, setPanelState] = useState({
-    status: 'idle', 
-    title: '시스템 대기 중',
-    message: '법령 문헌을 선택하거나 분석 개시 버튼을 눌러주세요.',
-    current: 0,
-    total: 0,
-    logs: [] as string[]
-  });
-
+  const [panelState, setPanelState] = useState({ status: 'idle', title: '대기 중', message: '작업을 선택하세요.', progress: 0, logs: [] as string[] });
+  
   const [categories, setCategories] = useState<Category[]>([]);
   const [savedCards, setSavedCards] = useState<Card[]>([]);
-  const [activeCard, setActiveCard] = useState<Card | null>(null);
-  const [relatedExams, setRelatedExams] = useState<any[]>([]);
-  const [aiExplanation, setAiExplanation] = useState("");
+  const [exams, setExams] = useState<Exam[]>([]);
   
-  const [parsedText, setParsedText] = useState("");
-  const [selectedWordIndices, setSelectedWordIndices] = useState<Set<number>>(new Set());
+  const [activeCraftFolder, setActiveCraftFolder] = useState('기본 폴더');
+  const [activeEnhanceFolder, setActiveEnhanceFolder] = useState('기본 폴더');
+  const [openCraftFolders, setOpenCraftFolders] = useState<Record<string, boolean>>({"기본 폴더": true});
+  const [openEnhanceFolders, setOpenEnhanceFolders] = useState<Record<string, boolean>>({"기본 폴더": true});
   
-  // 🚨 [신규 추가] 레이아웃 설정 및 타이핑 모드 관련 State
+  const [selectedCraftIds, setSelectedCraftIds] = useState<Set<number>>(new Set());
+  const [selectedEnhanceIds, setSelectedEnhanceIds] = useState<Set<number>>(new Set());
+  const [targetFolderName, setTargetFolderName] = useState('');
+  
   const [viewMode, setViewMode] = useState<'all' | '법' | '령' | '칙'>('all');
   const [colCount, setColCount] = useState<number>(3);
   const [cardColumns, setCardColumns] = useState<Record<number, number>>({});
+  const [columnNames, setColumnNames] = useState<Record<number, string>>({ 0: "COLUMN 1", 1: "COLUMN 2", 2: "COLUMN 3", 3: "COLUMN 4" });
+  
   const [expandedCardId, setExpandedCardId] = useState<number | null>(null);
+  const [expandedCategoryId, setExpandedCategoryId] = useState<number | null>(null);
+  const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
+  
+  const [activeCard, setActiveCard] = useState<Card | null>(null);
+  const [parsedText, setParsedText] = useState("");
+  const [selectedWordIndices, setSelectedWordIndices] = useState<Set<number>>(new Set());
   const [answerInput, setAnswerInput] = useState("");
-  const textRef = useRef<HTMLDivElement>(null);
 
-  // 로컬 스토리지에서 카드 컬럼 상태 불러오기
-  useEffect(() => {
-    const savedCols = localStorage.getItem('cardColumns');
-    if (savedCols) {
-      try { setCardColumns(JSON.parse(savedCols)); } catch(e) {}
-    }
-  }, []);
+  const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
+  const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
+  const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
+  const [startTime, setStartTime] = useState<number>(0);
+  const [elapsed, setElapsed] = useState<number>(0);
+  const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
-  const updateCardColumn = (cardId: number, colIndex: number) => {
-    const newCols = { ...cardColumns, [cardId]: colIndex };
-    setCardColumns(newCols);
-    localStorage.setItem('cardColumns', JSON.stringify(newCols));
+  // [오류 진단] 롱프레스 터치 커스텀 훅
+  const useLongPress = (callback: () => void, ms = 800) => {
+    const timerRef = useRef<any>(null);
+    const start = () => { timerRef.current = setTimeout(callback, ms); };
+    const clear = () => { clearTimeout(timerRef.current); };
+    return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
   };
 
-  // 배경 클릭 시 확장된 카드 축소
+  useEffect(() => {
+    const sCols = localStorage.getItem('cardColumns'); if (sCols) try { setCardColumns(JSON.parse(sCols)); } catch(e) {}
+    const sNames = localStorage.getItem('columnNames'); if (sNames) try { setColumnNames(JSON.parse(sNames)); } catch(e) {}
+    const sColCount = localStorage.getItem('colCount'); if (sColCount) try { setColCount(parseInt(sColCount)); } catch(e) {}
+  }, []);
+
+  const updateColCount = (num: number) => { setColCount(num); localStorage.setItem('colCount', num.toString()); };
+  const updateCardColumn = (cardId: number, colIndex: number) => { const n = { ...cardColumns, [cardId]: colIndex }; setCardColumns(n); localStorage.setItem('cardColumns', JSON.stringify(n)); };
+  const updateColumnName = (colIndex: number, newName: string) => { const n = { ...columnNames, [colIndex]: newName }; setColumnNames(n); localStorage.setItem('columnNames', JSON.stringify(n)); };
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (!(e.target as Element).closest('.expandable-card')) {
-        setExpandedCardId(null);
+      if (!(e.target as Element).closest('.expandable-card') && !(e.target as Element).closest('.modal-container')) { 
+        setExpandedCardId(null); setExpandedCategoryId(null); setExpandedExamId(null);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const renderMaskedContent = (text: string) => {
-    const parts = text.split(/(\[.*?\])/g);
-    return parts.map((part, i) => {
-      if (part.startsWith('[') && part.endsWith(']')) {
-        return <span key={i} className="inline-block min-w-[60px] h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
-      }
-      return part;
-    });
-  };
-
-  const updatePanel = (status: string, title: string, message: string, current=0, total=0) => {
-    setPanelState(prev => ({
-      status, title, message, current, total,
-      logs: [`[${new Date().toLocaleTimeString()}] ${message}`, ...prev.logs].slice(0, 10)
-    }));
-  };
-
   useEffect(() => {
-    const handleAuth = async () => {
-      try {
-        await enokiFlow.handleAuthCallback();
-        window.history.replaceState(null, '', window.location.pathname);
-      } catch (err: any) { console.error(err); }
-    };
+    const handleAuth = async () => { try { await enokiFlow.handleAuthCallback(); window.history.replaceState(null, '', window.location.pathname); } catch (err) { console.error("[진단] 인증콜백 오류:", err); } };
     if (window.location.hash.includes("id_token=")) handleAuth();
   }, [enokiFlow]);
 
-  useEffect(() => {
-    if (isLoggedIn) {
-      loadCategories();
-      loadMyCards();
-    }
-  }, [isLoggedIn, safeAddress]);
+  useEffect(() => { if (isLoggedIn) { loadCategories(); loadMyCards(); loadExams(); } }, [isLoggedIn, safeAddress]);
 
   const loadCategories = async () => {
-    if (!isLoggedIn) return;
     try {
       const res = await fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`);
       const data = await res.json();
       if (res.ok) setCategories(data.categories || []);
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error("[진단] 카테고리 로드 에러:", err); }
   };
 
   const loadMyCards = async () => {
-    if (!isLoggedIn) return;
     try {
       const res = await fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`);
       const data = await res.json();
       if (res.ok) setSavedCards(data.cards || []);
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error("[진단] 카드 로드 에러:", err); }
   };
 
-  const uploadFile = async (type: 'law' | 'exam') => {
-    const targetFile = type === 'law' ? file : examFile;
-    if (!targetFile) return alert("⚠️ 업로드할 파일을 먼저 선택해주세요.");
-    
-    updatePanel('loading', '통신 상태 확인 중', '백엔드 서버와 연결이 가능한지 핑(Ping) 테스트를 진행합니다...');
-    
+  const loadExams = async () => {
     try {
-      const healthCheck = await fetch("https://api.blankd.top/api/health");
-      if (!healthCheck.ok) throw new Error("서버 응답 오류");
-    } catch (error: any) {
-      updatePanel('error', '네트워크 연결 끊김 (Failed to Fetch)', `백엔드 서버와 통신할 수 없습니다: ${error.message}`);
-      alert(`[🚨 치명적 연결 오류]\n서버와 통신할 수 없습니다.`);
-      return;
-    }
-
-    updatePanel('loading', '파일 전송 및 파싱 중', `${targetFile.name} 파일을 분석 엔진으로 전송하고 있습니다...`);
-    const formData = new FormData();
-    formData.append("file", targetFile);
-    formData.append("wallet_address", safeAddress);
-    
-    try {
-      const endpoint = type === 'law' ? 'upload-pdf' : 'upload-exam';
-      const res = await fetch(`https://api.blankd.top/api/${endpoint}`, {
-        method: "POST",
-        body: formData,
-      });
-      
-      const responseText = await res.text(); 
-      let data;
-      try { data = JSON.parse(responseText); } 
-      catch (e) { throw new Error(`알 수 없는 백엔드 응답:\n${responseText.substring(0,200)}`); }
-
-      if (!res.ok) throw new Error(data.details || data.error || "서버 에러");
-      
-      updatePanel('success', '완료', type === 'law' ? `법령이 등록되었습니다.` : `모의고사가 파싱 및 저장되었습니다.`);
-      if (type === 'law') { setFile(null); loadCategories(); } 
-      else { setExamFile(null); }
-    } catch (err: any) {
-      updatePanel('error', '오류 발생', err.message);
-      alert(`[🚨 오류 발생]\n${err.message}`);
-    }
-  };
-
-  const handleAutoMakeCard = async (cat: Category, silent = false) => {
-    if (!isLoggedIn) return;
-    updatePanel('loading', 'AI 빈칸 추천 중', `[${cat.title}] 모의고사를 바탕으로 최적의 빈칸을 추출합니다...`);
-    
-    try {
-      const res = await fetch("https://api.blankd.top/api/auto-make-cards", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: safeAddress, category_id: cat.id, content: cat.content }),
-      });
+      const res = await fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.details || data.error);
-      
-      updatePanel('success', 'AI 추출 완료', data.message);
-      loadMyCards();
-    } catch (err: any) {
-      updatePanel('error', '추출 실패', err.message);
-    }
+      if (res.ok) setExams(data.exams || []);
+    } catch (err) { console.error("[진단] 모의고사 로드 에러:", err); }
   };
 
-  const handleBatchAutoMake = async () => {
-    if (!isLoggedIn || categories.length === 0) return;
-    if (!confirm("모든 문헌에서 일괄 추출을 진행하시겠습니까?")) return;
-    
-    for (let i = 0; i < categories.length; i++) {
-      updatePanel('loading', '일괄 추출 중', `전체 문헌을 분석하고 있습니다...`, i + 1, categories.length);
-      await handleAutoMakeCard(categories[i], true);
-    }
-    
-    updatePanel('success', '일괄 완료', `모든 분석이 완료되었습니다.`);
-    loadMyCards();
+  const updatePanel = (status: string, title: string, msg: string, progress: number = 0) => {
+    setPanelState(prev => ({ status, title, message: msg, progress, logs: [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev.logs].slice(0, 10) }));
+  };
+
+  const pollTaskProgress = (taskId: string, onSuccess: () => void) => {
+    const intv = setInterval(async () => {
+      try {
+        const res = await fetch(`https://api.blankd.top/api/task-status?task_id=${taskId}`);
+        const data = await res.json();
+        if (data.status === 'completed') {
+          clearInterval(intv);
+          updatePanel('success', '작업 완료', data.message, 100);
+          onSuccess();
+        } else if (data.status === 'error') {
+          clearInterval(intv);
+          updatePanel('error', '오류 발생', data.message, 0);
+        } else {
+          updatePanel('loading', '백그라운드 처리 중', data.message, data.progress);
+        }
+      } catch(e) { console.error("[진단] 폴링 실패", e); }
+    }, 1500);
+  };
+
+  const uploadLaw = async () => {
+    if (!lawFile) return alert("법령 파일을 선택해주세요.");
+    updatePanel('loading', '전송 대기', `업로드를 시작합니다...`, 5);
+    const formData = new FormData(); formData.append("file", lawFile); formData.append("wallet_address", safeAddress);
+    try {
+      const res = await fetch(`https://api.blankd.top/api/upload-pdf`, { method: "POST", body: formData });
+      if (res.ok) {
+        const data = await res.json();
+        setLawFile(null);
+        pollTaskProgress(data.task_id, () => loadCategories());
+      }
+    } catch (err: any) { updatePanel('error', '전송 오류', err.message, 0); }
+  };
+
+  const uploadExam = async () => {
+    if (!examFile) return alert("모의고사 파일을 선택해주세요.");
+    updatePanel('loading', '전송 대기', `모의고사 전송을 시작합니다...`, 5);
+    const formData = new FormData(); formData.append("file", examFile); formData.append("wallet_address", safeAddress);
+    try {
+      const res = await fetch(`https://api.blankd.top/api/upload-exam`, { method: "POST", body: formData });
+      if (res.ok) {
+        const data = await res.json();
+        setExamFile(null);
+        pollTaskProgress(data.task_id, () => loadExams());
+      }
+    } catch (err: any) { updatePanel('error', '전송 오류', err.message, 0); }
+  };
+
+  const handleAiRecommend = async (cat: Category) => {
+    updatePanel('loading', '분석 요청', 'AI 엔진과 연결 중입니다...', 5);
+    try {
+      const res = await fetch("https://api.blankd.top/api/recommend-blank", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: cat.content, wallet_address: safeAddress })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        pollTaskProgress(data.task_id, () => {});
+      }
+    } catch(e) { updatePanel('error', '연결 실패', 'AI 통신 오류', 0); }
+  };
+
+  const handleSplitCategory = async (cat: Category, splitIdx: number, wordsArray: string[]) => {
+    if (!confirm("이 부분을 기준으로 조항을 분할하시겠습니까?")) return;
+    const text1 = wordsArray.slice(0, splitIdx).join(''); const text2 = wordsArray.slice(splitIdx).join('');
+    updatePanel('loading', '문헌 분할 중', '조항을 나누고 있습니다...', 50);
+    try {
+      const res = await fetch("https://api.blankd.top/api/split-category", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: cat.id, text1, text2, wallet_address: safeAddress })
+      });
+      if (res.ok) { setExpandedCategoryId(null); setSelectedWordIndices(new Set()); loadCategories(); updatePanel('success', '완료', '분할되었습니다.', 100); }
+    } catch(e) { console.error("[진단] 분할 에러", e); }
+  };
+
+  const handleMakeBlankCard = async (cat: Category) => {
+    if (!isLoggedIn || selectedWordIndices.size === 0) return alert("단어를 선택해주세요.");
+    updatePanel('loading', '저장 및 삭제 중', '카드를 만들고 원본 문헌을 삭제합니다...', 50);
+    const words = cat.content ? cat.content.split(SPLIT_REGEX) : [];
+    let cardContent = ""; let answerText = ""; let isBlanking = false; 
+    words.forEach((word, index) => {
+      if (!word) return;
+      if (selectedWordIndices.has(index) && word.trim() !== "") {
+        if (!isBlanking) { cardContent += "[ "; if (answerText.length > 0) answerText += ", "; isBlanking = true; }
+        cardContent += word; answerText += word;
+      } else {
+        if (isBlanking) { cardContent += " ]"; isBlanking = false; }
+        cardContent += word;
+      }
+    });
+    if (isBlanking) cardContent += " ]";
+
+    try {
+      const res = await fetch("https://api.blankd.top/api/save-card", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, card_content: cardContent, answer_text: answerText }),
+      });
+      if (res.ok) {
+        await fetch("https://api.blankd.top/api/delete-category", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: safeAddress, id: cat.id })
+        });
+        setSelectedWordIndices(new Set()); setExpandedCategoryId(null);
+        loadCategories(); loadMyCards(); updatePanel('success', '완료', '추출 및 삭제됨.', 100); setActiveTab('enhance');
+      }
+    } catch(err) { console.error("[진단] 추출 에러", err); }
   };
 
   const handleDeleteCategory = async (cat_id: number) => {
-    if (!isLoggedIn || !confirm("이 문헌을 개별 삭제하시겠습니까?")) return;
-    try {
-      const res = await fetch("https://api.blankd.top/api/delete-category", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: safeAddress, id: cat_id }),
-      });
-      if (res.ok) {
-        alert("삭제되었습니다.");
-        loadCategories();
-      }
-    } catch (err) { alert("삭제 실패"); }
+    if (!confirm("이 문헌을 영구 삭제하시겠습니까?")) return;
+    const res = await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat_id }) });
+    if (res.ok) loadCategories();
   };
 
   const handleDeleteCard = async (card_id: number) => {
-    if (!isLoggedIn || !confirm("이 카드를 영구 삭제하시겠습니까?")) return;
-    try {
-      const res = await fetch("https://api.blankd.top/api/delete-card", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: safeAddress, id: card_id }),
-      });
-      if (res.ok) {
-        alert("카드가 삭제되었습니다.");
-        loadMyCards();
-      }
-    } catch (err) { alert("삭제 실패"); }
+    if (!confirm("이 카드를 영구 삭제하시겠습니까?")) return;
+    const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card_id }) });
+    if (res.ok) { setActiveCard(null); loadMyCards(); }
   };
 
-  const handleDeleteAll = async () => {
-    if (!isLoggedIn || !confirm("보관소의 모든 데이터를 영구적으로 지우시겠습니까?")) return;
-    const res = await fetch("https://api.blankd.top/api/delete-all", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ wallet_address: safeAddress }),
+  const handleMoveCraftFolders = async () => {
+    if (selectedCraftIds.size === 0 || !targetFolderName) return;
+    await fetch('/api/move-categories', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: Array.from(selectedCraftIds), folder_name: targetFolderName, wallet_address: safeAddress})});
+    setSelectedCraftIds(new Set()); setTargetFolderName(''); loadCategories(); setOpenCraftFolders(prev => ({...prev, [targetFolderName]: true}));
+  };
+
+  const handleMoveEnhanceFolders = async () => {
+    if (selectedEnhanceIds.size === 0 || !targetFolderName) return;
+    await fetch('/api/move-cards', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: Array.from(selectedEnhanceIds), folder_name: targetFolderName, wallet_address: safeAddress})});
+    setSelectedEnhanceIds(new Set()); setTargetFolderName(''); loadMyCards(); setOpenEnhanceFolders(prev => ({...prev, [targetFolderName]: true}));
+  };
+
+  const submitCombatAnswer = async (isCorrect: boolean, time: number = 999.0) => {
+    if (!activeCard) return;
+    const res = await fetch("https://api.blankd.top/api/submit-answer", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ card_id: activeCard.id, is_correct: isCorrect, clear_time: time }),
     });
     if (res.ok) {
-      alert("초기화되었습니다.");
-      setCategories([]); setSavedCards([]); setParsedText(""); setFile(null); setExamFile(null);
-      updatePanel('idle', '초기화 완료', '데이터가 리셋되었습니다.');
+      alert(isCorrect ? `성공! 기록: ${time.toFixed(1)}초` : `실패! 시간 초과 또는 오답입니다.`);
+      setActiveCard(null); loadMyCards();
     }
   };
 
   const handleGoogleZkLogin = async () => {
     try {
       const createUrl = (enokiFlow as any).createAuthorizationURL || enokiFlow.createAuthorizationUrl;
+      if (!createUrl) throw new Error("인증 함수 없음");
       const url = await createUrl.call(enokiFlow, {
         provider: 'google',
         clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com',
@@ -256,49 +275,6 @@ function App() {
     } catch (err: any) { alert(`로그인 에러: ${err.message}`); }
   };
 
-  const handleGithubPull = async () => {
-    try {
-      const res = await fetch("https://api.blankd.top/api/github-pull", { method: 'POST' });
-      const data = await res.json();
-      alert(data.message || data.error);
-    } catch (err) { alert("서버 연결 실패"); }
-  };
-
-  const loadTextForManualSelection = async (cat: Category) => {
-    setParsedText(cat.content);
-    setSelectedWordIndices(new Set()); 
-    setAiExplanation("");
-    updatePanel('loading', '기출 검색 중', '해당 조항과 관련된 문제를 검색합니다...');
-
-    try {
-      const res = await fetch("https://api.blankd.top/api/get-related-exams", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: cat.content, wallet_address: safeAddress }),
-      });
-      const data = await res.json();
-      setRelatedExams(data.related_exams || []);
-      updatePanel('idle', '준비 완료', '조항 분석 및 검색이 완료되었습니다.');
-    } catch (err) {
-      updatePanel('error', '검색 실패', '관련 기출문제 로드 중 에러가 발생했습니다.');
-    }
-  };
-
-  const getAiExplanation = async (exam: any) => {
-    setAiExplanation("AI가 법령을 근거로 해설을 작성하고 있습니다. 잠시만 기다려주세요...");
-    try {
-      const res = await fetch("https://api.blankd.top/api/generate-explanation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ law_text: parsedText, question: exam.question, answer: exam.answer }),
-      });
-      const data = await res.json();
-      setAiExplanation(data.explanation || "해설 생성에 실패했습니다.");
-    } catch (err) {
-      setAiExplanation("서버와의 통신 오류로 해설을 가져오지 못했습니다.");
-    }
-  };
-
   const toggleWordSelection = (index: number) => {
     const newSet = new Set(selectedWordIndices);
     if (newSet.has(index)) newSet.delete(index);
@@ -306,278 +282,114 @@ function App() {
     setSelectedWordIndices(newSet);
   };
 
-  const handleMakeBlankCard = async () => {
-    if (!isLoggedIn || selectedWordIndices.size === 0) return alert("단어를 선택해주세요.");
-    updatePanel('loading', '수동 저장 중', '카드를 저장하고 있습니다...');
+  // 모달 안의 타이핑 및 타이머 로직
+  useEffect(() => {
+    if (activeCard) {
+      const foundBlanks: {answer: string, correct: boolean}[] = [];
+      const regex = /\[\s*(.*?)\s*\]/g;
+      let match;
+      const safeContent = activeCard.content || "";
+      while((match = regex.exec(safeContent)) !== null) foundBlanks.push({ answer: match[1].trim(), correct: false });
+      if(foundBlanks.length === 0 && activeCard.answer) foundBlanks.push(...activeCard.answer.split(',').map(a => ({answer: a.trim(), correct: false})));
+      setBlanks(foundBlanks); setCurrentBlankIdx(0); setAnswerInput(""); setInputStatus('idle');
+      const timePerBlank = Math.max(1.0, 5.0 - Math.floor(activeCard.level / 5) * 0.5);
+      setTotalTimeLimit(timePerBlank * foundBlanks.length); setStartTime(Date.now()); setElapsed(0);
+    }
+  }, [activeCard]);
+
+  useEffect(() => {
+    if (activeCard && currentBlankIdx < blanks.length) {
+      const interval = setInterval(() => {
+        const diff = (Date.now() - startTime) / 1000;
+        setElapsed(diff);
+        if (diff >= totalTimeLimit) { clearInterval(interval); submitCombatAnswer(false, diff); }
+      }, 100);
+      return () => clearInterval(interval);
+    }
+  }, [activeCard, currentBlankIdx, blanks.length, startTime, totalTimeLimit]);
+
+  const handleSequentialInput = () => {
+    if (inputStatus === 'correct' || inputStatus === 'wrong') return;
+    if (!blanks[currentBlankIdx]) return;
+    const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
+    const actual = answerInput.replace(/\s+/g, '').toLowerCase();
     
-    const words = parsedText.split(SPLIT_REGEX);
-    let cardContent = ""; 
-    let answerText = ""; 
-    let isBlanking = false; 
+    if (expected === actual) {
+      setInputStatus('correct');
+      const newBlanks = [...blanks]; newBlanks[currentBlankIdx].correct = true; setBlanks(newBlanks);
+      setTimeout(() => {
+        setAnswerInput(""); setInputStatus('idle');
+        if (currentBlankIdx + 1 < blanks.length) setCurrentBlankIdx(currentBlankIdx + 1);
+        else submitCombatAnswer(true, elapsed);
+      }, 300);
+    } else {
+      setInputStatus('wrong');
+      setTimeout(() => { setAnswerInput(""); setInputStatus('idle'); }, 500);
+    }
+  };
 
-    words.forEach((word, index) => {
-      if (word === undefined || word === '') return;
-      const isSelected = selectedWordIndices.has(index) && word.trim() !== "";
+  // [오류 진단] 안전한 문자열 추출 및 정렬 처리
+  const getStrictCardTitle = (text?: string) => {
+    if (!text) return "제목 없음";
+    const match = text.match(/^(\[.*?\]\s*제\s*\d+\s*조(?:의\s*\d+)?(?:\([^)]+\))?)/);
+    return match ? match[1] : text.split('\n')[0].substring(0, 15) + "...";
+  };
 
-      if (isSelected) {
-        if (!isBlanking) {
-          cardContent += "[ ";
-          if (answerText.length > 0) answerText += ", ";
-          isBlanking = true;
-        }
-        cardContent += word;
-        answerText += word;
-      } else {
-        if (isBlanking) {
-          cardContent += " ]";
-          isBlanking = false;
-        }
-        cardContent += word;
+  const getSortNumber = (text?: string) => {
+    if (!text) return 999999;
+    const match = text.match(/제\s*(\d+)\s*조/);
+    return match ? parseInt(match[1]) : 999999;
+  };
+
+  const renderSequentialMaskedContent = (text?: string) => {
+    if (!text) return null;
+    const parts = text.split(/(\[.*?\])/g);
+    let bIdx = 0;
+    return parts.map((part, i) => {
+      if (part.startsWith('[') && part.endsWith(']')) {
+        const isCorrect = blanks[bIdx]?.correct; const isCurrent = bIdx === currentBlankIdx; bIdx++;
+        if (isCorrect) return <span key={i} className="text-green-400 font-bold mx-1">{part.replace(/\[|\]/g, '')}</span>;
+        else if (isCurrent) return <span key={i} className="inline-block min-w-[60px] h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>;
+        else return <span key={i} className="inline-block min-w-[60px] h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
       }
+      return part;
     });
-    
-    if (isBlanking) {
-      cardContent += " ]";
-    }
-
-    try {
-      const res = await fetch("https://api.blankd.top/api/save-card", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: safeAddress, card_content: cardContent, answer_text: answerText }),
-      });
-      if (res.ok) {
-        setSelectedWordIndices(new Set());
-        setParsedText(""); 
-        loadMyCards();
-        updatePanel('success', '저장 완료', '카드가 성공적으로 추가되었습니다.');
-      }
-    } catch(err:any) {
-      updatePanel('error', '저장 실패', err.message);
-    }
   };
 
-  const submitCombatAnswer = async (inputAnswer: string) => {
-    if (!activeCard) return;
-    
-    // 단순 공백 제거 및 소문자화 후 비교 (관대한 채점)
-    const isCorrect = inputAnswer.replace(/\s+/g, '').toLowerCase() === activeCard.answer.replace(/\s+/g, '').toLowerCase();
-    
-    const res = await fetch("https://api.blankd.top/api/submit-answer", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ card_id: activeCard.id, is_correct: isCorrect }),
+  const craftFolders = Array.from(new Set(categories.map(c => c.folder_name || '기본 폴더'))).reverse();
+  const enhanceFolders = Array.from(new Set(savedCards.map(c => c.folder_name || '기본 폴더'))).reverse();
+
+  // 대시보드 완전 삭제 방어 (초기화)
+  const handleDeleteAll = async () => {
+    if (!confirm("보관소의 모든 데이터를 영구 지우시겠습니까?")) return;
+    const res = await fetch("https://api.blankd.top/api/delete-all", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wallet_address: safeAddress }),
     });
-    if (res.ok) {
-      alert(isCorrect ? "지식 보존 성공! 정답입니다." : `지식 보존 실패. 정답: [${activeCard.answer}]`);
-      setActiveCard(null);
-      loadMyCards();
-    }
-  };
-
-  const getLevelTier = (level: number) => {
-    if (level === 0) return "일반 (Normal)";
-    if (level === 1) return "희귀 (Rare)";
-    if (level === 2) return "영웅 (Epic)";
-    return "전설 (Legend)";
-  };
-  
-  const getTierClass = (level: number) => {
-    if (level === 0) return "border-neutral-800 text-neutral-400";
-    if (level === 1) return "border-blue-900/50 text-blue-300/80";
-    if (level === 2) return "border-purple-900/50 text-purple-300/80";
-    return "border-amber-900/50 text-amber-300/80";
+    if (res.ok) { setCategories([]); setSavedCards([]); setExams([]); setExpandedCategoryId(null); updatePanel('idle', '초기화', '데이터 리셋됨', 0); }
   };
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] font-sans selection:bg-neutral-800 selection:text-white p-6 sm:p-12 relative">
-      
-      <header className="max-w-6xl mx-auto flex flex-col sm:flex-row sm:justify-between sm:items-baseline border-b border-white/10 pb-8 mb-12 gap-4">
-        <div>
-          <h1 className="text-2xl font-light tracking-[0.3em] text-white uppercase">Blank_D</h1>
-          <p className="text-[10px] text-white/30 mt-2 uppercase tracking-widest">AI & Mock-Exam Driven Archive</p>
-        </div>
-        {isLoggedIn && <div className="text-right text-[10px] text-white/30 tracking-wider">ID: {safeAddress.substring(0, 12)}...</div>}
+      <header className="max-w-6xl mx-auto flex justify-between items-baseline border-b border-white/10 pb-8 mb-12 gap-4">
+        <h1 className="text-2xl font-light tracking-[0.3em] text-white">Blank_D</h1>
       </header>
-
       <main className="max-w-6xl mx-auto">
         {!isLoggedIn ? (
-          <div className="flex flex-col items-center justify-center py-40">
-            <button onClick={handleGoogleZkLogin} className="px-10 py-3 border border-white/20 hover:border-white/60 text-white/80 hover:text-white transition-all text-sm tracking-widest font-light">
-              Google 이메일로 열기
+          <div className="flex justify-center py-40">
+            <button onClick={handleGoogleZkLogin} className="px-10 py-3 border border-white/20 text-white/80 hover:bg-white/10 transition-all font-light tracking-widest text-sm">
+              Google 로그인
             </button>
           </div>
         ) : (
           <>
-            <nav className="flex gap-8 mb-16 border-b border-white/5 pb-4 overflow-x-auto scrollbar-hide">
-              {[
-                { id: 'dashboard', label: '열람실' },
-                { id: 'craft', label: '지식 추출' },
-                { id: 'enhance', label: '기억 강화' },
-                { id: 'mypage', label: '설정' }
-              ].map((tab) => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`text-xs font-light tracking-[0.1em] transition-all whitespace-nowrap pb-4 -mb-[17px]
-                    ${activeTab === tab.id ? 'text-white border-b border-white/50' : 'text-white/30 hover:text-white/60'}
-                  `}
-                >
-                  {tab.label}
-                </button>
+            <nav className="flex gap-8 mb-8 border-b border-white/5 pb-4 overflow-x-auto scrollbar-hide">
+              {[{ id: 'dashboard', label: '열람실' }, { id: 'craft', label: '지식 추출' }, { id: 'enhance', label: '기억 강화' }, { id: 'exam', label: '모의고사' }, { id: 'mypage', label: '설정' }].map((tab) => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`text-xs font-light tracking-[0.1em] pb-4 -mb-[17px] ${activeTab === tab.id ? 'text-white border-b border-white/50' : 'text-white/30'}`}>{tab.label}</button>
               ))}
             </nav>
 
-            {activeTab === 'craft' && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in fade-in duration-700">
-                {/* 좌측 패널: 업로드 및 목록 */}
-                <div className="lg:col-span-6 space-y-12">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    <div className="space-y-4">
-                      <h3 className="text-sm font-light tracking-[0.2em] text-white/80 border-b border-white/5 pb-2">1. 법령 문헌 업로드</h3>
-                      <label className="block border border-dashed border-white/20 p-8 text-center hover:border-white/40 cursor-pointer">
-                        <input type="file" accept=".pdf,.txt,.docx,.html,.htm" onChange={(e) => setFile(e.target.files?.[0] || null)} className="hidden" />
-                        <div className="text-[10px] text-white/40">{file ? `✅ ${file.name}` : "파일 선택 (.pdf, .html)"}</div>
-                      </label>
-                      <button onClick={() => uploadFile('law')} className="w-full py-3 border border-white/10 hover:bg-white/10 text-xs">법령분석 개시</button>
-                    </div>
-
-                    <div className="space-y-4">
-                      <h3 className="text-sm font-light tracking-[0.2em] text-teal-500/80 border-b border-white/5 pb-2">2. 모의고사 구조화</h3>
-                      <label className="block border border-dashed border-teal-900/40 p-8 text-center hover:border-teal-500/40 cursor-pointer">
-                        <input type="file" accept=".pdf,.txt,.docx,.html,.htm" onChange={(e) => setExamFile(e.target.files?.[0] || null)} className="hidden" />
-                        <div className="text-[10px] text-teal-500/40">{examFile ? `✅ ${examFile.name}` : "파일 선택 (.pdf, .html)"}</div>
-                      </label>
-                      <button onClick={() => uploadFile('exam')} className="w-full py-3 border border-teal-900/30 hover:bg-teal-900/20 text-teal-500/80 text-xs">문제/정답/해설 DB 등록</button>
-                    </div>
-                  </div>
-
-                  {categories.length > 0 && (
-                    <div className="space-y-4">
-                      <div className="flex justify-between items-baseline border-b border-white/5 pb-2">
-                        <div className="text-xs font-light text-white/60 tracking-widest">분석된 문헌 리스트</div>
-                        <button onClick={handleBatchAutoMake} className="text-[10px] text-indigo-400">일괄 자동 추출</button>
-                      </div>
-                      <div className="flex gap-2 mb-4 mt-2">
-                        <button onClick={() => setViewMode('all')} className={`px-3 py-1 text-[10px] rounded-sm transition-all ${viewMode === 'all' ? 'bg-white/20 text-white' : 'border border-white/10 text-white/40 hover:text-white/80'}`}>전체</button>
-                        <button onClick={() => setViewMode('법')} className={`px-3 py-1 text-[10px] rounded-sm transition-all ${viewMode === '법' ? 'bg-white/20 text-white' : 'border border-white/10 text-white/40 hover:text-white/80'}`}>법률</button>
-                        <button onClick={() => setViewMode('령')} className={`px-3 py-1 text-[10px] rounded-sm transition-all ${viewMode === '령' ? 'bg-white/20 text-white' : 'border border-white/10 text-white/40 hover:text-white/80'}`}>시행령</button>
-                        <button onClick={() => setViewMode('칙')} className={`px-3 py-1 text-[10px] rounded-sm transition-all ${viewMode === '칙' ? 'bg-white/20 text-white' : 'border border-white/10 text-white/40 hover:text-white/80'}`}>시행규칙</button>
-                      </div>
-                      <div className="grid grid-cols-1 gap-2 max-h-[350px] overflow-y-auto scrollbar-hide">
-                        {categories.filter(c => viewMode === 'all' || c.title.includes(`[${viewMode}]`)).map(cat => (
-                          <div key={cat.id} className="border border-white/5 p-4 flex justify-between items-center group bg-white/[0.01]">
-                            <div className="flex-1 cursor-pointer pr-4" onClick={() => loadTextForManualSelection(cat)}>
-                              <div className="text-xs text-white/80">{cat.title}</div>
-                              <div className="text-[10px] text-white/30 truncate mt-1">{cat.content}</div>
-                            </div>
-                            <div className="flex gap-2">
-                              <button onClick={() => handleDeleteCategory(cat.id)} className="text-[10px] border border-rose-900/30 text-rose-500/60 px-3 py-1.5 hover:border-rose-500/50 hover:bg-rose-900/20 whitespace-nowrap">
-                                삭제
-                              </button>
-                              <button onClick={() => handleAutoMakeCard(cat)} className="text-[10px] border border-white/10 px-3 py-1.5 hover:border-white/40 whitespace-nowrap">
-                                분석
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 🚨 수동 터미널 */}
-                  {parsedText && (
-                    <div className="space-y-4">
-                      <div className="text-xs text-white/60 border-b border-white/5 pb-2">수동 터미널 (단어 및 조사 개별 터치)</div>
-                      <div ref={textRef} className="font-serif text-[14px] leading-[2.5] text-white/70 h-48 overflow-y-auto border border-white/10 p-5 bg-[#0a0a0c] scrollbar-hide break-all">
-                        {parsedText.split(SPLIT_REGEX).map((word, idx) => {
-                          if (word === undefined || word === '') return null;
-                          if (/^\s+$/.test(word)) return <span key={idx}>{word}</span>;
-                          
-                          const isSelected = selectedWordIndices.has(idx);
-                          return (
-                            <span 
-                              key={idx} 
-                              onClick={() => toggleWordSelection(idx)} 
-                              className={`cursor-pointer px-[1px] py-[2px] mx-[1px] rounded transition-colors duration-150 ${isSelected ? 'bg-amber-500 text-black font-bold shadow-[0_0_8px_rgba(245,158,11,0.6)]' : 'hover:bg-white/20'}`}
-                            >
-                              {word}
-                            </span>
-                          );
-                        })}
-                      </div>
-                      <button onClick={handleMakeBlankCard} className="w-full py-3 border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 text-xs tracking-widest">선택 지식 병합 및 추출</button>
-                    </div>
-                  )}
-                </div>
-
-                {/* 우측 패널 */}
-                <div className="lg:col-span-6 flex flex-col space-y-6">
-                  <div className="border border-indigo-900/30 bg-indigo-950/5 rounded-sm overflow-hidden sticky top-12 flex-shrink-0">
-                    <div className="border-b border-indigo-900/30 p-4 bg-indigo-950/20 flex justify-between items-center">
-                      <span className="text-[10px] tracking-widest text-indigo-400 font-bold uppercase">System Terminal</span>
-                      <div className={`w-2 h-2 rounded-full ${panelState.status === 'loading' ? 'bg-indigo-500 animate-ping' : panelState.status === 'error' ? 'bg-rose-500' : 'bg-teal-500'}`}></div>
-                    </div>
-                    <div className="p-6 text-center space-y-3">
-                      <div className={`text-sm tracking-widest ${panelState.status === 'error' ? 'text-rose-400' : 'text-white'}`}>{panelState.title}</div>
-                      <div className="text-[11px] text-white/50 leading-relaxed font-light">{panelState.message}</div>
-                      {panelState.total > 0 && (
-                        <div className="w-full px-8 pt-2">
-                          <div className="w-full bg-white/5 h-1 mb-2 rounded-full overflow-hidden">
-                            <div className="bg-indigo-500 h-full transition-all duration-500" style={{ width: `${(panelState.current / panelState.total) * 100}%` }}></div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <div className="h-20 bg-[#070709] border-t border-indigo-900/30 p-3 overflow-y-auto font-mono text-[9px] text-white/30 flex flex-col-reverse">
-                      {panelState.logs.map((log, i) => <div key={i}>{log}</div>)}
-                    </div>
-                  </div>
-
-                  <div className="flex-1 border border-indigo-900/30 bg-black/40 p-6 rounded-sm min-h-[300px]">
-                    <h3 className="text-xs font-bold text-indigo-400 mb-6 tracking-widest uppercase">Related Mock-Exams</h3>
-                    {relatedExams.length > 0 ? (
-                      <div className="space-y-6 overflow-y-auto max-h-[500px] scrollbar-hide pr-2">
-                        {relatedExams.map((exam, i) => (
-                          <div key={i} className="p-4 bg-white/5 border border-white/10 rounded-sm">
-                            <p className="text-xs text-amber-400 mb-2 leading-relaxed">Q. {exam.question}</p>
-                            <p className="text-[11px] text-white/60 mb-4">A. {exam.answer}</p>
-                            
-                            {exam.explanation && exam.explanation.trim() !== "" && (
-                              <p className="text-[10px] text-white/40 mb-4 bg-black/50 p-2 border border-white/5">
-                                기존 해설: {exam.explanation}
-                              </p>
-                            )}
-
-                            <button 
-                              onClick={() => getAiExplanation(exam)}
-                              className="text-[9px] px-3 py-1.5 border border-indigo-500/50 text-indigo-300 hover:bg-indigo-500/10 tracking-widest uppercase"
-                            >
-                              Gemma 26B 법령근거 해설 요청
-                            </button>
-                          </div>
-                        ))}
-                        
-                        {aiExplanation && (
-                          <div className="mt-6 p-5 border border-indigo-500/30 bg-indigo-950/20 rounded-sm">
-                            <div className="text-[10px] text-indigo-300 mb-3 font-bold uppercase">AI Rationale Explanation</div>
-                            <div className="text-[11px] leading-relaxed text-white/80 font-serif">
-                              {aiExplanation}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="h-40 flex items-center justify-center text-[10px] text-white/20 uppercase tracking-widest">
-                        관련된 기출문제가 없습니다.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Dashboard 탭 */}
+            {/* 🚨 열람실 대시보드 탭 (복구 완료) */}
             {activeTab === 'dashboard' && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 animate-in fade-in">
                 <div className="border border-white/10 p-8 rounded-sm bg-white/[0.02]">
@@ -595,133 +407,232 @@ function App() {
               </div>
             )}
 
-            {/* Enhance 탭 */}
-            {activeTab === 'enhance' && (
-              <div className="space-y-8 animate-in fade-in">
-                <div className="flex justify-between items-center mb-4">
-                  <div className="text-xs text-white/60">레이아웃 단수 설정</div>
-                  <div className="flex gap-2">
-                    {[2, 3, 4].map(num => (
-                      <button key={num} onClick={() => setColCount(num)} className={`px-3 py-1 text-[10px] rounded-sm transition-all ${colCount === num ? 'bg-white/20 text-white' : 'border border-white/10 text-white/40 hover:text-white/80'}`}>{num}단</button>
-                    ))}
+            {/* 지식 추출 탭 */}
+            {activeTab === 'craft' && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+                <div className="lg:col-span-8 space-y-8">
+                  <div className="flex gap-2 mb-4">
+                    <label className="flex-1 border border-white/20 p-2 text-center text-xs hover:bg-white/10 cursor-pointer text-white/80">
+                      <input type="file" accept=".pdf,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 법령 업로드'}
+                    </label>
+                    <button onClick={uploadLaw} className="px-4 border border-white/20 text-xs">전송</button>
+                    
+                    <label className="flex-1 border border-teal-900/40 p-2 text-center text-xs hover:bg-teal-900/20 cursor-pointer text-teal-400">
+                      <input type="file" accept=".pdf,.html" onChange={e => setExamFile(e.target.files?.[0] || null)} className="hidden"/> {examFile ? `✅ ${examFile.name}` : '+ 모의고사 업로드'}
+                    </label>
+                    <button onClick={uploadExam} className="px-4 border border-teal-900/40 text-xs text-teal-400">전송</button>
                   </div>
-                </div>
-                {savedCards.length === 0 ? (
-                  <div className="py-32 text-center text-white/20 text-xs tracking-widest">보관된 지식이 없습니다.</div>
-                ) : (
-                  <div className="grid gap-6" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-                    {Array.from({ length: colCount }).map((_, colIndex) => (
-                      <div 
-                        key={colIndex} 
-                        className="min-h-[300px] border border-white/5 bg-white/[0.005] p-2 rounded-sm"
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          const cardId = parseInt(e.dataTransfer.getData('cardId'));
-                          if (!isNaN(cardId)) updateCardColumn(cardId, colIndex);
-                        }}
-                      >
-                        <div className="text-[10px] text-white/30 mb-4 text-center border-b border-white/5 pb-2">COLUMN {colIndex + 1}</div>
-                        <div className="flex flex-col gap-4">
-                          {savedCards.filter(c => (cardColumns[c.id] || 0) % colCount === colIndex).map((card) => {
-                            const isExpanded = expandedCardId === card.id;
-                            const displayTitle = card.content.substring(0, 20).replace(/\[.*?\]/g, '___') + "...";
+                  
+                  {selectedCraftIds.size > 0 && (
+                    <div className="flex gap-2 items-center bg-indigo-900/20 p-3 rounded-sm border border-indigo-500/20 mb-4">
+                      <span className="text-xs text-indigo-300">{selectedCraftIds.size}개 선택됨</span>
+                      <input value={targetFolderName} onChange={e=>setTargetFolderName(e.target.value)} placeholder="새 폴더명" className="bg-black/50 border border-white/20 text-xs p-2 text-white outline-none flex-1" />
+                      <button onClick={handleMoveCraftFolders} className="text-xs border border-indigo-500/50 bg-indigo-600/30 text-white px-4 py-2">폴더로 이동</button>
+                    </div>
+                  )}
+
+                  {craftFolders.map(folder => (
+                    <div key={folder} className="mb-6">
+                      <button onClick={() => setOpenCraftFolders(p => ({...p, [folder]: !p[folder]}))} className="w-full text-left bg-indigo-900/40 p-4 text-indigo-300 font-bold border border-indigo-500/30 flex justify-between rounded-sm">
+                        <span>📁 {folder}</span>
+                        <span>{openCraftFolders[folder] ? '▼' : '▶'}</span>
+                      </button>
+                      
+                      {openCraftFolders[folder] && (
+                        <div className="grid gap-4 mt-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
+                          {categories.filter(c => (c.folder_name || '기본 폴더') === folder).sort((a, b) => getSortNumber(a.title) - getSortNumber(b.title)).map(cat => {
+                            const isExpanded = expandedCategoryId === cat.id;
                             return (
-                              <div 
-                                key={card.id} 
-                                draggable 
-                                onDragStart={(e) => e.dataTransfer.setData('cardId', card.id.toString())}
-                                onClick={(e) => { e.stopPropagation(); setExpandedCardId(isExpanded ? null : card.id); }}
-                                className={`expandable-card border p-5 transition-all cursor-pointer relative bg-white/[0.01] rounded-sm
-                                  ${card.status === "BURNED" ? "border-white/5 opacity-30" : getTierClass(card.level)}`}
-                              >
-                                <div className="flex justify-between items-start mb-4">
-                                  <span className="text-[10px] tracking-widest font-light">{getLevelTier(card.level)}</span>
-                                  <div className="flex items-center gap-3">
-                                    <span className="text-[10px] tracking-widest font-light text-white/40">LV.{card.level}</span>
-                                    {card.status !== "BURNED" && (
-                                      <button 
-                                        onClick={(e) => { e.stopPropagation(); handleDeleteCard(card.id); }} 
-                                        className="text-[10px] text-rose-500/60 hover:text-rose-400 tracking-widest"
-                                      >
-                                        삭제
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                                
+                              <div key={cat.id} className="expandable-card relative flex items-center justify-center">
+                                <input type="checkbox" className="absolute top-2 right-2 z-10 w-4 h-4 cursor-pointer" checked={selectedCraftIds.has(cat.id)} onChange={() => { const s = new Set(selectedCraftIds); if(s.has(cat.id)) s.delete(cat.id); else s.add(cat.id); setSelectedCraftIds(s); }} />
                                 {!isExpanded ? (
-                                  <div className="text-[13px] font-serif text-white/80">{displayTitle}</div>
+                                  <button 
+                                    {...useLongPress(() => handleDeleteCategory(cat.id), 800)}
+                                    onClick={() => { setExpandedCategoryId(cat.id); setSelectedWordIndices(new Set()); setParsedText(cat.content); }} 
+                                    className="w-full h-full text-[13px] font-serif font-bold text-center text-indigo-300 bg-indigo-900/20 py-4 px-3 rounded-sm border border-indigo-500/30 shadow-[0_0_10px_rgba(99,102,241,0.1)] transition-all hover:bg-indigo-900/40"
+                                  >
+                                    {getStrictCardTitle(cat.title)} 
+                                  </button>
                                 ) : (
-                                  <div className="animate-in fade-in zoom-in-95 duration-200">
-                                    <div className="text-[13px] leading-loose font-serif text-white/80 mb-6">
-                                       {renderMaskedContent(card.content)}
+                                  <div className="w-full absolute z-20 top-0 left-0 animate-in fade-in flex flex-col gap-3 p-4 bg-[#0a0a0c] border border-indigo-500/50 shadow-2xl rounded-sm">
+                                    <div className="flex justify-between items-center mb-2">
+                                      <button onClick={() => handleAiRecommend(cat)} className="text-[10px] bg-teal-900/40 text-teal-400 px-2 py-1 rounded">✨ Gemma 26B 빈칸 추천</button>
+                                      <button onClick={(e) => { e.stopPropagation(); setExpandedCategoryId(null); }} className="text-white/40 text-xs">닫기</button>
                                     </div>
-                                    <button 
-                                       onClick={(e) => { e.stopPropagation(); setAnswerInput(""); setActiveCard(card); setExpandedCardId(null); }}
-                                       className="w-full py-2 border border-white/10 text-[11px] text-white/60 hover:bg-white/10 hover:text-white transition-all"
-                                    >
-                                       기억 복원 도전 (타이핑)
-                                    </button>
+                                    <textarea value={parsedText} onChange={(e) => { setParsedText(e.target.value); setSelectedWordIndices(new Set()); }} className="w-full h-20 bg-black/40 text-white/80 border border-white/10 p-2 text-[11px] font-serif outline-none scrollbar-hide" />
+                                    <div className="font-serif text-[13px] leading-loose text-white/80 p-3 bg-black/40 border border-white/10 max-h-48 overflow-y-auto break-all scrollbar-hide">
+                                      {parsedText.split(SPLIT_REGEX).map((word, idx, arr) => {
+                                        if (!word) return null;
+                                        if (/^\s+$/.test(word)) return <span key={idx}>{word}</span>;
+                                        const isSelected = selectedWordIndices.has(idx);
+                                        return (
+                                          <span key={idx} onClick={() => toggleWordSelection(idx)} {...useLongPress(() => handleSplitCategory(cat, idx, arr), 800)} className={`cursor-pointer px-[2px] rounded select-none ${isSelected ? 'bg-amber-500 text-black font-bold' : 'hover:bg-white/20'}`}>{word}</span>
+                                        )
+                                      })}
+                                    </div>
+                                    <button onClick={() => handleMakeBlankCard(cat)} className="w-full py-3 bg-amber-500/20 text-amber-400 text-xs">지식 추출 및 원본 삭제</button>
                                   </div>
                                 )}
                               </div>
                             )
                           })}
                         </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="lg:col-span-4 flex flex-col space-y-6">
+                  <div className="border border-indigo-900/30 bg-indigo-950/5 rounded-sm overflow-hidden sticky top-12">
+                    <div className="border-b border-indigo-900/30 p-4 bg-indigo-950/20 flex justify-between items-center">
+                      <span className="text-[10px] text-indigo-400 font-bold uppercase">System Terminal</span>
+                      <div className="text-[10px] text-teal-400">{panelState.progress}%</div>
+                    </div>
+                    {panelState.progress > 0 && panelState.progress < 100 && (
+                      <div className="h-1 bg-indigo-500/20"><div className="h-full bg-indigo-500 transition-all duration-300" style={{ width: `${panelState.progress}%` }}></div></div>
+                    )}
+                    <div className="p-6 text-center space-y-3">
+                      <div className="text-[11px] text-white/80 whitespace-pre-wrap">{panelState.message}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 기억 강화 탭 */}
+            {activeTab === 'enhance' && (
+              <div className="space-y-8 animate-in fade-in">
+                {selectedEnhanceIds.size > 0 && (
+                  <div className="flex gap-2 items-center bg-amber-900/20 p-3 rounded-sm border border-amber-500/20 mb-4">
+                    <span className="text-xs text-amber-300">{selectedEnhanceIds.size}개 선택됨</span>
+                    <input value={targetFolderName} onChange={e=>setTargetFolderName(e.target.value)} placeholder="새 폴더명" className="bg-black/50 border border-white/20 text-xs p-2 text-white outline-none flex-1" />
+                    <button onClick={handleMoveEnhanceFolders} className="text-xs border border-amber-500/50 bg-amber-600/30 text-white px-4 py-2">폴더로 이동</button>
+                  </div>
+                )}
+
+                {enhanceFolders.map(folder => (
+                  <div key={folder} className="mb-6">
+                    <button onClick={() => setOpenEnhanceFolders(p => ({...p, [folder]: !p[folder]}))} className="w-full text-left bg-amber-900/30 p-4 text-amber-300 font-bold border border-amber-500/30 flex justify-between rounded-sm">
+                      <span>📁 {folder}</span>
+                      <span>{openEnhanceFolders[folder] ? '▼' : '▶'}</span>
+                    </button>
+                    
+                    {openEnhanceFolders[folder] && (
+                      <div className="grid gap-4 mt-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
+                        {savedCards
+                          .filter(c => (c.folder_name || '기본 폴더') === folder)
+                          .sort((a, b) => getSortNumber(a.content) - getSortNumber(b.content))
+                          .map((card) => {
+                          return (
+                            <div key={card.id} className="relative expandable-card">
+                              <input type="checkbox" className="absolute top-2 right-2 z-10 w-4 h-4 cursor-pointer" checked={selectedEnhanceIds.has(card.id)} onChange={() => { const s = new Set(selectedEnhanceIds); if(s.has(card.id)) s.delete(card.id); else s.add(card.id); setSelectedEnhanceIds(s); }} />
+                              <button 
+                                {...useLongPress(() => handleDeleteCard(card.id), 800)}
+                                onClick={() => setActiveCard(card)}
+                                className={`w-full relative text-[13px] font-serif font-bold text-center py-5 px-3 rounded-sm border shadow-[0_0_10px_rgba(0,0,0,0.5)] transition-all select-none ${card.status === "BURNED" ? "border-white/5 text-white/30" : "border-indigo-500/30 text-indigo-300 bg-indigo-900/20 hover:bg-indigo-900/40"}`}
+                              >
+                                <span className="absolute top-1 left-2 text-[9px] text-amber-400">LV.{card.level}</span>
+                                {getStrictCardTitle(card.content)}
+                              </button>
+                            </div>
+                          )
+                        })}
                       </div>
-                    ))}
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 모의고사 탭 */}
+            {activeTab === 'exam' && (
+              <div className="space-y-8 animate-in fade-in">
+                <div className="text-white/60 text-xs border-b border-white/10 pb-2">CBT 모의고사 문제 풀이장</div>
+                {exams.length === 0 ? (
+                  <div className="py-32 text-center text-white/20 text-xs tracking-widest">저장된 모의고사가 없습니다. 지식 추출 탭에서 업로드하세요.</div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {exams.map(exam => {
+                       const isExpanded = expandedExamId === exam.id;
+                       return (
+                         <div key={exam.id} className="border border-teal-900/40 bg-teal-950/10 p-6 rounded-sm cursor-pointer hover:bg-teal-900/20 transition-all expandable-card" onClick={() => setExpandedExamId(isExpanded ? null : exam.id)}>
+                            <div className="text-[13px] text-teal-100 font-serif leading-loose whitespace-pre-wrap">{exam.question}</div>
+                            {isExpanded && (
+                              <div className="mt-4 pt-4 border-t border-teal-900/50 animate-in fade-in">
+                                <div className="text-amber-400 font-bold mb-2">정답: {exam.answer}</div>
+                                <div className="text-[11px] text-white/60 leading-relaxed bg-black/40 p-3 rounded">{exam.explanation}</div>
+                              </div>
+                            )}
+                         </div>
+                       )
+                    })}
                   </div>
                 )}
               </div>
             )}
 
-            {/* Mypage 탭 */}
+            {/* 설정 탭 (삭제 기능 복원) */}
             {activeTab === 'mypage' && (
               <div className="max-w-md mx-auto space-y-8 py-16 animate-in fade-in">
-                <button onClick={handleGithubPull} className="w-full py-4 border border-teal-500/30 hover:border-teal-500/80 text-teal-300 text-xs">최신 코드 강제 동기화 (Pull)</button>
-                <button onClick={handleDeleteAll} className="w-full py-4 border border-rose-900/30 text-rose-500/70 text-xs">전체 데이터 일괄 초기화</button>
-                <div className="[&>button]:!w-full [&>button]:!bg-transparent [&>button]:!border [&>button]:!border-white/20 [&>button]:!text-white/80 [&>button]:!font-light [&>button]:!text-xs [&>button]:!tracking-widest [&>button]:!rounded-sm"><ConnectButton /></div>
+                <div className="border border-white/10 p-6 rounded-sm">
+                  <div className="text-xs text-white/60 mb-4">공통 레이아웃 뷰어 설정</div>
+                  <div className="flex gap-2 mb-4">
+                    {['all', '법', '령', '칙'].map(mode => (
+                      <button key={mode} onClick={() => setViewMode(mode as any)} className={`px-3 py-1 text-[10px] rounded-sm ${viewMode === mode ? 'bg-white/20 text-white' : 'border border-white/10 text-white/40'}`}>{mode === 'all' ? '전체' : mode}</button>
+                    ))}
+                  </div>
+                  <div className="text-xs text-white/60 mb-4">컬럼 단수 설정 (지식추출 & 기억강화)</div>
+                  <div className="flex gap-2">
+                    {[2, 3, 4].map(num => (
+                      <button key={num} onClick={() => updateColCount(num)} className={`px-3 py-1 text-[10px] rounded-sm ${colCount === num ? 'bg-white/20 text-white' : 'border border-white/10 text-white/40'}`}>{num}단</button>
+                    ))}
+                  </div>
+                </div>
+                <button onClick={handleDeleteAll} className="w-full py-4 border border-rose-900/30 text-rose-500/70 text-xs transition-all hover:bg-rose-900/20">데이터 완전 초기화 (전체 삭제)</button>
               </div>
             )}
           </>
         )}
       </main>
 
-      {/* 학습 강화 모달 (타이핑 버전) */}
+      {/* 모달 */}
       {activeCard && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0d0d0f]/95 backdrop-blur-sm animate-in fade-in">
+        <div className="modal-container fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0d0d0f]/95 backdrop-blur-sm animate-in fade-in">
           <div className="border border-white/10 bg-[#121214] w-full max-w-2xl p-10 shadow-2xl rounded-sm">
             <div className="flex justify-between items-baseline border-b border-white/5 pb-6 mb-8">
-              <span className="font-light tracking-[0.2em] text-sm text-white/80">기억 복원 (LV.{activeCard.level})</span>
+              <div>
+                <span className="font-bold text-amber-400 mr-4">LV.{activeCard.level}</span>
+                <span className="text-xs text-teal-400 mr-4">⏳ {(totalTimeLimit - elapsed).toFixed(1)}초 남음</span>
+                {activeCard.best_time && <span className="text-xs text-amber-300 font-bold">🏆 BEST: {activeCard.best_time.toFixed(1)}초</span>}
+              </div>
               <button onClick={() => setActiveCard(null)} className="text-white/40 hover:text-white text-sm font-light"> 닫기 </button>
             </div>
             <div className="p-8 border border-white/5 bg-[#0a0a0c] text-[15px] leading-loose font-serif text-white/90 mb-8 rounded-sm">
-              {renderMaskedContent(activeCard.content)}
+              {renderSequentialMaskedContent(activeCard.content)}
             </div>
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-4 relative">
               <input 
                 type="text" 
                 autoFocus
                 value={answerInput} 
                 onChange={(e) => setAnswerInput(e.target.value)} 
-                onKeyDown={(e) => e.key === 'Enter' && submitCombatAnswer(answerInput)}
-                placeholder="빈칸에 들어갈 정답을 정확히 타이핑하세요"
-                className="w-full bg-black/50 border border-white/20 p-4 text-white text-sm outline-none focus:border-indigo-500 transition-all"
+                onKeyDown={(e) => e.key === 'Enter' && handleSequentialInput()}
+                placeholder="보라색으로 깜빡이는 빈칸의 정답을 입력 후 엔터"
+                className={`w-full bg-black/50 border p-4 text-white text-sm outline-none transition-all ${inputStatus === 'correct' ? 'border-green-500 text-green-400' : inputStatus === 'wrong' ? 'shake-animation border-red-500 text-red-400' : 'border-white/20 focus:border-indigo-500'}`}
               />
-              <button 
-                onClick={() => submitCombatAnswer(answerInput)} 
-                className="w-full py-4 bg-indigo-600/20 border border-indigo-500/50 hover:bg-indigo-600/40 text-indigo-300 text-sm tracking-widest transition-all"
-              >
-                정답 제출
-              </button>
+              <button onClick={handleSequentialInput} className="w-full py-4 bg-indigo-600/20 border border-indigo-500/50 hover:bg-indigo-600/40 text-indigo-300 text-sm tracking-widest transition-all">기억 복원 도전</button>
             </div>
           </div>
         </div>
       )}
 
-      <style>{`.scrollbar-hide::-webkit-scrollbar { display: none; } .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
+      <style>{`
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 50% { transform: translateX(5px); } 75% { transform: translateX(-5px); } }
+        .shake-animation { animation: shake 0.3s ease-in-out; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; } 
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+      `}</style>
     </div>
   );
 }
 export default App;
+EOF
