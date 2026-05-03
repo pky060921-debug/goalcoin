@@ -25,6 +25,7 @@ try:
 except ImportError:
     docx = None
 
+# [오류 진단] 시스템 전체 에러 로깅
 logging.basicConfig(filename='backend_error_log.txt', level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
 
 app = Flask(__name__)
@@ -58,20 +59,15 @@ def init_db():
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute('''CREATE TABLE IF NOT EXISTS categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, 
-            wallet_address TEXT, 
-            title TEXT, 
-            content TEXT, 
-            folder_name TEXT DEFAULT "기본 폴더",
-            is_x_marked INTEGER DEFAULT 0
-        )''')
+        # [수정됨] is_x_marked 컬럼 추가 (프론트엔드 빈칸 추천 숨김 처리용)
+        cursor.execute('CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, title TEXT, content TEXT, folder_name TEXT DEFAULT "기본 폴더", is_x_marked INTEGER DEFAULT 0)')
         cursor.execute('CREATE TABLE IF NOT EXISTS cards (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, category_id INTEGER, card_content TEXT, answer_text TEXT, options_json TEXT, level INTEGER DEFAULT 0, next_review_time DATETIME, status TEXT DEFAULT "OWNED", best_time REAL DEFAULT NULL, folder_name TEXT DEFAULT "기본 폴더")')
         cursor.execute('''CREATE TABLE IF NOT EXISTS exams (
             id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, title TEXT, question TEXT, answer TEXT, explanation TEXT, related_law_keywords TEXT
         )''')
         cursor.execute('CREATE TABLE IF NOT EXISTS ai_analysis (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, topic TEXT, summary TEXT, recommended_blanks TEXT, quiz_json TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)')
         
+        # 마이그레이션 안전 장치
         try: cursor.execute('ALTER TABLE cards ADD COLUMN best_time REAL DEFAULT NULL')
         except: pass
         try: cursor.execute('ALTER TABLE categories ADD COLUMN folder_name TEXT DEFAULT "기본 폴더"')
@@ -84,7 +80,7 @@ def init_db():
         conn.commit()
         conn.close()
     except Exception as e:
-        logging.error(f"[오류 진단] DB 초기화 실패: {e}\n{traceback.format_exc()}")
+        logging.error(f"[오류 진단] DB 초기화 실패: {e}")
 
 init_db()
 
@@ -111,12 +107,22 @@ def parse_html_3col_law(raw_text):
     rows = re.split(r'<tr[^>]*>', pre_clean, flags=re.IGNORECASE)
     categories = []
     if len(rows) > 1:
+        current_chapter = "기본 폴더"
         current_law_num = "000조"
         type_names = {0: '법', 1: '령', 2: '규'}
         for row_html in rows[1:]:
             try:
                 row_text = re.sub(r'<[^>]+>', ' ', row_html).strip()
                 row_text = re.sub(r'\s+', ' ', row_text)
+                
+                chap_match = re.search(r'제\s*(\d+)\s*장\s*(.*)', row_text)
+                if chap_match:
+                    c_num = chap_match.group(1)
+                    c_name = re.sub(r'[^\w\s]', '', chap_match.group(2).split('(')[0]).strip()[:15] or "총칙"
+                    current_chapter = f"제{int(c_num)}장 {c_name}"
+                    if len(row_text) < 40 and "조" not in row_text:
+                        continue
+
                 cols = re.split(r'<td[^>]*>', row_html, flags=re.IGNORECASE)[1:]
                 if not cols: continue
                 c0_raw = re.sub(r'<[^>]+>', '', cols[0]).strip()
@@ -169,9 +175,9 @@ def parse_html_3col_law(raw_text):
                     else: title_text = clean_content.replace(article_num_str, "").strip().split('\n')[0][:15]
                     
                     clean_title = f"[{type_names.get(col_idx, '법')}] {article_num_str} {title_text}"
-                    categories.append({"title": clean_title, "content": clean_content})
+                    categories.append({"title": clean_title, "content": clean_content, "folder_name": current_chapter, "is_x_marked": 0})
             except Exception as e:
-                logging.error(f"[오류 진단] HTML 파싱 행 오류: {e}")
+                logging.error(f"[오류 진단] HTML 파싱 루프 에러: {e}")
                 continue
     return categories
 
@@ -211,11 +217,12 @@ def get_next_review_time(level):
 def upload_law():
     try:
         wallet_address = request.form.get('wallet_address')
+        custom_folder = request.form.get('custom_folder', '기본 폴더')
         file = request.files.get('file')
         if not file: return jsonify({"error": "업로드된 파일이 없습니다."}), 400
         
         task_id = str(uuid.uuid4())
-        TASK_STATUS[task_id] = {"status": "running", "progress": 10, "message": "문헌 파싱 및 3단 비교표 분석 중..."}
+        TASK_STATUS[task_id] = {"status": "running", "progress": 10, "message": "문헌 파싱 및 분석 중..."}
         
         raw_bytes = file.read()
         filename = file.filename.lower()
@@ -224,18 +231,21 @@ def upload_law():
             try:
                 if filename.endswith('.html') or filename.endswith('.htm'):
                     categories = parse_html_3col_law(raw_bytes.decode('utf-8', errors='ignore'))
+                    for cat in categories:
+                        if not cat.get('folder_name') or cat['folder_name'] == '기본 폴더':
+                            cat['folder_name'] = custom_folder
                 else:
                     text = raw_bytes.decode('utf-8', errors='ignore')
                     normalized_text = normalize_text(clean_korean_law_text(text))
                     categories = []
                     parts = re.split(r'(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)', normalized_text)
                     if parts and len(parts) > 1:
-                        if parts[0].strip(): categories.append({"title": "총칙 및 서론", "content": parts[0].strip()})
+                        if parts[0].strip(): categories.append({"title": "총칙 및 서론", "content": parts[0].strip(), "folder_name": custom_folder, "is_x_marked": 0})
                         for i in range(1, len(parts), 2):
                             title = parts[i].strip()
                             content = parts[i+1].strip() if i+1 < len(parts) else ""
-                            categories.append({"title": title, "content": content})
-                    else: categories = [{"title": "문서 전체", "content": normalized_text}]
+                            categories.append({"title": title, "content": content, "folder_name": custom_folder, "is_x_marked": 0})
+                    else: categories = [{"title": "문서 전체", "content": normalized_text, "folder_name": custom_folder, "is_x_marked": 0}]
                 
                 TASK_STATUS[task_id]["progress"] = 70
                 TASK_STATUS[task_id]["message"] = f"구조화 완료. 총 {len(categories)}개 조항 DB에 저장 중..."
@@ -243,8 +253,8 @@ def upload_law():
                 conn = sqlite3.connect(DB_PATH)
                 cursor = conn.cursor()
                 for cat in categories:
-                    cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name, is_x_marked) VALUES (?, ?, ?, '기본 폴더', 0)", 
-                                   (wallet_address, cat['title'], cat['content']))
+                    cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name, is_x_marked) VALUES (?, ?, ?, ?, ?)", 
+                                   (wallet_address, cat['title'], cat['content'], cat.get('folder_name', custom_folder), cat.get('is_x_marked', 0)))
                 conn.commit()
                 conn.close()
                 
@@ -252,15 +262,13 @@ def upload_law():
                 TASK_STATUS[task_id]["status"] = "completed"
                 TASK_STATUS[task_id]["message"] = "법령 아카이브 등록 성공"
             except Exception as e:
-                logging.error(f"[오류 진단] 법령 업로드 처리 실패: {e}\n{traceback.format_exc()}")
+                logging.error(f"[오류 진단] 법령 업로드 처리 실패: {e}")
                 TASK_STATUS[task_id]["status"] = "error"
                 TASK_STATUS[task_id]["message"] = f"분석 실패: {str(e)}"
                 
         threading.Thread(target=process_law).start()
         return jsonify({"task_id": task_id, "message": "업로드 완료, 백그라운드 처리 시작"})
-    except Exception as e: 
-        logging.error(f"[오류 진단] 전송 실패: {e}")
-        return jsonify({"error": "전송 실패"}), 500
+    except Exception as e: return jsonify({"error": "전송 실패"}), 500
 
 @app.route('/api/upload-exam', methods=['POST'])
 def upload_exam():
@@ -300,14 +308,13 @@ def upload_exam():
                 TASK_STATUS[task_id]["status"] = "completed"
                 TASK_STATUS[task_id]["message"] = f"{len(exam_data)}개의 문항이 저장되었습니다."
             except Exception as e:
-                logging.error(f"[오류 진단] 모의고사 업로드 처리 실패: {e}\n{traceback.format_exc()}")
+                logging.error(f"[오류 진단] 모의고사 업로드 처리 실패: {e}")
                 TASK_STATUS[task_id]["status"] = "error"
                 TASK_STATUS[task_id]["message"] = f"모의고사 파싱 실패: {str(e)}"
                 
         threading.Thread(target=process_exam).start()
         return jsonify({"task_id": task_id, "message": "모의고사 처리 시작"})
     except Exception as e:
-        logging.error(f"[오류 진단] 모의고사 전송 요청 실패: {e}")
         return jsonify({"error": "요청 실패"}), 500
 
 @app.route('/api/get-all-exams')
@@ -321,8 +328,9 @@ def get_all_exams():
         conn.close()
         return jsonify({"exams": exams})
     except Exception as e:
-        logging.error(f"[오류 진단] 모의고사 로드 실패: {e}")
-        return jsonify({"error": "조회 실패"}), 500
+        logging.error(f"[오류 진단] get-all-exams 데이터 조회 실패: {e}")
+        # 프론트엔드 충돌(WSOD) 완벽 방어를 위한 빈 배열 반환
+        return jsonify({"exams": []})
 
 @app.route('/api/recommend-blank', methods=['POST'])
 def recommend_blank():
@@ -369,7 +377,7 @@ def recommend_blank():
                 TASK_STATUS[task_id]["result"] = result
                 TASK_STATUS[task_id]["message"] = "AI 추천 완료!"
             except Exception as e:
-                logging.error(f"[오류 진단] AI 추천 실패: {e}\n{traceback.format_exc()}")
+                logging.error(f"[오류 진단] AI 추천 실패: {e}")
                 TASK_STATUS[task_id]["status"] = "error"
                 TASK_STATUS[task_id]["message"] = f"AI 연산 실패: {str(e)}"
                 
@@ -398,39 +406,29 @@ def split_category():
         conn.commit()
         conn.close()
         return jsonify({"message": "분할 완료"})
-    except Exception as e: 
-        logging.error(f"[오류 진단] 분할 오류: {e}")
-        return jsonify({"error": str(e)}), 500
+    except Exception as e: return jsonify({"error": str(e)}), 500
 
 @app.route('/api/move-categories', methods=['POST'])
 def move_categories():
-    try:
-        data = request.json
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        for cat_id in data.get('ids', []):
-            cursor.execute("UPDATE categories SET folder_name = ? WHERE id = ? AND wallet_address = ?", (data.get('folder_name'), cat_id, data.get('wallet_address')))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "이동 완료"})
-    except Exception as e:
-        logging.error(f"[오류 진단] 카테고리 이동 오류: {e}")
-        return jsonify({"error": str(e)}), 500
+    data = request.json
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    for cat_id in data.get('ids', []):
+        cursor.execute("UPDATE categories SET folder_name = ? WHERE id = ? AND wallet_address = ?", (data.get('folder_name'), cat_id, data.get('wallet_address')))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "이동 완료"})
 
 @app.route('/api/move-cards', methods=['POST'])
 def move_cards():
-    try:
-        data = request.json
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        for card_id in data.get('ids', []):
-            cursor.execute("UPDATE cards SET folder_name = ? WHERE id = ? AND wallet_address = ?", (data.get('folder_name'), card_id, data.get('wallet_address')))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "이동 완료"})
-    except Exception as e:
-        logging.error(f"[오류 진단] 카드 이동 오류: {e}")
-        return jsonify({"error": str(e)}), 500
+    data = request.json
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    for card_id in data.get('ids', []):
+        cursor.execute("UPDATE cards SET folder_name = ? WHERE id = ? AND wallet_address = ?", (data.get('folder_name'), card_id, data.get('wallet_address')))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "이동 완료"})
 
 @app.route('/api/get-categories')
 def get_categories():
@@ -443,23 +441,20 @@ def get_categories():
         conn.close()
         return jsonify({"categories": cats})
     except Exception as e:
-        logging.error(f"[오류 진단] 카테고리 로드 오류: {e}")
-        return jsonify({"error": str(e)}), 500
+        logging.error(f"[오류 진단] get-categories 조회 실패: {e}")
+        # 프론트엔드 충돌(WSOD) 완벽 방어를 위한 빈 배열 반환
+        return jsonify({"categories": []})
 
 @app.route('/api/save-card', methods=['POST'])
 def save_card():
-    try:
-        data = request.json
-        wallet_address, card_content, answer_text = data.get('wallet_address'), data.get('card_content'), data.get('answer_text')
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute('''INSERT INTO cards (wallet_address, card_content, answer_text, options_json, next_review_time, folder_name) VALUES (?, ?, ?, '[]', ?, "기본 폴더")''', (wallet_address, card_content, answer_text, get_next_review_time(0)))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "카드 제작 완료"}), 201
-    except Exception as e:
-        logging.error(f"[오류 진단] 카드 저장 오류: {e}")
-        return jsonify({"error": str(e)}), 500
+    data = request.json
+    wallet_address, card_content, answer_text = data.get('wallet_address'), data.get('card_content'), data.get('answer_text')
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''INSERT INTO cards (wallet_address, card_content, answer_text, options_json, next_review_time, folder_name) VALUES (?, ?, ?, '[]', ?, "기본 폴더")''', (wallet_address, card_content, answer_text, get_next_review_time(0)))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "카드 제작 완료"}), 201
 
 @app.route('/api/my-cards')
 def get_my_cards():
@@ -481,75 +476,60 @@ def get_my_cards():
         conn.close()
         return jsonify({"cards": cards})
     except Exception as e:
-        logging.error(f"[오류 진단] 내 카드 로드 오류: {e}")
-        return jsonify({"error": str(e)}), 500
+        logging.error(f"[오류 진단] my-cards 조회 실패: {e}")
+        # 프론트엔드 충돌(WSOD) 완벽 방어를 위한 빈 배열 반환
+        return jsonify({"cards": []})
 
 @app.route('/api/submit-answer', methods=['POST'])
 def submit_answer():
-    try:
-        data = request.json
-        card_id, is_correct, clear_time = data.get('card_id'), data.get('is_correct'), data.get('clear_time', 999.0)
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT level, best_time FROM cards WHERE id = ?", (card_id,))
-        row = cursor.fetchone()
-        if not row: return jsonify({"error": "카드가 없습니다."}), 404
-        current_lv, best_time = row[0], row[1]
-        
-        if is_correct:
-            new_lv = min(current_lv + 1, 50)
-            new_best = clear_time if best_time is None else min(best_time, clear_time)
-            cursor.execute("UPDATE cards SET level = ?, next_review_time = ?, status = 'OWNED', best_time = ? WHERE id = ?", (new_lv, get_next_review_time(new_lv), new_best, card_id))
-            msg = f"방어 성공! 레벨이 {new_lv}로 올랐습니다."
-        else:
-            cursor.execute("UPDATE cards SET level = 0, next_review_time = ?, status = 'AT_RISK' WHERE id = ?", (get_next_review_time(0), card_id))
-            msg = "방어 실패! 레벨이 0으로 초기화되었습니다."
-        conn.commit()
-        conn.close()
-        return jsonify({"message": msg})
-    except Exception as e:
-        logging.error(f"[오류 진단] 답안 제출 오류: {e}")
-        return jsonify({"error": str(e)}), 500
+    data = request.json
+    card_id, is_correct, clear_time = data.get('card_id'), data.get('is_correct'), data.get('clear_time', 999.0)
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT level, best_time FROM cards WHERE id = ?", (card_id,))
+    row = cursor.fetchone()
+    if not row: return jsonify({"error": "카드가 없습니다."}), 404
+    current_lv, best_time = row[0], row[1]
+    
+    if is_correct:
+        new_lv = min(current_lv + 1, 50)
+        new_best = clear_time if best_time is None else min(best_time, clear_time)
+        cursor.execute("UPDATE cards SET level = ?, next_review_time = ?, status = 'OWNED', best_time = ? WHERE id = ?", (new_lv, get_next_review_time(new_lv), new_best, card_id))
+        msg = f"방어 성공! 레벨이 {new_lv}로 올랐습니다."
+    else:
+        cursor.execute("UPDATE cards SET level = 0, next_review_time = ?, status = 'AT_RISK' WHERE id = ?", (get_next_review_time(0), card_id))
+        msg = "방어 실패! 레벨이 0으로 초기화되었습니다."
+    conn.commit()
+    conn.close()
+    return jsonify({"message": msg})
 
 @app.route('/api/delete-category', methods=['POST'])
 def delete_category():
-    try:
-        data = request.json
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("DELETE FROM categories WHERE wallet_address = ? AND id = ?", (data.get('wallet_address'), data.get('id')))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "삭제되었습니다."})
-    except Exception as e:
-        logging.error(f"[오류 진단] 카테고리 삭제 오류: {e}")
-        return jsonify({"error": str(e)}), 500
+    data = request.json
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM categories WHERE wallet_address = ? AND id = ?", (data.get('wallet_address'), data.get('id')))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "삭제되었습니다."})
 
 @app.route('/api/delete-card', methods=['POST'])
 def delete_card():
-    try:
-        data = request.json
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("DELETE FROM cards WHERE wallet_address = ? AND id = ?", (data.get('wallet_address'), data.get('id')))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "삭제되었습니다."})
-    except Exception as e:
-        logging.error(f"[오류 진단] 카드 삭제 오류: {e}")
-        return jsonify({"error": str(e)}), 500
+    data = request.json
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM cards WHERE wallet_address = ? AND id = ?", (data.get('wallet_address'), data.get('id')))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "삭제되었습니다."})
 
 @app.route('/api/delete-all', methods=['POST'])
 def delete_all():
-    try:
-        wallet_address = request.json.get('wallet_address')
-        conn = sqlite3.connect(DB_PATH)
-        for table in ['categories', 'cards', 'exams', 'ai_analysis']:
-            conn.execute(f"DELETE FROM {table} WHERE wallet_address = ?", (wallet_address,))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "초기화 성공"})
-    except Exception as e:
-        logging.error(f"[오류 진단] 전체 삭제 오류: {e}")
-        return jsonify({"error": str(e)}), 500
+    wallet_address = request.json.get('wallet_address')
+    conn = sqlite3.connect(DB_PATH)
+    for table in ['categories', 'cards', 'exams', 'ai_analysis']:
+        conn.execute(f"DELETE FROM {table} WHERE wallet_address = ?", (wallet_address,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "초기화 성공"})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001)
