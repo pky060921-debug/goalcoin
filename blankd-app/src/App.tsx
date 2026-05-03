@@ -53,7 +53,6 @@ function App() {
   const [elapsed, setElapsed] = useState<number>(0);
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
-  // 설정 탭: 빈칸 추천 활성화 여부
   const [blankRecommendationActive, setBlankRecommendationActive] = useState(false);
 
   // [오류 진단] 롱프레스 터치 커스텀 훅
@@ -65,14 +64,12 @@ function App() {
   };
 
   useEffect(() => {
-    const sCols = localStorage.getItem('cardColumns'); if (sCols) try { setCardColumns(JSON.parse(sCols)); } catch(e) { console.error("[오류 진단] LocalStorage 파싱 에러:", e); }
-    const sNames = localStorage.getItem('columnNames'); if (sNames) try { setColumnNames(JSON.parse(sNames)); } catch(e) { console.error("[오류 진단] LocalStorage 파싱 에러:", e); }
-    const sColCount = localStorage.getItem('colCount'); if (sColCount) try { setColCount(parseInt(sColCount)); } catch(e) { console.error("[오류 진단] LocalStorage 파싱 에러:", e); }
+    const sCols = localStorage.getItem('cardColumns'); if (sCols) try { setCardColumns(JSON.parse(sCols)); } catch(e) { console.error("LocalStorage 에러:", e); }
+    const sNames = localStorage.getItem('columnNames'); if (sNames) try { setColumnNames(JSON.parse(sNames)); } catch(e) { console.error("LocalStorage 에러:", e); }
+    const sColCount = localStorage.getItem('colCount'); if (sColCount) try { setColCount(parseInt(sColCount)); } catch(e) { console.error("LocalStorage 에러:", e); }
   }, []);
 
   const updateColCount = (num: number) => { setColCount(num); localStorage.setItem('colCount', num.toString()); };
-  const updateCardColumn = (cardId: number, colIndex: number) => { const n = { ...cardColumns, [cardId]: colIndex }; setCardColumns(n); localStorage.setItem('cardColumns', JSON.stringify(n)); };
-  const updateColumnName = (colIndex: number, newName: string) => { const n = { ...columnNames, [colIndex]: newName }; setColumnNames(n); localStorage.setItem('columnNames', JSON.stringify(n)); };
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -85,7 +82,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const handleAuth = async () => { try { await enokiFlow.handleAuthCallback(); window.history.replaceState(null, '', window.location.pathname); } catch (err) { console.error("[오류 진단] 인증콜백 오류:", err); } };
+    const handleAuth = async () => { try { await enokiFlow.handleAuthCallback(); window.history.replaceState(null, '', window.location.pathname); } catch (err) { console.error("인증콜백 오류:", err); } };
     if (window.location.hash.includes("id_token=")) handleAuth();
   }, [enokiFlow]);
 
@@ -96,7 +93,7 @@ function App() {
       const res = await fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`);
       const data = await res.json();
       if (res.ok) setCategories(data.categories || []);
-    } catch (err) { console.error("[오류 진단] 카테고리 로드 에러:", err); }
+    } catch (err) { console.error("카테고리 로드 에러:", err); }
   };
 
   const loadMyCards = async () => {
@@ -104,7 +101,7 @@ function App() {
       const res = await fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`);
       const data = await res.json();
       if (res.ok) setSavedCards(data.cards || []);
-    } catch (err) { console.error("[오류 진단] 카드 로드 에러:", err); }
+    } catch (err) { console.error("카드 로드 에러:", err); }
   };
 
   const loadExams = async () => {
@@ -112,7 +109,7 @@ function App() {
       const res = await fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`);
       const data = await res.json();
       if (res.ok) setExams(data.exams || []);
-    } catch (err) { console.error("[오류 진단] 모의고사 로드 에러:", err); }
+    } catch (err) { console.error("모의고사 로드 에러:", err); }
   };
 
   const updatePanel = (status: string, title: string, msg: string, progress: number = 0) => {
@@ -134,7 +131,7 @@ function App() {
         } else {
           updatePanel('loading', '백그라운드 처리 중', data.message, data.progress);
         }
-      } catch(e) { console.error("[오류 진단] 폴링 실패", e); }
+      } catch(e) { console.error("폴링 실패", e); }
     }, 1500);
   };
 
@@ -177,7 +174,7 @@ function App() {
         const data = await res.json();
         pollTaskProgress(data.task_id, () => {});
       }
-    } catch(e) { updatePanel('error', '연결 실패', 'AI 통신 오류', 0); console.error("[오류 진단] AI 추천 실패:", e); }
+    } catch(e) { updatePanel('error', '연결 실패', 'AI 통신 오류', 0); }
   };
 
   const handleSplitCategory = async (cat: Category, splitIdx: number, wordsArray: string[]) => {
@@ -190,14 +187,15 @@ function App() {
         body: JSON.stringify({ id: cat.id, text1, text2, wallet_address: safeAddress })
       });
       if (res.ok) { setExpandedCategoryId(null); setSelectedWordIndices(new Set()); loadCategories(); updatePanel('success', '완료', '분할되었습니다.', 100); }
-    } catch(e) { console.error("[오류 진단] 분할 에러", e); }
+    } catch(e) { console.error("분할 에러", e); }
   };
 
-  // [기능] 지식 추출 및 원본 삭제 -> 기억강화 탭으로 이동
   const handleMakeBlankCard = async (cat: Category) => {
     if (!isLoggedIn || selectedWordIndices.size === 0) return alert("단어를 선택해주세요.");
     updatePanel('loading', '저장 및 삭제 중', '카드를 만들고 원본 문헌을 삭제합니다...', 50);
-    const words = cat.content ? cat.content.split(SPLIT_REGEX) : [];
+    
+    // [강력 방어] content가 없을 경우 빈 배열 반환
+    const words = cat?.content ? String(cat.content).split(SPLIT_REGEX) : [];
     let cardContent = ""; let answerText = ""; let isBlanking = false;
     
     words.forEach((word, index) => {
@@ -225,9 +223,9 @@ function App() {
         setSelectedWordIndices(new Set()); setExpandedCategoryId(null);
         loadCategories(); loadMyCards(); 
         updatePanel('success', '완료', '추출 및 삭제됨.', 100); 
-        setActiveTab('enhance'); // 자동으로 기억강화 탭으로 이동
+        setActiveTab('enhance'); 
       }
-    } catch(err) { console.error("[오류 진단] 추출 에러", err); }
+    } catch(err) { console.error("추출 에러", err); }
   };
 
   const handleDeleteCategory = async (cat_id: number) => {
@@ -235,7 +233,7 @@ function App() {
     try {
       const res = await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat_id }) });
       if (res.ok) loadCategories();
-    } catch(err) { console.error("[오류 진단] 삭제 에러:", err); }
+    } catch(err) { console.error("삭제 에러:", err); }
   };
 
   const handleDeleteCard = async (card_id: number) => {
@@ -243,7 +241,7 @@ function App() {
     try {
       const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card_id }) });
       if (res.ok) { setActiveCard(null); loadMyCards(); }
-    } catch(err) { console.error("[오류 진단] 카드 삭제 에러:", err); }
+    } catch(err) { console.error("카드 삭제 에러:", err); }
   };
 
   const handleMoveCraftFolders = async () => {
@@ -252,7 +250,7 @@ function App() {
       await fetch('/api/move-categories', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: Array.from(selectedCraftIds), folder_name: targetFolderName, wallet_address: safeAddress})});
       setSelectedCraftIds(new Set()); setTargetFolderName(''); loadCategories();
       setOpenCraftFolders(prev => ({...prev, [targetFolderName]: true}));
-    } catch(err) { console.error("[오류 진단] 폴더 이동 에러:", err); }
+    } catch(err) { console.error("폴더 이동 에러:", err); }
   };
 
   const handleMoveEnhanceFolders = async () => {
@@ -261,7 +259,7 @@ function App() {
       await fetch('/api/move-cards', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: Array.from(selectedEnhanceIds), folder_name: targetFolderName, wallet_address: safeAddress})});
       setSelectedEnhanceIds(new Set()); setTargetFolderName(''); loadMyCards();
       setOpenEnhanceFolders(prev => ({...prev, [targetFolderName]: true}));
-    } catch(err) { console.error("[오류 진단] 폴더 이동 에러:", err); }
+    } catch(err) { console.error("폴더 이동 에러:", err); }
   };
 
   const submitCombatAnswer = async (isCorrect: boolean, time: number = 999.0) => {
@@ -276,7 +274,7 @@ function App() {
         setActiveCard(null);
         loadMyCards();
       }
-    } catch(err) { console.error("[오류 진단] 정답 제출 에러:", err); }
+    } catch(err) { console.error("정답 제출 에러:", err); }
   };
 
   const handleGoogleZkLogin = async () => {
@@ -290,7 +288,7 @@ function App() {
         network: 'testnet'
       });
       window.location.href = url;
-    } catch (err: any) { alert(`로그인 에러: ${err.message}`); console.error("[오류 진단] 로그인 에러:", err); }
+    } catch (err: any) { alert(`로그인 에러: ${err.message}`); }
   };
 
   const toggleWordSelection = (index: number) => {
@@ -305,12 +303,12 @@ function App() {
       const foundBlanks: {answer: string, correct: boolean}[] = [];
       const regex = /\[\s*(.*?)\s*\]/g;
       let match;
-      const safeContent = activeCard.content || "";
+      const safeContent = activeCard?.content || "";
       while((match = regex.exec(safeContent)) !== null) foundBlanks.push({ answer: match[1].trim(), correct: false });
-      if(foundBlanks.length === 0 && activeCard.answer) foundBlanks.push(...activeCard.answer.split(',').map(a => ({answer: a.trim(), correct: false})));
+      if(foundBlanks.length === 0 && activeCard?.answer) foundBlanks.push(...activeCard.answer.split(',').map(a => ({answer: a.trim(), correct: false})));
       setBlanks(foundBlanks); setCurrentBlankIdx(0); setAnswerInput(""); setInputStatus('idle');
  
-      const timePerBlank = Math.max(1.0, 5.0 - Math.floor(activeCard.level / 5) * 0.5);
+      const timePerBlank = Math.max(1.0, 5.0 - Math.floor((activeCard?.level || 0) / 5) * 0.5);
       setTotalTimeLimit(timePerBlank * foundBlanks.length); setStartTime(Date.now()); setElapsed(0);
     }
   }, [activeCard]);
@@ -345,41 +343,47 @@ function App() {
     }
   };
 
-  const getStrictCardTitle = (text?: string) => {
-    if (!text) return "제목 없음";
-    const match = text.match(/^(\[.*?\]\s*제\s*\d+\s*조(?:의\s*\d+)?(?:\([^)]+\))?)/);
-    return match ? match[1] : text.split('\n')[0].substring(0, 15) + "...";
+  // [강력 방어] 문자열이 아닐 경우 예외 처리
+  const getStrictCardTitle = (text?: any) => {
+    if (!text || typeof text !== 'string') return "제목 없음";
+    try {
+      const match = text.match(/^(\[.*?\]\s*제\s*\d+\s*조(?:의\s*\d+)?(?:\([^)]+\))?)/);
+      return match ? match[1] : text.split('\n')[0].substring(0, 15) + "...";
+    } catch(e) { return "제목 파싱 오류"; }
   };
 
-  // [기능] 장(Chapter) -> 조(Article) 순으로 정밀 정렬
-  const getSortNumber = (text?: string) => {
-    if (!text) return 999999;
-    const chapterMatch = text.match(/(\d+)장/);
-    const articleMatch = text.match(/제\s*(\d+)\s*조/);
-    let score = 0;
-    // 1장 = 10000, 2장 = 20000 가중치 부여를 통해 항상 장 단위 우선 정렬 보장
-    if (chapterMatch) score += parseInt(chapterMatch[1]) * 10000;
-    if (articleMatch) score += parseInt(articleMatch[1]);
-    return score || 999999;
+  // [강력 방어] 장/조 우선순위 정렬 로직 강화
+  const getSortNumber = (text?: any) => {
+    if (!text || typeof text !== 'string') return 999999;
+    try {
+      const chapterMatch = text.match(/(\d+)장/);
+      const articleMatch = text.match(/제\s*(\d+)\s*조/);
+      let score = 0;
+      if (chapterMatch) score += parseInt(chapterMatch[1]) * 10000;
+      if (articleMatch) score += parseInt(articleMatch[1]);
+      return score || 999999;
+    } catch (e) { return 999999; }
   };
 
-  const renderSequentialMaskedContent = (text?: string) => {
-    if (!text) return null;
-    const parts = text.split(/(\[.*?\])/g);
-    let bIdx = 0;
-    return parts.map((part, i) => {
-      if (part.startsWith('[') && part.endsWith(']')) {
-        const isCorrect = blanks[bIdx]?.correct; const isCurrent = bIdx === currentBlankIdx; bIdx++;
-        if (isCorrect) return <span key={i} className="text-green-400 font-bold mx-1">{part.replace(/\[|\]/g, '')}</span>;
-        else if (isCurrent) return <span key={i} className="inline-block min-w-[60px] h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>;
-        else return <span key={i} className="inline-block min-w-[60px] h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
-      }
-      return part;
-    });
+  const renderSequentialMaskedContent = (text?: any) => {
+    if (!text || typeof text !== 'string') return null;
+    try {
+      const parts = text.split(/(\[.*?\])/g);
+      let bIdx = 0;
+      return parts.map((part, i) => {
+        if (part.startsWith('[') && part.endsWith(']')) {
+          const isCorrect = blanks[bIdx]?.correct; const isCurrent = bIdx === currentBlankIdx; bIdx++;
+          if (isCorrect) return <span key={i} className="text-green-400 font-bold mx-1">{part.replace(/\[|\]/g, '')}</span>;
+          else if (isCurrent) return <span key={i} className="inline-block min-w-[60px] h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>;
+          else return <span key={i} className="inline-block min-w-[60px] h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
+        }
+        return part;
+      });
+    } catch (e) { return <span>렌더링 오류</span>; }
   };
 
-  const craftFolders = Array.from(new Set(categories.map(c => c.folder_name || '기본 폴더'))).reverse();
-  const enhanceFolders = Array.from(new Set(savedCards.map(c => c.folder_name || '기본 폴더'))).reverse();
+  const craftFolders = Array.from(new Set((categories || []).map(c => c?.folder_name || '기본 폴더'))).reverse();
+  const enhanceFolders = Array.from(new Set((savedCards || []).map(c => c?.folder_name || '기본 폴더'))).reverse();
 
   const handleDeleteAll = async () => {
     if (!confirm("보관소의 모든 데이터를 영구 지우시겠습니까?")) return;
@@ -389,7 +393,7 @@ function App() {
         body: JSON.stringify({ wallet_address: safeAddress }),
       });
       if (res.ok) { setCategories([]); setSavedCards([]); setExams([]); setExpandedCategoryId(null); updatePanel('idle', '초기화', '데이터 리셋됨', 0); }
-    } catch(err) { console.error("[오류 진단] 전체 삭제 에러:", err); }
+    } catch(err) { console.error("전체 삭제 에러:", err); }
   };
 
   return (
@@ -417,15 +421,15 @@ function App() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 animate-in fade-in">
                 <div className="border border-white/10 p-8 rounded-sm bg-white/[0.02]">
                   <div className="text-[10px] text-white/30 mb-4 tracking-widest uppercase">보유 지식 (카드)</div>
-                  <div className="text-4xl font-light text-white/90">{savedCards.length}</div>
+                  <div className="text-4xl font-light text-white/90">{(savedCards || []).length}</div>
                 </div>
                 <div className="border border-rose-900/30 p-8 rounded-sm bg-rose-950/10">
                   <div className="text-[10px] text-rose-400/50 mb-4 tracking-widest uppercase">망각 경고 (위험)</div>
-                  <div className="text-4xl font-light text-rose-400/80">{savedCards.filter(c => c.status === 'AT_RISK').length}</div>
+                  <div className="text-4xl font-light text-rose-400/80">{(savedCards || []).filter(c => c?.status === 'AT_RISK').length}</div>
                 </div>
                 <div className="border border-amber-900/30 p-8 rounded-sm bg-amber-950/10">
                   <div className="text-[10px] text-amber-500/50 mb-4 tracking-widest uppercase">영구 보존 (전설)</div>
-                  <div className="text-4xl font-light text-amber-500/80">{savedCards.filter(c => c.level >= 3).length}</div>
+                  <div className="text-4xl font-light text-amber-500/80">{(savedCards || []).filter(c => (c?.level || 0) >= 3).length}</div>
                 </div>
               </div>
             )}
@@ -454,7 +458,9 @@ function App() {
                     </div>
                   )}
 
-                  {craftFolders.map(folder => (
+                  {craftFolders.map(folder => {
+                    if (!folder) return null;
+                    return (
                     <div key={folder} className="mb-6">
                       <button onClick={() => setOpenCraftFolders(p => ({...p, [folder]: !p[folder]}))} className="w-full text-left bg-indigo-900/40 p-4 text-indigo-300 font-bold border border-indigo-500/30 flex justify-between rounded-sm">
                         <span>📁 {folder}</span>
@@ -463,16 +469,15 @@ function App() {
                       
                       {openCraftFolders[folder] && (
                         <div className="grid gap-4 mt-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-                          {categories
-                            .filter(c => (c.folder_name || '기본 폴더') === folder)
+                          {(categories || [])
+                            .filter(c => c && (c.folder_name || '기본 폴더') === folder)
                             .filter(c => {
-                              // [기능] 설정에서 빈칸 추천 비활성화 시 x표시 항목 숨김
-                              if (c.is_x_marked && !blankRecommendationActive) return false;
+                              if (c?.is_x_marked && !blankRecommendationActive) return false;
                               return true;
                             })
-                            // [기능] 장/조 우선순위 정렬 적용
-                            .sort((a, b) => getSortNumber(a.title) - getSortNumber(b.title))
+                            .sort((a, b) => getSortNumber(a?.title) - getSortNumber(b?.title))
                             .map(cat => {
+                            if (!cat) return null;
                             const isExpanded = expandedCategoryId === cat.id;
                             return (
                               <div key={cat.id} className="expandable-card relative flex items-center justify-center">
@@ -480,7 +485,8 @@ function App() {
                                 {!isExpanded ? (
                                   <button 
                                     {...useLongPress(() => handleDeleteCategory(cat.id), 800)}
-                                    onClick={() => { setExpandedCategoryId(cat.id); setSelectedWordIndices(new Set()); setParsedText(cat.content); }} 
+                                    // [강력 방어] 여기서 cat.content가 없어도 빈 문자열로 안전하게 처리
+                                    onClick={() => { setExpandedCategoryId(cat.id); setSelectedWordIndices(new Set()); setParsedText(cat.content || ""); }} 
                                     className="w-full h-full text-[13px] font-serif font-bold text-center text-indigo-300 bg-indigo-900/20 py-4 px-3 rounded-sm border border-indigo-500/30 shadow-[0_0_10px_rgba(99,102,241,0.1)] transition-all hover:bg-indigo-900/40"
                                   >
                                     {getStrictCardTitle(cat.title)} 
@@ -493,7 +499,8 @@ function App() {
                                     </div>
                                     <textarea value={parsedText} onChange={(e) => { setParsedText(e.target.value); setSelectedWordIndices(new Set()); }} className="w-full h-20 bg-black/40 text-white/80 border border-white/10 p-2 text-[11px] font-serif outline-none scrollbar-hide" />
                                     <div className="font-serif text-[13px] leading-loose text-white/80 p-3 bg-black/40 border border-white/10 max-h-48 overflow-y-auto break-all scrollbar-hide">
-                                      {parsedText.split(SPLIT_REGEX).map((word, idx, arr) => {
+                                      {/* [강력 방어] parsedText가 null이 되지 않도록 보장 */}
+                                      {(parsedText || "").split(SPLIT_REGEX).map((word, idx, arr) => {
                                         if (!word) return null;
                                         if (/^\s+$/.test(word)) return <span key={idx}>{word}</span>;
                                         const isSelected = selectedWordIndices.has(idx);
@@ -513,7 +520,7 @@ function App() {
                         </div>
                       )}
                     </div>
-                  ))}
+                  )})}
                 </div>
                 <div className="lg:col-span-4 flex flex-col space-y-6">
                   <div className="border border-indigo-900/30 bg-indigo-950/5 rounded-sm overflow-hidden sticky top-12">
@@ -543,7 +550,9 @@ function App() {
                   </div>
                 )}
 
-                {enhanceFolders.map(folder => (
+                {enhanceFolders.map(folder => {
+                  if (!folder) return null;
+                  return (
                   <div key={folder} className="mb-6">
                     <button onClick={() => setOpenEnhanceFolders(p => ({...p, [folder]: !p[folder]}))} className="w-full text-left bg-amber-900/30 p-4 text-amber-300 font-bold border border-amber-500/30 flex justify-between rounded-sm">
                       <span>📁 {folder}</span>
@@ -552,10 +561,11 @@ function App() {
                     
                     {openEnhanceFolders[folder] && (
                       <div className="grid gap-4 mt-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-                        {savedCards
-                          .filter(c => (c.folder_name || '기본 폴더') === folder)
-                          .sort((a, b) => getSortNumber(a.content) - getSortNumber(b.content))
+                        {(savedCards || [])
+                          .filter(c => c && (c.folder_name || '기본 폴더') === folder)
+                          .sort((a, b) => getSortNumber(a?.content) - getSortNumber(b?.content))
                           .map((card) => {
+                          if (!card) return null;
                           return (
                             <div key={card.id} className="relative expandable-card">
                               <input type="checkbox" className="absolute top-2 right-2 z-10 w-4 h-4 cursor-pointer" checked={selectedEnhanceIds.has(card.id)} onChange={() => { const s = new Set(selectedEnhanceIds); if(s.has(card.id)) s.delete(card.id); else s.add(card.id); setSelectedEnhanceIds(s); }} />
@@ -564,7 +574,7 @@ function App() {
                                 onClick={() => setActiveCard(card)}
                                 className={`w-full relative text-[13px] font-serif font-bold text-center py-5 px-3 rounded-sm border shadow-[0_0_10px_rgba(0,0,0,0.5)] transition-all select-none ${card.status === "BURNED" ? "border-white/5 text-white/30" : "border-indigo-500/30 text-indigo-300 bg-indigo-900/20 hover:bg-indigo-900/40"}`}
                               >
-                                <span className="absolute top-1 left-2 text-[9px] text-amber-400">LV.{card.level}</span>
+                                <span className="absolute top-1 left-2 text-[9px] text-amber-400">LV.{card.level || 0}</span>
                                 {getStrictCardTitle(card.content)}
                               </button>
                             </div>
@@ -573,7 +583,7 @@ function App() {
                       </div>
                     )}
                   </div>
-                ))}
+                )})}
               </div>
             )}
 
@@ -581,11 +591,12 @@ function App() {
             {activeTab === 'exam' && (
               <div className="space-y-8 animate-in fade-in">
                 <div className="text-white/60 text-xs border-b border-white/10 pb-2">CBT 모의고사 문제 풀이장</div>
-                {exams.length === 0 ? (
+                {(exams || []).length === 0 ? (
                   <div className="py-32 text-center text-white/20 text-xs tracking-widest">저장된 모의고사가 없습니다. 지식 추출 탭에서 업로드하세요.</div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {exams.map(exam => {
+                    {(exams || []).map(exam => {
+                       if (!exam) return null;
                        const isExpanded = expandedExamId === exam.id;
                        return (
                          <div key={exam.id} className="border border-teal-900/40 bg-teal-950/10 p-6 rounded-sm cursor-pointer hover:bg-teal-900/20 transition-all expandable-card" onClick={() => setExpandedExamId(isExpanded ? null : exam.id)}>
@@ -643,7 +654,7 @@ function App() {
           <div className="border border-white/10 bg-[#121214] w-full max-w-2xl p-10 shadow-2xl rounded-sm">
             <div className="flex justify-between items-baseline border-b border-white/5 pb-6 mb-8">
               <div>
-                <span className="font-bold text-amber-400 mr-4">LV.{activeCard.level}</span>
+                <span className="font-bold text-amber-400 mr-4">LV.{activeCard.level || 0}</span>
                 <span className="text-xs text-teal-400 mr-4">⏳ {(totalTimeLimit - elapsed).toFixed(1)}초 남음</span>
                 {activeCard.best_time && <span className="text-xs text-amber-300 font-bold">🏆 BEST: {activeCard.best_time.toFixed(1)}초</span>}
               </div>
