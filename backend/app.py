@@ -24,7 +24,7 @@ except ImportError:
     docx = None
 
 # ==========================================
-# 1. 에러 추적 로깅 설정 (오류 진단 기능 포함)
+# 1. 에러 추적 로깅 설정
 # ==========================================
 logging.basicConfig(filename='backend_error_log.txt', level=logging.ERROR, 
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -44,9 +44,9 @@ GLOBAL_WORD_POOL = set()
 @app.errorhandler(Exception)
 def handle_exception(e):
     error_detail = traceback.format_exc()
-    logging.error(f"오류 진단 - 백엔드 치명적 에러:\n{error_detail}")
+    logging.error(f"백엔드 치명적 에러:\n{error_detail}")
     print(f"\n[🚨 서버 치명적 에러]\n{error_detail}")
-    return jsonify({"error": "백엔드 엔진 오류 진단 발생", "details": error_detail}), 500
+    return jsonify({"error": "백엔드 엔진 오류", "details": error_detail}), 500
 
 @app.route('/api/health', methods=['GET', 'OPTIONS'])
 def health_check():
@@ -74,7 +74,7 @@ def init_db():
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"오류 진단 - DB 초기화 실패: {e}")
+        print(f"DB 초기화 실패: {e}")
 
 init_db()
 
@@ -97,6 +97,7 @@ def normalize_text(text):
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
+# 아키님 오리지널 HTML 3단 비교표 파싱 코드 기반 복원
 def parse_html_3col_law(raw_text):
     unescaped = html.unescape(raw_text)
     pre_clean = re.sub(r'<(br|p|div|li)[^>]*>', '\n', unescaped, flags=re.IGNORECASE)
@@ -166,6 +167,7 @@ def parse_html_3col_law(raw_text):
                         continue
                     
                     clean_content = re.sub(r'<[^>]+>', '', html_content)
+                    
                     if re.search(r'국민건강보험\s*요양급여의\s*기준', clean_content):
                         continue
                     
@@ -269,16 +271,17 @@ def get_ai_keyword(prompt_text, exams_context):
             """,
             "stream": False
         }
+        # 🚨 Timeout 600초 (10분) 연장
         response = requests.post(OLLAMA_API_URL, json=payload, timeout=600)
         if response.status_code == 200:
             result = response.json().get('response', '').strip()
             return re.sub(r'[^\w\s]', '', result.split('\n')[0]).strip()
     except requests.exceptions.ConnectionError:
-        logging.error("오류 진단 - Ollama AI 엔진 연결 거부됨 (포트 11434).")
+        logging.error("Ollama AI 엔진 연결 거부됨 (포트 11434).")
     except requests.exceptions.ReadTimeout:
-        logging.error("오류 진단 - Ollama AI 추천 타임아웃 발생 (대기 시간 초과).")
+        logging.error("Ollama AI 추천 타임아웃 발생 (대기 시간 초과).")
     except Exception as e:
-        logging.error(f"오류 진단 - Ollama 통신 오류: {str(e)}")
+        logging.error(f"Ollama 통신 오류: {str(e)}")
     return None
 
 # ==========================================
@@ -357,7 +360,7 @@ def upload_law():
         GLOBAL_WORD_POOL.update(extract_candidates(full_pool_text))
         return jsonify({"message": "법령 아카이브 등록 성공", "count": len(categories)})
     except Exception as e:
-        return jsonify({"error": "오류 진단 - 법령 분석 실패", "details": traceback.format_exc()}), 500
+        return jsonify({"error": "법령 분석 실패", "details": traceback.format_exc()}), 500
 
 @app.route('/api/upload-exam', methods=['POST'])
 def upload_exam():
@@ -391,6 +394,7 @@ def upload_exam():
         ]
         텍스트: {raw_text[:3000]}
         """
+        # 🚨 Timeout 600초 (10분) 연장: 26B 모델이 충분히 고민할 시간을 줍니다.
         response = requests.post(OLLAMA_API_URL, json={"model": MODEL_NAME, "prompt": prompt, "format": "json", "stream": False}, timeout=600)
         exam_data = json.loads(response.json().get('response', '[]'))
         
@@ -405,16 +409,16 @@ def upload_exam():
     
     except requests.exceptions.ConnectionError:
         return jsonify({
-            "error": "오류 진단 - AI 엔진(Ollama) 연결 거부됨", 
-            "details": "맥미니에서 Ollama가 꺼져 있습니다."
+            "error": "AI 엔진(Ollama) 연결 거부됨", 
+            "details": "맥미니에서 Ollama가 꺼져 있습니다. 터미널에서 'ollama serve' 명령어를 실행하거나 응용 프로그램에서 Ollama 앱을 켜주세요."
         }), 500
     except requests.exceptions.ReadTimeout:
         return jsonify({
-            "error": "오류 진단 - Ollama 응답 지연 (Timeout)", 
-            "details": "Gemma 26B 모델이 답변을 생성하는 데 너무 오랜 시간이 걸려 연결이 끊겼습니다."
+            "error": "Ollama 응답 지연 (Timeout)", 
+            "details": "Gemma 26B 모델이 답변을 생성하는 데 너무 오랜 시간이 걸려 연결이 끊겼습니다. 문서의 양을 줄여서 업로드하거나, 더 가벼운 모델(gemma:7b 등) 사용을 권장합니다."
         }), 500
     except Exception as e:
-        return jsonify({"error": "오류 진단 - 모의고사 파싱 실패", "details": traceback.format_exc()}), 500
+        return jsonify({"error": "모의고사 파싱 실패", "details": traceback.format_exc()}), 500
 
 @app.route('/api/get-related-exams', methods=['POST'])
 def get_related_exams():
@@ -439,7 +443,7 @@ def get_related_exams():
         conn.close()
         return jsonify({"related_exams": related_qs[:3]})
     except Exception as e:
-        return jsonify({"error": "오류 진단 - 관련 기출 검색 에러", "details": traceback.format_exc()}), 500
+        return jsonify({"error": "관련 기출 검색 에러", "details": traceback.format_exc()}), 500
 
 @app.route('/api/generate-explanation', methods=['POST'])
 def generate_ai_explanation():
@@ -456,14 +460,15 @@ def generate_ai_explanation():
         [문제]: {question}
         [정답]: {answer}
         """
+        # 🚨 Timeout 600초 (10분) 연장
         response = requests.post(OLLAMA_API_URL, json={"model": MODEL_NAME, "prompt": prompt, "stream": False}, timeout=600)
         return jsonify({"explanation": response.json()['response']})
     except requests.exceptions.ConnectionError:
-        return jsonify({"error": "오류 진단 - Ollama 연결 거부", "details": "맥미니에서 Ollama가 꺼져 있습니다."}), 500
+        return jsonify({"error": "Ollama 연결 거부", "details": "맥미니에서 Ollama가 꺼져 있습니다."}), 500
     except requests.exceptions.ReadTimeout:
-        return jsonify({"error": "오류 진단 - Ollama 응답 지연", "details": "해설을 생성하는 데 시간이 초과되었습니다."}), 500
+        return jsonify({"error": "Ollama 응답 지연", "details": "해설을 생성하는 데 시간이 초과되었습니다."}), 500
     except Exception as e:
-        return jsonify({"error": "오류 진단 - 해설 생성 에러", "details": traceback.format_exc()}), 500
+        return jsonify({"error": "해설 생성 에러", "details": traceback.format_exc()}), 500
 
 @app.route('/api/auto-make-cards', methods=['POST'])
 def auto_make_cards():
@@ -501,7 +506,7 @@ def auto_make_cards():
             cursor.execute('''
                 INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, next_review_time)
                 VALUES (?, ?, ?, ?, ?, ?)
-            ''', (wallet_address, category_id, card_content, answer_text, json.dumps(options), get_next_review_time(0)))
+            ''', (wallet_address, category_id, card_content, target, json.dumps(options), get_next_review_time(0)))
             conn.commit()
             msg = f"AI가 모의고사를 바탕으로 [{target}] 빈칸을 추천하여 제작했습니다."
         else:
@@ -509,8 +514,12 @@ def auto_make_cards():
             
         conn.close()
         return jsonify({"message": msg})
+    except requests.exceptions.ConnectionError:
+        return jsonify({"error": "Ollama 연결 거부", "details": "맥미니 터미널에서 'ollama serve'를 실행하세요."}), 500
+    except requests.exceptions.ReadTimeout:
+        return jsonify({"error": "Ollama 응답 지연", "details": "빈칸 추천을 계산하는 데 시간이 초과되었습니다."}), 500
     except Exception as e:
-        return jsonify({"error": "오류 진단 - 카드 제작 실패", "details": traceback.format_exc()}), 500
+        return jsonify({"error": "카드 제작 실패", "details": traceback.format_exc()}), 500
 
 @app.route('/api/save-card', methods=['POST'])
 def save_card():
@@ -534,7 +543,7 @@ def save_card():
         conn.close()
         return jsonify({"message": "수동 카드 제작 완료"}), 201
     except Exception as e:
-        return jsonify({"error": "오류 진단 - 카드 제작 에러", "details": traceback.format_exc()}), 500
+        return jsonify({"error": "카드 제작 에러", "details": traceback.format_exc()}), 500
 
 @app.route('/api/get-categories')
 def get_categories():
@@ -570,7 +579,7 @@ def get_my_cards():
         conn.close()
         return jsonify({"cards": cards})
     except Exception as e:
-        return jsonify({"error": "오류 진단 - 카드 로드 실패", "details": traceback.format_exc()}), 500
+        return jsonify({"error": "카드 로드 실패", "details": traceback.format_exc()}), 500
 
 @app.route('/api/submit-answer', methods=['POST'])
 def submit_answer():
@@ -581,7 +590,7 @@ def submit_answer():
     cursor = conn.cursor()
     cursor.execute("SELECT level FROM cards WHERE id = ?", (card_id,))
     row = cursor.fetchone()
-    if not row: return jsonify({"error": "오류 진단 - 카드가 없습니다."}), 404
+    if not row: return jsonify({"error": "카드가 없습니다."}), 404
     
     if is_correct:
         new_lv = row[0] + 1
@@ -637,19 +646,6 @@ def delete_all():
     conn.commit()
     conn.close()
     return jsonify({"message": "아카이브 초기화 성공"})
-
-# --- 🚨 [신규 추가] 법-령-칙 3단 레이아웃 데이터 제공 API ---
-@app.route('/api/law_data', methods=['GET'])
-def get_law_data():
-    try:
-        data = {
-            "law": [{"id": 1, "article": "제1조(목적)", "content": "이 법은 건강보험 및 체납처분과 관련된..."}],
-            "decree": [{"id": 1, "article": "제1조(시행일)", "content": "이 영은 공포한 날부터 시행한다."}],
-            "rule": [{"id": 1, "article": "제1조(세부규칙)", "content": "체납처분 담당자 180인 교육에 따른 세부 지침을..."}]
-        }
-        return jsonify({"status": "success", "data": data})
-    except Exception as e:
-        raise e
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001)
