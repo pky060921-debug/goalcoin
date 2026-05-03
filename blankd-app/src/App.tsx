@@ -1,6 +1,29 @@
-import { useState, useEffect, useRef } from "react";
+import React, { Component, ErrorInfo, ReactNode, useState, useEffect, useRef } from "react";
 import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
 import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
+
+// [오류 진단] 최상위 에러 바운더리: 흰 화면(WSOD) 방지 및 오류 원인 출력
+class ErrorBoundary extends Component<{children: ReactNode}, {hasError: boolean, error: Error | null, errorInfo: ErrorInfo | null}> {
+  constructor(props: any) { super(props); this.state = { hasError: false, error: null, errorInfo: null }; }
+  static getDerivedStateFromError(error: Error) { return { hasError: true, error }; }
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) { console.error("렌더링 오류 진단:", error, errorInfo); this.setState({ errorInfo }); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-black text-rose-500 p-10 font-mono">
+          <h1 className="text-2xl font-bold mb-4 border-b border-rose-500/50 pb-2">🚨 치명적 렌더링 오류 감지됨</h1>
+          <p className="mb-4 text-white/80">흰 화면(Crash)을 방지하고 오류 진단 결과를 표시합니다. 백엔드 데이터 형식 문제일 가능성이 높습니다.</p>
+          <div className="bg-rose-950/30 p-4 rounded border border-rose-900/50 mb-4 overflow-auto max-h-64">
+            <p className="font-bold">{this.state.error?.toString()}</p>
+            <pre className="text-xs text-rose-300 mt-2">{this.state.errorInfo?.componentStack}</pre>
+          </div>
+          <button onClick={() => window.location.reload()} className="px-6 py-2 bg-rose-900/50 border border-rose-500 text-white hover:bg-rose-800/50">시스템 새로고침</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 interface Category { id: number; title: string; content: string; folder_name?: string; is_x_marked?: boolean; }
 interface Card { id: number; content: string; answer: string; options: string[]; level: number; next_review: string; status: string; best_time?: number; folder_name?: string; }
@@ -8,7 +31,7 @@ interface Exam { id: number; title: string; question: string; answer: string; ex
 
 const SPLIT_REGEX = /(\s+|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]+|(?:은|는|이|가|을|를|의|에|에게|과|와|로서|로써|로|으로|도|만|부터|까지|이다|한다|함|됨|됨을|함을|함으로써|대하여|대해|대한|등|및|에서|에서는|에서의|로부터|에의|로부터의|에도|에는|이나|나|라도|이라도)(?=\s|$|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]))/g;
 
-function App() {
+function MainApp() {
   const enokiFlow = useEnokiFlow();
   const zkLogin = useZkLogin();
   const suiWalletAccount = useCurrentAccount();
@@ -55,7 +78,7 @@ function App() {
 
   const [blankRecommendationActive, setBlankRecommendationActive] = useState(false);
 
-  // [오류 진단] 롱프레스 터치 커스텀 훅
+  // 롱프레스 터치 커스텀 훅
   const useLongPress = (callback: () => void, ms = 800) => {
     const timerRef = useRef<any>(null);
     const start = () => { timerRef.current = setTimeout(callback, ms); };
@@ -88,32 +111,36 @@ function App() {
 
   useEffect(() => { if (isLoggedIn) { loadCategories(); loadMyCards(); loadExams(); } }, [isLoggedIn, safeAddress]);
 
+  // [강력 방어] API 데이터가 무조건 배열(Array)인지 검증. 객체나 HTML 에러 메시지가 오면 빈 배열 처리.
   const loadCategories = async () => {
     try {
       const res = await fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`);
       const data = await res.json();
-      if (res.ok) setCategories(data.categories || []);
-    } catch (err) { console.error("카테고리 로드 에러:", err); }
+      if (res.ok) setCategories(Array.isArray(data.categories) ? data.categories : []);
+      else console.error("백엔드 에러 응답:", data);
+    } catch (err) { console.error("카테고리 로드 에러:", err); setCategories([]); }
   };
 
   const loadMyCards = async () => {
     try {
       const res = await fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`);
       const data = await res.json();
-      if (res.ok) setSavedCards(data.cards || []);
-    } catch (err) { console.error("카드 로드 에러:", err); }
+      if (res.ok) setSavedCards(Array.isArray(data.cards) ? data.cards : []);
+      else console.error("백엔드 에러 응답:", data);
+    } catch (err) { console.error("카드 로드 에러:", err); setSavedCards([]); }
   };
 
   const loadExams = async () => {
     try {
       const res = await fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`);
       const data = await res.json();
-      if (res.ok) setExams(data.exams || []);
-    } catch (err) { console.error("모의고사 로드 에러:", err); }
+      if (res.ok) setExams(Array.isArray(data.exams) ? data.exams : []);
+      else console.error("백엔드 에러 응답:", data);
+    } catch (err) { console.error("모의고사 로드 에러:", err); setExams([]); }
   };
 
   const updatePanel = (status: string, title: string, msg: string, progress: number = 0) => {
-    setPanelState(prev => ({ status, title, message: msg, progress, logs: [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev.logs].slice(0, 10) }));
+    setPanelState(prev => ({ status, title, message: msg, progress, logs: [`[${new Date().toLocaleTimeString()}] ${msg}`, ...(Array.isArray(prev.logs) ? prev.logs : [])].slice(0, 10) }));
   };
 
   const pollTaskProgress = (taskId: string, onSuccess: () => void) => {
@@ -145,6 +172,8 @@ function App() {
         const data = await res.json();
         setLawFile(null);
         pollTaskProgress(data.task_id, () => loadCategories());
+      } else {
+        updatePanel('error', '서버 거부', '백엔드에서 업로드를 거절했습니다.', 0);
       }
     } catch (err: any) { updatePanel('error', '전송 오류', err.message, 0); }
   };
@@ -194,7 +223,6 @@ function App() {
     if (!isLoggedIn || selectedWordIndices.size === 0) return alert("단어를 선택해주세요.");
     updatePanel('loading', '저장 및 삭제 중', '카드를 만들고 원본 문헌을 삭제합니다...', 50);
     
-    // [강력 방어] content가 없을 경우 빈 배열 반환
     const words = cat?.content ? String(cat.content).split(SPLIT_REGEX) : [];
     let cardContent = ""; let answerText = ""; let isBlanking = false;
     
@@ -343,7 +371,6 @@ function App() {
     }
   };
 
-  // [강력 방어] 문자열이 아닐 경우 예외 처리
   const getStrictCardTitle = (text?: any) => {
     if (!text || typeof text !== 'string') return "제목 없음";
     try {
@@ -352,7 +379,6 @@ function App() {
     } catch(e) { return "제목 파싱 오류"; }
   };
 
-  // [강력 방어] 장/조 우선순위 정렬 로직 강화
   const getSortNumber = (text?: any) => {
     if (!text || typeof text !== 'string') return 999999;
     try {
@@ -382,8 +408,13 @@ function App() {
     } catch (e) { return <span>렌더링 오류</span>; }
   };
 
-  const craftFolders = Array.from(new Set((categories || []).map(c => c?.folder_name || '기본 폴더'))).reverse();
-  const enhanceFolders = Array.from(new Set((savedCards || []).map(c => c?.folder_name || '기본 폴더'))).reverse();
+  // [강력 방어] 빈 배열을 보장하여 .map() 충돌 방지
+  const safeCategories = Array.isArray(categories) ? categories : [];
+  const safeCards = Array.isArray(savedCards) ? savedCards : [];
+  const safeExams = Array.isArray(exams) ? exams : [];
+
+  const craftFolders = Array.from(new Set(safeCategories.map(c => c?.folder_name || '기본 폴더'))).reverse();
+  const enhanceFolders = Array.from(new Set(safeCards.map(c => c?.folder_name || '기본 폴더'))).reverse();
 
   const handleDeleteAll = async () => {
     if (!confirm("보관소의 모든 데이터를 영구 지우시겠습니까?")) return;
@@ -416,25 +447,23 @@ function App() {
               ))}
             </nav>
 
-            {/* 열람실 대시보드 탭 */}
             {activeTab === 'dashboard' && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 animate-in fade-in">
                 <div className="border border-white/10 p-8 rounded-sm bg-white/[0.02]">
                   <div className="text-[10px] text-white/30 mb-4 tracking-widest uppercase">보유 지식 (카드)</div>
-                  <div className="text-4xl font-light text-white/90">{(savedCards || []).length}</div>
+                  <div className="text-4xl font-light text-white/90">{safeCards.length}</div>
                 </div>
                 <div className="border border-rose-900/30 p-8 rounded-sm bg-rose-950/10">
                   <div className="text-[10px] text-rose-400/50 mb-4 tracking-widest uppercase">망각 경고 (위험)</div>
-                  <div className="text-4xl font-light text-rose-400/80">{(savedCards || []).filter(c => c?.status === 'AT_RISK').length}</div>
+                  <div className="text-4xl font-light text-rose-400/80">{safeCards.filter(c => c?.status === 'AT_RISK').length}</div>
                 </div>
                 <div className="border border-amber-900/30 p-8 rounded-sm bg-amber-950/10">
                   <div className="text-[10px] text-amber-500/50 mb-4 tracking-widest uppercase">영구 보존 (전설)</div>
-                  <div className="text-4xl font-light text-amber-500/80">{(savedCards || []).filter(c => (c?.level || 0) >= 3).length}</div>
+                  <div className="text-4xl font-light text-amber-500/80">{safeCards.filter(c => (c?.level || 0) >= 3).length}</div>
                 </div>
               </div>
             )}
 
-            {/* 지식 추출 탭 */}
             {activeTab === 'craft' && (
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
                 <div className="lg:col-span-8 space-y-8">
@@ -469,7 +498,7 @@ function App() {
                       
                       {openCraftFolders[folder] && (
                         <div className="grid gap-4 mt-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-                          {(categories || [])
+                          {safeCategories
                             .filter(c => c && (c.folder_name || '기본 폴더') === folder)
                             .filter(c => {
                               if (c?.is_x_marked && !blankRecommendationActive) return false;
@@ -485,7 +514,6 @@ function App() {
                                 {!isExpanded ? (
                                   <button 
                                     {...useLongPress(() => handleDeleteCategory(cat.id), 800)}
-                                    // [강력 방어] 여기서 cat.content가 없어도 빈 문자열로 안전하게 처리
                                     onClick={() => { setExpandedCategoryId(cat.id); setSelectedWordIndices(new Set()); setParsedText(cat.content || ""); }} 
                                     className="w-full h-full text-[13px] font-serif font-bold text-center text-indigo-300 bg-indigo-900/20 py-4 px-3 rounded-sm border border-indigo-500/30 shadow-[0_0_10px_rgba(99,102,241,0.1)] transition-all hover:bg-indigo-900/40"
                                   >
@@ -499,7 +527,6 @@ function App() {
                                     </div>
                                     <textarea value={parsedText} onChange={(e) => { setParsedText(e.target.value); setSelectedWordIndices(new Set()); }} className="w-full h-20 bg-black/40 text-white/80 border border-white/10 p-2 text-[11px] font-serif outline-none scrollbar-hide" />
                                     <div className="font-serif text-[13px] leading-loose text-white/80 p-3 bg-black/40 border border-white/10 max-h-48 overflow-y-auto break-all scrollbar-hide">
-                                      {/* [강력 방어] parsedText가 null이 되지 않도록 보장 */}
                                       {(parsedText || "").split(SPLIT_REGEX).map((word, idx, arr) => {
                                         if (!word) return null;
                                         if (/^\s+$/.test(word)) return <span key={idx}>{word}</span>;
@@ -539,7 +566,6 @@ function App() {
               </div>
             )}
 
-            {/* 기억 강화 탭 */}
             {activeTab === 'enhance' && (
               <div className="space-y-8 animate-in fade-in">
                 {selectedEnhanceIds.size > 0 && (
@@ -561,7 +587,7 @@ function App() {
                     
                     {openEnhanceFolders[folder] && (
                       <div className="grid gap-4 mt-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-                        {(savedCards || [])
+                        {safeCards
                           .filter(c => c && (c.folder_name || '기본 폴더') === folder)
                           .sort((a, b) => getSortNumber(a?.content) - getSortNumber(b?.content))
                           .map((card) => {
@@ -587,15 +613,14 @@ function App() {
               </div>
             )}
 
-            {/* 모의고사 탭 */}
             {activeTab === 'exam' && (
               <div className="space-y-8 animate-in fade-in">
                 <div className="text-white/60 text-xs border-b border-white/10 pb-2">CBT 모의고사 문제 풀이장</div>
-                {(exams || []).length === 0 ? (
+                {safeExams.length === 0 ? (
                   <div className="py-32 text-center text-white/20 text-xs tracking-widest">저장된 모의고사가 없습니다. 지식 추출 탭에서 업로드하세요.</div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {(exams || []).map(exam => {
+                    {safeExams.map(exam => {
                        if (!exam) return null;
                        const isExpanded = expandedExamId === exam.id;
                        return (
@@ -615,7 +640,6 @@ function App() {
               </div>
             )}
 
-            {/* 설정 탭 */}
             {activeTab === 'mypage' && (
               <div className="max-w-md mx-auto space-y-8 py-16 animate-in fade-in">
                 <div className="border border-white/10 p-6 rounded-sm">
@@ -633,7 +657,6 @@ function App() {
                   </div>
 
                   <div className="text-xs text-white/60 mb-4">지식 관리 설정</div>
-                  {/* [기능] 빈칸 추천(x표시) 토글 버튼 */}
                   <button 
                     onClick={() => setBlankRecommendationActive(!blankRecommendationActive)}
                     className={`w-full py-3 text-[10px] border transition-all rounded-sm ${blankRecommendationActive ? 'bg-teal-900/30 border-teal-500/50 text-teal-300' : 'border-white/10 text-white/40'}`}
@@ -648,7 +671,6 @@ function App() {
         )}
       </main>
 
-      {/* 모달 */}
       {activeCard && (
         <div className="modal-container fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0d0d0f]/95 backdrop-blur-sm animate-in fade-in">
           <div className="border border-white/10 bg-[#121214] w-full max-w-2xl p-10 shadow-2xl rounded-sm">
@@ -688,4 +710,11 @@ function App() {
     </div>
   );
 }
-export default App;
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <MainApp />
+    </ErrorBoundary>
+  );
+}
