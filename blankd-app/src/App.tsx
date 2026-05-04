@@ -96,7 +96,7 @@ function MainApp() {
 
       const url = await enokiFlow.createAuthorizationURL({
         provider: 'google',
-        clientId: '802422002773-j64t319p7pveem8gukq1t832b8h7l6um.apps.googleusercontent.com',
+        clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com',
         redirectUrl: redirectUrl,
         extraParams: { scope: ['openid', 'email', 'profile'] }
       });
