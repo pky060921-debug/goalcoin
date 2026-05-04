@@ -8,7 +8,6 @@ export const CraftTab = ({ categories, colCount, viewMode, handleMakeBlankCard, 
   const [parsedText, setParsedText] = useState("");
   const [selectedWords, setSelectedWords] = useState<Set<number>>(new Set());
 
-  // 탭이 열릴 때 모든 폴더를 '열림(true)' 상태로 초기화
   useEffect(() => {
     const initial: Record<string, boolean> = {};
     craftFolders.forEach(f => initial[f] = true);
@@ -26,13 +25,7 @@ export const CraftTab = ({ categories, colCount, viewMode, handleMakeBlankCard, 
       <div className="lg:col-span-8 space-y-8">
         <div className="flex flex-wrap gap-2 mb-6">
           {craftFolders.map((f: string) => (
-            <button 
-              key={f} 
-              onClick={() => setOpenFolders(p => ({...p, [f]: !p[f]}))} 
-              className={`px-4 py-2 text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-indigo-900/40 text-indigo-300 border-indigo-500/30'}`}
-            >
-              📁 {f}
-            </button>
+            <button key={f} onClick={() => setOpenFolders(p => ({...p, [f]: !p[f]}))} className={`px-4 py-2 text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-indigo-900/40 text-indigo-300 border-indigo-500/30'}`}>📁 {f}</button>
           ))}
         </div>
         {craftFolders.map((folder: string) => openFolders[folder] && (
