@@ -1,28 +1,26 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App'
+import App from './App.tsx'
 import './index.css'
-import { createNetworkConfig, SuiClientProvider, WalletProvider } from '@mysten/dapp-kit';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-// 🚨 경로를 @mysten/enoki/react 로 수정 완료
-import { EnokiFlowProvider } from '@mysten/enoki/react';
-import '@mysten/dapp-kit/dist/index.css';
+import { SuiClientProvider, WalletProvider } from '@mysten/dapp-kit'
+import { getFullnodeUrl } from '@mysten/sui/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { EnokiFlowProvider } from '@mysten/enoki/react'
 
-const queryClient = new QueryClient();
-const { networkConfig } = createNetworkConfig({
-  testnet: { url: "https://fullnode.testnet.sui.io:443" },
-});
+const queryClient = new QueryClient()
+const networks = { mainnet: { url: getFullnodeUrl('mainnet') } }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <EnokiFlowProvider apiKey="enoki_public_08e79fba532f4b3f54e86e722297b35e">
-      <QueryClientProvider client={queryClient}>
-        <SuiClientProvider networks={networkConfig} defaultNetwork="testnet">
-          <WalletProvider autoConnect>
+    <QueryClientProvider client={queryClient}>
+      <SuiClientProvider networks={networks} defaultNetwork="mainnet">
+        <WalletProvider>
+          {/* 아키님의 Enoki Public Key (enoki_public_... 로 시작하는 키)를 여기에 넣으세요 */}
+          <EnokiFlowProvider apiKey="enoki_public_79288e2c949704c77c61148439df67d1"> 
             <App />
-          </WalletProvider>
-        </SuiClientProvider>
-      </QueryClientProvider>
-    </EnokiFlowProvider>
+          </EnokiFlowProvider>
+        </WalletProvider>
+      </SuiClientProvider>
+    </QueryClientProvider>
   </React.StrictMode>,
 )
