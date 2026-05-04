@@ -28,12 +28,14 @@ def parse_html_3col_law(raw_text):
     if len(rows) > 1:
         current_chapter = "기본 폴더"
         current_law_num = "000조"
-        type_names = {0: '법', 1: '령', 2: '규'}
+        type_names = {0: '법', 1: '령', 2: '규'} # 3번째 단은 [규]로 파싱
+        
         for row_html in rows[1:]:
             try:
                 row_text = re.sub(r'<[^>]+>', ' ', row_html).strip()
                 row_text = re.sub(r'\s+', ' ', row_text)
                 
+                # '제X장' 폴더(장별) 추출 로직
                 chap_match = re.search(r'제\s*(\d+)\s*장\s*(.*)', row_text)
                 if chap_match:
                     c_num = chap_match.group(1)
@@ -47,7 +49,9 @@ def parse_html_3col_law(raw_text):
                 c0_raw = re.sub(r'<[^>]+>', '', cols[0]).strip()
                 is_act_cell = bool(re.match(r'^\s*제\s*\d+\s*조(?:\s*의\s*\d+)?', c0_raw))
                 mapped_cols = ["", "", ""]
-                if len(cols) >= 3: mapped_cols = cols[:3]
+                
+                if len(cols) >= 3: 
+                    mapped_cols = cols[:3]
                 elif len(cols) == 2:
                     if is_act_cell: mapped_cols[0], mapped_cols[1] = cols[0], cols[1]
                     else: mapped_cols[1], mapped_cols[2] = cols[0], cols[1]
