@@ -2,12 +2,11 @@ import React, { useState, useEffect } from "react";
 import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
 import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 import { api } from "./services/api";
-import { SPLIT_REGEX } from "./utils/constants";
 import { CardModal } from "./components/CardModal";
 import { DashboardTab } from "./tabs/DashboardTab";
 import { CraftTab } from "./tabs/CraftTab";
 import { EnhanceTab } from "./tabs/EnhanceTab";
-import { MypageTab } from "./tabs/MypageTab"; // Mypage는 기존 코드 그대로 사용 권장
+import { MypageTab } from "./tabs/MypageTab";
 
 function MainApp() {
   const enokiFlow = useEnokiFlow();
@@ -20,25 +19,47 @@ function MainApp() {
   const [categories, setCategories] = useState([]);
   const [savedCards, setSavedCards] = useState([]);
   const [activeCard, setActiveCard] = useState<any>(null);
-  const [panelState, setPanelState] = useState({ progress: 0, message: "대기 중" });
   
-  // 전역 상태 관리
+  // 글로벌 UI 상태
+  const [viewMode, setViewMode] = useState('all');
+  const [colCount, setColCount] = useState(3);
+  const [useAiRecommend, setUseAiRecommend] = useState(true);
+  const [panelState, setPanelState] = useState({ progress: 0, message: "대기 중..." });
+
   useEffect(() => {
-    if (isLoggedIn) {
-      api.getCategories(safeAddress).then(d => setCategories(d.categories || []));
-      api.getMyCards(safeAddress).then(d => setSavedCards(d.cards || []));
-    }
+    if (isLoggedIn) { loadAllData(); }
+    const sAi = localStorage.getItem('useAiRecommend');
+    if (sAi !== null) setUseAiRecommend(sAi === 'true');
   }, [isLoggedIn, safeAddress]);
 
-  // 렌더링 로직 (빈칸 복원용)
-  const renderMaskedContent = () => {
-    if (!activeCard) return null;
-    const parts = activeCard.content.split(/(\[.*?\])/g);
-    return parts.map((p: string, i: number) => {
-      if (p.startsWith('[') && p.endsWith(']')) return <span key={i} className="bg-indigo-500/30 border-b border-indigo-400 mx-1 px-4 text-transparent">____</span>;
-      return p;
-    });
+  const loadAllData = async () => {
+    try {
+      const catRes = await api.getCategories(safeAddress);
+      setCategories(catRes.categories || []);
+      const cardRes = await api.getMyCards(safeAddress);
+      setSavedCards(cardRes.cards || []);
+    } catch (e) { console.error("데이터 로딩 실패:", e); }
   };
+
+  // 삭제 및 저장 로직
+  const handleDeleteCard = async (id: number) => {
+    if (window.confirm("이 카드를 삭제하시겠습니까?")) {
+      await api.deleteCard(safeAddress, id);
+      loadAllData();
+    }
+  };
+
+  const handleMakeBlankCard = async (cat: any, text: string, selectedWords: Set<number>) => {
+    // 실제 저장 로직 구현 (API 호출 후 loadAllData())
+    alert("카드가 저장되었습니다! (실제 API 연동 필요)");
+  };
+
+  const handleAiRecommend = async (cat: any) => {
+    setPanelState({ progress: 50, message: "AI가 추천 중입니다..." });
+    // AI API 호출 로직
+  };
+
+  const createLongPressHandlers = (cb: any) => ({ onMouseDown: cb });
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-6 sm:p-12">
@@ -56,8 +77,31 @@ function MainApp() {
           </nav>
 
           {activeTab === 'dashboard' && <DashboardTab categories={categories} savedCards={savedCards} />}
-          {activeTab === 'craft' && <CraftTab categories={categories} craftFolders={Array.from(new Set(categories.map((c:any)=>c.folder_name||'기본 폴더')))} openCraftFolders={{}} setOpenCraftFolders={()=>{}} panelState={panelState} />}
-          {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} enhanceFolders={Array.from(new Set(savedCards.map((c:any)=>c.folder_name||'기본 폴더')))} openEnhanceFolders={{}} setOpenEnhanceFolders={()=>{}} colCount={3} viewMode="all" setActiveCard={setActiveCard} />}
+          
+          {activeTab === 'craft' && (
+            <CraftTab 
+              categories={categories} colCount={colCount} viewMode={viewMode} 
+              useAiRecommend={useAiRecommend} panelState={panelState}
+              handleMakeBlankCard={handleMakeBlankCard} handleAiRecommend={handleAiRecommend} 
+            />
+          )}
+          
+          {activeTab === 'enhance' && (
+            <EnhanceTab 
+              savedCards={savedCards} colCount={colCount} viewMode={viewMode} 
+              setActiveCard={setActiveCard} handleDeleteCard={handleDeleteCard} 
+              createLongPressHandlers={createLongPressHandlers} 
+            />
+          )}
+
+          {activeTab === 'mypage' && (
+             <MypageTab 
+               useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend}
+               viewMode={viewMode} setViewMode={setViewMode}
+               colCount={colCount} updateColCount={setColCount}
+               handleDeleteAll={() => {}}
+             />
+          )}
         </main>
       )}
 
@@ -65,7 +109,7 @@ function MainApp() {
         <CardModal 
           activeCard={activeCard} totalTimeLimit={10} elapsed={0} 
           answerInput="" setAnswerInput={()=>{}} inputStatus="idle" 
-          handleSequentialInput={()=>{}} renderContent={renderMaskedContent} 
+          handleSequentialInput={()=>{}} renderContent={() => <div>{activeCard.content}</div>} 
           onClose={() => setActiveCard(null)} 
         />
       )}
