@@ -5,7 +5,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
   const enhanceFolders = Array.from(new Set(savedCards.map((c:any)=>c.folder_name||'기본 폴더'))).sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
 
-  // 탭이 열릴 때 모든 폴더를 '열림(true)' 상태로 초기화
   useEffect(() => {
     const initial: Record<string, boolean> = {};
     enhanceFolders.forEach(f => initial[f] = true);
@@ -16,13 +15,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
     <div className="space-y-8 animate-in fade-in">
       <div className="flex flex-wrap gap-2 mb-6">
         {enhanceFolders.map((f: string) => (
-          <button 
-            key={f} 
-            onClick={() => setOpenFolders(p => ({...p, [f]: !p[f]}))} 
-            className={`px-4 py-2 text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-amber-600 border-amber-500 text-white' : 'bg-amber-900/30 text-amber-300 border-amber-500/30'}`}
-          >
-            📁 {f}
-          </button>
+          <button key={f} onClick={() => setOpenFolders(p => ({...p, [f]: !p[f]}))} className={`px-4 py-2 text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-amber-600 border-amber-500 text-white' : 'bg-amber-900/30 text-amber-300 border-amber-500/30'}`}>📁 {f}</button>
         ))}
       </div>
       {enhanceFolders.map((folder: string) => openFolders[folder] && (
@@ -34,7 +27,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
               return (
                 <div key={card.id} className={`${gridSpanClass}`}>
                   <button 
-                    {...(createLongPressHandlers ? createLongPressHandlers(() => handleDeleteCard(card.id)) : {})}
+                    {...createLongPressHandlers(() => handleDeleteCard(card.id))}
                     onClick={() => setActiveCard(card)}
                     className={`w-full p-5 text-center rounded-sm border transition-all h-full ${card.status === "BURNED" ? "border-white/5 text-white/30" : "border-indigo-500/30 text-indigo-300 bg-indigo-900/20 hover:bg-indigo-900/40"}`}
                   >
