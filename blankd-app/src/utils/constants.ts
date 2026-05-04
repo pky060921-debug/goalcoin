@@ -17,9 +17,7 @@ export const getColSpanAndStartClass = (text: string, currentViewMode: string, i
   if (isExpanded) return "col-span-full";
   const isLaw = text?.includes('[법]');
   const isDecret = text?.includes('[령]');
-  
-  // [칙]뿐만 아니라 백엔드가 보내주는 [규] 태그도 인식하도록 완벽 수정
-  const isRule = text?.includes('[칙]') || text?.includes('[규]'); 
+  const isRule = text?.includes('[칙]') || text?.includes('[규]'); // 시행규칙 버그 해결
   
   if (currentViewMode === 'all' && colCount >= 3 && (isLaw || isDecret || isRule)) {
     if (isLaw) return "md:col-start-1 col-span-1";
