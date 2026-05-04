@@ -367,17 +367,19 @@ def save_card():
     wallet_address = data.get('wallet_address')
     card_content = data.get('card_content')
     answer_text = data.get('answer_text')
+    # 🚨 [수정됨] 프론트엔드에서 넘어오는 폴더명을 정확히 받아서 저장합니다.
+    folder_name = data.get('folder_name', '기본 폴더') 
     
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    # 🚨 [수정됨] cards 테이블에 folder_name을 함께 저장하도록 쿼리를 수정합니다.
     cursor.execute(
-        '''INSERT INTO cards (wallet_address, card_content, answer_text, options_json, next_review_time)
-           VALUES (?, ?, ?, '[]', ?)''',
-        (wallet_address, card_content, answer_text, get_next_review_time(0))
+        '''INSERT INTO cards (wallet_address, card_content, answer_text, options_json, next_review_time, folder_name) 
+           VALUES (?, ?, ?, '[]', ?, ?)''', 
+        (wallet_address, card_content, answer_text, get_next_review_time(0), folder_name)
     )
     conn.commit()
     conn.close()
-    
     return jsonify({"message": "카드 제작 완료"}), 201
 
 @app.route('/api/my-cards')
