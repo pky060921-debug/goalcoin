@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useCurrentAccount } from "@mysten/dapp-kit";
+import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
 import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 import { api } from "./services/api";
 import { CardModal } from "./components/CardModal";
@@ -12,22 +12,28 @@ function MainApp() {
   const enokiFlow = useEnokiFlow();
   const zkLogin = useZkLogin();
   const suiWalletAccount = useCurrentAccount();
+  
+  // 지갑 또는 구글(zkLogin) 로그인 여부 확인
   const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
   const isLoggedIn = safeAddress.length > 0;
 
+  // 탭 및 데이터 상태 관리
   const [activeTab, setActiveTab] = useState('dashboard');
   const [categories, setCategories] = useState([]);
   const [savedCards, setSavedCards] = useState([]);
   const [activeCard, setActiveCard] = useState<any>(null);
   
-  // 글로벌 UI 상태
+  // 글로벌 UI 설정 상태 관리
   const [viewMode, setViewMode] = useState('all');
   const [colCount, setColCount] = useState(3);
   const [useAiRecommend, setUseAiRecommend] = useState(true);
   const [panelState, setPanelState] = useState({ progress: 0, message: "대기 중..." });
 
+  // 로그인 시 데이터 로드
   useEffect(() => {
-    if (isLoggedIn) { loadAllData(); }
+    if (isLoggedIn) { 
+      loadAllData(); 
+    }
     const sAi = localStorage.getItem('useAiRecommend');
     if (sAi !== null) setUseAiRecommend(sAi === 'true');
   }, [isLoggedIn, safeAddress]);
@@ -38,7 +44,9 @@ function MainApp() {
       setCategories(catRes.categories || []);
       const cardRes = await api.getMyCards(safeAddress);
       setSavedCards(cardRes.cards || []);
-    } catch (e) { console.error("데이터 로딩 실패:", e); }
+    } catch (e) { 
+      console.error("데이터 로딩 실패:", e); 
+    }
   };
 
   const handleDeleteCard = async (id: number) => {
@@ -49,32 +57,38 @@ function MainApp() {
   };
 
   const handleMakeBlankCard = async (cat: any, text: string, selectedWords: Set<number>) => {
-    alert("카드가 저장되었습니다! (실제 API 연동 필요)");
+    alert("카드가 저장되었습니다! (실제 백엔드 API 연동 필요)");
   };
 
   const handleAiRecommend = async (cat: any) => {
     setPanelState({ progress: 50, message: "AI가 추천 중입니다..." });
   };
 
-  const createLongPressHandlers = (cb: any) => ({ onMouseDown: cb });
+  const createLongPressHandlers = (cb: any) => ({ onMouseDown: cb, onTouchStart: cb });
 
-  // 구글 로그인 처리 함수
+  // 구글 로그인 처리 함수 (에러 진단 로그 포함)
   const handleGoogleLogin = async () => {
+    console.log("🚀 구글 로그인 시도 시작...");
     try {
       const protocol = window.location.protocol;
       const host = window.location.host;
       const redirectUrl = `${protocol}//${host}`;
       
-      enokiFlow.createAuthorizationURL({
+      console.log("📍 리다이렉트 주소:", redirectUrl);
+
+      const url = await enokiFlow.createAuthorizationURL({
         provider: 'google',
-        clientId: '802422002773-j64t319p7pveem8gukq1t832b8h7l6um.apps.googleusercontent.com', // 기존에 사용하시던 Enoki Client ID (또는 구글 Client ID)
+        clientId: '802422002773-j64t319p7pveem8gukq1t832b8h7l6um.apps.googleusercontent.com',
         redirectUrl: redirectUrl,
         extraParams: { scope: ['openid', 'email', 'profile'] }
-      }).then((url) => {
-        window.location.href = url;
       });
+
+      console.log("🔗 생성된 인증 URL:", url);
+      window.location.href = url;
+
     } catch (error) {
-      console.error("Login failed", error);
+      console.error("❌ 구글 로그인 에러 발생:", error);
+      alert("로그인 창을 불러오지 못했습니다. 콘솔(F12) 에러 로그를 확인해 주세요.");
     }
   };
 
@@ -108,10 +122,9 @@ function MainApp() {
           <h2 className="text-xl font-serif text-white mb-2">법령 기억 강화 시스템</h2>
           <p className="text-sm text-white/40 mb-12 text-center">인지 과학 기반의 간격 반복 학습으로<br/>방대한 법령을 영구 기억으로 전환합니다.</p>
           
-          {/* 구글 로그인 전용 대형 버튼 */}
           <button 
             onClick={handleGoogleLogin} 
-            className="w-full py-4 bg-white text-black font-bold text-sm flex items-center justify-center gap-3 hover:bg-gray-200 transition-all"
+            className="w-full py-4 bg-white text-black font-bold text-sm flex items-center justify-center gap-3 hover:bg-gray-200 transition-all rounded-sm"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">
               <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -154,14 +167,14 @@ function MainApp() {
                viewMode={viewMode} setViewMode={setViewMode}
                colCount={colCount} updateColCount={setColCount}
                handleDeleteAll={async () => {
-                 if(window.confirm('모든 데이터를 초기화합니까?')){
+                 if(window.confirm('모든 데이터를 초기화합니까?')) {
                    await fetch('https://api.blankd.top/api/delete-all', {
                      method: 'POST', 
                      headers: {'Content-Type':'application/json'}, 
                      body: JSON.stringify({wallet_address: safeAddress})
                    });
                    loadAllData();
-                   alert("초기화 완료!");
+                   alert("초기화 완료! 문헌을 다시 업로드해주세요.");
                  }
                }}
              />
@@ -181,4 +194,6 @@ function MainApp() {
   );
 }
 
-export default MainApp;
+export default function App() {
+  return <MainApp />;
+}
