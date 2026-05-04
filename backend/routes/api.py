@@ -204,61 +204,6 @@ def recommend_blank():
         logging.error(f"[오류 진단] 라우트 에러:\n{traceback.format_exc()}")
         return jsonify({"error": "요청 실패", "details": str(e)}), 500
 
-@api_bp.route('/split-category', methods=['POST'])
-def split_category():
-    try:
-        data = request.json
-        cat_id, text1, text2, wallet_address = data.get('id'), data.get('text1'), data.get('text2'), data.get('wallet_address')
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT title, folder_name FROM categories WHERE id = ? AND wallet_address = ?", (cat_id, wallet_address))
-        row = cursor.fetchone()
-        if not row: return jsonify({"error": "문헌을 찾을 수 없습니다."}), 404
-        title, folder_name = row[0], row[1]
-        
-        cursor.execute("UPDATE categories SET content = ? WHERE id = ? AND wallet_address = ?", (text1, cat_id, wallet_address))
-        import re
-        match = re.search(r'-(\d+)$', title)
-        new_title = f"{title[:match.start()]}-{int(match.group(1))+1}" if match else f"{title}-2"
-            
-        cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", (wallet_address, new_title, text2, folder_name))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "분할 완료"})
-    except Exception as e: 
-        logging.error(f"[오류 진단] split_category 에러:\n{traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-@api_bp.route('/move-categories', methods=['POST'])
-def move_categories():
-    try:
-        data = request.json
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        for cat_id in data.get('ids', []):
-            cursor.execute("UPDATE categories SET folder_name = ? WHERE id = ? AND wallet_address = ?", (data.get('folder_name'), cat_id, data.get('wallet_address')))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "이동 완료"})
-    except Exception as e:
-        logging.error(traceback.format_exc())
-        return jsonify({"error": "이동 실패"}), 500
-
-@api_bp.route('/move-cards', methods=['POST'])
-def move_cards():
-    try:
-        data = request.json
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        for card_id in data.get('ids', []):
-            cursor.execute("UPDATE cards SET folder_name = ? WHERE id = ? AND wallet_address = ?", (data.get('folder_name'), card_id, data.get('wallet_address')))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "이동 완료"})
-    except Exception as e:
-        logging.error(traceback.format_exc())
-        return jsonify({"error": "이동 실패"}), 500
-
 @api_bp.route('/get-categories')
 def get_categories():
     try:
@@ -303,6 +248,7 @@ def get_my_cards():
                 if now > next_review: cursor.execute("UPDATE cards SET status = 'BURNED', level = 0 WHERE id = ?", (card_id,))
                 elif (next_review - now).total_seconds() < 7200: cursor.execute("UPDATE cards SET status = 'AT_RISK' WHERE id = ?", (card_id,))
         conn.commit()
+        
         cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name FROM cards WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
         cards = [{"id": r[0], "content": r[1], "answer": r[2], "options": json.loads(r[3]), "level": r[4], "next_review": r[5], "status": r[6], "best_time": r[7], "folder_name": r[8]} for r in cursor.fetchall()]
         conn.close()
