@@ -41,7 +41,6 @@ function MainApp() {
     } catch (e) { console.error("데이터 로딩 실패:", e); }
   };
 
-  // 삭제 및 저장 로직
   const handleDeleteCard = async (id: number) => {
     if (window.confirm("이 카드를 삭제하시겠습니까?")) {
       await api.deleteCard(safeAddress, id);
@@ -50,13 +49,11 @@ function MainApp() {
   };
 
   const handleMakeBlankCard = async (cat: any, text: string, selectedWords: Set<number>) => {
-    // 실제 저장 로직 구현 (API 호출 후 loadAllData())
     alert("카드가 저장되었습니다! (실제 API 연동 필요)");
   };
 
   const handleAiRecommend = async (cat: any) => {
     setPanelState({ progress: 50, message: "AI가 추천 중입니다..." });
-    // AI API 호출 로직
   };
 
   const createLongPressHandlers = (cb: any) => ({ onMouseDown: cb });
@@ -71,14 +68,16 @@ function MainApp() {
       {isLoggedIn && (
         <main className="max-w-6xl mx-auto">
           <nav className="flex gap-8 mb-8 border-b border-white/5 pb-4 overflow-x-auto">
-            {['dashboard', 'craft', 'enhance', 'exam', 'mypage'].map(id => (
+            {/* craft를 create로 변경 완료 */}
+            {['dashboard', 'create', 'enhance', 'exam', 'mypage'].map(id => (
               <button key={id} onClick={() => setActiveTab(id)} className={`text-xs uppercase tracking-widest ${activeTab === id ? 'text-white border-b' : 'text-white/30'}`}>{id}</button>
             ))}
           </nav>
 
           {activeTab === 'dashboard' && <DashboardTab categories={categories} savedCards={savedCards} />}
           
-          {activeTab === 'craft' && (
+          {/* activeTab 조건식을 create로 변경 */}
+          {activeTab === 'create' && (
             <CraftTab 
               categories={categories} colCount={colCount} viewMode={viewMode} 
               useAiRecommend={useAiRecommend} panelState={panelState}
@@ -99,7 +98,18 @@ function MainApp() {
                useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend}
                viewMode={viewMode} setViewMode={setViewMode}
                colCount={colCount} updateColCount={setColCount}
-               handleDeleteAll={() => {}}
+               handleDeleteAll={async () => {
+                 // 데이터 완전 초기화 로직 연동
+                 if(window.confirm('구형 데이터(기본 폴더)를 지우기 위해 모든 데이터를 초기화합니까?')){
+                   await fetch('https://api.blankd.top/api/delete-all', {
+                     method: 'POST', 
+                     headers: {'Content-Type':'application/json'}, 
+                     body: JSON.stringify({wallet_address: safeAddress})
+                   });
+                   loadAllData();
+                   alert("초기화 완료! 이제 문헌을 새로 업로드하시면 장별로 분류됩니다.");
+                 }
+               }}
              />
           )}
         </main>
