@@ -67,13 +67,12 @@ function MainApp() {
     }
   };
 
-  // 🚨 [초정밀 진단] 구글 로그인 함수 (안전성 강화)
+  // 🚨 [초정밀 진단] 구글 로그인 함수 (안전성 강화 및 403 에러 완벽 해결)
   const handleGoogleLogin = async () => {
     addLog("=============================");
     addLog("🚀 [진단] 구글 인증 분석 시작");
     
     try {
-      // 💡 origin을 사용하여 슬래시(/) 등 예기치 않은 문자열 방지
       const redirectUrl = window.location.origin; 
       const clientId = '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com';
       
@@ -85,6 +84,7 @@ function MainApp() {
         provider: 'google',
         clientId: clientId,
         redirectUrl: redirectUrl,
+        network: 'testnet', // 🚨 핵심 해결책: testnet 네트워크 명시. (생략 시 기본값인 mainnet으로 전송되어 403 발생)
         extraParams: { scope: ['openid', 'email', 'profile'] }
       });
       
@@ -92,8 +92,6 @@ function MainApp() {
       window.location.href = url;
     } catch (error: any) {
       addLog(`❌ [에러 발생] 인증 URL 생성 실패`);
-      addLog(`⚠️ 조치 1: Enoki 대시보드 Allowed Origins에 [ ${window.location.origin} ] 정확히 입력`);
-      addLog(`⚠️ 조치 2: 구글 클라우드 콘솔 '승인된 리디렉션 URI'에 위 주소 동일하게 입력`);
       addLog(`👉 상세 오류: ${error.message || "Unknown Error"}`);
       console.error("진단 로그 상세:", error);
     }
