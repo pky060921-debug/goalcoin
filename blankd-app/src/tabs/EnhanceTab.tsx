@@ -3,7 +3,7 @@ import { getStrictCardTitle, getSortNumber, getColSpanAndStartClass } from '../u
 
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleDeleteCard, selectedEnhanceIds, setSelectedEnhanceIds, targetFolderName, setTargetFolderName, handleMoveEnhanceFolders }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
-  const enhanceFolders = Array.from(new Set(safeCards.map((c:any)=>c.folder_name||'기본 폴더'))).sort() as string[];
+  const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -12,21 +12,15 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
     setOpenFolders(initial);
   }, [savedCards]);
 
-  // 💡 렌더링 에러(310) 방지
   const createLongPressHandlers = (callback: () => void, ms = 800) => {
     let timer: any;
     const start = () => { timer = setTimeout(callback, ms); };
     const clear = () => { clearTimeout(timer); };
-    return { 
-      onTouchStart: start, onTouchEnd: clear, 
-      onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, 
-      onContextMenu: (e:any) => { e.preventDefault(); callback(); } 
-    };
+    return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
   };
 
   return (
     <div className="space-y-8 animate-in fade-in">
-      {/* 폴더 대량 이동 UI */}
       {selectedEnhanceIds.size > 0 && (
         <div className="flex gap-2 items-center bg-amber-900/20 p-3 rounded-sm border border-amber-500/20 mb-4">
           <span className="text-xs text-amber-300">{selectedEnhanceIds.size}개 선택됨</span>
@@ -43,7 +37,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
         <div key={folder} className="mb-8">
           <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
           <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-            {safeCards.filter((c:any) => (c.folder_name || '기본 폴더') === folder).sort((a:any, b:any) => getSortNumber(a.content) - getSortNumber(b.content)).map((card: any) => {
+            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => getSortNumber(a.content) - getSortNumber(b.content)).map((card: any) => {
               const gridSpanClass = getColSpanAndStartClass(card.content, viewMode, false, colCount);
               return (
                 <div key={card.id} className={`${gridSpanClass} relative`}>
