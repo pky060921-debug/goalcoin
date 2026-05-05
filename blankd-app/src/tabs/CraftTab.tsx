@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { getStrictCardTitle, getSortNumber, getColSpanAndStartClass, SPLIT_REGEX } from '../utils/constants';
 
-export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panelState, lawFile, setLawFile, examFile, setExamFile, uploadLaw, uploadExam, selectedCraftIds, setSelectedCraftIds, targetFolderName, setTargetFolderName, handleMoveCraftFolders, handleMakeBlankCard, handleAiRecommend, handleSplitCategory, handleDeleteCategory }: any) => {
+export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panelState, lawFile, setLawFile, uploadLaw, selectedCraftIds, setSelectedCraftIds, targetFolderName, setTargetFolderName, handleMoveCraftFolders, handleMakeBlankCard, handleAiRecommend, handleSplitCategory, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
-  const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name || '기본 폴더'))).sort() as string[];
+  const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [parsedText, setParsedText] = useState("");
@@ -15,35 +15,23 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panel
     setOpenFolders(initial);
   }, [categories]);
 
-  // 💡 렌더링 에러(310)의 주범이었던 useRef 훅을 버리고, 아키님의 원본 순수 함수 방식으로 복구!
   const createLongPressHandlers = (callback: () => void, ms = 800) => {
     let timer: any;
     const start = () => { timer = setTimeout(callback, ms); };
     const clear = () => { clearTimeout(timer); };
-    return { 
-      onTouchStart: start, onTouchEnd: clear, 
-      onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, 
-      onContextMenu: (e:any) => { e.preventDefault(); callback(); } 
-    };
+    return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
   };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in fade-in">
       <div className="lg:col-span-8 space-y-8">
-        {/* 파일 업로드 영역 */}
         <div className="flex gap-2 mb-4">
           <label className="flex-1 border border-white/20 p-2 text-center text-xs hover:bg-white/10 cursor-pointer text-white/80">
             <input type="file" accept=".pdf,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 법령 업로드'}
           </label>
           <button onClick={uploadLaw} className="px-4 border border-white/20 text-xs hover:bg-white/10">전송</button>
-          
-          <label className="flex-1 border border-teal-900/40 p-2 text-center text-xs hover:bg-teal-900/20 cursor-pointer text-teal-400">
-            <input type="file" accept=".pdf,.html" onChange={e => setExamFile(e.target.files?.[0] || null)} className="hidden"/> {examFile ? `✅ ${examFile.name}` : '+ 모의고사 업로드'}
-          </label>
-          <button onClick={uploadExam} className="px-4 border border-teal-900/40 text-xs text-teal-400 hover:bg-teal-900/20">전송</button>
         </div>
 
-        {/* 폴더 대량 이동 UI */}
         {selectedCraftIds.size > 0 && (
           <div className="flex gap-2 items-center bg-indigo-900/20 p-3 rounded-sm border border-indigo-500/20 mb-4">
             <span className="text-xs text-indigo-300">{selectedCraftIds.size}개 선택됨</span>
@@ -60,17 +48,13 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panel
           <div key={folder} className="mb-8">
             <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
             <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-              {safeCategories.filter((c:any) => (c.folder_name || '기본 폴더') === folder).sort((a:any, b:any) => getSortNumber(a.title) - getSortNumber(b.title)).map((cat: any) => {
+              {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => getSortNumber(a.title) - getSortNumber(b.title)).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 return (
                   <div key={cat.id} className={`${getColSpanAndStartClass(cat.title, viewMode, isExpanded, colCount)} relative`}>
                     <input type="checkbox" className="absolute top-2 right-2 z-10 w-4 h-4 cursor-pointer" checked={selectedCraftIds.has(cat.id)} onChange={() => { const s = new Set(selectedCraftIds); if(s.has(cat.id)) s.delete(cat.id); else s.add(cat.id); setSelectedCraftIds(s); }} />
                     {!isExpanded ? (
-                      <button 
-                        {...createLongPressHandlers(() => handleDeleteCategory(cat.id), 800)} 
-                        onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(cat.content); }} 
-                        className="w-full h-full p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm text-indigo-300 font-bold text-[13px] text-left leading-relaxed hover:bg-indigo-900/40 transition-colors"
-                      >
+                      <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id), 800)} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(cat.content); }} className="w-full h-full p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm text-indigo-300 font-bold text-[13px] text-left leading-relaxed hover:bg-indigo-900/40 transition-colors">
                         {getStrictCardTitle(cat.title)}
                       </button>
                     ) : (
