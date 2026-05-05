@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getStrictCardTitle, getSortNumber, getGridStyle, SPLIT_REGEX } from '../utils/constants';
+import { getStrictCardTitle, getGridStyle, SPLIT_REGEX } from '../utils/constants';
 
 export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panelState, lawFile, setLawFile, uploadLaw, selectedCraftIds, setSelectedCraftIds, targetFolderName, setTargetFolderName, handleMoveCraftFolders, handleMakeBlankCard, handleAiRecommend, handleSplitCategory, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
@@ -51,17 +51,16 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panel
               {safeCategories
                 .filter((c:any) => c.folder_name === folder)
                 .filter((c:any) => {
-                   // 💡 설정에서 선택한 법/령/칙 뷰어 연동
                    if (viewMode === 'all') return true;
                    if (viewMode === '법' && c.title.includes('[법]')) return true;
                    if (viewMode === '령' && c.title.includes('[령]')) return true;
                    if (viewMode === '칙' && (c.title.includes('[칙]') || c.title.includes('[규]'))) return true;
                    return false;
                 })
-                .sort((a:any, b:any) => getSortNumber(a.title) - getSortNumber(b.title))
+                // 💡 [핵심 패치] 숫자 억지 정렬을 폐기하고 원본 HTML 표 순서(id)를 완벽하게 보존합니다!
+                .sort((a:any, b:any) => a.id - b.id)
                 .map((cat: any) => {
                   const isExpanded = expandedId === cat.id;
-                  // 💡 완벽한 인라인 3단 배치 적용
                   const gridStyle = getGridStyle(cat.title, viewMode, isExpanded, colCount);
 
                   return (
