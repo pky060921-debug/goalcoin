@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Component, ReactNode } from "react";
 import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
 import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 import { api } from "./services/api";
@@ -7,6 +7,33 @@ import { DashboardTab } from "./tabs/DashboardTab";
 import { CraftTab } from "./tabs/CraftTab";
 import { EnhanceTab } from "./tabs/EnhanceTab";
 import { MypageTab } from "./tabs/MypageTab";
+
+// 🚨 [초정밀 진단] 화면이 하얗게 변하는 렌더링 에러를 잡아내는 Error Boundary 컴포넌트
+class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, errorMessage: "" };
+  }
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, errorMessage: error.message };
+  }
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("UI 렌더링 에러 상세:", error, errorInfo);
+    this.props.fallbackLog(`❌ 화면 렌더링 붕괴: ${error.message}`);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-6 bg-red-900/20 border border-red-500/50 rounded-md text-red-400 font-mono mt-8">
+          <h3 className="font-bold mb-2">⚠️ 컴포넌트 렌더링 치명적 오류 발생</h3>
+          <p className="text-sm">{this.state.errorMessage}</p>
+          <p className="text-xs text-red-400/70 mt-4">개발자 도구(F12)의 Console 탭에서 상세 오류를 확인하거나, 해당 탭의 코드를 점검하세요.</p>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function MainApp() {
   const enokiFlow = useEnokiFlow();
@@ -26,7 +53,6 @@ function MainApp() {
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 초정밀 진단 터미널 가동..."]);
   const [panelState, setPanelState] = useState({ progress: 0, message: "대기 중..." });
 
-  // 💡 로그를 최대 10개까지 보여주도록 설정
   const addLog = (msg: string) => {
     setSystemLogs(prev => {
       const newLogs = [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`];
@@ -35,13 +61,11 @@ function MainApp() {
   };
 
   useEffect(() => {
-    // 🚨 [초정밀 진단] 구글에서 전달받은 콜백 데이터를 가로채어 로그인 세션을 마무리합니다.
     if (window.location.hash) {
       addLog("⏳ 인증 콜백 데이터 감지됨. zkLogin 세션을 생성합니다...");
       enokiFlow.handleAuthCallback()
         .then(() => {
           addLog("✅ 세션 생성 완벽 통과!");
-          // 보안 및 미관을 위해 인증이 끝나면 URL에 남은 해시 데이터를 지웁니다.
           window.history.replaceState(null, '', window.location.pathname);
         })
         .catch((err: any) => {
@@ -82,7 +106,6 @@ function MainApp() {
     }
   };
 
-  // 🚨 [초정밀 진단] 구글 로그인 요청 URL 생성 함수
   const handleGoogleLogin = async () => {
     addLog("=============================");
     addLog("🚀 [진단] 구글 인증 분석 시작");
@@ -99,7 +122,7 @@ function MainApp() {
         provider: 'google',
         clientId: clientId,
         redirectUrl: redirectUrl,
-        network: 'testnet', // 🚨 테스트넷 명시 필수
+        network: 'testnet',
         extraParams: { scope: ['openid', 'email', 'profile'] }
       });
       
@@ -156,22 +179,25 @@ function MainApp() {
             ))}
           </nav>
 
-          {activeTab === 'dashboard' && <DashboardTab categories={categories} savedCards={savedCards} />}
-          {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} panelState={panelState} handleMakeBlankCard={()=>{}} handleAiRecommend={()=>{}} />}
-          {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleDeleteCard={handleDeleteCard} createLongPressHandlers={()=>{}} />}
-          {activeTab === 'mypage' && (
-             <MypageTab useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => {
-                 if(window.confirm('모든 데이터를 초기화합니까?')) {
-                   try {
-                     await api.deleteAll(safeAddress);
-                     addLog("✅ 초기화 완료.");
-                     loadAllData();
-                   } catch (e: any) {
-                     addLog(`❌ 초기화 실패: ${e.message}`);
+          {/* 💡 에러 바운더리로 탭 영역 전체를 감싸서 어디서 터졌는지 화면에 표시합니다. */}
+          <ErrorBoundary fallbackLog={addLog}>
+            {activeTab === 'dashboard' && <DashboardTab categories={categories} savedCards={savedCards} />}
+            {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} panelState={panelState} handleMakeBlankCard={()=>{}} handleAiRecommend={()=>{}} />}
+            {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleDeleteCard={handleDeleteCard} createLongPressHandlers={()=>{}} />}
+            {activeTab === 'mypage' && (
+               <MypageTab useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => {
+                   if(window.confirm('모든 데이터를 초기화합니까?')) {
+                     try {
+                       await api.deleteAll(safeAddress);
+                       addLog("✅ 초기화 완료.");
+                       loadAllData();
+                     } catch (e: any) {
+                       addLog(`❌ 초기화 실패: ${e.message}`);
+                     }
                    }
-                 }
-               }} />
-          )}
+                 }} />
+            )}
+          </ErrorBoundary>
         </main>
       )}
 
