@@ -6,10 +6,9 @@ import { CardModal } from "./components/CardModal";
 import { DashboardTab } from "./tabs/DashboardTab";
 import { CraftTab } from "./tabs/CraftTab";
 import { EnhanceTab } from "./tabs/EnhanceTab";
-import { ExamTab } from "./tabs/ExamTab"; // 💡 누락되었던 모의고사 탭 부활!
+import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
-// 🚨 Error Boundary 컴포넌트
 class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
   constructor(props: any) { super(props); this.state = { hasError: false, errorMessage: "" }; }
   static getDerivedStateFromError(error: any) { return { hasError: true, errorMessage: error.message }; }
@@ -31,7 +30,7 @@ function MainApp() {
   const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
   const isLoggedIn = safeAddress.length > 0;
   
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState('progress');
   const [categories, setCategories] = useState<any[]>([]);
   const [savedCards, setSavedCards] = useState<any[]>([]);
   const [exams, setExams] = useState<any[]>([]);
@@ -40,7 +39,6 @@ function MainApp() {
   const [colCount, setColCount] = useState(3);
   const [useAiRecommend, setUseAiRecommend] = useState(true);
   
-  // 💡 복구된 상태값들 (파일, 선택 ID, 타이머 로직)
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [examFile, setExamFile] = useState<File | null>(null);
   const [selectedCraftIds, setSelectedCraftIds] = useState<Set<number>>(new Set());
@@ -50,7 +48,6 @@ function MainApp() {
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 모듈화 시스템 부팅 완료..."]);
   const [panelState, setPanelState] = useState({ progress: 0, message: "대기 중..." });
 
-  // 💡 모달 타이머 & 빈칸 상태 관리
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [answerInput, setAnswerInput] = useState("");
@@ -134,7 +131,7 @@ function MainApp() {
     });
     if (isBlanking) cardContent += " ]";
     try {
-      const res = await fetch("https://api.blankd.top/api/save-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, card_content: cardContent, answer_text: answerText }) });
+      const res = await fetch("https://api.blankd.top/api/save-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, card_content: cardContent, answer_text: answerText, folder_name: cat.folder_name }) });
       if (res.ok) {
         await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
         loadAllData(); updatePanel('success', '완료', '추출 완료됨.', 100); onComplete(); setActiveTab('enhance');
@@ -175,7 +172,6 @@ function MainApp() {
     setActiveCard(null); loadAllData();
   };
 
-  // 💡 전투(타이머) 시스템 완벽 복구
   useEffect(() => {
     if (activeCard) {
       const foundBlanks: {answer: string, correct: boolean}[] = [];
@@ -232,14 +228,23 @@ function MainApp() {
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-6 sm:p-12 relative pb-48">
-      <header className="max-w-6xl mx-auto border-b border-white/10 pb-8 mb-12 flex justify-between items-end">
-        <h1 className="text-2xl font-light tracking-widest text-white">Blank_D</h1>
-        {isLoggedIn && (
-          <div className="flex items-center gap-4">
-            <div className="text-[10px] text-teal-400 font-mono bg-teal-900/20 px-2 py-1 rounded">{safeAddress.slice(0,6)}...{safeAddress.slice(-4)}</div>
-            <button onClick={() => { enokiFlow.logout(); window.location.reload(); }} className="text-[10px] text-white/40 hover:text-white transition-colors">로그아웃</button>
-          </div>
-        )}
+      <header className="max-w-6xl mx-auto border-b border-white/10 pb-8 mb-12 flex items-center justify-between">
+        <div className="flex items-center gap-10">
+          <h1 className="text-2xl font-light tracking-widest text-white">Blank_D</h1>
+          {isLoggedIn && (
+            <nav className="flex gap-6 overflow-x-auto">
+              {[
+                { id: 'progress', label: '진행상황' },
+                { id: 'create', label: '만들기' },
+                { id: 'enhance', label: '강화' },
+                { id: 'exam', label: '모의고사' },
+                { id: 'settings', label: '설정' }
+              ].map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`text-sm font-bold tracking-widest ${activeTab === tab.id ? 'text-white border-b-2 border-white pb-1' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
+              ))}
+            </nav>
+          )}
+        </div>
       </header>
 
       {!isLoggedIn ? (
@@ -249,17 +254,12 @@ function MainApp() {
         </main>
       ) : (
         <main className="max-w-6xl mx-auto">
-          <nav className="flex gap-8 mb-8 border-b border-white/5 pb-4 overflow-x-auto">
-            {['dashboard', 'craft', 'enhance', 'exam', 'mypage'].map(id => (
-              <button key={id} onClick={() => setActiveTab(id)} className={`text-xs uppercase tracking-widest ${activeTab === id ? 'text-white border-b' : 'text-white/30'}`}>{id}</button>
-            ))}
-          </nav>
           <ErrorBoundary fallbackLog={addLog}>
-            {activeTab === 'dashboard' && <DashboardTab categories={categories} savedCards={savedCards} />}
-            {activeTab === 'craft' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} panelState={panelState} lawFile={lawFile} setLawFile={setLawFile} examFile={examFile} setExamFile={setExamFile} uploadLaw={uploadLaw} uploadExam={uploadExam} selectedCraftIds={selectedCraftIds} setSelectedCraftIds={setSelectedCraftIds} targetFolderName={targetFolderName} setTargetFolderName={setTargetFolderName} handleMoveCraftFolders={handleMoveCraftFolders} handleMakeBlankCard={handleMakeBlankCard} handleAiRecommend={handleAiRecommend} handleSplitCategory={handleSplitCategory} handleDeleteCategory={handleDeleteCategory} />}
+            {activeTab === 'progress' && <DashboardTab categories={categories} savedCards={savedCards} />}
+            {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} panelState={panelState} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} selectedCraftIds={selectedCraftIds} setSelectedCraftIds={setSelectedCraftIds} targetFolderName={targetFolderName} setTargetFolderName={setTargetFolderName} handleMoveCraftFolders={handleMoveCraftFolders} handleMakeBlankCard={handleMakeBlankCard} handleAiRecommend={handleAiRecommend} handleSplitCategory={handleSplitCategory} handleDeleteCategory={handleDeleteCategory} />}
             {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleDeleteCard={handleDeleteCard} selectedEnhanceIds={selectedEnhanceIds} setSelectedEnhanceIds={setSelectedEnhanceIds} targetFolderName={targetFolderName} setTargetFolderName={setTargetFolderName} handleMoveEnhanceFolders={handleMoveEnhanceFolders} />}
-            {activeTab === 'exam' && <ExamTab exams={exams} />}
-            {activeTab === 'mypage' && <MypageTab useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
+            {activeTab === 'exam' && <ExamTab exams={exams} examFile={examFile} setExamFile={setExamFile} uploadExam={uploadExam} />}
+            {activeTab === 'settings' && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
           </ErrorBoundary>
         </main>
       )}
