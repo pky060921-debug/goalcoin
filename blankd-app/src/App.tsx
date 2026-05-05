@@ -35,13 +35,28 @@ function MainApp() {
   };
 
   useEffect(() => {
+    // 🚨 [초정밀 진단] 구글에서 전달받은 콜백 데이터를 가로채어 로그인 세션을 마무리합니다.
+    if (window.location.hash) {
+      addLog("⏳ 인증 콜백 데이터 감지됨. zkLogin 세션을 생성합니다...");
+      enokiFlow.handleAuthCallback()
+        .then(() => {
+          addLog("✅ 세션 생성 완벽 통과!");
+          // 보안 및 미관을 위해 인증이 끝나면 URL에 남은 해시 데이터를 지웁니다.
+          window.history.replaceState(null, '', window.location.pathname);
+        })
+        .catch((err: any) => {
+          addLog(`❌ 콜백 처리 에러 발생: ${err.message || "Unknown Callback Error"}`);
+        });
+    }
+
     if (isLoggedIn) { 
-      addLog("✅ 로그인 성공. 데이터를 불러옵니다.");
+      addLog("✅ 로그인 확인 완료. 데이터를 불러옵니다.");
       loadAllData(); 
     }
+    
     const sAi = localStorage.getItem('useAiRecommend');
     if (sAi !== null) setUseAiRecommend(sAi === 'true');
-  }, [isLoggedIn, safeAddress]);
+  }, [isLoggedIn, safeAddress, enokiFlow]);
 
   const loadAllData = async () => {
     try {
@@ -67,7 +82,7 @@ function MainApp() {
     }
   };
 
-  // 🚨 [초정밀 진단] 구글 로그인 함수 (안전성 강화 및 403 에러 완벽 해결)
+  // 🚨 [초정밀 진단] 구글 로그인 요청 URL 생성 함수
   const handleGoogleLogin = async () => {
     addLog("=============================");
     addLog("🚀 [진단] 구글 인증 분석 시작");
@@ -84,7 +99,7 @@ function MainApp() {
         provider: 'google',
         clientId: clientId,
         redirectUrl: redirectUrl,
-        network: 'testnet', // 🚨 핵심 해결책: testnet 네트워크 명시. (생략 시 기본값인 mainnet으로 전송되어 403 발생)
+        network: 'testnet', // 🚨 테스트넷 명시 필수
         extraParams: { scope: ['openid', 'email', 'profile'] }
       });
       
