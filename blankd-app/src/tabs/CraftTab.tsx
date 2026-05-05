@@ -4,8 +4,8 @@ import { getStrictCardTitle, getSortNumber, getColSpanAndStartClass, SPLIT_REGEX
 export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panelState, lawFile, setLawFile, uploadLaw, selectedCraftIds, setSelectedCraftIds, targetFolderName, setTargetFolderName, handleMoveCraftFolders, handleMakeBlankCard, handleAiRecommend, handleSplitCategory, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   
-  // 💡 [복구 완료] 구형 기본 폴더 데이터 보이도록 수정
-  const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name || '기본 폴더'))).sort() as string[];
+  // 💡 기본 폴더는 더 이상 렌더링되지 않습니다.
+  const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [parsedText, setParsedText] = useState("");
@@ -28,7 +28,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panel
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in fade-in">
       <div className="lg:col-span-8 space-y-8">
         
-        {/* 만들기 탭에는 오직 법령 업로드만 남김 (모의고사는 ExamTab으로 이동됨) */}
+        {/* 💡 모의고사 버튼은 모의고사 탭으로 이사갔습니다. */}
         <div className="flex gap-2 mb-4">
           <label className="flex-1 border border-white/20 p-2 text-center text-xs hover:bg-white/10 cursor-pointer text-white/80">
             <input type="file" accept=".pdf,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 법령 파일(HTML/PDF) 업로드'}
@@ -45,21 +45,16 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panel
         )}
 
         <div className="flex flex-wrap gap-2 mb-6">
-          {craftFolders.map((f: string) => (
-            <button key={f} onClick={() => setOpenFolders(p => ({...p, [f]: !p[f]}))} className={`px-4 py-2 text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-indigo-900/40 text-indigo-300 border-indigo-500/30'}`}>
-              📁 {f === '기본 폴더' ? '기본 폴더 (구형 데이터)' : f}
-            </button>
-          ))}
+          {craftFolders.map((f: string) => <button key={f} onClick={() => setOpenFolders(p => ({...p, [f]: !p[f]}))} className={`px-4 py-2 text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-indigo-900/40 text-indigo-300 border-indigo-500/30'}`}>📁 {f}</button>)}
         </div>
         
         {craftFolders.map((folder: string) => openFolders[folder] && (
           <div key={folder} className="mb-8">
-            <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder === '기본 폴더' ? '기본 폴더 (이 조항들을 선택해서 장별 폴더로 이동시켜주세요)' : folder}</div>
+            <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
+            {/* 💡 3단(법-령-칙) 레이아웃 그리드 */}
             <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-              {safeCategories.filter((c:any) => (c.folder_name || '기본 폴더') === folder).sort((a:any, b:any) => getSortNumber(a.title) - getSortNumber(b.title)).map((cat: any) => {
+              {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => getSortNumber(a.title) - getSortNumber(b.title)).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
-                
-                // 💡 3단 레이아웃 계산 (법/령/칙 위치 배정)
                 const gridSpanClass = getColSpanAndStartClass(cat.title, viewMode, isExpanded, colCount);
 
                 return (
@@ -70,7 +65,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panel
                         {getStrictCardTitle(cat.title)}
                       </button>
                     ) : (
-                      <div className="w-full p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-4 shadow-xl">
+                      <div className="w-full p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-4 shadow-xl z-20 relative">
                         <div className="flex justify-between items-center mb-2">
                           {useAiRecommend && <button onClick={() => handleAiRecommend(cat)} className="text-[10px] bg-teal-900/40 text-teal-400 px-3 py-1.5 rounded hover:bg-teal-900/60 transition-colors">✨ AI 추천</button>}
                           <button onClick={() => setExpandedId(null)} className="text-white/40 text-xs hover:text-white">닫기</button>
