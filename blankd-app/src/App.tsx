@@ -2,6 +2,7 @@ import React, { useState, useEffect, Component, ReactNode } from "react";
 import { ConnectButton, useCurrentAccount } from "@mysten/dapp-kit";
 import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 import { api } from "./services/api";
+import { SPLIT_REGEX } from "./utils/constants";
 import { CardModal } from "./components/CardModal";
 import { DashboardTab } from "./tabs/DashboardTab";
 import { CraftTab } from "./tabs/CraftTab";
@@ -14,11 +15,7 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
   static getDerivedStateFromError(error: any) { return { hasError: true, errorMessage: error.message }; }
   componentDidCatch(error: any, errorInfo: any) { this.props.fallbackLog(`❌ 화면 렌더링 붕괴: ${error.message}`); }
   render() {
-    if (this.state.hasError) return (
-      <div className="p-6 bg-red-900/20 border border-red-500/50 rounded-md text-red-400 font-mono mt-8">
-        <h3 className="font-bold mb-2">⚠️ 컴포넌트 렌더링 오류 발생</h3><p className="text-sm">{this.state.errorMessage}</p>
-      </div>
-    );
+    if (this.state.hasError) return <div className="p-6 bg-red-900/20 border border-red-500/50 rounded-md text-red-400 mt-8">⚠️ 렌더링 오류: {this.state.errorMessage}</div>;
     return this.props.children;
   }
 }
@@ -45,7 +42,7 @@ function MainApp() {
   const [selectedEnhanceIds, setSelectedEnhanceIds] = useState<Set<number>>(new Set());
   const [targetFolderName, setTargetFolderName] = useState('');
   
-  const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 모듈화 시스템 부팅 완료..."]);
+  const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 부팅 완료..."]);
   const [panelState, setPanelState] = useState({ progress: 0, message: "대기 중..." });
 
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
@@ -74,7 +71,6 @@ function MainApp() {
         fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`).then(r=>r.json())
       ]);
       setCategories(catRes.categories || []); setSavedCards(cardRes.cards || []); setExams(examRes.exams || []);
-      addLog(`✅ 데이터 로드 완료 (문헌:${catRes.categories?.length||0}, 카드:${cardRes.cards?.length||0}, 문제:${examRes.exams?.length||0})`);
     } catch (e: any) { addLog(`❌ 로딩 실패: ${e.message}`); }
   };
 
@@ -110,28 +106,33 @@ function MainApp() {
   };
 
   const handleAiRecommend = async (cat: any) => {
-    updatePanel('loading', '분석 요청', 'Gemma 26B 엔진 연결 중...', 5);
+    updatePanel('loading', '분석 요청', 'Gemma 엔진 연결 중...', 5);
     try {
       const res = await fetch("https://api.blankd.top/api/recommend-blank", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: cat.content, wallet_address: safeAddress }) });
       if (res.ok) { const data = await res.json(); pollTaskProgress(data.task_id, () => loadAllData()); }
     } catch(e) { updatePanel('error', '연결 실패', 'AI 통신 오류', 0); }
   };
 
+  // 💡 제목(Title)을 카드 내용에 합쳐서 강화(Enhance) 탭에서도 법/령/칙 구분이 가능하도록 수정
   const handleMakeBlankCard = async (cat: any, content: string, selectedIndices: Set<number>, onComplete: () => void) => {
     if (!isLoggedIn || selectedIndices.size === 0) return alert("단어를 선택해주세요.");
-    updatePanel('loading', '처리 중', '카드 추출 및 원본 삭제 중...', 50);
-    const words = content ? content.split(/(\s+|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]+|(?:은|는|이|가|을|를|의|에|에게|과|와|로서|로써|로|으로|도|만|부터|까지|이다|한다|함|됨|됨을|함을|함으로써|대하여|대해|대한|등|및|에서|에서는|에서의|로부터|에의|로부터의|에도|에는|이나|나|라도|이라도)(?=\s|$|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]))/g) : [];
-    let cardContent = ""; let answerText = ""; let isBlanking = false;
+    updatePanel('loading', '처리 중', '카드 추출 중...', 50);
+    const words = content ? content.split(SPLIT_REGEX) : [];
+    let bodyContent = ""; let answerText = ""; let isBlanking = false;
     words.forEach((word, index) => {
       if (!word) return;
       if (selectedIndices.has(index) && word.trim() !== "") {
-        if (!isBlanking) { cardContent += "[ "; if (answerText.length > 0) answerText += ", "; isBlanking = true; }
-        cardContent += word; answerText += word;
-      } else { if (isBlanking) { cardContent += " ]"; isBlanking = false; } cardContent += word; }
+        if (!isBlanking) { bodyContent += "[ "; if (answerText.length > 0) answerText += ", "; isBlanking = true; }
+        bodyContent += word; answerText += word;
+      } else { if (isBlanking) { bodyContent += " ]"; isBlanking = false; } bodyContent += word; }
     });
-    if (isBlanking) cardContent += " ]";
+    if (isBlanking) bodyContent += " ]";
+    
+    // 핵심: 강화 탭 배치를 위해 타이틀 병합
+    const finalCardContent = `${cat.title}\n\n${bodyContent}`;
+
     try {
-      const res = await fetch("https://api.blankd.top/api/save-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, card_content: cardContent, answer_text: answerText, folder_name: cat.folder_name }) });
+      const res = await fetch("https://api.blankd.top/api/save-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name }) });
       if (res.ok) {
         await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
         loadAllData(); updatePanel('success', '완료', '추출 완료됨.', 100); onComplete(); setActiveTab('enhance');
@@ -142,23 +143,19 @@ function MainApp() {
   const handleSplitCategory = async (cat: any, splitIdx: number, wordsArray: string[]) => {
     if (!confirm("이 부분을 기준으로 조항을 분할하시겠습니까?")) return;
     const text1 = wordsArray.slice(0, splitIdx).join(''); const text2 = wordsArray.slice(splitIdx).join('');
-    updatePanel('loading', '분할 중', '조항 분할 중...', 50);
     await fetch("https://api.blankd.top/api/split-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: cat.id, text1, text2, wallet_address: safeAddress }) });
-    loadAllData(); updatePanel('success', '완료', '분할되었습니다.', 100);
+    loadAllData();
   };
 
-  const handleDeleteCategory = async (id: number) => {
-    if (confirm("영구 삭제하시겠습니까?")) { await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); }
-  };
-  const handleDeleteCard = async (id: number) => {
-    if (confirm("영구 삭제하시겠습니까?")) { await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); setActiveCard(null); loadAllData(); }
-  };
+  const handleDeleteCategory = async (id: number) => { if (confirm("영구 삭제하시겠습니까?")) { await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } };
+  const handleDeleteCard = async (id: number) => { if (confirm("영구 삭제하시겠습니까?")) { await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); setActiveCard(null); loadAllData(); } };
 
   const handleMoveCraftFolders = async () => {
     if (selectedCraftIds.size === 0 || !targetFolderName) return;
     await fetch('https://api.blankd.top/api/move-categories', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: Array.from(selectedCraftIds), folder_name: targetFolderName, wallet_address: safeAddress})});
     setSelectedCraftIds(new Set()); setTargetFolderName(''); loadAllData();
   };
+  
   const handleMoveEnhanceFolders = async () => {
     if (selectedEnhanceIds.size === 0 || !targetFolderName) return;
     await fetch('https://api.blankd.top/api/move-cards', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: Array.from(selectedEnhanceIds), folder_name: targetFolderName, wallet_address: safeAddress})});
@@ -168,7 +165,6 @@ function MainApp() {
   const submitCombatAnswer = async (isCorrect: boolean, time: number = 999.0) => {
     if (!activeCard) return;
     await fetch("https://api.blankd.top/api/submit-answer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ card_id: activeCard.id, is_correct: isCorrect, clear_time: time }) });
-    alert(isCorrect ? `성공! 기록: ${time.toFixed(1)}초` : `실패! 시간 초과 또는 오답입니다.`);
     setActiveCard(null); loadAllData();
   };
 
@@ -176,7 +172,11 @@ function MainApp() {
     if (activeCard) {
       const foundBlanks: {answer: string, correct: boolean}[] = [];
       const regex = /\[\s*(.*?)\s*\]/g; let match;
-      while((match = regex.exec(activeCard.content || "")) !== null) foundBlanks.push({ answer: match[1].trim(), correct: false });
+      while((match = regex.exec(activeCard.content || "")) !== null) {
+        const val = match[1].trim();
+        if (['법', '령', '칙', '규'].includes(val)) continue; // 💡 태그는 빈칸에서 예외 처리
+        foundBlanks.push({ answer: val, correct: false });
+      }
       if(foundBlanks.length === 0 && activeCard.answer) foundBlanks.push(...activeCard.answer.split(',').map((a:any) => ({answer: a.trim(), correct: false})));
       setBlanks(foundBlanks); setCurrentBlankIdx(0); setAnswerInput(""); setInputStatus('idle');
       const timePerBlank = Math.max(1.0, 5.0 - Math.floor(activeCard.level / 5) * 0.5);
@@ -210,6 +210,9 @@ function MainApp() {
     const parts = text.split(/(\[.*?\])/g); let bIdx = 0;
     return parts.map((part, i) => {
       if (part.startsWith('[') && part.endsWith(']')) {
+        // 💡 타이틀 태그 렌더링 예외 처리
+        if (/^\[(법|령|칙|규)\]$/.test(part)) return <span key={i} className="text-amber-400 font-bold mr-1">{part}</span>;
+
         const isCorrect = blanks[bIdx]?.correct; const isCurrent = bIdx === currentBlankIdx; bIdx++;
         if (isCorrect) return <span key={i} className="text-green-400 font-bold mx-1">{part.replace(/\[|\]/g, '')}</span>;
         else if (isCurrent) return <span key={i} className="inline-block min-w-[60px] h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>;
@@ -220,7 +223,6 @@ function MainApp() {
 
   const handleGoogleLogin = async () => {
     try {
-      addLog("🚀 구글 인증 URL 요청...");
       const url = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }});
       window.location.href = url;
     } catch (e: any) { addLog(`❌ 로그인 에러: ${e.message}`); }
@@ -228,23 +230,25 @@ function MainApp() {
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-6 sm:p-12 relative pb-48">
-      <header className="max-w-6xl mx-auto border-b border-white/10 pb-8 mb-12 flex items-center justify-between">
-        <div className="flex items-center gap-10">
-          <h1 className="text-2xl font-light tracking-widest text-white">Blank_D</h1>
-          {isLoggedIn && (
-            <nav className="flex gap-6 overflow-x-auto">
-              {[
-                { id: 'progress', label: '진행상황' },
-                { id: 'create', label: '만들기' },
-                { id: 'enhance', label: '강화' },
-                { id: 'exam', label: '모의고사' },
-                { id: 'settings', label: '설정' }
-              ].map(tab => (
-                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`text-sm font-bold tracking-widest ${activeTab === tab.id ? 'text-white border-b-2 border-white pb-1' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
-              ))}
-            </nav>
-          )}
-        </div>
+      
+      {/* 💡 메뉴를 Blank_D 로고 바로 옆으로 이동 */}
+      <header className="max-w-6xl mx-auto border-b border-white/10 pb-8 mb-12 flex items-center gap-10">
+        <h1 className="text-2xl font-light tracking-widest text-white shrink-0">Blank_D</h1>
+        {isLoggedIn && (
+          <nav className="flex gap-6 overflow-x-auto w-full">
+            {[
+              { id: 'progress', label: '진행상황' },
+              { id: 'create', label: '만들기' },
+              { id: 'enhance', label: '강화' },
+              { id: 'exam', label: '모의고사' },
+              { id: 'settings', label: '설정' }
+            ].map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`text-sm font-bold tracking-widest whitespace-nowrap px-2 py-1 transition-all ${activeTab === tab.id ? 'text-white border-b-2 border-white' : 'text-white/40 hover:text-white/70'}`}>
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        )}
       </header>
 
       {!isLoggedIn ? (
