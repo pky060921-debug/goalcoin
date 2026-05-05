@@ -1,16 +1,23 @@
 import React, { useState } from 'react';
 
-export const ExamTab = ({ exams }: { exams: any[] }) => {
+export const ExamTab = ({ exams, examFile, setExamFile, uploadExam }: any) => {
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
   
   return (
     <div className="space-y-8 animate-in fade-in">
+      <div className="flex gap-2 mb-8">
+        <label className="flex-1 border border-teal-900/40 p-2 text-center text-xs hover:bg-teal-900/20 cursor-pointer text-teal-400">
+          <input type="file" accept=".pdf,.html" onChange={e => setExamFile(e.target.files?.[0] || null)} className="hidden"/> {examFile ? `✅ ${examFile.name}` : '+ 모의고사 파일 업로드'}
+        </label>
+        <button onClick={uploadExam} className="px-4 border border-teal-900/40 text-xs text-teal-400 hover:bg-teal-900/20">전송</button>
+      </div>
+
       <div className="text-white/60 text-xs border-b border-white/10 pb-2">CBT 모의고사 기출문제 열람실</div>
       {exams.length === 0 ? (
-        <div className="py-32 text-center text-white/20 text-xs tracking-widest">저장된 모의고사가 없습니다. 지식 추출 탭에서 업로드하세요.</div>
+        <div className="py-32 text-center text-white/20 text-xs tracking-widest">저장된 모의고사가 없습니다. 상단에서 파일을 업로드하세요.</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {exams.map(exam => {
+          {exams.map((exam: any) => {
             const isExpanded = expandedExamId === exam.id;
             return (
               <div key={exam.id} className="border border-teal-900/40 bg-teal-950/10 p-6 rounded-sm cursor-pointer hover:bg-teal-900/20 transition-all" onClick={() => setExpandedExamId(isExpanded ? null : exam.id)}>
