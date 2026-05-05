@@ -13,16 +13,17 @@ export const getSortNumber = (text?: string) => {
   return match ? parseInt(match[1]) : 999999;
 };
 
+// 💡 3단(법-령-칙) 테이블 레이아웃 구현의 핵심
 export const getColSpanAndStartClass = (text: string, currentViewMode: string, isExpanded: boolean, colCount: number) => {
   if (isExpanded) return "col-span-full";
   const isLaw = text?.includes('[법]');
   const isDecret = text?.includes('[령]');
-  const isRule = text?.includes('[칙]') || text?.includes('[규]'); // 시행규칙 버그 해결
+  const isRule = text?.includes('[칙]') || text?.includes('[규]');
   
   if (currentViewMode === 'all' && colCount >= 3 && (isLaw || isDecret || isRule)) {
-    if (isLaw) return "md:col-start-1 col-span-1";
-    if (isDecret) return "md:col-start-2 col-span-1";
-    if (isRule) return "md:col-start-3 col-span-1";
+    if (isLaw) return "col-start-1 col-span-1";
+    if (isDecret) return "col-start-2 col-span-1";
+    if (isRule) return "col-start-3 col-span-1";
   }
-  return "col-span-full";
+  return "col-span-1";
 };
