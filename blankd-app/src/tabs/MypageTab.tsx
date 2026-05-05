@@ -4,11 +4,13 @@ export const MypageTab = ({ safeAddress, enokiFlow, useAiRecommend, setUseAiReco
   return (
     <div className="max-w-md mx-auto space-y-8 py-16 animate-in fade-in">
       <div className="border border-white/10 p-6 rounded-sm">
-        <div className="text-xs text-white/60 mb-2">계정 정보</div>
-        <div className="text-sm font-mono text-teal-400 bg-black/50 p-3 rounded mb-4 break-all">
-          {safeAddress}
+        
+        {/* 💡 헤더에서 가져온 계정(지갑) 정보 및 로그아웃 버튼 */}
+        <div className="text-xs text-white/60 mb-2">계정 및 지갑 정보</div>
+        <div className="text-[11px] font-mono text-teal-400 bg-black/50 p-3 rounded mb-4 break-all">
+          {safeAddress || "연결된 계정 없음"}
         </div>
-        <button onClick={() => { enokiFlow.logout(); window.location.reload(); }} className="px-3 py-1 text-[10px] border border-white/20 text-white/60 hover:text-white rounded-sm mb-6 transition-colors">
+        <button onClick={() => { enokiFlow.logout(); window.location.reload(); }} className="px-4 py-2 text-xs border border-white/20 text-white/60 hover:text-white hover:bg-white/10 rounded-sm mb-6 transition-all">
           로그아웃
         </button>
 
