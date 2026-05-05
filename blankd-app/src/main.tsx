@@ -14,7 +14,6 @@ const networks = { testnet: { url: 'https://fullnode.testnet.sui.io:443' } }
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      {/* 💡 기본 네트워크를 testnet으로 설정 */}
       <SuiClientProvider networks={networks} defaultNetwork="testnet">
         <WalletProvider>
           {/* ⚠️ 반드시 Enoki 대시보드에서 발급받은 테스트넷용 Public Key를 넣으세요 */}
