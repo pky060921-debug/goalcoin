@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { getStrictCardTitle, getSortNumber, getColSpanAndStartClass, SPLIT_REGEX } from '../utils/constants';
+import { getStrictCardTitle, getSortNumber, getGridStyle, SPLIT_REGEX } from '../utils/constants';
 
 export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panelState, lawFile, setLawFile, uploadLaw, selectedCraftIds, setSelectedCraftIds, targetFolderName, setTargetFolderName, handleMoveCraftFolders, handleMakeBlankCard, handleAiRecommend, handleSplitCategory, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
-  
-  // 💡 기본 폴더는 더 이상 렌더링되지 않습니다.
   const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -27,13 +25,11 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panel
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in fade-in">
       <div className="lg:col-span-8 space-y-8">
-        
-        {/* 💡 모의고사 버튼은 모의고사 탭으로 이사갔습니다. */}
         <div className="flex gap-2 mb-4">
           <label className="flex-1 border border-white/20 p-2 text-center text-xs hover:bg-white/10 cursor-pointer text-white/80">
             <input type="file" accept=".pdf,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 법령 파일(HTML/PDF) 업로드'}
           </label>
-          <button onClick={uploadLaw} className="px-4 border border-white/20 text-xs hover:bg-white/10">전송</button>
+          <button onClick={uploadLaw} className="px-4 border border-white/20 text-xs hover:bg-white/10 transition-colors">전송</button>
         </div>
 
         {selectedCraftIds.size > 0 && (
@@ -51,37 +47,48 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panel
         {craftFolders.map((folder: string) => openFolders[folder] && (
           <div key={folder} className="mb-8">
             <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
-            {/* 💡 3단(법-령-칙) 레이아웃 그리드 */}
             <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-              {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => getSortNumber(a.title) - getSortNumber(b.title)).map((cat: any) => {
-                const isExpanded = expandedId === cat.id;
-                const gridSpanClass = getColSpanAndStartClass(cat.title, viewMode, isExpanded, colCount);
+              {safeCategories
+                .filter((c:any) => c.folder_name === folder)
+                .filter((c:any) => {
+                   // 💡 설정에서 선택한 법/령/칙 뷰어 연동
+                   if (viewMode === 'all') return true;
+                   if (viewMode === '법' && c.title.includes('[법]')) return true;
+                   if (viewMode === '령' && c.title.includes('[령]')) return true;
+                   if (viewMode === '칙' && (c.title.includes('[칙]') || c.title.includes('[규]'))) return true;
+                   return false;
+                })
+                .sort((a:any, b:any) => getSortNumber(a.title) - getSortNumber(b.title))
+                .map((cat: any) => {
+                  const isExpanded = expandedId === cat.id;
+                  // 💡 완벽한 인라인 3단 배치 적용
+                  const gridStyle = getGridStyle(cat.title, viewMode, isExpanded, colCount);
 
-                return (
-                  <div key={cat.id} className={`${gridSpanClass} relative`}>
-                    <input type="checkbox" className="absolute top-2 right-2 z-10 w-4 h-4 cursor-pointer" checked={selectedCraftIds.has(cat.id)} onChange={() => { const s = new Set(selectedCraftIds); if(s.has(cat.id)) s.delete(cat.id); else s.add(cat.id); setSelectedCraftIds(s); }} />
-                    {!isExpanded ? (
-                      <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id), 800)} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(cat.content); }} className="w-full h-full p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm text-indigo-300 font-bold text-[13px] text-left leading-relaxed hover:bg-indigo-900/40 transition-colors">
-                        {getStrictCardTitle(cat.title)}
-                      </button>
-                    ) : (
-                      <div className="w-full p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-4 shadow-xl z-20 relative">
-                        <div className="flex justify-between items-center mb-2">
-                          {useAiRecommend && <button onClick={() => handleAiRecommend(cat)} className="text-[10px] bg-teal-900/40 text-teal-400 px-3 py-1.5 rounded hover:bg-teal-900/60 transition-colors">✨ AI 추천</button>}
-                          <button onClick={() => setExpandedId(null)} className="text-white/40 text-xs hover:text-white">닫기</button>
+                  return (
+                    <div key={cat.id} className="relative transition-all" style={gridStyle}>
+                      <input type="checkbox" className="absolute top-2 right-2 z-10 w-4 h-4 cursor-pointer" checked={selectedCraftIds.has(cat.id)} onChange={() => { const s = new Set(selectedCraftIds); if(s.has(cat.id)) s.delete(cat.id); else s.add(cat.id); setSelectedCraftIds(s); }} />
+                      {!isExpanded ? (
+                        <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id), 800)} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(cat.content); }} className="w-full h-full p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm text-indigo-300 font-bold text-[13px] text-left leading-relaxed hover:bg-indigo-900/40 transition-colors">
+                          {getStrictCardTitle(cat.title)}
+                        </button>
+                      ) : (
+                        <div className="w-full p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-4 shadow-xl z-20 relative">
+                          <div className="flex justify-between items-center mb-2">
+                            {useAiRecommend && <button onClick={() => handleAiRecommend(cat)} className="text-[10px] bg-teal-900/40 text-teal-400 px-3 py-1.5 rounded hover:bg-teal-900/60 transition-colors">✨ AI 추천</button>}
+                            <button onClick={() => setExpandedId(null)} className="text-white/40 text-xs hover:text-white">닫기</button>
+                          </div>
+                          <div className="font-serif text-[15px] leading-loose text-white/80 p-5 bg-black/40 border border-white/10 max-h-64 overflow-y-auto rounded">
+                            {parsedText.split(SPLIT_REGEX).map((word: string, idx: number, arr: any[]) => {
+                              if (!word) return null;
+                              const isSelected = selectedWords.has(idx);
+                              return <span key={idx} onClick={() => { const s = new Set(selectedWords); if(s.has(idx)) s.delete(idx); else s.add(idx); setSelectedWords(s); }} {...createLongPressHandlers(() => handleSplitCategory(cat, idx, arr), 800)} className={`cursor-pointer px-[2px] rounded transition-colors ${isSelected ? 'bg-amber-500 text-black font-bold' : 'hover:bg-white/20'}`}>{word}</span>
+                            })}
+                          </div>
+                          <button onClick={() => handleMakeBlankCard(cat, parsedText, selectedWords, () => { setExpandedId(null); setSelectedWords(new Set()); })} className="w-full py-3 bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 text-sm font-bold tracking-widest transition-all rounded-sm mt-2">지식 추출 및 원본 삭제</button>
                         </div>
-                        <div className="font-serif text-[15px] leading-loose text-white/80 p-5 bg-black/40 border border-white/10 max-h-64 overflow-y-auto rounded">
-                          {parsedText.split(SPLIT_REGEX).map((word: string, idx: number, arr: any[]) => {
-                            if (!word) return null;
-                            const isSelected = selectedWords.has(idx);
-                            return <span key={idx} onClick={() => { const s = new Set(selectedWords); if(s.has(idx)) s.delete(idx); else s.add(idx); setSelectedWords(s); }} {...createLongPressHandlers(() => handleSplitCategory(cat, idx, arr), 800)} className={`cursor-pointer px-[2px] rounded transition-colors ${isSelected ? 'bg-amber-500 text-black font-bold' : 'hover:bg-white/20'}`}>{word}</span>
-                          })}
-                        </div>
-                        <button onClick={() => handleMakeBlankCard(cat, parsedText, selectedWords, () => { setExpandedId(null); setSelectedWords(new Set()); })} className="w-full py-3 bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 text-sm font-bold tracking-widest transition-all rounded-sm mt-2">지식 추출 및 원본 삭제</button>
-                      </div>
-                    )}
-                  </div>
-                );
+                      )}
+                    </div>
+                  );
               })}
             </div>
           </div>
