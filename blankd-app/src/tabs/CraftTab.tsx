@@ -3,7 +3,9 @@ import { getStrictCardTitle, getSortNumber, getColSpanAndStartClass, SPLIT_REGEX
 
 export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panelState, lawFile, setLawFile, uploadLaw, selectedCraftIds, setSelectedCraftIds, targetFolderName, setTargetFolderName, handleMoveCraftFolders, handleMakeBlankCard, handleAiRecommend, handleSplitCategory, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
-  const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
+  
+  // 💡 [복구 완료] 구형 기본 폴더 데이터 보이도록 수정
+  const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name || '기본 폴더'))).sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [parsedText, setParsedText] = useState("");
@@ -25,9 +27,11 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panel
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in fade-in">
       <div className="lg:col-span-8 space-y-8">
+        
+        {/* 만들기 탭에는 오직 법령 업로드만 남김 (모의고사는 ExamTab으로 이동됨) */}
         <div className="flex gap-2 mb-4">
           <label className="flex-1 border border-white/20 p-2 text-center text-xs hover:bg-white/10 cursor-pointer text-white/80">
-            <input type="file" accept=".pdf,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 법령 업로드'}
+            <input type="file" accept=".pdf,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 법령 파일(HTML/PDF) 업로드'}
           </label>
           <button onClick={uploadLaw} className="px-4 border border-white/20 text-xs hover:bg-white/10">전송</button>
         </div>
@@ -35,23 +39,31 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panel
         {selectedCraftIds.size > 0 && (
           <div className="flex gap-2 items-center bg-indigo-900/20 p-3 rounded-sm border border-indigo-500/20 mb-4">
             <span className="text-xs text-indigo-300">{selectedCraftIds.size}개 선택됨</span>
-            <input value={targetFolderName} onChange={e=>setTargetFolderName(e.target.value)} placeholder="새 폴더명" className="bg-black/50 border border-white/20 text-xs p-2 text-white outline-none flex-1" />
-            <button onClick={handleMoveCraftFolders} className="text-xs border border-indigo-500/50 bg-indigo-600/30 text-white px-4 py-2 hover:bg-indigo-600/50">폴더로 이동</button>
+            <input value={targetFolderName} onChange={e=>setTargetFolderName(e.target.value)} placeholder="새 폴더명 (예: 제1장 총칙)" className="bg-black/50 border border-white/20 text-xs p-2 text-white outline-none flex-1" />
+            <button onClick={handleMoveCraftFolders} className="text-xs border border-indigo-500/50 bg-indigo-600/30 text-white px-4 py-2 hover:bg-indigo-600/50">선택한 조항 이동</button>
           </div>
         )}
 
         <div className="flex flex-wrap gap-2 mb-6">
-          {craftFolders.map((f: string) => <button key={f} onClick={() => setOpenFolders(p => ({...p, [f]: !p[f]}))} className={`px-4 py-2 text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-indigo-900/40 text-indigo-300 border-indigo-500/30'}`}>📁 {f}</button>)}
+          {craftFolders.map((f: string) => (
+            <button key={f} onClick={() => setOpenFolders(p => ({...p, [f]: !p[f]}))} className={`px-4 py-2 text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-indigo-900/40 text-indigo-300 border-indigo-500/30'}`}>
+              📁 {f === '기본 폴더' ? '기본 폴더 (구형 데이터)' : f}
+            </button>
+          ))}
         </div>
         
         {craftFolders.map((folder: string) => openFolders[folder] && (
           <div key={folder} className="mb-8">
-            <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
+            <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder === '기본 폴더' ? '기본 폴더 (이 조항들을 선택해서 장별 폴더로 이동시켜주세요)' : folder}</div>
             <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-              {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => getSortNumber(a.title) - getSortNumber(b.title)).map((cat: any) => {
+              {safeCategories.filter((c:any) => (c.folder_name || '기본 폴더') === folder).sort((a:any, b:any) => getSortNumber(a.title) - getSortNumber(b.title)).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
+                
+                // 💡 3단 레이아웃 계산 (법/령/칙 위치 배정)
+                const gridSpanClass = getColSpanAndStartClass(cat.title, viewMode, isExpanded, colCount);
+
                 return (
-                  <div key={cat.id} className={`${getColSpanAndStartClass(cat.title, viewMode, isExpanded, colCount)} relative`}>
+                  <div key={cat.id} className={`${gridSpanClass} relative`}>
                     <input type="checkbox" className="absolute top-2 right-2 z-10 w-4 h-4 cursor-pointer" checked={selectedCraftIds.has(cat.id)} onChange={() => { const s = new Set(selectedCraftIds); if(s.has(cat.id)) s.delete(cat.id); else s.add(cat.id); setSelectedCraftIds(s); }} />
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id), 800)} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(cat.content); }} className="w-full h-full p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm text-indigo-300 font-bold text-[13px] text-left leading-relaxed hover:bg-indigo-900/40 transition-colors">
