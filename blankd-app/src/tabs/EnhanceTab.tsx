@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { getStrictCardTitle, getSortNumber, getColSpanAndStartClass } from '../utils/constants';
+import { getStrictCardTitle, getSortNumber, getGridStyle } from '../utils/constants';
 
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleDeleteCard, selectedEnhanceIds, setSelectedEnhanceIds, targetFolderName, setTargetFolderName, handleMoveEnhanceFolders }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
-  
-  // 💡 기본 폴더 삭제
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
 
@@ -39,24 +37,36 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
         <div key={folder} className="mb-8">
           <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
           
-          {/* 💡 만들기 탭과 동일하게 적용된 3단(법-령-칙) 레이아웃 그리드 */}
           <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => getSortNumber(a.content) - getSortNumber(b.content)).map((card: any) => {
-              const gridSpanClass = getColSpanAndStartClass(card.content, viewMode, false, colCount);
+            {safeCards
+              .filter((c:any) => c.folder_name === folder)
+              .filter((c:any) => {
+                 // 💡 설정에서 선택한 법/령/칙 뷰어 연동
+                 if (viewMode === 'all') return true;
+                 const title = getStrictCardTitle(c.content);
+                 if (viewMode === '법' && title.includes('[법]')) return true;
+                 if (viewMode === '령' && title.includes('[령]')) return true;
+                 if (viewMode === '칙' && (title.includes('[칙]') || title.includes('[규]'))) return true;
+                 return false;
+              })
+              .sort((a:any, b:any) => getSortNumber(a.content) - getSortNumber(b.content))
+              .map((card: any) => {
+                // 💡 완벽한 인라인 3단 배치 적용
+                const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
 
-              return (
-                <div key={card.id} className={`${gridSpanClass} relative`}>
-                  <input type="checkbox" className="absolute top-2 right-2 z-10 w-4 h-4 cursor-pointer" checked={selectedEnhanceIds.has(card.id)} onChange={() => { const s = new Set(selectedEnhanceIds); if(s.has(card.id)) s.delete(card.id); else s.add(card.id); setSelectedEnhanceIds(s); }} />
-                  <button 
-                    {...createLongPressHandlers(() => handleDeleteCard(card.id), 800)}
-                    onClick={() => setActiveCard(card)}
-                    className={`w-full p-5 text-left rounded-sm border transition-all h-full flex flex-col ${card.status === "BURNED" ? "border-white/5 text-white/30" : "border-indigo-500/30 text-indigo-300 bg-indigo-900/20 hover:bg-indigo-900/40"}`}
-                  >
-                    <span className="text-[9px] text-amber-400 block mb-2">LV.{card.level}</span>
-                    <div className="font-serif text-[13px] font-bold leading-relaxed">{getStrictCardTitle(card.content)}</div>
-                  </button>
-                </div>
-              );
+                return (
+                  <div key={card.id} className="relative transition-all" style={gridStyle}>
+                    <input type="checkbox" className="absolute top-2 right-2 z-10 w-4 h-4 cursor-pointer" checked={selectedEnhanceIds.has(card.id)} onChange={() => { const s = new Set(selectedEnhanceIds); if(s.has(card.id)) s.delete(card.id); else s.add(card.id); setSelectedEnhanceIds(s); }} />
+                    <button 
+                      {...createLongPressHandlers(() => handleDeleteCard(card.id), 800)}
+                      onClick={() => setActiveCard(card)}
+                      className={`w-full p-5 text-left rounded-sm border transition-all h-full flex flex-col ${card.status === "BURNED" ? "border-white/5 text-white/30" : "border-indigo-500/30 text-indigo-300 bg-indigo-900/20 hover:bg-indigo-900/40"}`}
+                    >
+                      <span className="text-[9px] text-amber-400 block mb-2">LV.{card.level}</span>
+                      <div className="font-serif text-[13px] font-bold leading-relaxed">{getStrictCardTitle(card.content)}</div>
+                    </button>
+                  </div>
+                );
             })}
           </div>
         </div>
