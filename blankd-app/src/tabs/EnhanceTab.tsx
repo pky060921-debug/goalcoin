@@ -35,14 +35,12 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
           
           {studyMode === '법령' && (
             <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(3, minmax(0, 1fr))` }}>
-               <div>법</div>
-               <div>시행령</div>
-               <div>시행규칙</div>
+               <div>법</div><div>시행령</div><div>시행규칙</div>
             </div>
           )}
 
-          {/* 💡 [핵심 복구] 인라인 스타일과 getSortNumber 마스터 정렬 동시 적용 */}
           <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
+            {/* 💡 [핵심 복구] 강화 탭도 3단 배치를 위해 카드를 읽어 숫자로 완벽히 정렬! */}
             {safeCards.filter((c:any) => c.folder_name === folder)
               .sort((a:any, b:any) => getSortNumber(a.content) - getSortNumber(b.content))
               .map((card: any) => {
@@ -52,10 +50,11 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
 
                 return (
                   <div key={card.id} className="relative transition-all" style={gridStyle}>
-                    <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} className={`w-full p-4 text-left rounded-sm border transition-all h-full flex flex-col gap-2 ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
+                    <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col gap-2 ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
                       
                       <div className="flex justify-between items-center w-full gap-2" onClick={() => setActiveCard(card)}>
-                        <span className="text-amber-400 font-bold text-[13px] truncate flex-1">{cleanTitle}</span>
+                        <span className="text-amber-400 font-bold text-[13px] truncate flex-1 text-left">{cleanTitle}</span>
+                        {/* 💡 이전의 요청대로 '반복.X'가 절대 찌그러지지 않고 한 줄로 나오도록 고정! */}
                         <span className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap shrink-0">반복.{card.level}</span>
                       </div>
                       
