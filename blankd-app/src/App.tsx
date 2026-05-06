@@ -1,8 +1,8 @@
 import React, { useState, useEffect, Component, ReactNode } from "react";
-import { useCurrentAccount } from "@mysten/dapp-kit";
 import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
+import { useCurrentAccount } from "@mysten/dapp-kit";
 import { api } from "./services/api";
-import { SPLIT_REGEX } from "./utils/constants";
+import { SPLIT_REGEX, formatCardText } from "./utils/constants";
 import { CardModal } from "./components/CardModal";
 import { DashboardTab } from "./tabs/DashboardTab";
 import { CraftTab } from "./tabs/CraftTab";
@@ -14,10 +14,7 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
   constructor(props: any) { super(props); this.state = { hasError: false, errorMessage: "" }; }
   static getDerivedStateFromError(error: any) { return { hasError: true, errorMessage: error.message }; }
   componentDidCatch(error: any, errorInfo: any) { this.props.fallbackLog(`❌ 에러: ${error.message}`); }
-  render() {
-    if (this.state.hasError) return <div className="p-6 text-red-400">⚠️ 렌더링 오류 발생</div>;
-    return this.props.children;
-  }
+  render() { if (this.state.hasError) return <div className="p-6 text-red-400">⚠️ 렌더링 오류 발생</div>; return this.props.children; }
 }
 
 function MainApp() {
@@ -33,7 +30,6 @@ function MainApp() {
   const [exams, setExams] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
   const [studyMode, setStudyMode] = useState(localStorage.getItem('studyMode') || '법령');
-  
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [examFile, setExamFile] = useState<File | null>(null);
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 부팅 완료..."]);
@@ -48,9 +44,7 @@ function MainApp() {
 
   const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-10));
 
-  useEffect(() => {
-    if (isLoggedIn) loadAllData();
-  }, [isLoggedIn, safeAddress]);
+  useEffect(() => { if (isLoggedIn) loadAllData(); }, [isLoggedIn, safeAddress]);
 
   const loadAllData = async () => {
     try {
@@ -77,18 +71,19 @@ function MainApp() {
     if (res.ok) { setExamFile(null); setTimeout(() => loadAllData(), 2000); }
   };
 
-  const handleMakeBlankCard = async (cat: any, content: string, selectedIndices: Set<number>, memo: string, onComplete: () => void) => {
-    const words = content ? content.split(SPLIT_REGEX) : [];
-    let bodyContent = ""; let answerText = ""; let isBlanking = false;
+  const handleMakeBlankCard = async (cat: any, bodyContent: string, selectedIndices: Set<number>, memo: string, onComplete: () => void) => {
+    const words = bodyContent ? bodyContent.split(SPLIT_REGEX) : [];
+    let processedBody = ""; let answerText = ""; let isBlanking = false;
     words.forEach((word, index) => {
       if (selectedIndices.has(index)) {
-        if (!isBlanking) { bodyContent += "[ "; isBlanking = true; }
-        bodyContent += word; answerText += (answerText ? ", " : "") + word;
-      } else { if (isBlanking) { bodyContent += " ]"; isBlanking = false; } bodyContent += word; }
+        if (!isBlanking) { processedBody += "[ "; isBlanking = true; }
+        processedBody += word; answerText += (answerText ? ", " : "") + word;
+      } else { if (isBlanking) { processedBody += " ]"; isBlanking = false; } processedBody += word; }
     });
-    if (isBlanking) bodyContent += " ]";
+    if (isBlanking) processedBody += " ]";
     
-    const finalCardContent = `${cat.title}\n\n${bodyContent}`;
+    // 💡 저장 시 제목과 본문을 확실한 구분자(\n\n)로 결합
+    const finalCardContent = `${cat.title}\n\n${processedBody}`;
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
       body: JSON.stringify({ wallet_address: safeAddress, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo }) 
@@ -101,24 +96,7 @@ function MainApp() {
 
   const handleUpdateMemo = async (id: number, memo: string) => {
     setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
-    await fetch("https://api.blankd.top/api/update-card-memo", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ wallet_address: safeAddress, id, memo })
-    });
-  };
-
-  const handleSplitCategory = async (cat: any, splitIdx: number, wordsArray: string[]) => {
-    if (!confirm("분할하시겠습니까?")) return;
-    const text1 = wordsArray.slice(0, splitIdx).join(''); const text2 = wordsArray.slice(splitIdx).join('');
-    await fetch("https://api.blankd.top/api/split-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: cat.id, text1, text2, wallet_address: safeAddress }) });
-    loadAllData();
-  };
-
-  const handleDeleteCategory = async (id: number) => { 
-    if (confirm("삭제하시겠습니까?")) { await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } 
-  };
-  const handleDeleteCard = async (id: number) => { 
-    if (confirm("삭제하시겠습니까?")) { await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); setActiveCard(null); loadAllData(); } 
+    await fetch("https://api.blankd.top/api/update-card-memo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id, memo }) });
   };
 
   const submitCombatAnswer = async (isCorrect: boolean, time: number = 999.0) => {
@@ -127,12 +105,14 @@ function MainApp() {
     setActiveCard(null); loadAllData();
   };
 
+  // 💡 [핵심 패치] 문제 풀기 시작 시 메타데이터를 분리하여 본문에서만 빈칸 추출
   useEffect(() => {
     if (activeCard) {
+      const { body } = formatCardText(activeCard.content);
       const foundBlanks: {answer: string, correct: boolean}[] = [];
       const regex = /\[\s*(.*?)\s*\]/g; let match;
-      while((match = regex.exec(activeCard.content || "")) !== null) {
-        if (['법', '령', '칙', '규'].includes(match[1].trim())) continue; 
+      // 이제 본문(body)에서만 찾으므로 [법] 태그 등과 절대 충돌하지 않음!
+      while((match = regex.exec(body)) !== null) {
         foundBlanks.push({ answer: match[1].trim(), correct: false });
       }
       setBlanks(foundBlanks); setCurrentBlankIdx(0); setAnswerInput(""); setInputStatus('idle');
@@ -151,28 +131,13 @@ function MainApp() {
   }, [activeCard, currentBlankIdx, blanks.length, startTime, totalTimeLimit]);
 
   const handleSequentialInput = () => {
-    if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
+    if (!blanks[currentBlankIdx]) return;
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     const actual = answerInput.replace(/\s+/g, '').toLowerCase();
     if (expected === actual) {
-      setInputStatus('correct');
       const nb = [...blanks]; nb[currentBlankIdx].correct = true; setBlanks(nb);
-      setTimeout(() => { setAnswerInput(""); setInputStatus('idle'); if (currentBlankIdx + 1 < blanks.length) setCurrentBlankIdx(currentBlankIdx + 1); else submitCombatAnswer(true, elapsed); }, 200);
+      setTimeout(() => { setAnswerInput(""); if (currentBlankIdx + 1 < blanks.length) setCurrentBlankIdx(currentBlankIdx + 1); else submitCombatAnswer(true, elapsed); }, 200);
     } else { setInputStatus('wrong'); setTimeout(() => setInputStatus('idle'), 500); }
-  };
-
-  const renderSequentialMaskedContent = (text?: string) => {
-    if (!text) return null;
-    const parts = text.split(/(\[.*?\])/g); let bIdx = 0;
-    return parts.map((part, i) => {
-      if (part.startsWith('[') && part.endsWith(']')) {
-        if (/^\[(법|령|칙|규)\]$/.test(part)) return <span key={i} className="text-amber-400 font-bold mr-1">{part}</span>;
-        const isCorrect = blanks[bIdx]?.correct; const isCurrent = bIdx === currentBlankIdx; bIdx++;
-        if (isCorrect) return <span key={i} className="text-green-400 font-bold mx-1">{part.replace(/\[|\]/g, '')}</span>;
-        else if (isCurrent) return <span key={i} className="inline-block min-w-[60px] h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>;
-        else return <span key={i} className="inline-block min-w-[60px] h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
-      } return part;
-    });
   };
 
   return (
@@ -198,8 +163,8 @@ function MainApp() {
         <main className="max-w-6xl mx-auto">
           <ErrorBoundary fallbackLog={addLog}>
             {activeTab === 'progress' && <DashboardTab categories={categories} savedCards={savedCards} />}
-            {activeTab === 'create' && <CraftTab categories={categories} studyMode={studyMode} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} handleDeleteCategory={handleDeleteCategory} />}
-            {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} studyMode={studyMode} setActiveCard={setActiveCard} handleUpdateMemo={handleUpdateMemo} handleDeleteCard={handleDeleteCard} />}
+            {activeTab === 'create' && <CraftTab categories={categories} studyMode={studyMode} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleDeleteCategory={async (id:number) => { if(confirm('삭제?')) { await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} />}
+            {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} studyMode={studyMode} setActiveCard={setActiveCard} handleUpdateMemo={handleUpdateMemo} handleDeleteCard={async (id:number) => { if(confirm('삭제?')) { await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} />}
             {activeTab === 'exam' && <ExamTab exams={exams} examFile={examFile} setExamFile={setExamFile} uploadExam={uploadExam} />}
             {activeTab === 'settings' && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} studyMode={studyMode} setStudyMode={setStudyMode} handleDeleteAll={async () => { if(confirm('초기화?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
           </ErrorBoundary>
@@ -207,7 +172,22 @@ function MainApp() {
       )}
 
       {activeCard && (
-        <CardModal activeCard={activeCard} totalTimeLimit={totalTimeLimit} elapsed={elapsed} answerInput={answerInput} setAnswerInput={setAnswerInput} inputStatus={inputStatus} handleSequentialInput={handleSequentialInput} renderContent={() => renderSequentialMaskedContent(activeCard.content)} onClose={() => setActiveCard(null)} />
+        <CardModal activeCard={activeCard} totalTimeLimit={totalTimeLimit} elapsed={elapsed} answerInput={answerInput} setAnswerInput={setAnswerInput} inputStatus={inputStatus} handleSequentialInput={handleSequentialInput} 
+          renderContent={() => {
+            // 💡 [핵심 패치] 모달창에서 지저분한 빨간 표시(태그/제목) 영역을 삭제하고 본문만 렌더링!
+            const { body } = formatCardText(activeCard.content);
+            const parts = body.split(/(\[.*?\])/g); let bIdx = 0;
+            return parts.map((part, i) => {
+              if (part.startsWith('[') && part.endsWith(']')) {
+                const isCorrect = blanks[bIdx]?.correct; const isCurrent = bIdx === currentBlankIdx; bIdx++;
+                if (isCorrect) return <span key={i} className="text-green-400 font-bold mx-1">{part.replace(/\[|\]/g, '')}</span>;
+                else if (isCurrent) return <span key={i} className="inline-block min-w-[60px] h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>;
+                else return <span key={i} className="inline-block min-w-[60px] h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
+              } return part;
+            });
+          }} 
+          onClose={() => setActiveCard(null)} 
+        />
       )}
     </div>
   );
