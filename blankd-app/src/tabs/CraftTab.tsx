@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, getGridStyle, getStrictTitleOnly, getSortNumber, sortFolders, SPLIT_REGEX } from '../utils/constants';
+import { formatCardText, getGridStyle, getStrictTitleOnly, SPLIT_REGEX } from '../utils/constants';
 
 export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, handleAiRecommend, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
-  const rawFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더') as string[];
-  const craftFolders = sortFolders(rawFolders);
+  const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [parsedText, setParsedText] = useState("");
@@ -52,13 +51,14 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
 
           <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
             {safeCategories.filter((c:any) => c.folder_name === folder)
-              .sort((a:any, b:any) => getSortNumber(a.content || a.title) - getSortNumber(b.content || b.title))
+              // 💡 [핵심 복구] 압축 파일에 있던 완벽했던 정렬 로직 (a.id - b.id) 그대로 롤백!
+              .sort((a:any, b:any) => a.id - b.id)
               .map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const contentToUse = cat.content || cat.title || "";
                 const gridStyle = getGridStyle(contentToUse, studyMode, isExpanded);
-                const { title, body } = formatCardText(contentToUse);
-                const cleanTitle = getStrictTitleOnly(title);
+                const { body } = formatCardText(contentToUse);
+                const cleanTitle = getStrictTitleOnly(contentToUse);
 
                 return (
                   <div key={cat.id} className="relative transition-all" style={gridStyle}>
@@ -71,8 +71,10 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
                       <div className="w-full p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-4 shadow-xl z-20 relative">
                         <div className="flex justify-between items-center mb-2 cursor-pointer" onClick={() => setExpandedId(null)}>
                           <span className="text-amber-400 font-bold text-[13px]">{cleanTitle}</span>
+                          {useAiRecommend && <button onClick={(e) => { e.stopPropagation(); handleAiRecommend(cat); }} className="text-[10px] bg-teal-900/40 text-teal-400 px-3 py-1.5 rounded hover:bg-teal-900/60 transition-colors">✨ AI 추천</button>}
                         </div>
                         <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-3 text-sm text-teal-200 outline-none rounded-sm mb-4" />
+                        
                         <div className="font-serif text-[15px] leading-loose text-white/80 p-5 bg-black/40 border border-white/10 max-h-64 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap">
                           {parsedText.split(SPLIT_REGEX).map((word: string, idx: number, arr: any[]) => {
                             if (!word) return null;
