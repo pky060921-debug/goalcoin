@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, getGridStyle } from '../utils/constants';
+import { getGridStyle, getStrictTitleOnly } from '../utils/constants';
 
 export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateMemo, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
@@ -43,29 +43,28 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
           <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
                 const gridStyle = getGridStyle(card.content, studyMode, false);
-                const { title } = formatCardText(card.content);
-                const cleanTitle = title.replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '').trim();
+                
+                // 💡 새롭게 만든 초정밀 함수 적용
+                const cleanTitle = getStrictTitleOnly(card.content);
 
                 return (
                   <div key={card.id} className="relative transition-all" style={gridStyle}>
-                    <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} className={`w-full p-5 text-left rounded-sm border transition-all h-full flex flex-col gap-3 ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
+                    <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} className={`w-full p-4 text-left rounded-sm border transition-all h-full flex flex-col gap-2 ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
                       
                       <div className="flex justify-between items-center w-full gap-2" onClick={() => setActiveCard(card)}>
-                        <span className="text-amber-400 font-bold text-[13px] truncate">{cleanTitle}</span>
-                        {/* 💡 [수정] 반복.X 글자가 절대 깨지지 않고 한 줄로 나오도록 whitespace-nowrap 및 shrink-0 추가 */}
+                        {/* 💡 flex-1과 truncate를 주어 제목이 길어지면 스스로 줄어들게 만듭니다. */}
+                        <span className="text-amber-400 font-bold text-[13px] truncate flex-1">{cleanTitle}</span>
+                        {/* 💡 shrink-0을 주어 반복.X 텍스트가 절대 찌그러지거나 줄바꿈되지 않게 방어합니다. */}
                         <span className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap shrink-0">반복.{card.level}</span>
                       </div>
                       
-                      {/* 암기 메모 노출 */}
                       <input 
                         defaultValue={card.memo || ""} 
                         placeholder="암기 메모/두문자 입력..." 
                         onClick={(e) => e.stopPropagation()} 
                         onBlur={(e) => handleUpdateMemo(card.id, e.target.value)} 
-                        className="text-[11px] text-teal-300 bg-teal-950/40 p-2 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400" 
+                        className="text-[11px] text-teal-300 bg-teal-950/40 p-2 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 shrink-0" 
                       />
-                      
-                      {/* 💡 [수정] 사진에서 -표시된 본문 텍스트 영역을 완전히 삭제했습니다. */}
                     </div>
                   </div>
                 );
