@@ -3,7 +3,7 @@ export const SPLIT_REGEX = /(\s+|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○
 export const formatCardText = (text?: string) => {
   if (!text) return { title: "제목 없음", body: "" };
   const str = String(text).trim();
-  const match = str.match(/^(\[.*?\]\s*제\s*\d+\s*조(?:의\s*\d+)?(?:\([^)]+\))?)\s*(.*)/s);
+  const match = str.match(/^(\[.*?\]\s*제\s*\d+\s*조(?:의\s*\d+)?(?:\([^)]+\))?[*\s]*)\s*(.*)/s);
   if (match) {
     return { title: match[1].trim(), body: match[2].trim() };
   }
@@ -15,6 +15,15 @@ export const extractLawTag = (title: string) => {
   if (title.includes('[령]')) return '시행령';
   if (title.includes('[칙]') || title.includes('[규]')) return '시행규칙';
   return '';
+};
+
+// 💡 별표(*)와 띄어쓰기를 보존하는 정밀 제목 추출
+export const getStrictTitleOnly = (text?: string) => {
+  if (!text) return "제목 없음";
+  const str = String(text);
+  const match = str.match(/(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?[*\s]*)/);
+  if (match) return match[1].trim(); 
+  return str.split('\n')[0].replace(/\[(법|령|칙|규)\]/g, '').trim();
 };
 
 export const getSortNumber = (text?: string) => {
@@ -33,16 +42,13 @@ export const getSortNumber = (text?: string) => {
   return base + typeScore; 
 };
 
-// 💡 법령/일반 모드에 따른 배치 결정
-export const getGridStyle = (text: string, studyMode: string, isExpanded: boolean) => {
+// 💡 아키님의 원본 정렬 방식 그대로 유지 (절대 꼬이지 않음)
+export const getGridStyle = (text: string, currentViewMode: string, isExpanded: boolean, colCount: number) => {
   if (isExpanded) return { gridColumn: "1 / -1" }; 
-  if (studyMode !== '법령') return {}; // 일반 모드는 그리드 자동 흐름
-
   const isLaw = text?.includes('[법]');
   const isDecret = text?.includes('[령]');
   const isRule = text?.includes('[칙]') || text?.includes('[규]');
-  
-  if (isLaw || isDecret || isRule) {
+  if (currentViewMode === 'all' && colCount >= 3 && (isLaw || isDecret || isRule)) {
     if (isLaw) return { gridColumn: "1" };
     if (isDecret) return { gridColumn: "2" };
     if (isRule) return { gridColumn: "3" };
