@@ -32,11 +32,15 @@ function MainApp() {
   const [savedCards, setSavedCards] = useState<any[]>([]);
   const [exams, setExams] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
-  const [studyMode, setStudyMode] = useState(localStorage.getItem('studyMode') || '법령');
+  
+  // 💡 원본 변수 유지
+  const [viewMode, setViewMode] = useState('all');
+  const [colCount, setColCount] = useState(3);
+  const [useAiRecommend, setUseAiRecommend] = useState(true);
   
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [examFile, setExamFile] = useState<File | null>(null);
-  const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 시스템 부팅 완료..."]);
+  const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 부팅 완료..."]);
 
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
@@ -48,48 +52,14 @@ function MainApp() {
 
   const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-10));
 
-  // 💡 [초정밀 진단 1] 구글 인증 후 돌아왔을 때의 해시(Hash) 처리 과정 추적
   useEffect(() => {
-    const handleAuthCallback = async () => {
-      if (window.location.hash) {
-        addLog(`🔄 구글 응답 수신됨 (해시 길이: ${window.location.hash.length})`);
-        try {
-          await enokiFlow.handleAuthCallback();
-          addLog("✅ Enoki 토큰 승인 완료! (지갑 주소 생성 요청 중...)");
-          window.history.replaceState(null, '', window.location.pathname);
-        } catch (err: any) {
-          addLog(`❌ 토큰 승인 에러: ${err.message}`);
-          alert(`구글 인증 콜백 처리 중 에러가 발생했습니다:\n${err.message}`);
-        }
-      }
-    };
-    handleAuthCallback();
-  }, [enokiFlow]);
-
-  // 💡 [초정밀 진단 2] 로그인 멈춤 현상(지갑 주소 미발급) 원인 추적
-  useEffect(() => {
-    const monitorSession = async () => {
-      try {
-        const session = await enokiFlow.getSession();
-        if (session) {
-          if (!zkLogin?.address) {
-            addLog("⚠️ 구글 로그인은 성공했으나 Enoki가 지갑 주소를 발급하지 못하고 있습니다.");
-            addLog("👉 원인: Enoki 대시보드의 API 키 설정이나 Origin 도메인 거부일 확률이 높습니다.");
-          } else {
-            addLog(`✅ 지갑 주소 확보 완료: ${zkLogin.address.substring(0, 6)}...`);
-            loadAllData();
-          }
-        }
-      } catch (e) {
-        // 무시
-      }
-    };
-    monitorSession();
-  }, [enokiFlow, zkLogin?.address]);
-
-  useEffect(() => {
+    if (window.location.hash) {
+      enokiFlow.handleAuthCallback().then(() => { 
+        window.history.replaceState(null, '', window.location.pathname); 
+      }).catch((err: any) => addLog(`❌ 인증 에러: ${err.message}`));
+    }
     if (isLoggedIn) loadAllData();
-  }, [isLoggedIn, safeAddress]);
+  }, [isLoggedIn, safeAddress, enokiFlow]);
 
   const loadAllData = async () => {
     try {
@@ -99,7 +69,7 @@ function MainApp() {
         fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`).then(r=>r.json())
       ]);
       setCategories(catRes.categories || []); setSavedCards(cardRes.cards || []); setExams(examRes.exams || []);
-    } catch (e: any) { addLog(`❌ 데이터 로딩 에러: ${e.message}`); }
+    } catch (e: any) { addLog(`❌ 로딩 실패: ${e.message}`); }
   };
 
   const uploadLaw = async () => {
@@ -200,10 +170,8 @@ function MainApp() {
     } else { setInputStatus('wrong'); setTimeout(() => setInputStatus('idle'), 500); }
   };
 
-  // 💡 구글 로그인 실행 함수 (마찬가지로 정밀 에러 로그 출력)
   const handleGoogleLogin = async () => {
     try {
-      addLog("🟢 구글 로그인 URL 요청 중...");
       const url = await enokiFlow.createAuthorizationURL({ 
         provider: 'google', 
         clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', 
@@ -211,12 +179,8 @@ function MainApp() {
         network: 'testnet', 
         extraParams: { scope: ['openid', 'email', 'profile'] }
       });
-      addLog("🟢 구글 이동 성공!");
       window.location.href = url;
-    } catch (e: any) {
-      addLog(`❌ 로그인 URL 생성 실패: ${e.message}`);
-      alert(`로그인 창을 열 수 없습니다:\n${e.message}`);
-    }
+    } catch (e: any) { alert(`로그인 창을 열 수 없습니다:\n${e.message}`); }
   };
 
   return (
@@ -234,28 +198,20 @@ function MainApp() {
 
       {!isLoggedIn ? (
         <main className="max-w-md mx-auto mt-24 flex flex-col items-center">
+          {/* 💡 타이틀 수정 및 이미지 제거 */}
           <h2 className="text-2xl font-serif text-white mb-4">빈칸 기억강화 시스템</h2>
           <p className="text-sm text-white/40 mb-12 text-center">인지 과학 기반의 간격 반복 학습으로<br/>영구 기억을 형성합니다.</p>
-          <button onClick={handleGoogleLogin} className="w-full py-4 bg-white text-black font-bold rounded-sm mb-8 transition-transform active:scale-95">Google 계정으로 시작하기</button>
-          
-          {/* 💡 로그인 멈춤 현상을 시각적으로 보여주는 터미널 화면 */}
-          <div className="w-full bg-black border border-white/10 p-4 rounded text-[11px] font-mono text-teal-400/80 leading-relaxed shadow-inner">
-            <div className="text-white/30 border-b border-white/10 pb-2 mb-2 uppercase tracking-widest">Auth Terminal Logs</div>
-            <div className="space-y-1">
-              {systemLogs.map((log, idx) => (
-                <div key={idx} className={log.includes('❌') || log.includes('⚠️') ? 'text-red-400 font-bold' : ''}>{log}</div>
-              ))}
-            </div>
-          </div>
+          <button onClick={handleGoogleLogin} className="w-full py-4 bg-white text-black font-bold rounded-sm mb-8">Google 계정으로 시작하기</button>
         </main>
       ) : (
         <main className="max-w-6xl mx-auto">
           <ErrorBoundary fallbackLog={addLog}>
             {activeTab === 'progress' && <DashboardTab categories={categories} savedCards={savedCards} />}
-            {activeTab === 'create' && <CraftTab categories={categories} studyMode={studyMode} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} handleDeleteCategory={handleDeleteCategory} />}
-            {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} studyMode={studyMode} setActiveCard={setActiveCard} handleUpdateMemo={handleUpdateMemo} handleDeleteCard={handleDeleteCard} />}
+            {/* 💡 원본 props 그대로 전달 */}
+            {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} handleDeleteCategory={handleDeleteCategory} />}
+            {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleUpdateMemo={handleUpdateMemo} handleDeleteCard={handleDeleteCard} />}
             {activeTab === 'exam' && <ExamTab exams={exams} examFile={examFile} setExamFile={setExamFile} uploadExam={uploadExam} />}
-            {activeTab === 'settings' && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} studyMode={studyMode} setStudyMode={setStudyMode} handleDeleteAll={async () => { if(confirm('초기화?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
+            {activeTab === 'settings' && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('초기화?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
           </ErrorBoundary>
         </main>
       )}
