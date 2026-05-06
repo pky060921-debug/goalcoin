@@ -36,7 +36,7 @@ function MainApp() {
   
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [examFile, setExamFile] = useState<File | null>(null);
-  const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 부팅 완료..."]);
+  const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 시스템 부팅 완료..."]);
 
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
@@ -47,6 +47,45 @@ function MainApp() {
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-10));
+
+  // 💡 [초정밀 진단 1] 구글 인증 후 돌아왔을 때의 해시(Hash) 처리 과정 추적
+  useEffect(() => {
+    const handleAuthCallback = async () => {
+      if (window.location.hash) {
+        addLog(`🔄 구글 응답 수신됨 (해시 길이: ${window.location.hash.length})`);
+        try {
+          await enokiFlow.handleAuthCallback();
+          addLog("✅ Enoki 토큰 승인 완료! (지갑 주소 생성 요청 중...)");
+          window.history.replaceState(null, '', window.location.pathname);
+        } catch (err: any) {
+          addLog(`❌ 토큰 승인 에러: ${err.message}`);
+          alert(`구글 인증 콜백 처리 중 에러가 발생했습니다:\n${err.message}`);
+        }
+      }
+    };
+    handleAuthCallback();
+  }, [enokiFlow]);
+
+  // 💡 [초정밀 진단 2] 로그인 멈춤 현상(지갑 주소 미발급) 원인 추적
+  useEffect(() => {
+    const monitorSession = async () => {
+      try {
+        const session = await enokiFlow.getSession();
+        if (session) {
+          if (!zkLogin?.address) {
+            addLog("⚠️ 구글 로그인은 성공했으나 Enoki가 지갑 주소를 발급하지 못하고 있습니다.");
+            addLog("👉 원인: Enoki 대시보드의 API 키 설정이나 Origin 도메인 거부일 확률이 높습니다.");
+          } else {
+            addLog(`✅ 지갑 주소 확보 완료: ${zkLogin.address.substring(0, 6)}...`);
+            loadAllData();
+          }
+        }
+      } catch (e) {
+        // 무시
+      }
+    };
+    monitorSession();
+  }, [enokiFlow, zkLogin?.address]);
 
   useEffect(() => {
     if (isLoggedIn) loadAllData();
@@ -60,7 +99,7 @@ function MainApp() {
         fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`).then(r=>r.json())
       ]);
       setCategories(catRes.categories || []); setSavedCards(cardRes.cards || []); setExams(examRes.exams || []);
-    } catch (e: any) { addLog(`❌ 로딩 실패: ${e.message}`); }
+    } catch (e: any) { addLog(`❌ 데이터 로딩 에러: ${e.message}`); }
   };
 
   const uploadLaw = async () => {
@@ -161,10 +200,10 @@ function MainApp() {
     } else { setInputStatus('wrong'); setTimeout(() => setInputStatus('idle'), 500); }
   };
 
-  // 💡 [핵심 진단 패치] 아키님 요청대로 로그인 프로세스 전 구간에 강력한 에러 진단 코드를 탑재했습니다.
+  // 💡 구글 로그인 실행 함수 (마찬가지로 정밀 에러 로그 출력)
   const handleGoogleLogin = async () => {
     try {
-      addLog("🟢 구글 로그인 URL 생성 시도 중...");
+      addLog("🟢 구글 로그인 URL 요청 중...");
       const url = await enokiFlow.createAuthorizationURL({ 
         provider: 'google', 
         clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', 
@@ -172,12 +211,11 @@ function MainApp() {
         network: 'testnet', 
         extraParams: { scope: ['openid', 'email', 'profile'] }
       });
-      addLog("🟢 생성 완료, 화면 이동 처리 중...");
+      addLog("🟢 구글 이동 성공!");
       window.location.href = url;
     } catch (e: any) {
-      console.error("Login Exception:", e);
-      alert(`❌ 구글 로그인 에러 감지!\n\n오류 내용: ${e.message}\n\n* Enoki 대시보드 Client ID와 Origin을 다시 확인해주세요.`);
-      addLog(`❌ 로그인 치명적 에러: ${e.message}`);
+      addLog(`❌ 로그인 URL 생성 실패: ${e.message}`);
+      alert(`로그인 창을 열 수 없습니다:\n${e.message}`);
     }
   };
 
@@ -198,12 +236,17 @@ function MainApp() {
         <main className="max-w-md mx-auto mt-24 flex flex-col items-center">
           <h2 className="text-2xl font-serif text-white mb-4">빈칸 기억강화 시스템</h2>
           <p className="text-sm text-white/40 mb-12 text-center">인지 과학 기반의 간격 반복 학습으로<br/>영구 기억을 형성합니다.</p>
-          <button onClick={handleGoogleLogin} className="w-full py-4 bg-white text-black font-bold rounded-sm">Google 계정으로 시작하기</button>
-          {systemLogs.length > 1 && (
-            <div className="mt-8 w-full bg-black/50 p-4 border border-red-500/30 text-[10px] text-red-400 h-32 overflow-y-auto font-mono">
-              {systemLogs.map((l, i) => <div key={i}>{l}</div>)}
+          <button onClick={handleGoogleLogin} className="w-full py-4 bg-white text-black font-bold rounded-sm mb-8 transition-transform active:scale-95">Google 계정으로 시작하기</button>
+          
+          {/* 💡 로그인 멈춤 현상을 시각적으로 보여주는 터미널 화면 */}
+          <div className="w-full bg-black border border-white/10 p-4 rounded text-[11px] font-mono text-teal-400/80 leading-relaxed shadow-inner">
+            <div className="text-white/30 border-b border-white/10 pb-2 mb-2 uppercase tracking-widest">Auth Terminal Logs</div>
+            <div className="space-y-1">
+              {systemLogs.map((log, idx) => (
+                <div key={idx} className={log.includes('❌') || log.includes('⚠️') ? 'text-red-400 font-bold' : ''}>{log}</div>
+              ))}
             </div>
-          )}
+          </div>
         </main>
       ) : (
         <main className="max-w-6xl mx-auto">
@@ -216,8 +259,23 @@ function MainApp() {
           </ErrorBoundary>
         </main>
       )}
+
       {activeCard && (
-        <CardModal activeCard={activeCard} totalTimeLimit={totalTimeLimit} elapsed={elapsed} answerInput={answerInput} setAnswerInput={setAnswerInput} inputStatus={inputStatus} handleSequentialInput={handleSequentialInput} renderContent={() => null} onClose={() => setActiveCard(null)} />
+        <CardModal activeCard={activeCard} totalTimeLimit={totalTimeLimit} elapsed={elapsed} answerInput={answerInput} setAnswerInput={setAnswerInput} inputStatus={inputStatus} handleSequentialInput={handleSequentialInput} 
+          renderContent={() => {
+            const parts = activeCard.content.split(/(\[.*?\])/g); let bIdx = 0;
+            return parts.map((part: string, i: number) => {
+              if (part.startsWith('[') && part.endsWith(']')) {
+                if (/^\[(법|령|칙|규)\]$/.test(part)) return <span key={i} className="text-amber-400 font-bold mr-1">{part}</span>;
+                const isCorrect = blanks[bIdx]?.correct; const isCurrent = bIdx === currentBlankIdx; bIdx++;
+                if (isCorrect) return <span key={i} className="text-green-400 font-bold mx-1">{part.replace(/\[|\]/g, '')}</span>;
+                else if (isCurrent) return <span key={i} className="inline-block min-w-[60px] h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>;
+                else return <span key={i} className="inline-block min-w-[60px] h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
+              } return part;
+            });
+          }} 
+          onClose={() => setActiveCard(null)} 
+        />
       )}
     </div>
   );
