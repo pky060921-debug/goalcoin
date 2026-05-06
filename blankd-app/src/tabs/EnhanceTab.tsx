@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { getGridStyle, formatCardText } from '../utils/constants';
+import { getGridStyle, getStrictTitleOnly, formatCardText, getSortNumber, sortFolders } from '../utils/constants';
 
-export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleUpdateMemo, handleDeleteCard }: any) => {
+export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateMemo, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
-  const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
+  const rawFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더') as string[];
+  const enhanceFolders = sortFolders(rawFolders);
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -32,32 +33,36 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
         <div key={folder} className="mb-8">
           <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
           
-          <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-             {colCount >= 3 && (<><div>법</div><div>시행령</div><div>시행규칙</div></>)}
-          </div>
+          {studyMode === '법령' && (
+            <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(3, minmax(0, 1fr))` }}>
+               <div>법</div><div>시행령</div><div>시행규칙</div>
+            </div>
+          )}
 
-          <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
-                const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
+          <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
+            {safeCards.filter((c:any) => c.folder_name === folder)
+              .sort((a:any, b:any) => getSortNumber(a.content) - getSortNumber(b.content))
+              .map((card: any) => {
+                const gridStyle = getGridStyle(card.content, studyMode, false);
                 const { title } = formatCardText(card.content);
-                const cleanTitle = title.replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '').trim();
+                const cleanTitle = getStrictTitleOnly(title);
 
                 return (
                   <div key={card.id} className="relative transition-all" style={gridStyle}>
-                    <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col gap-2 ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
+                    <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col justify-between ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
                       
-                      <div className="flex justify-between items-center w-full gap-2" onClick={() => setActiveCard(card)}>
-                        <span className="text-amber-400 font-bold text-[13px] truncate flex-1 text-left">{cleanTitle}</span>
-                        {/* 💡 반복.X 가 좁은 모바일 화면에서도 절대 줄바꿈되지 않게 방어합니다 */}
-                        <span className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap shrink-0">반복.{card.level}</span>
+                      {/* 💡 [핵심 복구] flex 레이아웃 충돌로 인해 '반복.X'가 위로 뜨거나 어긋나는 문제를 완전히 해결했습니다. */}
+                      <div className="flex justify-between items-center w-full mb-3" onClick={() => setActiveCard(card)}>
+                        <div className="text-amber-400 font-bold text-[13px] truncate flex-1 pr-2">{cleanTitle}</div>
+                        <div className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap">반복.{card.level}</div>
                       </div>
                       
                       <input 
                         defaultValue={card.memo || ""} 
-                        placeholder="암기 메모/두문자 입력..." 
+                        placeholder="암기 메모 입력..." 
                         onClick={(e) => e.stopPropagation()} 
                         onBlur={(e) => handleUpdateMemo(card.id, e.target.value)} 
-                        className="text-[11px] text-teal-300 bg-teal-950/40 p-2 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 shrink-0" 
+                        className="text-[11px] text-teal-300 bg-teal-950/40 p-2 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400" 
                       />
                     </div>
                   </div>
