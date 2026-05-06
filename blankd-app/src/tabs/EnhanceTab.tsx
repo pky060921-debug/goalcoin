@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { getGridStyle, getStrictTitleOnly, formatCardText, getSortNumber, sortFolders } from '../utils/constants';
+import { getGridStyle, formatCardText } from '../utils/constants';
 
-export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateMemo, handleDeleteCard }: any) => {
+export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleUpdateMemo, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
-  const rawFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더') as string[];
-  const enhanceFolders = sortFolders(rawFolders);
+  const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -33,20 +32,15 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
         <div key={folder} className="mb-8">
           <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
           
-          {studyMode === '법령' && (
-            <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(3, minmax(0, 1fr))` }}>
-               <div>법</div><div>시행령</div><div>시행규칙</div>
-            </div>
-          )}
+          <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
+             {colCount >= 3 && (<><div>법</div><div>시행령</div><div>시행규칙</div></>)}
+          </div>
 
-          <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
-            {/* 💡 [핵심 복구] 강화 탭도 3단 배치를 위해 카드를 읽어 숫자로 완벽히 정렬! */}
-            {safeCards.filter((c:any) => c.folder_name === folder)
-              .sort((a:any, b:any) => getSortNumber(a.content) - getSortNumber(b.content))
-              .map((card: any) => {
-                const gridStyle = getGridStyle(card.content, studyMode, false);
+          <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
+            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
+                const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
                 const { title } = formatCardText(card.content);
-                const cleanTitle = getStrictTitleOnly(title);
+                const cleanTitle = title.replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '').trim();
 
                 return (
                   <div key={card.id} className="relative transition-all" style={gridStyle}>
@@ -54,7 +48,7 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
                       
                       <div className="flex justify-between items-center w-full gap-2" onClick={() => setActiveCard(card)}>
                         <span className="text-amber-400 font-bold text-[13px] truncate flex-1 text-left">{cleanTitle}</span>
-                        {/* 💡 이전의 요청대로 '반복.X'가 절대 찌그러지지 않고 한 줄로 나오도록 고정! */}
+                        {/* 💡 반복.X 가 좁은 모바일 화면에서도 절대 줄바꿈되지 않게 방어합니다 */}
                         <span className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap shrink-0">반복.{card.level}</span>
                       </div>
                       
