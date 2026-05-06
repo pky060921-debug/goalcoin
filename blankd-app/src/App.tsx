@@ -15,7 +15,7 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
   static getDerivedStateFromError(error: any) { return { hasError: true, errorMessage: error.message }; }
   componentDidCatch(error: any, errorInfo: any) { this.props.fallbackLog(`❌ 에러: ${error.message}`); }
   render() {
-    if (this.state.hasError) return <div className="p-6 text-red-400 font-mono border border-red-500/30">⚠️ 시스템 렌더링 에러: {this.state.errorMessage}</div>;
+    if (this.state.hasError) return <div className="p-6 text-red-400 font-mono border border-red-500/30">⚠️ 렌더링 에러: {this.state.errorMessage}</div>;
     return this.props.children;
   }
 }
@@ -66,7 +66,7 @@ function MainApp() {
         fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`).then(r=>r.json())
       ]);
       setCategories(catRes.categories || []); setSavedCards(cardRes.cards || []); setExams(examRes.exams || []);
-    } catch (e: any) { addLog(`❌ 데이터 로드 실패: ${e.message}`); }
+    } catch (e: any) { addLog(`❌ 로딩 실패: ${e.message}`); }
   };
 
   const uploadLaw = async () => {
@@ -166,8 +166,8 @@ function MainApp() {
       {!isLoggedIn ? (
         <main className="max-w-md mx-auto mt-24 flex flex-col items-center">
           <h2 className="text-2xl font-serif text-white mb-4">빈칸 기억강화 시스템</h2>
-          <p className="text-sm text-white/40 mb-12 text-center text-pretty">인지 과학 기반의 간격 반복 학습으로<br/>영구 기억을 형성합니다.</p>
-          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-white text-black font-bold rounded-sm mb-6 transition-transform active:scale-95">Google 계정으로 시작하기</button>
+          <p className="text-sm text-white/40 mb-12 text-center">인지 과학 기반의 간격 반복 학습으로<br/>영구 기억을 형성합니다.</p>
+          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-white text-black font-bold rounded-sm mb-6 active:scale-95 transition-transform">Google 계정으로 시작하기</button>
         </main>
       ) : (
         <main className="max-w-6xl mx-auto">
@@ -176,7 +176,7 @@ function MainApp() {
             {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleDeleteCategory={async (id:number)=>{if(confirm('삭제?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />}
             {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleUpdateMemo={handleUpdateMemo} handleDeleteCard={async (id:number)=>{if(confirm('삭제?')){await fetch("https://api.blankd.top/api/delete-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});setActiveCard(null);loadAllData();}}} />}
             {activeTab === 'exam' && <ExamTab exams={exams} examFile={examFile} setExamFile={setExamFile} uploadExam={uploadExam} />}
-            {activeTab === 'settings' && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화하시겠습니까?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
+            {activeTab === 'settings' && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
           </ErrorBoundary>
         </main>
       )}
