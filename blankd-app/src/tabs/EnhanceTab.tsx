@@ -39,13 +39,14 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
             </div>
           )}
 
+          {/* 💡 강화 탭 역시 gridAutoFlow: 'dense'를 삭제했습니다. 이제 빈칸이 보장되며 법-령-칙이 같은 줄에 배열됩니다. */}
           <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
             {safeCards.filter((c:any) => c.folder_name === folder)
-              .sort((a:any, b:any) => getSortNumber(a.content) - getSortNumber(b.content))
+              .sort((a:any, b:any) => getSortNumber(a.content || a.title) - getSortNumber(b.content || b.title))
               .map((card: any) => {
-                // 💡 [핵심 패치] 강화 탭도 인라인 스타일로 절대 겹치지 않게 고정!
-                const gridStyle = getGridStyle(card.content, studyMode, false);
-                const { title } = formatCardText(card.content);
+                const contentToUse = card.content || card.title || "";
+                const gridStyle = getGridStyle(contentToUse, studyMode, false);
+                const { title } = formatCardText(contentToUse);
                 const cleanTitle = getStrictTitleOnly(title);
 
                 return (
