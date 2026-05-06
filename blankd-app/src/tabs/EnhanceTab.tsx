@@ -37,7 +37,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
           <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
                 const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
-                const { title } = formatCardText(card.content);
                 const cleanTitle = getStrictTitleOnly(card.content);
 
                 return (
