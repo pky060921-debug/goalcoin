@@ -3,7 +3,6 @@ export const SPLIT_REGEX = /(\s+|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○
 export const formatCardText = (text?: string) => {
   if (!text) return { title: "제목 없음", body: "" };
   const str = String(text).trim();
-  // 정규식 수정: [법] 등 태그를 타이틀에서 분리하지 않고 포함시킵니다.
   const match = str.match(/^(\[.*?\]\s*제\s*\d+\s*조(?:의\s*\d+)?(?:\([^)]+\))?)\s*(.*)/s);
   if (match) {
     return { title: match[1].trim(), body: match[2].trim() };
@@ -11,7 +10,6 @@ export const formatCardText = (text?: string) => {
   return { title: str.split('\n')[0].substring(0, 30), body: str };
 };
 
-// 💡 새로 추가된 함수: 카드 제목에서 [법], [령], [칙/규] 태그만 추출
 export const extractLawTag = (title: string) => {
   if (title.includes('[법]')) return '법';
   if (title.includes('[령]')) return '시행령';
@@ -35,12 +33,16 @@ export const getSortNumber = (text?: string) => {
   return base + typeScore; 
 };
 
-export const getGridStyle = (text: string, currentViewMode: string, isExpanded: boolean, colCount: number) => {
+// 💡 법령/일반 모드에 따른 배치 결정
+export const getGridStyle = (text: string, studyMode: string, isExpanded: boolean) => {
   if (isExpanded) return { gridColumn: "1 / -1" }; 
+  if (studyMode !== '법령') return {}; // 일반 모드는 그리드 자동 흐름
+
   const isLaw = text?.includes('[법]');
   const isDecret = text?.includes('[령]');
   const isRule = text?.includes('[칙]') || text?.includes('[규]');
-  if (currentViewMode === 'all' && colCount >= 3 && (isLaw || isDecret || isRule)) {
+  
+  if (isLaw || isDecret || isRule) {
     if (isLaw) return { gridColumn: "1" };
     if (isDecret) return { gridColumn: "2" };
     if (isRule) return { gridColumn: "3" };
