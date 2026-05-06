@@ -39,7 +39,7 @@ function MainApp() {
   
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [examFile, setExamFile] = useState<File | null>(null);
-  const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 부팅 완료..."]);
+  const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인..."]);
 
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
@@ -49,11 +49,12 @@ function MainApp() {
   const [elapsed, setElapsed] = useState<number>(0);
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
-  const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-10));
+  // 💡 터미널에 로그를 추가하는 함수 (최대 30줄 보관)
+  const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-30));
 
   useEffect(() => {
     if (window.location.hash) {
-      enokiFlow.handleAuthCallback().then(() => { window.history.replaceState(null, '', window.location.pathname); }).catch((err: any) => addLog(`❌ 인증 실패: ${err.message}`));
+      enokiFlow.handleAuthCallback().then(() => { window.history.replaceState(null, '', window.location.pathname); addLog("✅ 로그인 콜백 완료"); }).catch((err: any) => addLog(`❌ 인증 실패: ${err.message}`));
     }
     if (isLoggedIn) loadAllData();
   }, [isLoggedIn, safeAddress, enokiFlow]);
@@ -66,6 +67,7 @@ function MainApp() {
         fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`).then(r=>r.json())
       ]);
       setCategories(catRes.categories || []); setSavedCards(cardRes.cards || []); setExams(examRes.exams || []);
+      addLog(`🟢 데이터 로드 완료 (카테고리: ${catRes.categories?.length || 0}개)`);
     } catch (e: any) { addLog(`❌ 데이터 로드 실패: ${e.message}`); }
   };
 
@@ -151,7 +153,7 @@ function MainApp() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-6 relative pb-48 font-sans">
+    <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-6 relative pb-56 font-sans">
       <header className="max-w-6xl mx-auto border-b border-white/10 pb-6 mb-12 flex items-center gap-10">
         <h1 className="text-2xl font-light tracking-widest text-white shrink-0">Blank_D</h1>
         {isLoggedIn && (
@@ -173,13 +175,27 @@ function MainApp() {
         <main className="max-w-6xl mx-auto">
           <ErrorBoundary fallbackLog={addLog}>
             {activeTab === 'progress' && <DashboardTab categories={categories} savedCards={savedCards} />}
-            {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleDeleteCategory={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />}
-            {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleUpdateMemo={handleUpdateMemo} handleDeleteCard={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});setActiveCard(null);loadAllData();}}} />}
+            {/* 💡 만들기 탭에 터미널 로깅 함수 전달 */}
+            {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} addLog={addLog} handleDeleteCategory={async (id:number)=>{if(confirm('삭제?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />}
+            {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleUpdateMemo={handleUpdateMemo} handleDeleteCard={async (id:number)=>{if(confirm('삭제?')){await fetch("https://api.blankd.top/api/delete-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});setActiveCard(null);loadAllData();}}} />}
             {activeTab === 'exam' && <ExamTab exams={exams} examFile={examFile} setExamFile={setExamFile} uploadExam={uploadExam} />}
             {activeTab === 'settings' && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화하시겠습니까?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
           </ErrorBoundary>
         </main>
       )}
+
+      {/* 💡 [핵심] 로그인 여부와 무관하게 무조건 노출되는 시스템 전역 터미널 */}
+      <div className="fixed bottom-0 left-0 w-full h-40 bg-black/90 border-t border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto z-[999]">
+        <div className="flex justify-between items-center mb-2 border-b border-teal-500/30 pb-1 sticky top-0 bg-black/90">
+          <span className="uppercase tracking-widest text-teal-500/50">Diagnostic Terminal</span>
+          <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2">Clear</button>
+        </div>
+        <div className="space-y-1">
+          {systemLogs.map((l, i) => (
+            <div key={i} className={l.includes('❌') ? 'text-red-400 font-bold' : l.includes('▶️') ? 'text-amber-300' : ''}>{l}</div>
+          ))}
+        </div>
+      </div>
 
       {activeCard && (
         <CardModal activeCard={activeCard} totalTimeLimit={totalTimeLimit} elapsed={elapsed} answerInput={answerInput} setAnswerInput={setAnswerInput} inputStatus={inputStatus} handleSequentialInput={handleSequentialInput} 
