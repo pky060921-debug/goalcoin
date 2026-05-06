@@ -33,7 +33,6 @@ function MainApp() {
   const [exams, setExams] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
   
-  // 💡 설정 모드 간소화
   const [studyMode, setStudyMode] = useState(localStorage.getItem('studyMode') || '법령');
   const [useAiRecommend, setUseAiRecommend] = useState(true);
   
@@ -129,7 +128,6 @@ function MainApp() {
     });
     if (isBlanking) bodyContent += " ]";
     
-    // 법/령/칙 꼬리표를 유지하기 위해 타이틀을 묶어서 DB에 저장
     const finalCardContent = `${cat.title}\n\n${bodyContent}`;
 
     try {
@@ -141,7 +139,6 @@ function MainApp() {
     } catch(err) { console.error(err); }
   };
 
-  // 💡 즉각적인 두문자 메모 업데이트 
   const handleUpdateMemo = async (id: number, memo: string) => {
     setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
     try {
@@ -249,8 +246,8 @@ function MainApp() {
 
       {!isLoggedIn ? (
         <main className="max-w-md mx-auto mt-16 flex flex-col items-center">
-          {/* 💡 로그인 화면 아이콘(이미지) 제거 */}
-          <h2 className="text-2xl font-serif text-white mb-4">법령 기억 강화 시스템</h2>
+          {/* 💡 요청하신 타이틀 변경 완료 */}
+          <h2 className="text-2xl font-serif text-white mb-4">빈칸 기억강화 시스템</h2>
           <p className="text-sm text-white/40 mb-12 text-center leading-relaxed">인지 과학 기반의 간격 반복 학습으로<br/>방대한 데이터를 영구 기억으로 전환합니다.</p>
           <button onClick={handleGoogleLogin} className="w-full py-4 bg-white text-black font-bold text-sm">Google 계정으로 시작하기</button>
         </main>
