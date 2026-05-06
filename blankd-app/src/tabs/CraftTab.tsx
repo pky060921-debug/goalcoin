@@ -50,6 +50,14 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
                 const isExpanded = expandedId === cat.id;
                 const gridStyle = getGridStyle(cat.title, viewMode, isExpanded, colCount);
                 const contentToUse = cat.content || cat.title || "";
+                
+                // 💡 [DEBUG] 브라우저 콘솔에 DB에서 넘어온 원본 데이터를 그대로 출력합니다.
+                if (isExpanded) {
+                   console.log(`\n▶️ [CraftTab 모달 열림] ID: ${cat.id}`);
+                   console.log(`원본 cat.title:`, cat.title);
+                   console.log(`원본 cat.content:`, cat.content);
+                }
+
                 const { body } = formatCardText(contentToUse);
                 const cleanTitle = getStrictTitleOnly(contentToUse);
 
