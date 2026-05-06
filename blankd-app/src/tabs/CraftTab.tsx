@@ -24,7 +24,8 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
   };
 
   return (
-    <div className="animate-in fade-in space-y-8">
+    // 💡 [핵심 패치] 우측 터미널 Grid를 완전히 없애고 전체 화면 레이아웃으로 변경
+    <div className="space-y-8 animate-in fade-in">
       <div className="flex gap-2 mb-4">
         <label className="flex-1 border border-white/20 p-2 text-center text-xs hover:bg-white/10 cursor-pointer text-white/80">
           <input type="file" accept=".pdf,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 학습자료(HTML/PDF) 업로드'}
@@ -40,7 +41,6 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
         <div key={folder} className="mb-8">
           <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
           
-          {/* 💡 법령 레이아웃 선택 시에만 3단 표 머리글 렌더링 */}
           {studyMode === '법령' && (
             <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(3, minmax(0, 1fr))` }}>
                <div>법 (Law)</div>
@@ -61,23 +61,19 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
 
                 return (
                   <div key={cat.id} className="relative transition-all" style={gridStyle}>
-                    {/* 💡 체크박스 등 거슬리는 부분 일절 삭제 */}
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id), 800)} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); }} className="w-full h-full p-5 bg-indigo-900/20 border border-indigo-500/30 rounded-sm text-left transition-colors hover:bg-indigo-900/40 flex flex-col gap-3">
                         <span className="text-amber-400 font-bold text-[13px]">{cleanTitle}</span>
-                        {/* 닫혀 있을 때 메모가 있으면 보여줌 */}
                         {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full">{cat.memo}</div>}
                         <span className="text-white/60 text-[12px] leading-relaxed line-clamp-3 whitespace-pre-wrap">{body}</span>
                       </button>
                     ) : (
                       <div className="w-full p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-4 shadow-xl z-20 relative">
-                        {/* 헤더 클릭 시 닫히도록 수정 (x표시 대체) */}
                         <div className="flex justify-between items-center mb-2 cursor-pointer" onClick={() => setExpandedId(null)}>
                           <span className="text-amber-400 font-bold text-[13px]">{cleanTitle}</span>
                           {useAiRecommend && <button onClick={(e) => { e.stopPropagation(); handleAiRecommend(cat); }} className="text-[10px] bg-teal-900/40 text-teal-400 px-3 py-1.5 rounded hover:bg-teal-900/60 transition-colors">✨ AI 추천</button>}
                         </div>
                         
-                        {/* 두문자 암기 메모 입력 */}
                         <input 
                           type="text" 
                           value={memoInput} 
@@ -86,7 +82,6 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
                           className="w-full bg-black/50 border border-teal-500/30 p-3 text-sm text-teal-200 outline-none rounded-sm mb-4 placeholder-teal-800 focus:border-teal-400"
                         />
 
-                        {/* 빈칸 만들기 텍스트 영역 (본문만 나옴) */}
                         <div className="font-serif text-[15px] leading-loose text-white/80 p-5 bg-black/40 border border-white/10 max-h-64 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap">
                           {parsedText.split(SPLIT_REGEX).map((word: string, idx: number, arr: any[]) => {
                             if (!word) return null;
