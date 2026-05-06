@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { formatCardText, getGridStyle, getStrictTitleOnly, SPLIT_REGEX } from '../utils/constants';
 
-export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, handleAiRecommend, handleDeleteCategory }: any) => {
+// 💡 파라미터에 addLog 추가
+export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
@@ -50,21 +51,24 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
                 const isExpanded = expandedId === cat.id;
                 const gridStyle = getGridStyle(cat.title, viewMode, isExpanded, colCount);
                 const contentToUse = cat.content || cat.title || "";
-                
-                // 💡 [DEBUG] 브라우저 콘솔에 DB에서 넘어온 원본 데이터를 그대로 출력합니다.
-                if (isExpanded) {
-                   console.log(`\n▶️ [CraftTab 모달 열림] ID: ${cat.id}`);
-                   console.log(`원본 cat.title:`, cat.title);
-                   console.log(`원본 cat.content:`, cat.content);
-                }
-
                 const { body } = formatCardText(contentToUse);
                 const cleanTitle = getStrictTitleOnly(contentToUse);
 
                 return (
                   <div key={cat.id} className="relative transition-all" style={gridStyle}>
                     {!isExpanded ? (
-                      <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); }} className="w-full h-full p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-2">
+                      <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} 
+                        // 💡 [디버깅] 버튼을 누를 때마다 터미널에 로그를 쏩니다.
+                        onClick={() => { 
+                          if(addLog) {
+                            addLog(`▶️ [클릭] 카드 ID: ${cat.id}`);
+                            addLog(`원본 데이터: ${contentToUse.replace(/\n/g, '\\n').substring(0, 50)}...`);
+                            addLog(`추출된 제목: ${cleanTitle}`);
+                            addLog(`추출된 본문: ${body.replace(/\n/g, '\\n').substring(0, 30)}...`);
+                          }
+                          setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); 
+                        }} 
+                        className="w-full h-full p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-2">
                         <span className="text-amber-400 font-bold text-[13px] text-left leading-snug">{cleanTitle}</span>
                         {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full text-left truncate">{cat.memo}</div>}
                       </button>
