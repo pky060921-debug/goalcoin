@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, getGridStyle } from '../utils/constants';
+import { formatCardText, getGridStyle, extractLawTag } from '../utils/constants';
 
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleDeleteCard, selectedEnhanceIds, setSelectedEnhanceIds, targetFolderName, setTargetFolderName, handleMoveEnhanceFolders }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
@@ -51,9 +51,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
               .sort((a:any, b:any) => a.id - b.id)
               .map((card: any) => {
                 const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
-                
-                // 💡 강화 탭에서도 완벽하게 제목과 본문이 나눠집니다!
                 const { title, body } = formatCardText(card.content);
+                const lawTag = extractLawTag(title);
+                const cleanTitle = title.replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '').trim();
 
                 return (
                   <div key={card.id} className="relative transition-all" style={gridStyle}>
@@ -63,11 +63,19 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                       onClick={() => setActiveCard(card)}
                       className={`w-full p-5 text-left rounded-sm border transition-all h-full flex flex-col gap-3 ${card.status === "BURNED" ? "border-white/5 text-white/30" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"}`}
                     >
-                      <div className="flex justify-between items-start w-full">
-                        <span className="text-amber-400 font-bold text-[13px]">{title}</span>
-                        <span className="text-[9px] text-teal-400 border border-teal-500/30 px-1 rounded whitespace-nowrap mt-1">LV.{card.level}</span>
+                      <div className="flex justify-between items-center w-full">
+                        <span className="text-amber-400 font-bold text-[13px]">{cleanTitle}</span>
+                        {/* 💡 삭제 X 버튼이 있던 자리에 법/령/규 태그와 레벨이 함께 표시됩니다. */}
+                        <div className="flex gap-2">
+                           {lawTag && <span className="text-[10px] text-white/50 bg-black/40 px-2 py-1 rounded border border-white/10">{lawTag}</span>}
+                           <span className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap">LV.{card.level}</span>
+                        </div>
                       </div>
-                      <div className="text-white/70 text-[12px] leading-relaxed whitespace-pre-wrap line-clamp-3">{body}</div>
+                      
+                      {/* 암기 메모 표시 영역 (있는 경우에만 렌더링) */}
+                      {card.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full">{card.memo}</div>}
+
+                      <div className="text-white/70 text-[12px] leading-relaxed whitespace-pre-wrap line-clamp-3 w-full">{body}</div>
                     </button>
                   </div>
                 );
