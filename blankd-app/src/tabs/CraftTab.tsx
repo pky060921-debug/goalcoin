@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, getGridStyle, SPLIT_REGEX, extractLawTag } from '../utils/constants';
+import { formatCardText, getGridStyle, SPLIT_REGEX } from '../utils/constants';
 
 export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, handleAiRecommend, handleSplitCategory, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
@@ -16,19 +16,21 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
     setOpenFolders(initial);
   }, [categories]);
 
-  const createLongPressHandlers = (callback: () => void, ms = 800) => {
+  const createLongPressHandlers = (callback: () => void) => {
     let timer: any;
-    const start = () => { timer = setTimeout(callback, ms); };
-    const clear = () => { clearTimeout(timer); };
-    return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
+    return { 
+      onTouchStart: () => timer = setTimeout(callback, 800), 
+      onTouchEnd: () => clearTimeout(timer), 
+      onMouseDown: () => timer = setTimeout(callback, 800), 
+      onMouseUp: () => clearTimeout(timer) 
+    };
   };
 
   return (
-    // 💡 [핵심 패치] 우측 터미널 Grid를 완전히 없애고 전체 화면 레이아웃으로 변경
     <div className="space-y-8 animate-in fade-in">
       <div className="flex gap-2 mb-4">
         <label className="flex-1 border border-white/20 p-2 text-center text-xs hover:bg-white/10 cursor-pointer text-white/80">
-          <input type="file" accept=".pdf,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 학습자료(HTML/PDF) 업로드'}
+          <input type="file" accept=".pdf,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 학습자료 업로드'}
         </label>
         <button onClick={uploadLaw} className="px-4 border border-white/20 text-xs hover:bg-white/10 transition-colors">전송</button>
       </div>
@@ -43,17 +45,15 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
           
           {studyMode === '법령' && (
             <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(3, minmax(0, 1fr))` }}>
-               <div>법 (Law)</div>
-               <div>시행령 (Decree)</div>
-               <div>시행규칙 (Rule)</div>
+               {/* 💡 요청하신 (영어) 삭제 완료 */}
+               <div>법</div>
+               <div>시행령</div>
+               <div>시행규칙</div>
             </div>
           )}
 
           <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
-            {safeCategories
-              .filter((c:any) => c.folder_name === folder)
-              .sort((a:any, b:any) => a.id - b.id)
-              .map((cat: any) => {
+            {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const gridStyle = getGridStyle(cat.title, studyMode, isExpanded);
                 const { title, body } = formatCardText(cat.content || cat.title);
@@ -62,10 +62,10 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
                 return (
                   <div key={cat.id} className="relative transition-all" style={gridStyle}>
                     {!isExpanded ? (
-                      <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id), 800)} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); }} className="w-full h-full p-5 bg-indigo-900/20 border border-indigo-500/30 rounded-sm text-left transition-colors hover:bg-indigo-900/40 flex flex-col gap-3">
+                      <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); }} className="w-full h-full p-5 bg-indigo-900/20 border border-indigo-500/30 rounded-sm text-left transition-colors hover:bg-indigo-900/40 flex flex-col gap-3">
+                        {/* 💡 요청하신 대로 본문 텍스트를 아예 삭제하고 오직 '제1조(목적)' 형태의 제목만 남겼습니다! */}
                         <span className="text-amber-400 font-bold text-[13px]">{cleanTitle}</span>
                         {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full">{cat.memo}</div>}
-                        <span className="text-white/60 text-[12px] leading-relaxed line-clamp-3 whitespace-pre-wrap">{body}</span>
                       </button>
                     ) : (
                       <div className="w-full p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-4 shadow-xl z-20 relative">
@@ -73,32 +73,18 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
                           <span className="text-amber-400 font-bold text-[13px]">{cleanTitle}</span>
                           {useAiRecommend && <button onClick={(e) => { e.stopPropagation(); handleAiRecommend(cat); }} className="text-[10px] bg-teal-900/40 text-teal-400 px-3 py-1.5 rounded hover:bg-teal-900/60 transition-colors">✨ AI 추천</button>}
                         </div>
+                        <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-3 text-sm text-teal-200 outline-none rounded-sm mb-4" />
                         
-                        <input 
-                          type="text" 
-                          value={memoInput} 
-                          onChange={(e) => setMemoInput(e.target.value)} 
-                          placeholder="여기에 두문자나 핵심 암기 비법을 적어두세요..." 
-                          className="w-full bg-black/50 border border-teal-500/30 p-3 text-sm text-teal-200 outline-none rounded-sm mb-4 placeholder-teal-800 focus:border-teal-400"
-                        />
-
                         <div className="font-serif text-[15px] leading-loose text-white/80 p-5 bg-black/40 border border-white/10 max-h-64 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap">
                           {parsedText.split(SPLIT_REGEX).map((word: string, idx: number, arr: any[]) => {
                             if (!word) return null;
                             const isSelected = selectedWords.has(idx);
                             return (
-                              <span 
-                                key={idx} 
-                                onClick={() => { const s = new Set(selectedWords); if(s.has(idx)) s.delete(idx); else s.add(idx); setSelectedWords(s); }} 
-                                onDoubleClick={(e) => { e.preventDefault(); const s = new Set(selectedWords); s.add(idx); if (idx + 1 < arr.length) s.add(idx + 1); if (idx + 2 < arr.length) s.add(idx + 2); setSelectedWords(s); }}
-                                className={`cursor-pointer px-[2px] rounded transition-colors ${isSelected ? 'bg-amber-500 text-black font-bold' : 'hover:bg-white/20'}`}
-                              >
-                                {word}
-                              </span>
+                              <span key={idx} onClick={() => { const s = new Set(selectedWords); if(s.has(idx)) s.delete(idx); else s.add(idx); setSelectedWords(s); }} onDoubleClick={(e) => { e.preventDefault(); const s = new Set(selectedWords); s.add(idx); if (idx + 1 < arr.length) s.add(idx + 1); if (idx + 2 < arr.length) s.add(idx + 2); setSelectedWords(s); }} className={`cursor-pointer px-[2px] rounded transition-colors ${isSelected ? 'bg-amber-500 text-black font-bold' : 'hover:bg-white/20'}`}>{word}</span>
                             )
                           })}
                         </div>
-                        <button onClick={() => handleMakeBlankCard({ ...cat, title, memo: memoInput }, parsedText, selectedWords, () => { setExpandedId(null); setSelectedWords(new Set()); setMemoInput(""); })} className="w-full py-3 bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 text-sm font-bold tracking-widest transition-all rounded-sm mt-2">지식 추출 및 원본 삭제</button>
+                        <button onClick={() => handleMakeBlankCard({ ...cat, title, memo: memoInput }, parsedText, selectedWords, () => setExpandedId(null))} className="w-full py-3 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-sm font-bold rounded-sm mt-2">지식 추출 저장</button>
                       </div>
                     )}
                   </div>
