@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { formatCardText, getGridStyle, getStrictTitleOnly, SPLIT_REGEX } from '../utils/constants';
 
-// 💡 파라미터에 addLog 추가
 export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
@@ -51,6 +50,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
                 const isExpanded = expandedId === cat.id;
                 const gridStyle = getGridStyle(cat.title, viewMode, isExpanded, colCount);
                 const contentToUse = cat.content || cat.title || "";
+                
                 const { body } = formatCardText(contentToUse);
                 const cleanTitle = getStrictTitleOnly(contentToUse);
 
@@ -58,13 +58,9 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
                   <div key={cat.id} className="relative transition-all" style={gridStyle}>
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} 
-                        // 💡 [디버깅] 버튼을 누를 때마다 터미널에 로그를 쏩니다.
                         onClick={() => { 
                           if(addLog) {
-                            addLog(`▶️ [클릭] 카드 ID: ${cat.id}`);
-                            addLog(`원본 데이터: ${contentToUse.replace(/\n/g, '\\n').substring(0, 50)}...`);
-                            addLog(`추출된 제목: ${cleanTitle}`);
-                            addLog(`추출된 본문: ${body.replace(/\n/g, '\\n').substring(0, 30)}...`);
+                            addLog(`▶️ [클릭] 추출제목: ${cleanTitle} / 본문길이: ${body.length}자`);
                           }
                           setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); 
                         }} 
