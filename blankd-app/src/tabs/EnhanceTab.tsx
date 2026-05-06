@@ -34,7 +34,6 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
           
           {studyMode === '법령' && (
             <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(3, minmax(0, 1fr))` }}>
-               {/* 💡 (영어) 완전히 삭제 완료 */}
                <div>법</div>
                <div>시행령</div>
                <div>시행규칙</div>
@@ -51,13 +50,13 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
                   <div key={card.id} className="relative transition-all" style={gridStyle}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} className={`w-full p-5 text-left rounded-sm border transition-all h-full flex flex-col gap-3 ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
                       
-                      {/* 💡 카드 내부의 본문을 삭제하고 제목(cleanTitle)과 반복 횟수(LV)만 남겼습니다. */}
-                      <div className="flex justify-between items-center w-full" onClick={() => setActiveCard(card)}>
-                        <span className="text-amber-400 font-bold text-[13px]">{cleanTitle}</span>
-                        <span className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded">반복.{card.level}</span>
+                      <div className="flex justify-between items-center w-full gap-2" onClick={() => setActiveCard(card)}>
+                        <span className="text-amber-400 font-bold text-[13px] truncate">{cleanTitle}</span>
+                        {/* 💡 [수정] 반복.X 글자가 절대 깨지지 않고 한 줄로 나오도록 whitespace-nowrap 및 shrink-0 추가 */}
+                        <span className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap shrink-0">반복.{card.level}</span>
                       </div>
                       
-                      {/* 암기 메모 노출 (언제든 수정 가능) */}
+                      {/* 암기 메모 노출 */}
                       <input 
                         defaultValue={card.memo || ""} 
                         placeholder="암기 메모/두문자 입력..." 
@@ -65,6 +64,8 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
                         onBlur={(e) => handleUpdateMemo(card.id, e.target.value)} 
                         className="text-[11px] text-teal-300 bg-teal-950/40 p-2 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400" 
                       />
+                      
+                      {/* 💡 [수정] 사진에서 -표시된 본문 텍스트 영역을 완전히 삭제했습니다. */}
                     </div>
                   </div>
                 );
