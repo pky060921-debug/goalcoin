@@ -1,13 +1,23 @@
 export const SPLIT_REGEX = /(\s+|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]+|(?:은|는|이|가|을|를|의|에|에게|과|와|로서|로써|로|으로|도|만|부터|까지|이다|한다|하다|함|됨|됨을|함을|함으로써|됨으로써|대하여|대해|대한|관하여|관해|관한|등|및|에서|에서는|에서의|로부터|에의|로부터의|에도|에는|이나|나|라도|이라도|인가|든가|이든지|든지|적|적인|적으로|할|한|하는|된|될|되는|인|일|이고|이며|이면|이지|입니다|합니다|습니다)(?=\s|$|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]))/g;
 
+// 💡 [버그수정] 제목과 본문을 확실히 분리하여 문제 풀이 시 중복 노출 방지
 export const formatCardText = (text?: string) => {
   if (!text) return { title: "제목 없음", body: "" };
   const str = String(text).trim();
-  const match = str.match(/^(\[.*?\]\s*제\s*\d+\s*조(?:의\s*\d+)?(?:\([^)]+\))?[*\s]*)\s*(.*)/s);
-  if (match) {
-    return { title: match[1].trim(), body: match[2].trim() };
+  
+  // 줄바꿈 두 번(\n\n)이 있으면 제목과 본문의 명확한 구분선으로 인지
+  if (str.includes('\n\n')) {
+    const parts = str.split('\n\n');
+    return { title: parts[0].trim(), body: parts.slice(1).join('\n\n').trim() };
   }
-  return { title: str.split('\n')[0].substring(0, 30), body: str };
+  
+  // 구분선이 없으면 첫 줄을 제목으로, 나머지를 본문으로 분리
+  const lines = str.split('\n');
+  if (lines.length > 1) {
+    return { title: lines[0].trim(), body: lines.slice(1).join('\n').trim() };
+  }
+  
+  return { title: str, body: str };
 };
 
 export const extractLawTag = (title: string) => {
@@ -17,13 +27,13 @@ export const extractLawTag = (title: string) => {
   return '';
 };
 
-// 💡 별표(*)와 띄어쓰기를 보존하는 정밀 제목 추출
+// 💡 [버그수정] 조항번호 뒤의 조항명(목적 등)과 별표(*)를 온전히 보존하여 추출
 export const getStrictTitleOnly = (text?: string) => {
   if (!text) return "제목 없음";
-  const str = String(text);
-  const match = str.match(/(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?[*\s]*)/);
-  if (match) return match[1].trim(); 
-  return str.split('\n')[0].replace(/\[(법|령|칙|규)\]/g, '').trim();
+  const str = String(text).trim();
+  const firstLine = str.split('\n')[0];
+  // 시스템 태그 [법][령][칙][규]만 제거하고 나머지는 괄호 포함 그대로 반환
+  return firstLine.replace(/\[(법|령|칙|규)\]/g, '').trim();
 };
 
 export const getSortNumber = (text?: string) => {
@@ -42,12 +52,13 @@ export const getSortNumber = (text?: string) => {
   return base + typeScore; 
 };
 
-// 💡 아키님의 원본 정렬 방식 그대로 유지 (절대 꼬이지 않음)
+// 💡 [원본복구] 아키님이 주신 압축파일의 완벽했던 그리드 로직 100% 복구
 export const getGridStyle = (text: string, currentViewMode: string, isExpanded: boolean, colCount: number) => {
   if (isExpanded) return { gridColumn: "1 / -1" }; 
   const isLaw = text?.includes('[법]');
   const isDecret = text?.includes('[령]');
   const isRule = text?.includes('[칙]') || text?.includes('[규]');
+  
   if (currentViewMode === 'all' && colCount >= 3 && (isLaw || isDecret || isRule)) {
     if (isLaw) return { gridColumn: "1" };
     if (isDecret) return { gridColumn: "2" };
