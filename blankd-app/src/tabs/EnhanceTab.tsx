@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getGridStyle, getStrictTitleOnly, formatCardText } from '../utils/constants';
+import { getGridStyle, getStrictTitleOnly, formatCardText, getSortNumber } from '../utils/constants';
 
 export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateMemo, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
@@ -41,7 +41,8 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
           )}
 
           <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
-            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
+            {/* 💡 [핵심 패치] 강화 탭도 3단 배치를 위해 카드의 본문을 읽어 완벽히 정렬! */}
+            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => getSortNumber(a.content) - getSortNumber(b.content)).map((card: any) => {
                 const gridStyle = getGridStyle(card.content, studyMode, false);
                 const { title } = formatCardText(card.content);
                 const cleanTitle = getStrictTitleOnly(title);
