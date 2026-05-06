@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getGridStyle, getStrictTitleOnly } from '../utils/constants';
+import { getGridStyle, getStrictTitleOnly, formatCardText } from '../utils/constants';
 
 export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateMemo, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
@@ -40,20 +40,23 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
 
           <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
             {safeCards.filter((c:any) => c.folder_name === folder)
-              // 💡 [핵심 복구] 압축 파일 원본 로직 (a.id - b.id)
+              // 💡 [핵심 복원] 압축파일의 정렬 로직 완벽 복구
               .sort((a:any, b:any) => a.id - b.id)
               .map((card: any) => {
                 const contentToUse = card.content || card.title || "";
                 const gridStyle = getGridStyle(contentToUse, studyMode, false);
-                const cleanTitle = getStrictTitleOnly(contentToUse);
+                const { title } = formatCardText(contentToUse);
+                const cleanTitle = getStrictTitleOnly(title);
 
                 return (
                   <div key={card.id} className="relative transition-all" style={gridStyle}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col justify-between ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
                       
-                      <div className="flex justify-between items-center w-full gap-2 mb-2" onClick={() => setActiveCard(card)}>
-                        <span className="text-amber-400 font-bold text-[13px] truncate flex-1 text-left">{cleanTitle}</span>
-                        <span className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap shrink-0">반복.{card.level}</span>
+                      <div className="flex justify-between items-start w-full gap-2 mb-2" onClick={() => setActiveCard(card)}>
+                        {/* 💡 truncate 제거로 긴 제목이 숨겨지지 않게 보장합니다 */}
+                        <span className="text-amber-400 font-bold text-[13px] text-left">{cleanTitle}</span>
+                        {/* 💡 반복 글자 영구 고정 */}
+                        <span className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap shrink-0 mt-0.5">반복.{card.level}</span>
                       </div>
                       
                       <input 
