@@ -43,6 +43,7 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
         <div key={folder} className="mb-8">
           <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
           
+          {/* 💡 [영어 삭제] 깔끔한 헤더 */}
           {studyMode === '법령' && (
             <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(3, minmax(0, 1fr))` }}>
                <div>법</div><div>시행령</div><div>시행규칙</div>
@@ -51,21 +52,22 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
 
           <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
             {safeCategories.filter((c:any) => c.folder_name === folder)
-              // 💡 [핵심 복구] 압축 파일에 있던 완벽했던 정렬 로직 (a.id - b.id) 그대로 롤백!
+              // 💡 [핵심 복원] 압축파일의 정렬 로직 완벽 복구
               .sort((a:any, b:any) => a.id - b.id)
               .map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const contentToUse = cat.content || cat.title || "";
                 const gridStyle = getGridStyle(contentToUse, studyMode, isExpanded);
-                const { body } = formatCardText(contentToUse);
-                const cleanTitle = getStrictTitleOnly(contentToUse);
+                const { title, body } = formatCardText(contentToUse);
+                const cleanTitle = getStrictTitleOnly(title);
 
                 return (
                   <div key={cat.id} className="relative transition-all" style={gridStyle}>
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); }} className="w-full h-full p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-2">
-                        <span className="text-amber-400 font-bold text-[13px] truncate w-full text-left">{cleanTitle}</span>
-                        {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full truncate text-left">{cat.memo}</div>}
+                        {/* 💡 truncate를 제거하여 글자가 좁은 화면에서도 사라지지 않게 처리! */}
+                        <span className="text-amber-400 font-bold text-[13px] text-left">{cleanTitle}</span>
+                        {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full text-left">{cat.memo}</div>}
                       </button>
                     ) : (
                       <div className="w-full p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-4 shadow-xl z-20 relative">
