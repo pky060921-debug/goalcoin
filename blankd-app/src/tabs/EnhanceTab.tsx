@@ -43,6 +43,7 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
             {safeCards.filter((c:any) => c.folder_name === folder)
               .sort((a:any, b:any) => getSortNumber(a.content) - getSortNumber(b.content))
               .map((card: any) => {
+                // 💡 [핵심 패치] 강화 탭도 인라인 스타일로 절대 겹치지 않게 고정!
                 const gridStyle = getGridStyle(card.content, studyMode, false);
                 const { title } = formatCardText(card.content);
                 const cleanTitle = getStrictTitleOnly(title);
@@ -51,7 +52,6 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
                   <div key={card.id} className="relative transition-all" style={gridStyle}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col justify-between ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
                       
-                      {/* 💡 [핵심 복구] flex 레이아웃 충돌로 인해 '반복.X'가 위로 뜨거나 어긋나는 문제를 완전히 해결했습니다. */}
                       <div className="flex justify-between items-center w-full mb-3" onClick={() => setActiveCard(card)}>
                         <div className="text-amber-400 font-bold text-[13px] truncate flex-1 pr-2">{cleanTitle}</div>
                         <div className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap">반복.{card.level}</div>
