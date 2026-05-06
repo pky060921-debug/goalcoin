@@ -57,7 +57,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panel
                    if (viewMode === '칙' && (c.title.includes('[칙]') || c.title.includes('[규]'))) return true;
                    return false;
                 })
-                // 💡 [핵심 패치] 숫자 억지 정렬을 폐기하고 원본 HTML 표 순서(id)를 완벽하게 보존합니다!
                 .sort((a:any, b:any) => a.id - b.id)
                 .map((cat: any) => {
                   const isExpanded = expandedId === cat.id;
@@ -76,11 +75,37 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, panel
                             {useAiRecommend && <button onClick={() => handleAiRecommend(cat)} className="text-[10px] bg-teal-900/40 text-teal-400 px-3 py-1.5 rounded hover:bg-teal-900/60 transition-colors">✨ AI 추천</button>}
                             <button onClick={() => setExpandedId(null)} className="text-white/40 text-xs hover:text-white">닫기</button>
                           </div>
-                          <div className="font-serif text-[15px] leading-loose text-white/80 p-5 bg-black/40 border border-white/10 max-h-64 overflow-y-auto rounded">
+                          
+                          {/* 💡 더블클릭 시 화면이 줌인되는 현상 방지 (select-none touch-manipulation) */}
+                          <div className="font-serif text-[15px] leading-loose text-white/80 p-5 bg-black/40 border border-white/10 max-h-64 overflow-y-auto rounded select-none touch-manipulation">
                             {parsedText.split(SPLIT_REGEX).map((word: string, idx: number, arr: any[]) => {
                               if (!word) return null;
                               const isSelected = selectedWords.has(idx);
-                              return <span key={idx} onClick={() => { const s = new Set(selectedWords); if(s.has(idx)) s.delete(idx); else s.add(idx); setSelectedWords(s); }} {...createLongPressHandlers(() => handleSplitCategory(cat, idx, arr), 800)} className={`cursor-pointer px-[2px] rounded transition-colors ${isSelected ? 'bg-amber-500 text-black font-bold' : 'hover:bg-white/20'}`}>{word}</span>
+                              return (
+                                <span 
+                                  key={idx} 
+                                  onClick={() => { 
+                                    const s = new Set(selectedWords); 
+                                    if(s.has(idx)) s.delete(idx); else s.add(idx); 
+                                    setSelectedWords(s); 
+                                  }} 
+                                  
+                                  // 💡 더블클릭 이벤트 (현재 단어 + 공간 + 다음 단어까지 한 방에 연결)
+                                  onDoubleClick={(e) => {
+                                    e.preventDefault();
+                                    const s = new Set(selectedWords);
+                                    s.add(idx);
+                                    if (idx + 1 < arr.length) s.add(idx + 1);
+                                    if (idx + 2 < arr.length) s.add(idx + 2);
+                                    setSelectedWords(s);
+                                  }}
+                                  
+                                  {...createLongPressHandlers(() => handleSplitCategory(cat, idx, arr), 800)} 
+                                  className={`cursor-pointer px-[2px] rounded transition-colors ${isSelected ? 'bg-amber-500 text-black font-bold' : 'hover:bg-white/20'}`}
+                                >
+                                  {word}
+                                </span>
+                              )
                             })}
                           </div>
                           <button onClick={() => handleMakeBlankCard(cat, parsedText, selectedWords, () => { setExpandedId(null); setSelectedWords(new Set()); })} className="w-full py-3 bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 text-sm font-bold tracking-widest transition-all rounded-sm mt-2">지식 추출 및 원본 삭제</button>
