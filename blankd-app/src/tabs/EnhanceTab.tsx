@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getStrictCardTitle, getGridStyle } from '../utils/constants';
+import { formatCardText, getGridStyle } from '../utils/constants';
 
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleDeleteCard, selectedEnhanceIds, setSelectedEnhanceIds, targetFolderName, setTargetFolderName, handleMoveEnhanceFolders }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
@@ -42,16 +42,18 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
               .filter((c:any) => c.folder_name === folder)
               .filter((c:any) => {
                  if (viewMode === 'all') return true;
-                 const title = getStrictCardTitle(c.content);
+                 const { title } = formatCardText(c.content);
                  if (viewMode === '법' && title.includes('[법]')) return true;
                  if (viewMode === '령' && title.includes('[령]')) return true;
                  if (viewMode === '칙' && (title.includes('[칙]') || title.includes('[규]'))) return true;
                  return false;
               })
-              // 💡 [핵심 패치] 카드 생성 순서대로 나열하여 레이아웃 붕괴를 원천 차단
               .sort((a:any, b:any) => a.id - b.id)
               .map((card: any) => {
                 const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
+                
+                // 💡 강화 탭에서도 완벽하게 제목과 본문이 나눠집니다!
+                const { title, body } = formatCardText(card.content);
 
                 return (
                   <div key={card.id} className="relative transition-all" style={gridStyle}>
@@ -59,10 +61,13 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                     <button 
                       {...createLongPressHandlers(() => handleDeleteCard(card.id), 800)}
                       onClick={() => setActiveCard(card)}
-                      className={`w-full p-5 text-left rounded-sm border transition-all h-full flex flex-col ${card.status === "BURNED" ? "border-white/5 text-white/30" : "border-indigo-500/30 text-indigo-300 bg-indigo-900/20 hover:bg-indigo-900/40"}`}
+                      className={`w-full p-5 text-left rounded-sm border transition-all h-full flex flex-col gap-3 ${card.status === "BURNED" ? "border-white/5 text-white/30" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"}`}
                     >
-                      <span className="text-[9px] text-amber-400 block mb-2">LV.{card.level}</span>
-                      <div className="font-serif text-[13px] font-bold leading-relaxed whitespace-pre-wrap">{getStrictCardTitle(card.content)}</div>
+                      <div className="flex justify-between items-start w-full">
+                        <span className="text-amber-400 font-bold text-[13px]">{title}</span>
+                        <span className="text-[9px] text-teal-400 border border-teal-500/30 px-1 rounded whitespace-nowrap mt-1">LV.{card.level}</span>
+                      </div>
+                      <div className="text-white/70 text-[12px] leading-relaxed whitespace-pre-wrap line-clamp-3">{body}</div>
                     </button>
                   </div>
                 );
