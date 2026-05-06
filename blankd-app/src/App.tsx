@@ -32,15 +32,13 @@ function MainApp() {
   const [savedCards, setSavedCards] = useState<any[]>([]);
   const [exams, setExams] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
-  const [viewMode, setViewMode] = useState('all');
-  const [colCount, setColCount] = useState(3);
+  
+  // 💡 설정 모드 간소화
+  const [studyMode, setStudyMode] = useState(localStorage.getItem('studyMode') || '법령');
   const [useAiRecommend, setUseAiRecommend] = useState(true);
   
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [examFile, setExamFile] = useState<File | null>(null);
-  const [selectedCraftIds, setSelectedCraftIds] = useState<Set<number>>(new Set());
-  const [selectedEnhanceIds, setSelectedEnhanceIds] = useState<Set<number>>(new Set());
-  const [targetFolderName, setTargetFolderName] = useState('');
   
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 부팅 완료..."]);
   const [panelState, setPanelState] = useState({ progress: 0, message: "대기 중..." });
@@ -86,8 +84,8 @@ function MainApp() {
   };
 
   const uploadLaw = async () => {
-    if (!lawFile) return alert("법령 파일을 선택해주세요.");
-    updatePanel('loading', '전송 대기', `문헌 업로드 시작...`, 5);
+    if (!lawFile) return alert("학습자료 파일을 선택해주세요.");
+    updatePanel('loading', '전송 대기', `학습자료 업로드 시작...`, 5);
     const fd = new FormData(); fd.append("file", lawFile); fd.append("wallet_address", safeAddress);
     try {
       const res = await fetch(`https://api.blankd.top/api/upload-pdf`, { method: "POST", body: fd });
@@ -121,8 +119,6 @@ function MainApp() {
     
     words.forEach((word, index) => {
       if (!word) return;
-      
-      // 💡 [핵심 패치] word.trim() !== "" 검사를 삭제하여 띄어쓰기도 빈칸으로 합칠 수 있도록 허용!
       if (selectedIndices.has(index)) {
         if (!isBlanking) { bodyContent += "[ "; if (answerText.length > 0) answerText += ", "; isBlanking = true; }
         bodyContent += word; answerText += word;
@@ -133,15 +129,27 @@ function MainApp() {
     });
     if (isBlanking) bodyContent += " ]";
     
+    // 법/령/칙 꼬리표를 유지하기 위해 타이틀을 묶어서 DB에 저장
     const finalCardContent = `${cat.title}\n\n${bodyContent}`;
 
     try {
-      const res = await fetch("https://api.blankd.top/api/save-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name }) });
+      const res = await fetch("https://api.blankd.top/api/save-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: cat.memo }) });
       if (res.ok) {
         await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
         loadAllData(); updatePanel('success', '완료', '추출 완료됨.', 100); onComplete(); setActiveTab('enhance');
       }
     } catch(err) { console.error(err); }
+  };
+
+  // 💡 즉각적인 두문자 메모 업데이트 
+  const handleUpdateMemo = async (id: number, memo: string) => {
+    setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
+    try {
+      await fetch("https://api.blankd.top/api/update-card-memo", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, id, memo })
+      });
+    } catch(e) { console.error(e); }
   };
 
   const handleSplitCategory = async (cat: any, splitIdx: number, wordsArray: string[]) => {
@@ -153,18 +161,6 @@ function MainApp() {
 
   const handleDeleteCategory = async (id: number) => { if (confirm("영구 삭제하시겠습니까?")) { await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } };
   const handleDeleteCard = async (id: number) => { if (confirm("영구 삭제하시겠습니까?")) { await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); setActiveCard(null); loadAllData(); } };
-
-  const handleMoveCraftFolders = async () => {
-    if (selectedCraftIds.size === 0 || !targetFolderName) return;
-    await fetch('https://api.blankd.top/api/move-categories', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: Array.from(selectedCraftIds), folder_name: targetFolderName, wallet_address: safeAddress})});
-    setSelectedCraftIds(new Set()); setTargetFolderName(''); loadAllData();
-  };
-  
-  const handleMoveEnhanceFolders = async () => {
-    if (selectedEnhanceIds.size === 0 || !targetFolderName) return;
-    await fetch('https://api.blankd.top/api/move-cards', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ids: Array.from(selectedEnhanceIds), folder_name: targetFolderName, wallet_address: safeAddress})});
-    setSelectedEnhanceIds(new Set()); setTargetFolderName(''); loadAllData();
-  };
 
   const submitCombatAnswer = async (isCorrect: boolean, time: number = 999.0) => {
     if (!activeCard) return;
@@ -252,18 +248,20 @@ function MainApp() {
       </header>
 
       {!isLoggedIn ? (
-        <main className="max-w-md mx-auto mt-8 flex flex-col items-center">
-          <div className="w-16 h-16 bg-white/5 border border-white/10 rounded-sm mb-8 flex justify-center items-center text-2xl">🏛️</div>
+        <main className="max-w-md mx-auto mt-16 flex flex-col items-center">
+          {/* 💡 로그인 화면 아이콘(이미지) 제거 */}
+          <h2 className="text-2xl font-serif text-white mb-4">법령 기억 강화 시스템</h2>
+          <p className="text-sm text-white/40 mb-12 text-center leading-relaxed">인지 과학 기반의 간격 반복 학습으로<br/>방대한 데이터를 영구 기억으로 전환합니다.</p>
           <button onClick={handleGoogleLogin} className="w-full py-4 bg-white text-black font-bold text-sm">Google 계정으로 시작하기</button>
         </main>
       ) : (
         <main className="max-w-6xl mx-auto">
           <ErrorBoundary fallbackLog={addLog}>
             {activeTab === 'progress' && <DashboardTab categories={categories} savedCards={savedCards} />}
-            {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} panelState={panelState} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} selectedCraftIds={selectedCraftIds} setSelectedCraftIds={setSelectedCraftIds} targetFolderName={targetFolderName} setTargetFolderName={setTargetFolderName} handleMoveCraftFolders={handleMoveCraftFolders} handleMakeBlankCard={handleMakeBlankCard} handleAiRecommend={handleAiRecommend} handleSplitCategory={handleSplitCategory} handleDeleteCategory={handleDeleteCategory} />}
-            {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleDeleteCard={handleDeleteCard} selectedEnhanceIds={selectedEnhanceIds} setSelectedEnhanceIds={setSelectedEnhanceIds} targetFolderName={targetFolderName} setTargetFolderName={setTargetFolderName} handleMoveEnhanceFolders={handleMoveEnhanceFolders} />}
+            {activeTab === 'create' && <CraftTab categories={categories} studyMode={studyMode} useAiRecommend={useAiRecommend} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleAiRecommend={handleAiRecommend} handleSplitCategory={handleSplitCategory} handleDeleteCategory={handleDeleteCategory} />}
+            {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} studyMode={studyMode} setActiveCard={setActiveCard} handleDeleteCard={handleDeleteCard} handleUpdateMemo={handleUpdateMemo} />}
             {activeTab === 'exam' && <ExamTab exams={exams} examFile={examFile} setExamFile={setExamFile} uploadExam={uploadExam} />}
-            {activeTab === 'settings' && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
+            {activeTab === 'settings' && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} handleDeleteAll={async () => { if(confirm('전체 초기화?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
           </ErrorBoundary>
         </main>
       )}
@@ -271,10 +269,6 @@ function MainApp() {
       {activeCard && (
         <CardModal activeCard={activeCard} totalTimeLimit={totalTimeLimit} elapsed={elapsed} answerInput={answerInput} setAnswerInput={setAnswerInput} inputStatus={inputStatus} handleSequentialInput={handleSequentialInput} renderContent={() => renderSequentialMaskedContent(activeCard.content)} onClose={() => setActiveCard(null)} />
       )}
-
-      <div className="fixed bottom-0 left-0 w-full bg-black/95 border-t border-indigo-500/50 p-4 z-50">
-        <div className="max-w-6xl mx-auto"><div className="text-[10px] text-indigo-400 font-bold mb-2 uppercase">System Terminal Logs</div><div className="space-y-1 h-20 overflow-y-auto font-mono">{systemLogs.map((log, idx) => (<div key={idx} className={`text-[11px] ${log.includes('❌') ? 'text-red-400' : 'text-white/70'}`}>{log}</div>))}</div></div>
-      </div>
     </div>
   );
 }
