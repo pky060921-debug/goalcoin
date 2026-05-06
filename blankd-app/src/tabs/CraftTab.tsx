@@ -56,6 +56,8 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
               .map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const contentToUse = cat.content || cat.title || "";
+                
+                // 💡 [핵심 패치] 여기서 getGridStyle이 던져주는 style을 직접 div에 박습니다.
                 const gridStyle = getGridStyle(contentToUse, studyMode, isExpanded);
                 const { title, body } = formatCardText(contentToUse);
                 const cleanTitle = getStrictTitleOnly(title);
@@ -64,11 +66,8 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
                   <div key={cat.id} className="relative transition-all" style={gridStyle}>
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); }} className="w-full h-full p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-2">
-                        {/* 💡 flex/gap 구조를 최소화하여 카드 높이가 일정하게 유지되도록 수정 */}
-                        <div className="w-full text-left">
-                          <span className="text-amber-400 font-bold text-[13px]">{cleanTitle}</span>
-                        </div>
-                        {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full truncate text-left mt-1">{cat.memo}</div>}
+                        <span className="text-amber-400 font-bold text-[13px] truncate w-full text-left">{cleanTitle}</span>
+                        {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full truncate text-left">{cat.memo}</div>}
                       </button>
                     ) : (
                       <div className="w-full p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-4 shadow-xl z-20 relative">
