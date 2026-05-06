@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, getGridStyle, SPLIT_REGEX } from '../utils/constants';
+import { formatCardText, getGridStyle, getStrictTitleOnly, SPLIT_REGEX } from '../utils/constants';
 
 export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, handleAiRecommend, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
@@ -56,15 +56,17 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
                 const isExpanded = expandedId === cat.id;
                 const gridStyle = getGridStyle(cat.title, studyMode, isExpanded);
                 const { title, body } = formatCardText(cat.content || cat.title);
-                const cleanTitle = title.replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '').trim();
+                
+                // 💡 새롭게 만든 초정밀 함수 적용
+                const cleanTitle = getStrictTitleOnly(cat.title);
 
                 return (
                   <div key={cat.id} className="relative transition-all" style={gridStyle}>
                     {!isExpanded ? (
-                      <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); }} className="w-full h-full p-5 bg-indigo-900/20 border border-indigo-500/30 rounded-sm text-left transition-colors hover:bg-indigo-900/40 flex flex-col gap-3">
-                        {/* 💡 [수정] 본문 텍스트가 표시되던 부분을 완전히 삭제했습니다. */}
-                        <span className="text-amber-400 font-bold text-[13px]">{cleanTitle}</span>
-                        {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full">{cat.memo}</div>}
+                      <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); }} className="w-full h-full p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm text-left transition-colors hover:bg-indigo-900/40 flex flex-col gap-2">
+                        {/* 💡 제목이 길면 자동으로 말줄임(truncate) 처리하여 화면 깨짐 방지 */}
+                        <span className="text-amber-400 font-bold text-[13px] truncate w-full">{cleanTitle}</span>
+                        {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
                       </button>
                     ) : (
                       <div className="w-full p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-4 shadow-xl z-20 relative">
