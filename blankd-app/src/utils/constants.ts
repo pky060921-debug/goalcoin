@@ -47,7 +47,7 @@ export const getSortNumber = (text?: string) => {
   return base + typeScore; 
 };
 
-// 💡 [핵심] 오직 '시작 열(Start)'만 인라인 스타일로 고정하여 자리를 지정합니다.
+// 💡 1열, 2열, 3열 절대 이탈 방지용 CSS
 export const getGridStyle = (text: string, studyMode: string, isExpanded: boolean) => {
   if (isExpanded) return { gridColumn: "1 / -1" }; 
   if (studyMode !== '법령') return {};
