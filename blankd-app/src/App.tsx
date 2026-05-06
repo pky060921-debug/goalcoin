@@ -113,22 +113,26 @@ function MainApp() {
     } catch(e) { updatePanel('error', '연결 실패', 'AI 통신 오류', 0); }
   };
 
-  // 💡 제목(Title)을 카드 내용에 합쳐서 강화(Enhance) 탭에서도 법/령/칙 구분이 가능하도록 수정
   const handleMakeBlankCard = async (cat: any, content: string, selectedIndices: Set<number>, onComplete: () => void) => {
     if (!isLoggedIn || selectedIndices.size === 0) return alert("단어를 선택해주세요.");
     updatePanel('loading', '처리 중', '카드 추출 중...', 50);
     const words = content ? content.split(SPLIT_REGEX) : [];
     let bodyContent = ""; let answerText = ""; let isBlanking = false;
+    
     words.forEach((word, index) => {
       if (!word) return;
-      if (selectedIndices.has(index) && word.trim() !== "") {
+      
+      // 💡 [핵심 패치] word.trim() !== "" 검사를 삭제하여 띄어쓰기도 빈칸으로 합칠 수 있도록 허용!
+      if (selectedIndices.has(index)) {
         if (!isBlanking) { bodyContent += "[ "; if (answerText.length > 0) answerText += ", "; isBlanking = true; }
         bodyContent += word; answerText += word;
-      } else { if (isBlanking) { bodyContent += " ]"; isBlanking = false; } bodyContent += word; }
+      } else { 
+        if (isBlanking) { bodyContent += " ]"; isBlanking = false; } 
+        bodyContent += word; 
+      }
     });
     if (isBlanking) bodyContent += " ]";
     
-    // 핵심: 강화 탭 배치를 위해 타이틀 병합
     const finalCardContent = `${cat.title}\n\n${bodyContent}`;
 
     try {
@@ -174,7 +178,7 @@ function MainApp() {
       const regex = /\[\s*(.*?)\s*\]/g; let match;
       while((match = regex.exec(activeCard.content || "")) !== null) {
         const val = match[1].trim();
-        if (['법', '령', '칙', '규'].includes(val)) continue; // 💡 태그는 빈칸에서 예외 처리
+        if (['법', '령', '칙', '규'].includes(val)) continue; 
         foundBlanks.push({ answer: val, correct: false });
       }
       if(foundBlanks.length === 0 && activeCard.answer) foundBlanks.push(...activeCard.answer.split(',').map((a:any) => ({answer: a.trim(), correct: false})));
@@ -210,9 +214,7 @@ function MainApp() {
     const parts = text.split(/(\[.*?\])/g); let bIdx = 0;
     return parts.map((part, i) => {
       if (part.startsWith('[') && part.endsWith(']')) {
-        // 💡 타이틀 태그 렌더링 예외 처리
         if (/^\[(법|령|칙|규)\]$/.test(part)) return <span key={i} className="text-amber-400 font-bold mr-1">{part}</span>;
-
         const isCorrect = blanks[bIdx]?.correct; const isCurrent = bIdx === currentBlankIdx; bIdx++;
         if (isCorrect) return <span key={i} className="text-green-400 font-bold mx-1">{part.replace(/\[|\]/g, '')}</span>;
         else if (isCurrent) return <span key={i} className="inline-block min-w-[60px] h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>;
@@ -230,8 +232,6 @@ function MainApp() {
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-6 sm:p-12 relative pb-48">
-      
-      {/* 💡 메뉴를 Blank_D 로고 바로 옆으로 이동 */}
       <header className="max-w-6xl mx-auto border-b border-white/10 pb-8 mb-12 flex items-center gap-10">
         <h1 className="text-2xl font-light tracking-widest text-white shrink-0">Blank_D</h1>
         {isLoggedIn && (
