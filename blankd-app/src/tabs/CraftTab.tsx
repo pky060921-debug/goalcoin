@@ -49,8 +49,10 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
             {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const gridStyle = getGridStyle(cat.title, viewMode, isExpanded, colCount);
-                const { title, body } = formatCardText(cat.content || cat.title);
-                const cleanTitle = getStrictTitleOnly(cat.content || cat.title);
+                // 💡 [핵심] 여기서 분리된 title과 body를 활용하여, 제목과 본문(①부터 시작)을 완벽하게 분리 출력합니다.
+                const contentToUse = cat.content || cat.title || "";
+                const { body } = formatCardText(contentToUse);
+                const cleanTitle = getStrictTitleOnly(contentToUse);
 
                 return (
                   <div key={cat.id} className="relative transition-all" style={gridStyle}>
@@ -74,7 +76,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
                             )
                           })}
                         </div>
-                        <button onClick={() => handleMakeBlankCard({ ...cat, title: cat.title, memo: memoInput }, parsedText, selectedWords, () => setExpandedId(null))} className="w-full py-3 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-sm font-bold rounded-sm mt-2 transition-all hover:bg-amber-500/30">지식 추출 저장</button>
+                        <button onClick={() => handleMakeBlankCard({ ...cat, title: cleanTitle, memo: memoInput }, parsedText, selectedWords, () => setExpandedId(null))} className="w-full py-3 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-sm font-bold rounded-sm mt-2 transition-all hover:bg-amber-500/30">지식 추출 저장</button>
                       </div>
                     )}
                   </div>
