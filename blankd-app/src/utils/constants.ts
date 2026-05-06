@@ -47,7 +47,7 @@ export const getSortNumber = (text?: string) => {
   return base + typeScore; 
 };
 
-// 💡 [핵심 패치] 절대 겹치지 않게 자리를 고정하는 '인라인 스타일'로 롤백
+// 💡 [핵심] 오직 '시작 열(Start)'만 인라인 스타일로 고정하여 자리를 지정합니다.
 export const getGridStyle = (text: string, studyMode: string, isExpanded: boolean) => {
   if (isExpanded) return { gridColumn: "1 / -1" }; 
   if (studyMode !== '법령') return {};
