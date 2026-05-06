@@ -1,9 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, getGridStyle, getStrictTitleOnly, getSortNumber, SPLIT_REGEX } from '../utils/constants';
+import { formatCardText, getGridClass, getStrictTitleOnly, getSortNumber, sortFolders, SPLIT_REGEX } from '../utils/constants';
 
 export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, handleAiRecommend, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
-  const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
+  
+  // 💡 폴더도 숫자 기반 오름차순으로 완벽히 정렬됩니다.
+  const rawFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더') as string[];
+  const craftFolders = sortFolders(rawFolders);
+  
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [parsedText, setParsedText] = useState("");
@@ -44,24 +48,29 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
           <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
           
           {studyMode === '법령' && (
-            <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(3, minmax(0, 1fr))` }}>
+            <div className="grid grid-cols-3 gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest">
                <div>법</div>
                <div>시행령</div>
                <div>시행규칙</div>
             </div>
           )}
 
-          <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
-            {/* 💡 [핵심 패치] a.id - b.id 삭제 후 3단 레이아웃을 위한 getSortNumber 로직 완벽 복구! */}
-            {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => getSortNumber(a.title) - getSortNumber(b.title)).map((cat: any) => {
+          {/* 💡 그리드를 강제하는 grid-cols-3 클래스 적용 */}
+          <div className={`grid gap-4 ${studyMode === '법령' ? 'grid-cols-3' : 'grid-cols-1 md:grid-cols-2'}`}>
+            {safeCategories.filter((c:any) => c.folder_name === folder)
+              // 💡 조항 번호 기반의 마스터 정렬 적용
+              .sort((a:any, b:any) => getSortNumber(a.content || a.title) - getSortNumber(b.content || b.title))
+              .map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const contentToUse = cat.content || cat.title || "";
-                const gridStyle = getGridStyle(contentToUse, studyMode, isExpanded);
+                
+                // 💡 열 위치를 지정하는 Tailwind 클래스 추출
+                const gridClass = getGridClass(contentToUse, studyMode, isExpanded);
                 const { title, body } = formatCardText(contentToUse);
                 const cleanTitle = getStrictTitleOnly(title);
 
                 return (
-                  <div key={cat.id} className="relative transition-all" style={gridStyle}>
+                  <div key={cat.id} className={`relative transition-all ${gridClass}`}>
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); }} className="w-full h-full p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm text-left transition-colors hover:bg-indigo-900/40 flex flex-col gap-2">
                         <span className="text-amber-400 font-bold text-[13px] truncate w-full">{cleanTitle}</span>
