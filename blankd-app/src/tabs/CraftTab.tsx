@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, getGridStyle, getStrictTitleOnly, SPLIT_REGEX } from '../utils/constants';
+import { formatCardText, getGridStyle, getStrictTitleOnly, getSortNumber, SPLIT_REGEX } from '../utils/constants';
 
 export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, handleAiRecommend, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
@@ -52,10 +52,9 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
           )}
 
           <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
-            {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
+            {/* 💡 [핵심 패치] a.id - b.id 삭제 후 3단 레이아웃을 위한 getSortNumber 로직 완벽 복구! */}
+            {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => getSortNumber(a.title) - getSortNumber(b.title)).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
-                
-                // 💡 [핵심 패치 3] 잘려있는 cat.title 대신 원본 데이터(cat.content)에서 제목을 끄집어냅니다!
                 const contentToUse = cat.content || cat.title || "";
                 const gridStyle = getGridStyle(contentToUse, studyMode, isExpanded);
                 const { title, body } = formatCardText(contentToUse);
@@ -75,7 +74,6 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
                           {useAiRecommend && <button onClick={(e) => { e.stopPropagation(); handleAiRecommend(cat); }} className="text-[10px] bg-teal-900/40 text-teal-400 px-3 py-1.5 rounded hover:bg-teal-900/60 transition-colors">✨ AI 추천</button>}
                         </div>
                         <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-3 text-sm text-teal-200 outline-none rounded-sm mb-4" />
-                        
                         <div className="font-serif text-[15px] leading-loose text-white/80 p-5 bg-black/40 border border-white/10 max-h-64 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap">
                           {parsedText.split(SPLIT_REGEX).map((word: string, idx: number, arr: any[]) => {
                             if (!word) return null;
@@ -85,7 +83,7 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
                             )
                           })}
                         </div>
-                        <button onClick={() => handleMakeBlankCard({ ...cat, title, memo: memoInput }, parsedText, selectedWords, () => setExpandedId(null))} className="w-full py-3 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-sm font-bold rounded-sm mt-2">지식 추출 저장</button>
+                        <button onClick={() => handleMakeBlankCard({ ...cat, title: cat.title, memo: memoInput }, parsedText, selectedWords, () => setExpandedId(null))} className="w-full py-3 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-sm font-bold rounded-sm mt-2">지식 추출 저장</button>
                       </div>
                     )}
                   </div>
