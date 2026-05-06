@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { formatCardText, getGridStyle, getStrictTitleOnly, SPLIT_REGEX } from '../utils/constants';
 
-export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, handleAiRecommend, handleSplitCategory, handleDeleteCategory }: any) => {
+export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, handleAiRecommend, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
@@ -40,7 +40,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
         <div key={folder} className="mb-8">
           <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
           
-          {/* 💡 영어 텍스트 삭제 및 원본 colCount 구조 유지 */}
+          {/* 💡 영어 삭제 완료 */}
           {viewMode === 'all' && colCount >= 3 && (
             <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
                <div>법</div><div>시행령</div><div>시행규칙</div>
@@ -48,28 +48,28 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
           )}
 
           <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-            {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
+            {safeCategories.filter((c:any) => c.folder_name === folder)
+              .sort((a:any, b:any) => a.id - b.id) // 💡 원본 정렬 방식 유지
+              .map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const gridStyle = getGridStyle(cat.title, viewMode, isExpanded, colCount);
                 const { title, body } = formatCardText(cat.content || cat.title);
-                const cleanTitle = getStrictTitleOnly(title); // 💡 제목만 깔끔하게 추출
+                const cleanTitle = getStrictTitleOnly(title);
 
                 return (
                   <div key={cat.id} className="relative transition-all" style={gridStyle}>
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); }} className="w-full h-full p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-2">
-                        {/* 💡 본문 제거 및 제목만 출력 */}
-                        <span className="text-amber-400 font-bold text-[13px] text-left">{cleanTitle}</span>
-                        {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full text-left">{cat.memo}</div>}
+                        {/* 💡 본문 없이 제목만 깔끔하게 출력 */}
+                        <span className="text-amber-400 font-bold text-[13px] text-left leading-snug">{cleanTitle}</span>
+                        {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full text-left truncate">{cat.memo}</div>}
                       </button>
                     ) : (
-                      <div className="w-full p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-4 shadow-xl z-20 relative">
+                      <div className="w-full p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-4 shadow-xl z-20 relative animate-in zoom-in-95">
                         <div className="flex justify-between items-center mb-2 cursor-pointer" onClick={() => setExpandedId(null)}>
                           <span className="text-amber-400 font-bold text-[13px]">{cleanTitle}</span>
-                          {useAiRecommend && <button onClick={(e) => { e.stopPropagation(); handleAiRecommend(cat); }} className="text-[10px] bg-teal-900/40 text-teal-400 px-3 py-1.5 rounded hover:bg-teal-900/60 transition-colors">✨ AI 추천</button>}
                         </div>
                         <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-3 text-sm text-teal-200 outline-none rounded-sm mb-4" />
-                        
                         <div className="font-serif text-[15px] leading-loose text-white/80 p-5 bg-black/40 border border-white/10 max-h-64 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap">
                           {parsedText.split(SPLIT_REGEX).map((word: string, idx: number, arr: any[]) => {
                             if (!word) return null;
@@ -79,7 +79,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
                             )
                           })}
                         </div>
-                        <button onClick={() => handleMakeBlankCard({ ...cat, title: cat.title, memo: memoInput }, parsedText, selectedWords, () => setExpandedId(null))} className="w-full py-3 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-sm font-bold rounded-sm mt-2">지식 추출 저장</button>
+                        <button onClick={() => handleMakeBlankCard({ ...cat, title: cat.title, memo: memoInput }, parsedText, selectedWords, () => setExpandedId(null))} className="w-full py-3 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-sm font-bold rounded-sm mt-2 transition-all hover:bg-amber-500/30">지식 추출 저장</button>
                       </div>
                     )}
                   </div>
