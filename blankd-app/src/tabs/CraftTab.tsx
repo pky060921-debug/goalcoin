@@ -1,13 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, getGridClass, getStrictTitleOnly, getSortNumber, sortFolders, SPLIT_REGEX } from '../utils/constants';
+import { formatCardText, getGridStyle, getStrictTitleOnly, getSortNumber, sortFolders, SPLIT_REGEX } from '../utils/constants';
 
 export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, handleAiRecommend, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
-  
-  // 💡 폴더도 숫자 기반 오름차순으로 완벽히 정렬됩니다.
   const rawFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더') as string[];
   const craftFolders = sortFolders(rawFolders);
-  
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [parsedText, setParsedText] = useState("");
@@ -48,29 +45,26 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
           <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
           
           {studyMode === '법령' && (
-            <div className="grid grid-cols-3 gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest">
+            <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(3, minmax(0, 1fr))` }}>
                <div>법</div>
                <div>시행령</div>
                <div>시행규칙</div>
             </div>
           )}
 
-          {/* 💡 그리드를 강제하는 grid-cols-3 클래스 적용 */}
-          <div className={`grid gap-4 ${studyMode === '법령' ? 'grid-cols-3' : 'grid-cols-1 md:grid-cols-2'}`}>
+          {/* 💡 [핵심 복구] 인라인 스타일로 3단 표를 절대 깨지지 않게 강제합니다. */}
+          <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
             {safeCategories.filter((c:any) => c.folder_name === folder)
-              // 💡 조항 번호 기반의 마스터 정렬 적용
-              .sort((a:any, b:any) => getSortNumber(a.content || a.title) - getSortNumber(b.content || b.title))
+              // 💡 [핵심 복구] getSortNumber를 다시 연결하여 법->령->칙 순서 보장!
+              .sort((a:any, b:any) => getSortNumber(a.title) - getSortNumber(b.title))
               .map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
-                const contentToUse = cat.content || cat.title || "";
-                
-                // 💡 열 위치를 지정하는 Tailwind 클래스 추출
-                const gridClass = getGridClass(contentToUse, studyMode, isExpanded);
-                const { title, body } = formatCardText(contentToUse);
+                const gridStyle = getGridStyle(cat.title, studyMode, isExpanded);
+                const { title, body } = formatCardText(cat.content || cat.title);
                 const cleanTitle = getStrictTitleOnly(title);
 
                 return (
-                  <div key={cat.id} className={`relative transition-all ${gridClass}`}>
+                  <div key={cat.id} className="relative transition-all" style={gridStyle}>
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); }} className="w-full h-full p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm text-left transition-colors hover:bg-indigo-900/40 flex flex-col gap-2">
                         <span className="text-amber-400 font-bold text-[13px] truncate w-full">{cleanTitle}</span>
@@ -83,6 +77,7 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
                           {useAiRecommend && <button onClick={(e) => { e.stopPropagation(); handleAiRecommend(cat); }} className="text-[10px] bg-teal-900/40 text-teal-400 px-3 py-1.5 rounded hover:bg-teal-900/60 transition-colors">✨ AI 추천</button>}
                         </div>
                         <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-3 text-sm text-teal-200 outline-none rounded-sm mb-4" />
+                        
                         <div className="font-serif text-[15px] leading-loose text-white/80 p-5 bg-black/40 border border-white/10 max-h-64 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap">
                           {parsedText.split(SPLIT_REGEX).map((word: string, idx: number, arr: any[]) => {
                             if (!word) return null;
