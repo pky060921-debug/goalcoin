@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, getGridStyle, SPLIT_REGEX } from '../utils/constants';
+import { formatCardText, getGridStyle, getStrictTitleOnly, getSortNumber, sortFolders, SPLIT_REGEX } from '../utils/constants';
 
-export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, handleAiRecommend, handleDeleteCategory }: any) => {
+export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, handleAiRecommend, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
-  const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
+  const rawFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더') as string[];
+  const craftFolders = sortFolders(rawFolders);
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [parsedText, setParsedText] = useState("");
@@ -43,25 +44,31 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
         <div key={folder} className="mb-8">
           <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
           
-          {/* 💡 (영어) 없는 깔끔한 3단 헤더 */}
-          <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-             {colCount >= 3 && (<><div>법</div><div>시행령</div><div>시행규칙</div></>)}
-          </div>
+          {studyMode === '법령' && (
+            <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(3, minmax(0, 1fr))` }}>
+               <div>법</div><div>시행령</div><div>시행규칙</div>
+            </div>
+          )}
 
-          <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-            {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
+          <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
+            {safeCategories.filter((c:any) => c.folder_name === folder)
+              .sort((a:any, b:any) => getSortNumber(a.content || a.title) - getSortNumber(b.content || b.title))
+              .map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
-                const gridStyle = getGridStyle(cat.title, viewMode, isExpanded, colCount);
-                const { title, body } = formatCardText(cat.content || cat.title);
-                const cleanTitle = title.replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '').trim();
+                const contentToUse = cat.content || cat.title || "";
+                const gridStyle = getGridStyle(contentToUse, studyMode, isExpanded);
+                const { title, body } = formatCardText(contentToUse);
+                const cleanTitle = getStrictTitleOnly(title);
 
                 return (
                   <div key={cat.id} className="relative transition-all" style={gridStyle}>
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); }} className="w-full h-full p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-2">
-                        {/* 💡 본문 없이 오직 제목만 깔끔하게 남습니다 */}
-                        <span className="text-amber-400 font-bold text-[13px] truncate w-full text-left">{cleanTitle}</span>
-                        {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full truncate text-left">{cat.memo}</div>}
+                        {/* 💡 flex/gap 구조를 최소화하여 카드 높이가 일정하게 유지되도록 수정 */}
+                        <div className="w-full text-left">
+                          <span className="text-amber-400 font-bold text-[13px]">{cleanTitle}</span>
+                        </div>
+                        {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full truncate text-left mt-1">{cat.memo}</div>}
                       </button>
                     ) : (
                       <div className="w-full p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-4 shadow-xl z-20 relative">
