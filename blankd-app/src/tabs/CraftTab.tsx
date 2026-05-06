@@ -39,8 +39,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
       {craftFolders.map((folder: string) => openFolders[folder] && (
         <div key={folder} className="mb-8">
           <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
-          
-          {/* 💡 영어 삭제 완료 */}
           {viewMode === 'all' && colCount >= 3 && (
             <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
                <div>법</div><div>시행령</div><div>시행규칙</div>
@@ -48,19 +46,16 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
           )}
 
           <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-            {safeCategories.filter((c:any) => c.folder_name === folder)
-              .sort((a:any, b:any) => a.id - b.id) // 💡 원본 정렬 방식 유지
-              .map((cat: any) => {
+            {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const gridStyle = getGridStyle(cat.title, viewMode, isExpanded, colCount);
                 const { title, body } = formatCardText(cat.content || cat.title);
-                const cleanTitle = getStrictTitleOnly(title);
+                const cleanTitle = getStrictTitleOnly(cat.content || cat.title);
 
                 return (
                   <div key={cat.id} className="relative transition-all" style={gridStyle}>
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); }} className="w-full h-full p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-2">
-                        {/* 💡 본문 없이 제목만 깔끔하게 출력 */}
                         <span className="text-amber-400 font-bold text-[13px] text-left leading-snug">{cleanTitle}</span>
                         {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full text-left truncate">{cat.memo}</div>}
                       </button>
