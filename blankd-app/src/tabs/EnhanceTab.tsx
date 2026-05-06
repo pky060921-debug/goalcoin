@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getStrictCardTitle, getSortNumber, getGridStyle } from '../utils/constants';
+import { getStrictCardTitle, getGridStyle } from '../utils/constants';
 
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleDeleteCard, selectedEnhanceIds, setSelectedEnhanceIds, targetFolderName, setTargetFolderName, handleMoveEnhanceFolders }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
@@ -41,7 +41,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
             {safeCards
               .filter((c:any) => c.folder_name === folder)
               .filter((c:any) => {
-                 // 💡 설정에서 선택한 법/령/칙 뷰어 연동
                  if (viewMode === 'all') return true;
                  const title = getStrictCardTitle(c.content);
                  if (viewMode === '법' && title.includes('[법]')) return true;
@@ -49,9 +48,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                  if (viewMode === '칙' && (title.includes('[칙]') || title.includes('[규]'))) return true;
                  return false;
               })
-              .sort((a:any, b:any) => getSortNumber(a.content) - getSortNumber(b.content))
+              // 💡 [핵심 패치] 카드 생성 순서대로 나열하여 레이아웃 붕괴를 원천 차단
+              .sort((a:any, b:any) => a.id - b.id)
               .map((card: any) => {
-                // 💡 완벽한 인라인 3단 배치 적용
                 const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
 
                 return (
@@ -63,7 +62,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                       className={`w-full p-5 text-left rounded-sm border transition-all h-full flex flex-col ${card.status === "BURNED" ? "border-white/5 text-white/30" : "border-indigo-500/30 text-indigo-300 bg-indigo-900/20 hover:bg-indigo-900/40"}`}
                     >
                       <span className="text-[9px] text-amber-400 block mb-2">LV.{card.level}</span>
-                      <div className="font-serif text-[13px] font-bold leading-relaxed">{getStrictCardTitle(card.content)}</div>
+                      <div className="font-serif text-[13px] font-bold leading-relaxed whitespace-pre-wrap">{getStrictCardTitle(card.content)}</div>
                     </button>
                   </div>
                 );
