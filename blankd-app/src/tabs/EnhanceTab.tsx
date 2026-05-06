@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, getGridStyle, getStrictTitleOnly } from '../utils/constants';
+import { getGridStyle, getStrictTitleOnly, formatCardText } from '../utils/constants';
 
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleUpdateMemo, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
@@ -29,7 +29,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
         <div key={folder} className="mb-8">
           <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
           
-          {/* 💡 영어 없는 헤더 */}
           {viewMode === 'all' && colCount >= 3 && (
             <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
                <div>법</div><div>시행령</div><div>시행규칙</div>
@@ -37,9 +36,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
           )}
 
           <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
+            {safeCards.filter((c:any) => c.folder_name === folder)
+              .sort((a:any, b:any) => a.id - b.id) // 💡 원본 정렬 방식 유지
+              .map((card: any) => {
                 const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
                 const { title } = formatCardText(card.content);
+                // 💡 [버그수정] 제X조(조항명)가 온전히 나오도록 수정
                 const cleanTitle = getStrictTitleOnly(title);
 
                 return (
@@ -47,13 +49,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col justify-between ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
                       
                       <div className="flex justify-between items-start w-full gap-2 mb-2" onClick={() => setActiveCard(card)}>
-                        {/* 💡 본문 삭제 및 제목 출력 */}
-                        <span className="text-amber-400 font-bold text-[13px] text-left leading-relaxed">{cleanTitle}</span>
-                        {/* 💡 '반복.X'가 두 줄로 깨지지 않도록 방어막(shrink-0 whitespace-nowrap) 설치 */}
-                        <span className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap shrink-0 mt-0.5">반복.{card.level}</span>
+                        {/* 💡 제목이 길어도 잘리지 않고 개행되도록 처리 */}
+                        <div className="text-amber-400 font-bold text-[13px] text-left flex-1 leading-snug">{cleanTitle}</div>
+                        {/* 💡 [수정] 반복.X가 절대 찌그러지거나 줄바꿈되지 않게 방어 */}
+                        <div className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap shrink-0 mt-0.5">반복.{card.level}</div>
                       </div>
                       
-                      {/* 메모 출력 */}
                       <input 
                         defaultValue={card.memo || ""} 
                         placeholder="암기 메모 입력..." 
