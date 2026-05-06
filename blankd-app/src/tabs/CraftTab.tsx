@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, getGridStyle, SPLIT_REGEX } from '../utils/constants';
+import { formatCardText, getGridStyle, SPLIT_REGEX, extractLawTag } from '../utils/constants';
 
 export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFile, setLawFile, uploadLaw, selectedCraftIds, setSelectedCraftIds, targetFolderName, setTargetFolderName, handleMoveCraftFolders, handleMakeBlankCard, handleAiRecommend, handleSplitCategory, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
@@ -8,6 +8,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [parsedText, setParsedText] = useState("");
   const [selectedWords, setSelectedWords] = useState<Set<number>>(new Set());
+  const [memoInput, setMemoInput] = useState(""); // 암기 메모 상태 추가
 
   useEffect(() => {
     const initial: Record<string, boolean> = {};
@@ -23,7 +24,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
   };
 
   return (
-    // 💡 1. 우측 터미널 공간을 완전히 없애고 전체 화면을 사용하도록 변경했습니다.
     <div className="animate-in fade-in space-y-8">
       <div className="flex gap-2 mb-4">
         <label className="flex-1 border border-white/20 p-2 text-center text-xs hover:bg-white/10 cursor-pointer text-white/80">
@@ -61,17 +61,22 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
               .map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const gridStyle = getGridStyle(cat.title, viewMode, isExpanded, colCount);
-                
-                // 💡 2. DB의 텍스트를 무조건 제목과 본문으로 쪼갭니다.
                 const { title, body } = formatCardText(cat.content || cat.title);
+                const lawTag = extractLawTag(title);
+                // 타이틀에서 [법] 등 텍스트 제거하여 순수 조항 번호만 남김
+                const cleanTitle = title.replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '').trim();
 
                 return (
                   <div key={cat.id} className="relative transition-all" style={gridStyle}>
                     <input type="checkbox" className="absolute top-2 right-2 z-10 w-4 h-4 cursor-pointer" checked={selectedCraftIds.has(cat.id)} onChange={() => { const s = new Set(selectedCraftIds); if(s.has(cat.id)) s.delete(cat.id); else s.add(cat.id); setSelectedCraftIds(s); }} />
                     {!isExpanded ? (
-                      // 💡 3. 닫혀있는 카드 모양에서도 제목과 본문이 위아래로 나뉘도록 디자인 수정!
-                      <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id), 800)} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(`${title}\n\n${body}`); }} className="w-full h-full p-5 bg-indigo-900/20 border border-indigo-500/30 rounded-sm text-left transition-colors hover:bg-indigo-900/40 flex flex-col gap-3">
-                        <span className="text-amber-400 font-bold text-[13px]">{title}</span>
+                      <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id), 800)} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(`${cleanTitle}\n\n${body}`); setMemoInput(cat.memo || ""); }} className="w-full h-full p-5 bg-indigo-900/20 border border-indigo-500/30 rounded-sm text-left transition-colors hover:bg-indigo-900/40 flex flex-col gap-3">
+                        <div className="flex justify-between items-center w-full">
+                           <span className="text-amber-400 font-bold text-[13px]">{cleanTitle}</span>
+                           {lawTag && <span className="text-[10px] text-white/50 bg-black/40 px-2 py-1 rounded border border-white/10">{lawTag}</span>}
+                        </div>
+                        {/* 암기 메모 표시 영역 */}
+                        {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20">{cat.memo}</div>}
                         <span className="text-white/60 text-[12px] leading-relaxed line-clamp-3 whitespace-pre-wrap">{body}</span>
                       </button>
                     ) : (
@@ -81,7 +86,15 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
                           <button onClick={() => setExpandedId(null)} className="text-white/40 text-xs hover:text-white">닫기</button>
                         </div>
                         
-                        {/* 💡 4. 열렸을 때도 줄바꿈(whitespace-pre-wrap)이 완벽하게 유지됩니다. */}
+                        {/* 암기 메모 입력 란 */}
+                        <input 
+                          type="text" 
+                          value={memoInput} 
+                          onChange={(e) => setMemoInput(e.target.value)} 
+                          placeholder="두문자 암기 비법 입력..." 
+                          className="w-full bg-black/50 border border-teal-500/30 p-3 text-sm text-teal-200 outline-none rounded-sm mb-4 placeholder-teal-800 focus:border-teal-400"
+                        />
+
                         <div className="font-serif text-[15px] leading-loose text-white/80 p-5 bg-black/40 border border-white/10 max-h-64 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap">
                           {parsedText.split(SPLIT_REGEX).map((word: string, idx: number, arr: any[]) => {
                             if (!word) return null;
@@ -110,7 +123,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
                             )
                           })}
                         </div>
-                        <button onClick={() => handleMakeBlankCard({ ...cat, title }, parsedText, selectedWords, () => { setExpandedId(null); setSelectedWords(new Set()); })} className="w-full py-3 bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 text-sm font-bold tracking-widest transition-all rounded-sm mt-2">지식 추출 및 원본 삭제</button>
+                        <button onClick={() => handleMakeBlankCard({ ...cat, title, memo: memoInput }, parsedText, selectedWords, () => { setExpandedId(null); setSelectedWords(new Set()); setMemoInput(""); })} className="w-full py-3 bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 text-sm font-bold tracking-widest transition-all rounded-sm mt-2">지식 추출 및 원본 삭제</button>
                       </div>
                     )}
                   </div>
