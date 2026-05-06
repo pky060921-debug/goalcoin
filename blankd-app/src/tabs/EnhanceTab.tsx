@@ -21,7 +21,6 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleDeleteC
 
   return (
     <div className="space-y-8 animate-in fade-in">
-      {/* 💡 업로드 및 대량 이동 UI 모두 삭제 완료 */}
       <div className="flex flex-wrap gap-2 mb-6">
         {enhanceFolders.map((f: string) => <button key={f} onClick={() => setOpenFolders(p => ({...p, [f]: !p[f]}))} className={`px-4 py-2 text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-amber-600 border-amber-500 text-white' : 'bg-amber-900/30 text-amber-300 border-amber-500/30'}`}>📁 {f}</button>)}
       </div>
@@ -30,7 +29,6 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleDeleteC
         <div key={folder} className="mb-8">
           <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
           
-          {/* 💡 만들기 탭과 동일한 3단 표 머리글 */}
           {studyMode === '법령' && (
             <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(3, minmax(0, 1fr))` }}>
                <div>법 (Law)</div>
@@ -56,15 +54,15 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleDeleteC
                     >
                       <div className="flex justify-between items-center w-full" onClick={() => setActiveCard(card)}>
                         <span className="text-amber-400 font-bold text-[13px]">{cleanTitle}</span>
-                        <span className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap">LV.{card.level}</span>
+                        {/* 💡 요청하신 반복 횟수(레벨) 복구 (X버튼은 삭제된 상태 유지) */}
+                        <span className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap">반복.{card.level}</span>
                       </div>
                       
-                      {/* 💡 언제든 텍스트를 수정할 수 있는 메모(두문자) 입력칸 */}
                       <input 
                         defaultValue={card.memo || ""}
                         placeholder="암기 메모/두문자 입력..."
-                        onClick={(e) => e.stopPropagation()} // 클릭 시 카드(학습)가 열리는 것을 방지
-                        onBlur={(e) => handleUpdateMemo(card.id, e.target.value)} // 포커스를 잃으면 자동 저장!
+                        onClick={(e) => e.stopPropagation()} 
+                        onBlur={(e) => handleUpdateMemo(card.id, e.target.value)}
                         className="text-[11px] text-teal-300 bg-teal-950/40 p-2 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 focus:bg-teal-900/40 transition-colors placeholder-teal-800"
                       />
 
