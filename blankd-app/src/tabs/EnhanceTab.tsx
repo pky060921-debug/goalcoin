@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { getGridClass, getStrictTitleOnly, formatCardText, getSortNumber, sortFolders } from '../utils/constants';
+import { getGridStyle, getStrictTitleOnly, formatCardText, getSortNumber, sortFolders } from '../utils/constants';
 
 export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateMemo, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
-  
   const rawFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더') as string[];
   const enhanceFolders = sortFolders(rawFolders);
-  
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -36,23 +34,24 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
           <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
           
           {studyMode === '법령' && (
-            <div className="grid grid-cols-3 gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest">
+            <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(3, minmax(0, 1fr))` }}>
                <div>법</div>
                <div>시행령</div>
                <div>시행규칙</div>
             </div>
           )}
 
-          <div className={`grid gap-4 ${studyMode === '법령' ? 'grid-cols-3' : 'grid-cols-1 md:grid-cols-2'}`}>
+          {/* 💡 [핵심 복구] 인라인 스타일과 getSortNumber 마스터 정렬 동시 적용 */}
+          <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
             {safeCards.filter((c:any) => c.folder_name === folder)
               .sort((a:any, b:any) => getSortNumber(a.content) - getSortNumber(b.content))
               .map((card: any) => {
-                const gridClass = getGridClass(card.content, studyMode, false);
+                const gridStyle = getGridStyle(card.content, studyMode, false);
                 const { title } = formatCardText(card.content);
                 const cleanTitle = getStrictTitleOnly(title);
 
                 return (
-                  <div key={card.id} className={`relative transition-all ${gridClass}`}>
+                  <div key={card.id} className="relative transition-all" style={gridStyle}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} className={`w-full p-4 text-left rounded-sm border transition-all h-full flex flex-col gap-2 ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
                       
                       <div className="flex justify-between items-center w-full gap-2" onClick={() => setActiveCard(card)}>
