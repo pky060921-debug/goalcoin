@@ -17,18 +17,34 @@ export const formatCardText = (text?: string) => {
     const parts = str.split('\n\n');
     return { title: parts[0].trim(), body: parts.slice(1).join('\n\n').trim() };
   }
+  const match = str.match(/^(\[.*?\]\s*제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?[*\s]*)\s*(.*)/s);
+  if (match) {
+    return { title: match[1].trim(), body: match[2].trim() };
+  }
   return { title: str.split('\n')[0].substring(0, 30), body: str };
 };
 
-// 💡 법 -> 령 -> 칙 순서를 소수점 단위로 강제하는 핵심 정렬 엔진
+// 💡 [핵심 패치 1] 폴더(제1장, 제10장, 제2장)를 정확히 숫자로 인식하여 정렬
+export const sortFolders = (folders: string[]) => {
+  return folders.sort((a, b) => {
+    const matchA = a.match(/제\s*(\d+)\s*장/);
+    const matchB = b.match(/제\s*(\d+)\s*장/);
+    const numA = matchA ? parseInt(matchA[1], 10) : 999999;
+    const numB = matchB ? parseInt(matchB[1], 10) : 999999;
+    if (numA !== numB) return numA - numB;
+    return a.localeCompare(b);
+  });
+};
+
+// 💡 [핵심 패치 2] 조항(제1조)을 숫자로 인식하고, 법->령->칙 순으로 미세조정 정렬
 export const getSortNumber = (text?: string) => {
   if (!text) return 999999;
   const str = String(text);
   const articleMatch = str.match(/제\s*(\d+)\s*조(?:의\s*(\d+))?/);
   let base = 999999;
-  if (articleMatch) {
-    base = parseInt(articleMatch[1]);
-    if (articleMatch[2]) base += parseInt(articleMatch[2]) / 1000;
+  if (articleMatch && articleMatch[1]) {
+    base = parseInt(articleMatch[1], 10);
+    if (articleMatch[2]) base += parseInt(articleMatch[2], 10) / 1000;
   }
   let typeScore = 0.0004;
   if (str.includes('[법]')) typeScore = 0.0001;
@@ -37,17 +53,17 @@ export const getSortNumber = (text?: string) => {
   return base + typeScore; 
 };
 
-// 💡 1, 2, 3열 자리를 절대 이탈하지 않도록 gridColumnStart 로 강화
-export const getGridStyle = (text: string, studyMode: string, isExpanded: boolean) => {
-  if (isExpanded) return { gridColumn: "1 / -1" }; 
-  if (studyMode !== '법령') return {};
+// 💡 [핵심 패치 3] 인라인 스타일의 버그를 버리고, Tailwind 네이티브 클래스로 각 열을 강제 고정
+export const getGridClass = (text: string, studyMode: string, isExpanded: boolean) => {
+  if (isExpanded) return "col-span-full"; 
+  if (studyMode !== '법령') return "col-span-1";
 
   const isLaw = text?.includes('[법]');
   const isDecret = text?.includes('[령]');
   const isRule = text?.includes('[칙]') || text?.includes('[규]');
   
-  if (isLaw) return { gridColumnStart: 1 };
-  if (isDecret) return { gridColumnStart: 2 };
-  if (isRule) return { gridColumnStart: 3 };
-  return {};
+  if (isLaw) return "col-start-1 col-span-1";
+  if (isDecret) return "col-start-2 col-span-1";
+  if (isRule) return "col-start-3 col-span-1";
+  return "col-span-1";
 };
