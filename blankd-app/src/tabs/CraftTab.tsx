@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { formatCardText, getGridStyle, SPLIT_REGEX } from '../utils/constants';
 
-export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, handleAiRecommend, handleSplitCategory, handleDeleteCategory }: any) => {
+export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, handleAiRecommend, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
@@ -45,7 +45,6 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
           
           {studyMode === '법령' && (
             <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(3, minmax(0, 1fr))` }}>
-               {/* 💡 요청하신 (영어) 삭제 완료 */}
                <div>법</div>
                <div>시행령</div>
                <div>시행규칙</div>
@@ -63,7 +62,7 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
                   <div key={cat.id} className="relative transition-all" style={gridStyle}>
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); }} className="w-full h-full p-5 bg-indigo-900/20 border border-indigo-500/30 rounded-sm text-left transition-colors hover:bg-indigo-900/40 flex flex-col gap-3">
-                        {/* 💡 요청하신 대로 본문 텍스트를 아예 삭제하고 오직 '제1조(목적)' 형태의 제목만 남겼습니다! */}
+                        {/* 💡 [수정] 본문 텍스트가 표시되던 부분을 완전히 삭제했습니다. */}
                         <span className="text-amber-400 font-bold text-[13px]">{cleanTitle}</span>
                         {cat.memo && <div className="text-[11px] text-teal-300 bg-teal-900/20 p-2 rounded border border-teal-500/20 w-full">{cat.memo}</div>}
                       </button>
