@@ -37,7 +37,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
       </div>
       
       {craftFolders.map((folder: string) => openFolders[folder] && (
-        <div key={folder} className="mb-8">
+        <div key={folder} className="mb-8 border-l border-white/5 pl-4">
           <div className="text-sm text-white/50 mb-3 border-b border-white/10 pb-2">{folder}</div>
           {viewMode === 'all' && colCount >= 3 && (
             <div className="grid gap-4 mb-4 text-center font-bold text-white/40 text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
@@ -65,7 +65,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, lawFi
                           <span className="text-amber-400 font-bold text-[13px]">{cleanTitle}</span>
                         </div>
                         <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-3 text-sm text-teal-200 outline-none rounded-sm mb-4" />
-                        <div className="font-serif text-[15px] leading-loose text-white/80 p-5 bg-black/40 border border-white/10 max-h-64 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap">
+                        <div className="font-serif text-[15px] leading-loose text-white/80 p-5 bg-black/40 border border-white/10 max-h-96 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap">
                           {parsedText.split(SPLIT_REGEX).map((word: string, idx: number, arr: any[]) => {
                             if (!word) return null;
                             const isSelected = selectedWords.has(idx);
