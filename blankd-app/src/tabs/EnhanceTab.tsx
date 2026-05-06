@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { getGridStyle, getStrictTitleOnly, formatCardText, getSortNumber, sortFolders } from '../utils/constants';
+import { getGridStyle, getStrictTitleOnly } from '../utils/constants';
 
 export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateMemo, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
-  const rawFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더') as string[];
-  const enhanceFolders = sortFolders(rawFolders);
+  const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -41,20 +40,20 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
 
           <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
             {safeCards.filter((c:any) => c.folder_name === folder)
-              .sort((a:any, b:any) => getSortNumber(a.content) - getSortNumber(b.content))
+              // 💡 [핵심 복구] 압축 파일 원본 로직 (a.id - b.id)
+              .sort((a:any, b:any) => a.id - b.id)
               .map((card: any) => {
                 const contentToUse = card.content || card.title || "";
                 const gridStyle = getGridStyle(contentToUse, studyMode, false);
-                const { title } = formatCardText(contentToUse);
-                const cleanTitle = getStrictTitleOnly(title);
+                const cleanTitle = getStrictTitleOnly(contentToUse);
 
                 return (
                   <div key={card.id} className="relative transition-all" style={gridStyle}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col justify-between ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
                       
-                      <div className="flex justify-between items-center w-full mb-3" onClick={() => setActiveCard(card)}>
-                        <div className="text-amber-400 font-bold text-[13px] truncate flex-1 pr-2 text-left">{cleanTitle}</div>
-                        <div className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap shrink-0">반복.{card.level}</div>
+                      <div className="flex justify-between items-center w-full gap-2 mb-2" onClick={() => setActiveCard(card)}>
+                        <span className="text-amber-400 font-bold text-[13px] truncate flex-1 text-left">{cleanTitle}</span>
+                        <span className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap shrink-0">반복.{card.level}</span>
                       </div>
                       
                       <input 
