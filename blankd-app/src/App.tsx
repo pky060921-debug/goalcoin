@@ -95,6 +95,7 @@ function MainApp() {
     });
     if (isBlanking) bodyContent += " ]";
     
+    // 💡 저장 시 제목과 본문을 확실한 구분선(\n\n)으로 나눕니다.
     const finalCardContent = `${cat.title}\n\n${bodyContent}`;
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
