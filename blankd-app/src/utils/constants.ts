@@ -1,41 +1,49 @@
 export const SPLIT_REGEX = /(\s+|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]+|(?:은|는|이|가|을|를|의|에|에게|과|와|로서|로써|로|으로|도|만|부터|까지|이다|한다|하다|함|됨|됨을|함을|함으로써|됨으로써|대하여|대해|대한|관하여|관해|관한|등|및|에서|에서는|에서의|로부터|에의|로부터의|에도|에는|이나|나|라도|이라도|인가|든가|이든지|든지|적|적인|적으로|할|한|하는|된|될|되는|인|일|이고|이며|이면|이지|입니다|합니다|습니다)(?=\s|$|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]))/g;
 
-// 💡 [궁극의 해결책] 오직 "제X조(조항제목)"만 남기고, 앞뒤의 모든 괄호와 텍스트를 본문으로 던집니다!
 export const formatCardText = (text?: string) => {
   if (!text) return { title: "제목 없음", body: "" };
   const str = String(text);
   
+  // 💡 [핵심 패치] 강화 탭의 카드는 이미 "\n\n"으로 제목과 본문이 나뉘어 저장되어 있습니다.
+  // 이 경우 정규식을 돌리지 않고 무조건 앞부분 전체를 제목으로 100% 보존합니다!
+  if (str.includes('\n\n')) {
+    const parts = str.split('\n\n');
+    return {
+      title: parts[0].trim(),
+      body: parts.slice(1).join('\n\n').trimStart()
+    };
+  }
+
   let tag = "";
   let remaining = str.trimStart();
   
-  // 1. [법], [령], [칙], [규] 등 필수 시스템 태그만 엄격하게 분리
+  // 1. [법], [령] 시스템 태그 분리
   const tagMatch = remaining.match(/^(\[(?:법|령|칙|규)\])/);
   if (tagMatch) {
     tag = tagMatch[1];
     remaining = remaining.substring(tag.length).trimStart();
   }
 
-  // 2. 조항번호와 조항제목 추출 (제X조(제목) 형태만 핀셋으로 집어냅니다)
-  const titleRegex = /(제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:\([^)]+\))?)/;
+  // 2. 조항번호와 조항제목 추출 (반각/전각 괄호 및 띄어쓰기 모두 지원)
+  const titleRegex = /(제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:[(（][^)）]+[)）])?)/;
   const match = remaining.match(titleRegex);
 
   if (match && match.index !== undefined) {
-    const titlePart = match[1].trim(); // 추출된 "제3조의2(국민건강보험종합계획...)"
-    
-    // 조항번호(제목)을 기준으로, 그 앞과 뒤에 붙어있던 괄호나 잡동사니들을 싹 다 모아 본문으로 보냅니다.
+    const titlePart = match[1].trim(); 
     const beforeTitle = remaining.substring(0, match.index).trim();
     const afterTitle = remaining.substring(match.index + match[1].length).trimStart();
     
-    // 이전 내용(예: [본조신설...])과 이후 내용(예: <개정...>)을 합쳐서 본문으로 구성
+    // 조항번호 앞뒤의 <개정...>, [본조신설] 등 모든 잡동사니를 모아 본문으로 합칩니다.
     let bodyPart = (beforeTitle ? beforeTitle + "\n" : "") + afterTitle;
-    
+    bodyPart = bodyPart.replace(/^[*]/, '').trimStart();
+
     return {
       title: tag ? `${tag} ${titlePart}` : titlePart,
       body: bodyPart
     };
   }
 
-  // 3. 만약 위 패턴이 없다면 기존처럼 동그라미나 줄바꿈에서 자릅니다.
+  // 3. 위 패턴이 없으면 동그라미나 줄바꿈에서 자릅니다.
   const circleMatch = remaining.match(/([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]|\n)/);
   if (circleMatch && circleMatch.index !== undefined) {
     const splitIdx = circleMatch.index;
@@ -55,7 +63,7 @@ export const extractLawTag = (title: string) => {
   return '';
 };
 
-// 💡 시스템 태그 완전 제거 후 깔끔한 제목만 반환
+// 💡 시스템 태그 제거 후 깔끔한 제목만 반환
 export const getStrictTitleOnly = (text?: string) => {
   if (!text) return "제목 없음";
   const { title } = formatCardText(text);
@@ -78,7 +86,6 @@ export const getSortNumber = (text?: string) => {
   return base + typeScore; 
 };
 
-// 💡 오리지널 3단 그리드 공식 유지
 export const getGridStyle = (text: string, currentViewMode: string, isExpanded: boolean, colCount: number) => {
   if (isExpanded) return { gridColumn: "1 / -1" }; 
   const isLaw = text?.includes('[법]');
