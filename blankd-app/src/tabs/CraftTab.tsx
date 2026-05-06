@@ -50,14 +50,13 @@ export const CraftTab = ({ categories, studyMode, useAiRecommend, lawFile, setLa
             </div>
           )}
 
+          {/* 💡 [핵심 해결] 빈칸을 강제로 메워버리던 gridAutoFlow: 'dense'를 삭제했습니다. 이제 빈칸은 예쁘게 남습니다! */}
           <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
             {safeCategories.filter((c:any) => c.folder_name === folder)
               .sort((a:any, b:any) => getSortNumber(a.content || a.title) - getSortNumber(b.content || b.title))
               .map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const contentToUse = cat.content || cat.title || "";
-                
-                // 💡 [핵심 패치] 여기서 getGridStyle이 던져주는 style을 직접 div에 박습니다.
                 const gridStyle = getGridStyle(contentToUse, studyMode, isExpanded);
                 const { title, body } = formatCardText(contentToUse);
                 const cleanTitle = getStrictTitleOnly(title);
