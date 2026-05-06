@@ -39,10 +39,9 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
             </div>
           )}
 
-          {/* 💡 강화 탭 역시 gridAutoFlow: 'dense'를 삭제했습니다. 이제 빈칸이 보장되며 법-령-칙이 같은 줄에 배열됩니다. */}
           <div className={`grid gap-4 ${studyMode === '일반' ? 'grid-cols-1 md:grid-cols-2' : ''}`} style={studyMode === '법령' ? { gridTemplateColumns: `repeat(3, minmax(0, 1fr))` } : {}}>
             {safeCards.filter((c:any) => c.folder_name === folder)
-              .sort((a:any, b:any) => getSortNumber(a.content || a.title) - getSortNumber(b.content || b.title))
+              .sort((a:any, b:any) => getSortNumber(a.content) - getSortNumber(b.content))
               .map((card: any) => {
                 const contentToUse = card.content || card.title || "";
                 const gridStyle = getGridStyle(contentToUse, studyMode, false);
@@ -54,8 +53,8 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col justify-between ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
                       
                       <div className="flex justify-between items-center w-full mb-3" onClick={() => setActiveCard(card)}>
-                        <div className="text-amber-400 font-bold text-[13px] truncate flex-1 pr-2">{cleanTitle}</div>
-                        <div className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap">반복.{card.level}</div>
+                        <div className="text-amber-400 font-bold text-[13px] truncate flex-1 pr-2 text-left">{cleanTitle}</div>
+                        <div className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap shrink-0">반복.{card.level}</div>
                       </div>
                       
                       <input 
@@ -63,7 +62,7 @@ export const EnhanceTab = ({ savedCards, studyMode, setActiveCard, handleUpdateM
                         placeholder="암기 메모 입력..." 
                         onClick={(e) => e.stopPropagation()} 
                         onBlur={(e) => handleUpdateMemo(card.id, e.target.value)} 
-                        className="text-[11px] text-teal-300 bg-teal-950/40 p-2 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400" 
+                        className="text-[11px] text-teal-300 bg-teal-950/40 p-2 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 shrink-0" 
                       />
                     </div>
                   </div>
