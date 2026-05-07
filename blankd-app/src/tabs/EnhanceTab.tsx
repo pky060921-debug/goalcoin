@@ -49,24 +49,26 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} 
                          onClick={() => setActiveCard(card)} 
                          className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col justify-start ${hasWrong ? "border-red-500/30 bg-red-900/10" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer`}>
-                      <div className="flex flex-col items-start w-full gap-2">
-                        <div className="text-amber-400 font-bold text-[13px] text-left w-full leading-snug">{cleanTitle}</div>
+                      
+                      {/* 💡 [수정됨] 제목과 뱃지들을 나란히(좌우) 배치하도록 flex-row 적용 */}
+                      <div className="flex justify-between items-start w-full gap-3">
+                        <div className="text-amber-400 font-bold text-[13px] text-left leading-snug break-keep flex-1">{cleanTitle}</div>
                         
-                        {/* 💡 [직관적인 UI 변경] 빈칸 / 채움 / 틀림 뱃지 */}
-                        <div className="flex gap-1.5 flex-wrap w-full mt-1">
-                          <span className="text-[10px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded whitespace-nowrap bg-indigo-900/20">
-                            빈칸 {totalBlanks}개
+                        <div className="flex gap-1 flex-wrap justify-end shrink-0 items-start mt-0.5">
+                          <span className="text-[10px] text-indigo-300 border border-indigo-500/30 px-1 py-0.5 rounded whitespace-nowrap bg-indigo-900/20">
+                            빈칸 {totalBlanks}
                           </span>
-                          <span className="text-[10px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded whitespace-nowrap bg-teal-900/20">
-                            채움 {stats.filled}개
+                          <span className="text-[10px] text-teal-300 border border-teal-500/30 px-1 py-0.5 rounded whitespace-nowrap bg-teal-900/20">
+                            채움 {stats.filled}
                           </span>
                           {hasWrong && (
-                            <span className="text-[10px] text-red-300 border border-red-500/30 px-1.5 py-0.5 rounded whitespace-nowrap bg-red-900/20 animate-pulse">
-                              틀림 {stats.wrongIndices.length}개
+                            <span className="text-[10px] text-red-300 border border-red-500/30 px-1 py-0.5 rounded whitespace-nowrap bg-red-900/20 animate-pulse">
+                              틀림 {stats.wrongIndices.length}
                             </span>
                           )}
                         </div>
                       </div>
+                      
                     </div>
                   </div>
                 );
