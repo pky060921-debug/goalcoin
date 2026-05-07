@@ -41,18 +41,14 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
 
                 return (
                   <div key={card.id} className="relative transition-all" style={gridStyle}>
-                    <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col justify-between ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
-                      <div className="flex justify-between items-start w-full gap-2 mb-2" onClick={() => setActiveCard(card)}>
+                    {/* 💡 기존의 메모 <input> 태그를 완전히 제거하고, 카드 전체를 클릭 가능하도록 병합했습니다. */}
+                    <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} 
+                         onClick={() => setActiveCard(card)} 
+                         className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col justify-start ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
+                      <div className="flex justify-between items-start w-full gap-2">
                         <div className="text-amber-400 font-bold text-[13px] text-left flex-1 leading-snug">{cleanTitle}</div>
                         <div className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap shrink-0 mt-0.5">반복.{card.level}</div>
                       </div>
-                      <input 
-                        defaultValue={card.memo || ""} 
-                        placeholder="암기 메모 입력..." 
-                        onClick={(e) => e.stopPropagation()} 
-                        onBlur={(e) => handleUpdateMemo(card.id, e.target.value)} 
-                        className="text-[11px] text-teal-300 bg-teal-950/40 p-2 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 shrink-0" 
-                      />
                     </div>
                   </div>
                 );
