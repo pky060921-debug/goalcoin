@@ -1,7 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, getGridStyle, getStrictTitleOnly, SPLIT_REGEX } from '../utils/constants';
+import { formatCardText, getStrictTitleOnly, SPLIT_REGEX } from '../utils/constants';
 
-export const CraftTab = ({ categories, colCount, viewMode, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, handleDeleteCategory }: any) => {
+// 💡 [핵심] 설정의 열 갯수(colCount)를 실제 그리드 레이아웃에 적용하는 함수
+const getGridClass = (cols: number) => {
+  if(cols === 1) return "md:grid-cols-1";
+  if(cols === 2) return "md:grid-cols-2";
+  if(cols === 3) return "md:grid-cols-3";
+  if(cols === 4) return "md:grid-cols-4";
+  if(cols === 5) return "md:grid-cols-5";
+  return "md:grid-cols-3";
+};
+
+export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
@@ -9,6 +19,7 @@ export const CraftTab = ({ categories, colCount, viewMode, lawFile, setLawFile, 
   const [parsedText, setParsedText] = useState("");
   const [selectedWords, setSelectedWords] = useState<Set<number>>(new Set());
   const [memoInput, setMemoInput] = useState(""); 
+  const [lastSelected, setLastSelected] = useState<number | null>(null);
 
   useEffect(() => {
     const initial: Record<string, boolean> = {};
@@ -23,64 +34,116 @@ export const CraftTab = ({ categories, colCount, viewMode, lawFile, setLawFile, 
     return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
   };
 
+  // 💡 [복구] 짧게 터치(클릭) 시 1개 선택
+  const handleWordClick = (idx: number) => {
+    const s = new Set(selectedWords);
+    if(s.has(idx)) s.delete(idx); else s.add(idx);
+    setSelectedWords(s);
+    setLastSelected(idx);
+  };
+
+  // 💡 [복구] 길게 터치(롱프레스/우클릭) 시, 이전에 누른 곳부터 현재 위치까지 쫙! 범위 선택
+  const handleWordLongPress = (idx: number, e: any) => {
+    e.preventDefault(); 
+    if (lastSelected !== null) {
+        const s = new Set(selectedWords);
+        const start = Math.min(lastSelected, idx);
+        const end = Math.max(lastSelected, idx);
+        for(let i = start; i <= end; i++) s.add(i);
+        setSelectedWords(s);
+        setLastSelected(idx);
+    } else {
+        handleWordClick(idx);
+    }
+  };
+
+  // 💡 [기능 추가] AI 추천 빈칸 연동 함수
+  const triggerAiRecommend = async (cat: any, bodyText: string) => {
+    addLog(`▶️ [AI 추천] ${cat.title} 분석 시작...`);
+    try {
+        const res = await fetch("https://api.blankd.top/api/recommend-blank", {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ wallet_address: safeAddress, content: bodyText })
+        });
+        const data = await res.json();
+        if(data.task_id) {
+            const poll = setInterval(async () => {
+                const sRes = await fetch(`https://api.blankd.top/api/task-status?task_id=${data.task_id}`);
+                const sData = await sRes.json();
+                if(sData.status === 'completed') {
+                    clearInterval(poll);
+                    addLog(`✅ AI 추천 키워드 발견: ${sData.result.keyword}`);
+                    const words = bodyText.split(SPLIT_REGEX);
+                    const newSet = new Set(selectedWords);
+                    words.forEach((w:string, i:number) => {
+                        if(w.includes(sData.result.keyword)) newSet.add(i);
+                    });
+                    setSelectedWords(newSet);
+                } else if(sData.status === 'error') {
+                    clearInterval(poll);
+                    addLog(`❌ AI 추천 실패: ${sData.message}`);
+                }
+            }, 2000);
+        }
+    } catch(e:any) { addLog(`❌ AI 통신 오류`); }
+  };
+
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in w-full">
-      <div className="flex gap-2 mb-4">
-        <label className="flex-1 border border-white/20 p-2 text-center text-[10px] sm:text-xs hover:bg-white/10 cursor-pointer text-white/80 rounded-sm">
+      <div className="flex gap-2 mb-2 sm:mb-4">
+        <label className="flex-1 border border-white/20 p-2 sm:p-2.5 text-center text-[10px] sm:text-xs hover:bg-white/10 cursor-pointer text-white/80 rounded-sm transition-colors">
           <input type="file" accept=".pdf,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 학습자료 업로드'}
         </label>
-        <button onClick={uploadLaw} className="px-4 border border-white/20 text-xs hover:bg-white/10 rounded-sm">전송</button>
+        <button onClick={uploadLaw} className="px-3 sm:px-4 border border-white/20 text-[10px] sm:text-xs hover:bg-white/10 transition-colors rounded-sm">전송</button>
       </div>
 
-      <div className="flex flex-wrap gap-2 mb-6">
-        {craftFolders.map((f: string) => <button key={f} onClick={() => setOpenFolders(p => ({...p, [f]: !p[f]}))} className={`px-3 py-1.5 text-[10px] sm:text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-indigo-900/40 text-indigo-300 border-indigo-500/30'}`}>📁 {f}</button>)}
+      <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-4 sm:mb-6">
+        {craftFolders.map((f: string) => <button key={f} onClick={() => setOpenFolders(p => ({...p, [f]: !p[f]}))} className={`px-2.5 sm:px-4 py-1.5 sm:py-2 text-[10px] sm:text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' : 'bg-indigo-900/40 text-indigo-300 border-indigo-500/30'}`}>📁 {f}</button>)}
       </div>
       
       {craftFolders.map((folder: string) => openFolders[folder] && (
-        <div key={folder} className="mb-8 border-l border-white/5 pl-4">
-          <div className="text-xs sm:text-sm text-white/50 mb-4 border-b border-white/10 pb-2 font-bold">{folder}</div>
-          
-          {/* 💡 [복구] PC 버전에서의 3단 헤더 */}
-          <div className="hidden md:grid grid-cols-3 gap-4 mb-4 text-center font-bold text-white/30 text-[10px] uppercase tracking-widest">
-             <div>법 (ACT)</div><div>시행령 (DECREE)</div><div>시행규칙 (RULE)</div>
-          </div>
+        <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
+          <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 auto-rows-fr">
+          {/* 💡 [적용] 설정에서 선택한 colCount 레이아웃을 그대로 따름 */}
+          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 auto-rows-fr`}>
             {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
-                // 💡 [복구] 3단 구조 강제 적용 로직
-                const gridStyle = getGridStyle(cat.title, 'all', isExpanded, 3);
+                const gridStyle = isExpanded ? { gridColumn: "1 / -1" } : {};
                 const contentToUse = cat.content || cat.title || "";
                 const { body } = formatCardText(contentToUse);
                 const cleanTitle = getStrictTitleOnly(contentToUse);
 
                 return (
-                  <div key={cat.id} className="relative transition-all" style={gridStyle}>
+                  <div key={cat.id} className="relative transition-all w-full" style={gridStyle}>
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} 
-                        onClick={() => { 
-                          setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); 
-                        }} 
-                        className="w-full h-full min-h-[60px] p-3 sm:p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-2 text-left">
-                        <span className="text-amber-400 font-bold text-[12px] sm:text-[13px] leading-relaxed break-keep">{cleanTitle}</span>
-                        {cat.memo && <div className="text-[10px] text-teal-300 bg-teal-900/20 p-1.5 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
+                        onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); setLastSelected(null); }} 
+                        className="w-full h-full min-h-[60px] p-3 sm:p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-1.5 sm:gap-2 text-left">
+                        <span className="text-amber-400 font-bold text-[11px] sm:text-[13px] leading-snug break-keep">{cleanTitle}</span>
+                        {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
                       </button>
                     ) : (
-                      <div className="w-full p-4 sm:p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-4 shadow-xl z-20 relative animate-in zoom-in-95">
-                        <div className="flex justify-between items-center mb-1 cursor-pointer" onClick={() => setExpandedId(null)}>
-                          <span className="text-amber-400 font-bold text-[13px] sm:text-[14px]">{cleanTitle}</span>
+                      <div className="w-full p-4 sm:p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-3 sm:space-y-4 shadow-xl z-20 relative animate-in zoom-in-95">
+                        <div className="flex justify-between items-center mb-1 sm:mb-2">
+                          <span className="text-amber-400 font-bold text-[12px] sm:text-[14px] cursor-pointer" onClick={() => setExpandedId(null)}>{cleanTitle}</span>
+                          
+                          {/* 💡 [기능 부활] 설정의 AI 추천이 ON일 때만 등장하는 버튼 */}
+                          {useAiRecommend && (
+                            <button onClick={(e) => { e.stopPropagation(); triggerAiRecommend(cat, body); }} className="text-[9px] sm:text-[11px] bg-indigo-600/30 text-indigo-300 border border-indigo-500/50 px-2 py-1 rounded hover:bg-indigo-600/50 transition-colors whitespace-nowrap">✨ AI 추천</button>
+                          )}
                         </div>
-                        <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-2.5 text-xs sm:text-sm text-teal-200 outline-none rounded-sm" />
-                        <div className="font-serif text-[14px] sm:text-[15px] leading-relaxed text-white/80 p-4 bg-black/40 border border-white/10 max-h-80 overflow-y-auto rounded whitespace-pre-wrap break-keep custom-scrollbar">
-                          {body.split(SPLIT_REGEX).map((word: string, idx: number, arr: any[]) => {
+                        <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-2.5 sm:p-3 text-xs sm:text-sm text-teal-200 outline-none rounded-sm mb-2 sm:mb-4 transition-colors focus:border-teal-400" />
+                        <div className="font-serif text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 sm:p-5 bg-black/40 border border-white/10 max-h-72 sm:max-h-96 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar">
+                          {parsedText.split(SPLIT_REGEX).map((word: string, idx: number) => {
                             if (!word) return null;
                             const isSelected = selectedWords.has(idx);
                             return (
-                              <span key={idx} onClick={() => { const s = new Set(selectedWords); if(s.has(idx)) s.delete(idx); else s.add(idx); setSelectedWords(s); }} className={`cursor-pointer px-[1px] rounded transition-colors ${isSelected ? 'bg-amber-500 text-black font-bold' : 'hover:bg-white/20'}`}>{word}</span>
+                              <span key={idx} onClick={() => handleWordClick(idx)} onContextMenu={(e) => handleWordLongPress(idx, e)} className={`cursor-pointer px-[2px] rounded transition-colors ${isSelected ? 'bg-amber-500 text-black font-bold shadow-sm' : 'hover:bg-white/20'}`}>{word}</span>
                             )
                           })}
                         </div>
-                        <button onClick={() => handleMakeBlankCard({ ...cat, title: cleanTitle, memo: memoInput }, body, selectedWords, () => setExpandedId(null))} className="w-full py-2.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs sm:text-sm font-bold rounded-sm transition-all hover:bg-amber-500/30">지식 추출 저장</button>
+                        <button onClick={() => handleMakeBlankCard({ ...cat, title: cleanTitle, memo: memoInput }, parsedText, selectedWords, () => setExpandedId(null))} className="w-full py-2.5 sm:py-3 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs sm:text-sm font-bold rounded-sm mt-2 transition-all hover:bg-amber-500/30 shadow-sm">지식 추출 저장</button>
                       </div>
                     )}
                   </div>
