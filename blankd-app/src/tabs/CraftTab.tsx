@@ -16,11 +16,12 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
   
-  // 💡 [수정] 문자열 대신 배열로 관리하여 단어 융합/분할을 가능하게 함
+  // 💡 편집 기능을 위한 상태
   const [wordArray, setWordArray] = useState<string[]>([]);
   const [selectedWords, setSelectedWords] = useState<Set<number>>(new Set());
-  const [pageBreaks, setPageBreaks] = useState<Set<number>>(new Set()); // 페이지 구분선
+  const [pageBreaks, setPageBreaks] = useState<Set<number>>(new Set());
   const [memoInput, setMemoInput] = useState(""); 
+  const [lastSelected, setLastSelected] = useState<number | null>(null);
 
   useEffect(() => {
     const initial: Record<string, boolean> = {};
@@ -41,71 +42,25 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     setSelectedWords(s);
   };
 
-  // 💡 [신규 기능] 우클릭 시 해당 위치에 페이지 나누기 선(Page Break) 추가
+  // 💡 [신규] 우클릭 시 페이지 구분선 추가
   const handleWordSplit = (idx: number, e: any) => {
     e.preventDefault(); 
     const p = new Set(pageBreaks);
-    if (p.has(idx)) {
-        p.delete(idx); // 이미 선이 있으면 제거
-    } else {
-        if (window.confirm("이 위치에서 페이지를 나누시겠습니까? (빈칸 풀 때 다음 장으로 넘어갑니다)")) {
-            p.add(idx);
-        }
-    }
+    if (p.has(idx)) p.delete(idx);
+    else if (window.confirm("이 위치에서 페이지를 나누시겠습니까?")) p.add(idx);
     setPageBreaks(p);
   };
 
-  // 💡 [신규 기능] 더블클릭 시 뒤의 단어와 한 덩어리로 병합
+  // 💡 [신규] 더블클릭 시 단어 병합
   const handleWordMerge = (idx: number) => {
     if (idx >= wordArray.length - 1) return;
     const newArray = [...wordArray];
-    newArray[idx] = newArray[idx] + newArray[idx + 1]; 
-    newArray.splice(idx + 1, 1); 
+    newArray[idx] = newArray[idx] + newArray[idx + 1];
+    newArray.splice(idx + 1, 1);
     setWordArray(newArray);
-
     const newSet = new Set<number>();
-    selectedWords.forEach(i => {
-        if (i < idx) newSet.add(i);
-        else newSet.add(i - 1);
-    });
-    newSet.add(idx); 
+    selectedWords.forEach(i => { if (i < idx) newSet.add(i); else if (i > idx) newSet.add(i - 1); });
     setSelectedWords(newSet);
-
-    const newPageBreaks = new Set<number>();
-    pageBreaks.forEach(i => {
-        if (i <= idx) newPageBreaks.add(i);
-        else newPageBreaks.add(i - 1);
-    });
-    setPageBreaks(newPageBreaks);
-  };
-
-  const triggerAiRecommend = async (cat: any, bodyText: string) => {
-    addLog(`▶️ [AI 추천] ${cat.title} 분석 시작...`);
-    try {
-        const res = await fetch("https://api.blankd.top/api/recommend-blank", {
-            method: "POST", headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({ wallet_address: safeAddress, content: bodyText })
-        });
-        const data = await res.json();
-        if(data.task_id) {
-            const poll = setInterval(async () => {
-                const sRes = await fetch(`https://api.blankd.top/api/task-status?task_id=${data.task_id}`);
-                const sData = await sRes.json();
-                if(sData.status === 'completed') {
-                    clearInterval(poll);
-                    addLog(`✅ AI 추천 키워드 발견: ${sData.result.keyword}`);
-                    const newSet = new Set(selectedWords);
-                    wordArray.forEach((w:string, i:number) => {
-                        if(w.includes(sData.result.keyword)) newSet.add(i);
-                    });
-                    setSelectedWords(newSet);
-                } else if(sData.status === 'error') {
-                    clearInterval(poll);
-                    addLog(`❌ AI 추천 실패: ${sData.message}`);
-                }
-            }, 2000);
-        }
-    } catch(e:any) { addLog(`❌ AI 통신 오류`); }
   };
 
   return (
@@ -125,26 +80,28 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
+          {/* 💡 아키님의 원본 auto-rows-fr 배열 그대로 복구 */}
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 auto-rows-fr`}>
             {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const contentToUse = cat.content || cat.title || "";
+                const checkText = `${cat.title || ''} ${cat.content || ''}`;
                 
+                // 💡 원본 colClass 로직 복구 및 색상 추가
                 let colClass = "";
                 let titleColor = "text-amber-400";
                 
                 if (viewMode === 'all' && colCount >= 3) {
-                  if (contentToUse.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
-                  else if (contentToUse.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
-                  else if (contentToUse.includes('[칙]') || contentToUse.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
+                  if (checkText.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
+                  else if (checkText.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
                 } else {
-                  if (contentToUse.includes('[법]')) titleColor = "text-red-500";
-                  else if (contentToUse.includes('[령]')) titleColor = "text-blue-400";
-                  else if (contentToUse.includes('[칙]') || contentToUse.includes('[규]')) titleColor = "text-green-500";
+                  if (checkText.includes('[법]')) titleColor = "text-red-500";
+                  else if (checkText.includes('[령]')) titleColor = "text-blue-400";
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
                 }
                 
                 if (isExpanded) colClass = "col-span-full";
-
                 const cleanTitle = getStrictTitleOnly(contentToUse);
 
                 return (
@@ -154,52 +111,27 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                         onClick={() => { 
                           setExpandedId(cat.id); setSelectedWords(new Set()); setPageBreaks(new Set()); setMemoInput(cat.memo || "");
                           const { body } = formatCardText(contentToUse);
-                          setWordArray(body.split(SPLIT_REGEX).filter((w:string) => w !== undefined && w !== null && w !== ""));
+                          setWordArray(body.split(SPLIT_REGEX).filter(w => w !== ""));
                         }} 
                         className="w-full h-full min-h-[60px] p-3 sm:p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-1.5 sm:gap-2 text-left">
                         <span className={`${titleColor} font-bold text-[11px] sm:text-[13px] leading-snug break-keep`}>{cleanTitle}</span>
                         {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
                       </button>
                     ) : (
-                      <div className="w-full p-4 sm:p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-3 sm:space-y-4 shadow-xl z-20 relative animate-in zoom-in-95">
-                        <div className="flex justify-between items-center mb-1 sm:mb-2">
+                      <div className="w-full p-4 sm:p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-3 shadow-xl z-20 relative animate-in zoom-in-95">
+                        <div className="flex justify-between items-center mb-1">
                           <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{cleanTitle}</span>
-                          {useAiRecommend && (
-                            <button onClick={(e) => { e.stopPropagation(); triggerAiRecommend(cat, wordArray.join("")); }} className="text-[9px] sm:text-[11px] bg-indigo-600/30 text-indigo-300 border border-indigo-500/50 px-2 py-1 rounded hover:bg-indigo-600/50 transition-colors whitespace-nowrap">✨ AI 추천</button>
-                          )}
                         </div>
-                        
-                        {/* 사용자 안내 문구 추가 */}
-                        <div className="text-[10px] text-white/40 mb-2 font-mono bg-white/5 p-2 rounded leading-relaxed">
-                          👉 <span className="text-amber-400">터치(클릭)</span>: 빈칸 지정<br/>
-                          👉 <span className="text-red-400">길게 누르기(우클릭)</span>: <span className="text-white">이 단어 위치에 페이지 나누기 선(---) 긋기</span><br/>
-                          👉 <span className="text-teal-400">따닥 두번 누르기(더블클릭)</span>: 다음 글자와 한 덩어리로 병합
+                        <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-2 text-xs text-teal-200 outline-none rounded-sm" />
+                        <div className="font-serif text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border border-white/10 max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative">
+                          {wordArray.map((word, idx) => (
+                            <React.Fragment key={idx}>
+                              {pageBreaks.has(idx) && <div className="w-full border-t border-red-500/50 my-2 relative"><span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black px-1 text-[8px] text-red-400">PAGE BREAK</span></div>}
+                              <span onClick={() => handleWordClick(idx)} onContextMenu={(e) => handleWordSplit(idx, e)} onDoubleClick={() => handleWordMerge(idx)} className={`cursor-pointer px-[1px] rounded ${selectedWords.has(idx) ? 'bg-amber-500 text-black' : 'hover:bg-white/20'}`}>{word}</span>
+                            </React.Fragment>
+                          ))}
                         </div>
-
-                        <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-2.5 sm:p-3 text-xs sm:text-sm text-teal-200 outline-none rounded-sm mb-2 sm:mb-4 transition-colors focus:border-teal-400" />
-                        
-                        <div className="font-serif text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 sm:p-5 bg-black/40 border border-white/10 max-h-72 sm:max-h-96 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative">
-                          {wordArray.map((word: string, idx: number) => {
-                            const isSelected = selectedWords.has(idx);
-                            const hasPageBreak = pageBreaks.has(idx);
-                            return (
-                              <React.Fragment key={idx}>
-                                {/* 💡 화면에 붉은색 페이지 구분선을 그려줍니다. */}
-                                {hasPageBreak && <div className="w-full border-t-2 border-red-500/50 my-2 relative"><span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#0a0a0c] px-2 text-[10px] text-red-400 font-bold">다음 페이지</span></div>}
-                                <span 
-                                  onClick={() => handleWordClick(idx)} 
-                                  onContextMenu={(e) => handleWordSplit(idx, e)} 
-                                  onDoubleClick={() => handleWordMerge(idx)}
-                                  className={`cursor-pointer px-[2px] rounded transition-colors ${isSelected ? 'bg-amber-500 text-black font-bold shadow-sm' : 'hover:bg-white/20'}`}
-                                >
-                                  {word}
-                                </span>
-                              </React.Fragment>
-                            )
-                          })}
-                        </div>
-                        {/* 💡 [수정] App.tsx로 배열과 페이지 브레이크 데이터를 전달 */}
-                        <button onClick={() => handleMakeBlankCard({ ...cat, title: cleanTitle, memo: memoInput }, wordArray, selectedWords, pageBreaks, () => setExpandedId(null))} className="w-full py-2.5 sm:py-3 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs sm:text-sm font-bold rounded-sm mt-2 transition-all hover:bg-amber-500/30 shadow-sm">지식 추출 저장</button>
+                        <button onClick={() => handleMakeBlankCard({ ...cat, title: cleanTitle, memo: memoInput }, wordArray, selectedWords, pageBreaks, () => setExpandedId(null))} className="w-full py-2.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-bold rounded-sm hover:bg-amber-500/30">지식 추출 저장</button>
                       </div>
                     )}
                   </div>
