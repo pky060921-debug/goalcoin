@@ -16,7 +16,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
   
-  // 💡 편집 기능을 위한 상태
+  // 💡 [추가] 편집 기능을 위한 상태 (배열 관리)
   const [wordArray, setWordArray] = useState<string[]>([]);
   const [selectedWords, setSelectedWords] = useState<Set<number>>(new Set());
   const [pageBreaks, setPageBreaks] = useState<Set<number>>(new Set());
@@ -42,7 +42,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     setSelectedWords(s);
   };
 
-  // 💡 [신규] 우클릭 시 페이지 구분선 추가
+  // 💡 [신규] 우클릭(롱프레스) 시 페이지 분할
   const handleWordSplit = (idx: number, e: any) => {
     e.preventDefault(); 
     const p = new Set(pageBreaks);
@@ -80,14 +80,14 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-          {/* 💡 아키님의 원본 auto-rows-fr 배열 그대로 복구 */}
-          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 auto-rows-fr`}>
+          {/* 💡 [해결] auto-rows-fr을 제거하고 items-start를 추가하여 칸이 위아래로 커지는 현상을 해결했습니다. */}
+          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const contentToUse = cat.content || cat.title || "";
                 const checkText = `${cat.title || ''} ${cat.content || ''}`;
                 
-                // 💡 원본 colClass 로직 복구 및 색상 추가
+                // 💡 아키님의 원본 colClass 배치 로직
                 let colClass = "";
                 let titleColor = "text-amber-400";
                 
@@ -113,7 +113,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                           const { body } = formatCardText(contentToUse);
                           setWordArray(body.split(SPLIT_REGEX).filter(w => w !== ""));
                         }} 
-                        className="w-full h-full min-h-[60px] p-3 sm:p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-1.5 sm:gap-2 text-left">
+                        className="w-full min-h-[60px] p-3 sm:p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-1.5 sm:gap-2 text-left">
                         <span className={`${titleColor} font-bold text-[11px] sm:text-[13px] leading-snug break-keep`}>{cleanTitle}</span>
                         {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
                       </button>
@@ -126,8 +126,8 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                         <div className="font-serif text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border border-white/10 max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative">
                           {wordArray.map((word, idx) => (
                             <React.Fragment key={idx}>
-                              {pageBreaks.has(idx) && <div className="w-full border-t border-red-500/50 my-2 relative"><span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black px-1 text-[8px] text-red-400">PAGE BREAK</span></div>}
-                              <span onClick={() => handleWordClick(idx)} onContextMenu={(e) => handleWordSplit(idx, e)} onDoubleClick={() => handleWordMerge(idx)} className={`cursor-pointer px-[1px] rounded ${selectedWords.has(idx) ? 'bg-amber-500 text-black' : 'hover:bg-white/20'}`}>{word}</span>
+                              {pageBreaks.has(idx) && <div className="w-full border-t border-red-500/50 my-2 relative"><span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black px-1 text-[8px] text-red-400 font-bold uppercase tracking-tighter">Page Break</span></div>}
+                              <span onClick={() => handleWordClick(idx)} onContextMenu={(e) => handleWordSplit(idx, e)} onDoubleClick={() => handleWordMerge(idx)} className={`cursor-pointer px-[1px] rounded transition-colors ${selectedWords.has(idx) ? 'bg-amber-500 text-black font-bold' : 'hover:bg-white/20'}`}>{word}</span>
                             </React.Fragment>
                           ))}
                         </div>
