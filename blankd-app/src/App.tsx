@@ -103,7 +103,7 @@ function MainApp() {
       });
       if (res.ok) {
         localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
-        addLog(`🔄 백그라운드 일괄 동기화 (메모 ${q.memos.length}건, 결과 ${q.answers.length}건)`);
+        addLog(`🔄 백그라운드 일괄 동기화 완료`);
       }
     } catch (e) {
       addLog("⚠️ 오프라인 상태: 동기화 대기 중..."); 
@@ -136,28 +136,20 @@ function MainApp() {
     if (res.ok) { setExamFile(null); setTimeout(() => loadAllData(), 2000); }
   };
 
-  // 💡 [핵심] 분할된 데이터를 받아 서버에 전달하는 함수
-  const handleSplitCategory = async (cat: any, text1: string, text2: string, title1: string, title2: string) => {
-    try {
-        const res = await fetch("https://api.blankd.top/api/split-category", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ wallet_address: safeAddress, id: cat.id, text1, text2, title1, title2, folder_name: cat.folder_name })
-        });
-        if (res.ok) {
-            addLog(`✂️ [${cat.title}] 분할 완료`);
-            loadAllData();
-        }
-    } catch (e: any) { addLog(`❌ 분할 통신 오류`); }
-  };
-
-  // 💡 [핵심] 텍스트 문자열이 아닌 커스텀 배열(wordsArray)을 받아 조립하도록 수정
-  const handleMakeBlankCard = async (cat: any, wordsArray: string[], selectedIndices: Set<number>, memo: string, onComplete: () => void) => {
+  // 💡 [수정] DB에 저장할 때 구분선(##PAGE_BREAK##)을 함께 문자열에 박아넣습니다.
+  const handleMakeBlankCard = async (cat: any, wordsArray: string[], selectedIndices: Set<number>, pageBreaks: Set<number>, memo: string, onComplete: () => void) => {
     let bodyContent = ""; let answerText = ""; let isBlanking = false;
     wordsArray.forEach((word, index) => {
+      // 해당 인덱스에 도달하면 구분선 삽입
+      if (pageBreaks.has(index)) { bodyContent += " ##PAGE_BREAK## "; }
+
       if (selectedIndices.has(index)) {
         if (!isBlanking) { bodyContent += "[ "; isBlanking = true; }
         bodyContent += word; answerText += (answerText ? ", " : "") + word;
-      } else { if (isBlanking) { bodyContent += " ]"; isBlanking = false; } bodyContent += word; }
+      } else { 
+        if (isBlanking) { bodyContent += " ]"; isBlanking = false; } 
+        bodyContent += word; 
+      }
     });
     if (isBlanking) bodyContent += " ]";
     
@@ -184,10 +176,14 @@ function MainApp() {
       isClosingRef.current = false;
       const { body } = formatCardText(activeCard.content);
       const foundBlanks: {answer: string, correct: boolean}[] = [];
-      const regex = /\[\s*(.*?)\s*\]/g; let match;
-      while((match = regex.exec(body)) !== null) {
-        foundBlanks.push({ answer: match[1].trim(), correct: false });
-      }
+      const parts = body.split(/(\[.*?\])/g);
+      
+      parts.forEach(part => {
+        if (part.startsWith('[') && part.endsWith(']')) {
+          foundBlanks.push({ answer: part.replace(/\[|\]/g, '').trim(), correct: false });
+        }
+      });
+
       setBlanks(foundBlanks); setCurrentBlankIdx(0); setAnswerInput(""); setInputStatus('idle');
       setTotalTimeLimit(5.0 * foundBlanks.length); setStartTime(Date.now()); setElapsed(0);
       
@@ -313,8 +309,7 @@ function MainApp() {
         <main className="max-w-6xl mx-auto w-full">
           <ErrorBoundary fallbackLog={addLog}>
             {activeTab === 'progress' && <DashboardTab categories={categories} savedCards={savedCards} />}
-            {/* 💡 [핵심] 분할 기능 API(handleSplitCategory)를 자식에게 전달 */}
-            {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} handleDeleteCategory={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />}
+            {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} addLog={addLog} handleDeleteCategory={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />}
             {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleDeleteCard={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});setActiveCard(null);loadAllData();}}} />}
             {activeTab === 'exam' && <ExamTab exams={exams} examFile={examFile} setExamFile={setExamFile} uploadExam={uploadExam} />}
             {activeTab === 'settings' && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화하시겠습니까?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
@@ -343,25 +338,66 @@ function MainApp() {
         <CardModal activeCard={activeCard} totalTimeLimit={totalTimeLimit} elapsed={elapsed} answerInput={answerInput} setAnswerInput={setAnswerInput} inputStatus={inputStatus} handleSequentialInput={handleSequentialInput} 
           renderContent={() => {
             const { body } = formatCardText(activeCard.content);
-            const parts = body.split(/(\[.*?\])/g); let bIdx = 0;
+            const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== ''); 
+            
+            // 💡 [수정] 오직 '현재 진행 중인 빈칸이 속한 페이지'만 필터링하여 렌더링
+            let displayPage = 0;
+            let tempGlobalBlank = 0;
+            let tempPage = 0;
+
+            for (let part of parts) {
+                if (part === '##PAGE_BREAK##') {
+                    tempPage++;
+                } else if (part.startsWith('[') && part.endsWith(']')) {
+                    if (tempGlobalBlank === currentBlankIdx) { displayPage = tempPage; break; }
+                    tempGlobalBlank++;
+                }
+            }
+
+            let renderPage = 0;
+            let bIdx = 0;
+            const contentToRender: any[] = [];
+            
+            parts.forEach((part: string, i: number) => {
+              if (part === '##PAGE_BREAK##') { renderPage++; return; }
+              
+              if (renderPage === displayPage) {
+                  if (part.startsWith('[') && part.endsWith(']')) {
+                    const isCorrect = blanks[bIdx]?.correct; 
+                    const isCurrent = bIdx === currentBlankIdx; 
+                    const isWrong = statsRef.current.wrongIndices.has(bIdx); 
+                    
+                    if (isCorrect) contentToRender.push(<span key={i} className={`font-bold mx-1 ${isWrong ? 'text-red-400' : 'text-green-400'}`}>{part.replace(/\[|\]/g, '')}</span>);
+                    else if (isCurrent) contentToRender.push(<span key={i} className="inline-block min-w-[50px] sm:min-w-[60px] h-4 sm:h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>);
+                    else contentToRender.push(<span key={i} className="inline-block min-w-[50px] sm:min-w-[60px] h-4 sm:h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>);
+                    bIdx++;
+                  } else {
+                    contentToRender.push(<span key={i}>{part}</span>);
+                  }
+              } else {
+                  if (part.startsWith('[') && part.endsWith(']')) bIdx++;
+              }
+            });
+
             return (
               <div className="flex flex-col gap-4 sm:gap-6 w-full">
-                <div className="whitespace-pre-wrap leading-relaxed text-[13px] sm:text-[14px] md:text-[15px] font-serif break-keep">
-                  {parts.map((part: string, i: number) => {
-                    if (part.startsWith('[') && part.endsWith(']')) {
-                      const isCorrect = blanks[bIdx]?.correct; 
-                      const isCurrent = bIdx === currentBlankIdx; 
-                      const isWrong = statsRef.current.wrongIndices.has(bIdx); 
-                      bIdx++;
-                      if (isCorrect) return <span key={i} className={`font-bold mx-1 ${isWrong ? 'text-red-400' : 'text-green-400'}`}>{part.replace(/\[|\]/g, '')}</span>;
-                      else if (isCurrent) return <span key={i} className="inline-block min-w-[50px] sm:min-w-[60px] h-4 sm:h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>;
-                      else return <span key={i} className="inline-block min-w-[50px] sm:min-w-[60px] h-4 sm:h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
-                    } return <span key={i}>{part}</span>;
-                  })}
+                <div className="flex justify-between items-center border-b border-white/10 pb-2">
+                    <span className="text-amber-400 font-bold text-[12px] sm:text-[14px]">
+                      {activeCard.content.split('\n')[0]} {/* 제목 */}
+                    </span>
+                    <span className="text-[10px] sm:text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded">
+                      Page {displayPage + 1}
+                    </span>
                 </div>
+
+                <div className="whitespace-pre-wrap leading-relaxed text-[13px] sm:text-[14px] md:text-[15px] font-serif break-keep min-h-[150px]">
+                  {contentToRender}
+                </div>
+                
                 <div className="flex justify-end w-full mb-1 sm:mb-2">
                   <button onClick={handleShowAnswer} className="px-2 sm:px-3 py-1 sm:py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-colors shadow-sm">정답 보기 (오답 처리)</button>
                 </div>
+
                 <div className="pt-3 sm:pt-4 border-t border-white/10 w-full animate-in fade-in">
                   <div className="text-[10px] sm:text-[11px] text-teal-500/50 mb-1.5 sm:mb-2 font-bold uppercase tracking-widest">📝 Memo</div>
                   <input defaultValue={statsRef.current.text || ""} placeholder="메모 입력..." onBlur={(e) => { statsRef.current.text = e.target.value; handleUpdateMemoBackground(activeCard.id, stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices))); }} className="text-[12px] sm:text-[13px] text-teal-300 bg-teal-950/20 p-2.5 sm:p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-colors" />
