@@ -136,10 +136,24 @@ function MainApp() {
     if (res.ok) { setExamFile(null); setTimeout(() => loadAllData(), 2000); }
   };
 
-  const handleMakeBlankCard = async (cat: any, content: string, selectedIndices: Set<number>, memo: string, onComplete: () => void) => {
-    const words = content ? content.split(SPLIT_REGEX) : [];
+  // 💡 [핵심] 분할된 데이터를 받아 서버에 전달하는 함수
+  const handleSplitCategory = async (cat: any, text1: string, text2: string, title1: string, title2: string) => {
+    try {
+        const res = await fetch("https://api.blankd.top/api/split-category", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet_address: safeAddress, id: cat.id, text1, text2, title1, title2, folder_name: cat.folder_name })
+        });
+        if (res.ok) {
+            addLog(`✂️ [${cat.title}] 분할 완료`);
+            loadAllData();
+        }
+    } catch (e: any) { addLog(`❌ 분할 통신 오류`); }
+  };
+
+  // 💡 [핵심] 텍스트 문자열이 아닌 커스텀 배열(wordsArray)을 받아 조립하도록 수정
+  const handleMakeBlankCard = async (cat: any, wordsArray: string[], selectedIndices: Set<number>, memo: string, onComplete: () => void) => {
     let bodyContent = ""; let answerText = ""; let isBlanking = false;
-    words.forEach((word, index) => {
+    wordsArray.forEach((word, index) => {
       if (selectedIndices.has(index)) {
         if (!isBlanking) { bodyContent += "[ "; isBlanking = true; }
         bodyContent += word; answerText += (answerText ? ", " : "") + word;
@@ -248,17 +262,11 @@ function MainApp() {
     actual = actual.replace(/\s+/g, '').toLowerCase();
     
     if (expected === actual) {
-      // 💡 [핵심 해결] 한글 IME 조합 잔여물 방지를 위해 포커스를 강제로 잠깐 뺍니다.
-      if (document.activeElement instanceof HTMLElement) {
-        document.activeElement.blur();
-      }
-
+      if (document.activeElement instanceof HTMLElement) { document.activeElement.blur(); }
       setInputStatus('correct');
       const nb = [...blanks]; nb[currentBlankIdx].correct = true; setBlanks(nb);
-      
       statsRef.current.wrongIndices.delete(currentBlankIdx);
       statsRef.current.filled += 1; 
-
       setTimeout(() => { 
         setAnswerInput(""); setInputStatus('idle'); 
         if (currentBlankIdx + 1 < nb.length) setCurrentBlankIdx(currentBlankIdx + 1); 
@@ -273,14 +281,8 @@ function MainApp() {
 
   const handleShowAnswer = () => {
     if (!blanks[currentBlankIdx]) return;
-    
-    setInputStatus('wrong');
-    statsRef.current.wrongIndices.add(currentBlankIdx); 
-    
-    const nb = [...blanks];
-    nb[currentBlankIdx].correct = true; 
-    setBlanks(nb);
-
+    setInputStatus('wrong'); statsRef.current.wrongIndices.add(currentBlankIdx); 
+    const nb = [...blanks]; nb[currentBlankIdx].correct = true; setBlanks(nb);
     setTimeout(() => {
       setAnswerInput(""); setInputStatus('idle');
       if (currentBlankIdx + 1 < nb.length) setCurrentBlankIdx(currentBlankIdx + 1);
@@ -291,9 +293,7 @@ function MainApp() {
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden">
       <header className="max-w-6xl mx-auto border-b border-white/10 pb-4 sm:pb-6 mb-8 sm:mb-12 flex items-center justify-between gap-4">
-        <h1 className="text-xl sm:text-2xl font-bold tracking-widest text-white shrink-0">
-          BlankD
-        </h1>
+        <h1 className="text-xl sm:text-2xl font-bold tracking-widest text-white shrink-0">BlankD</h1>
         {isLoggedIn && (
           <nav className="flex gap-2 sm:gap-6 overflow-x-auto w-full scrollbar-hide justify-end sm:justify-start">
             {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '강화' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
@@ -313,7 +313,8 @@ function MainApp() {
         <main className="max-w-6xl mx-auto w-full">
           <ErrorBoundary fallbackLog={addLog}>
             {activeTab === 'progress' && <DashboardTab categories={categories} savedCards={savedCards} />}
-            {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} addLog={addLog} handleDeleteCategory={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />}
+            {/* 💡 [핵심] 분할 기능 API(handleSplitCategory)를 자식에게 전달 */}
+            {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} handleDeleteCategory={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />}
             {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleDeleteCard={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});setActiveCard(null);loadAllData();}}} />}
             {activeTab === 'exam' && <ExamTab exams={exams} examFile={examFile} setExamFile={setExamFile} uploadExam={uploadExam} />}
             {activeTab === 'settings' && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화하시겠습니까?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
@@ -335,12 +336,7 @@ function MainApp() {
             </div>
           </div>
         )}
-        <button 
-          onClick={() => setIsTerminalOpen(!isTerminalOpen)} 
-          className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-full font-bold text-[10px] sm:text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}
-        >
-          {isTerminalOpen ? 'Close Terminal' : 'Open Terminal'}
-        </button>
+        <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-full font-bold text-[10px] sm:text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>{isTerminalOpen ? 'Close Terminal' : 'Open Terminal'}</button>
       </div>
 
       {activeCard && (
@@ -363,11 +359,9 @@ function MainApp() {
                     } return <span key={i}>{part}</span>;
                   })}
                 </div>
-                
                 <div className="flex justify-end w-full mb-1 sm:mb-2">
                   <button onClick={handleShowAnswer} className="px-2 sm:px-3 py-1 sm:py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-colors shadow-sm">정답 보기 (오답 처리)</button>
                 </div>
-
                 <div className="pt-3 sm:pt-4 border-t border-white/10 w-full animate-in fade-in">
                   <div className="text-[10px] sm:text-[11px] text-teal-500/50 mb-1.5 sm:mb-2 font-bold uppercase tracking-widest">📝 Memo</div>
                   <input defaultValue={statsRef.current.text || ""} placeholder="메모 입력..." onBlur={(e) => { statsRef.current.text = e.target.value; handleUpdateMemoBackground(activeCard.id, stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices))); }} className="text-[12px] sm:text-[13px] text-teal-300 bg-teal-950/20 p-2.5 sm:p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-colors" />
