@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getStrictTitleOnly, formatCardText, parseCardStats, getGridStyle } from '../utils/constants';
+import { getStrictTitleOnly, formatCardText, parseCardStats } from '../utils/constants';
 
 const getGridClass = (cols: number) => {
   if(cols === 1) return "md:grid-cols-1";
@@ -39,33 +39,29 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 auto-rows-fr`}>
-            {/* 💡 [핵심 해결] 강화 탭 역시 법(1) -> 령(2) -> 칙(3) 순서를 강제로 보장하는 이중 정렬 적용 */}
-            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => {
-                const textA = a.content || "";
-                const textB = b.content || "";
-                const wA = textA.includes('[법]') ? 1 : textA.includes('[령]') ? 2 : (textA.includes('[칙]') || textA.includes('[규]')) ? 3 : 4;
-                const wB = textB.includes('[법]') ? 1 : textB.includes('[령]') ? 2 : (textB.includes('[칙]') || textB.includes('[규]')) ? 3 : 4;
-                if (wA !== wB) return wA - wB;
-                return (getStrictTitleOnly(textA) || "").localeCompare((getStrictTitleOnly(textB) || ""), undefined, {numeric: true});
-            }).map((card: any) => {
+            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
                 const cleanTitle = getStrictTitleOnly(card.content);
                 const { body } = formatCardText(card.content);
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
 
+                let colClass = "";
+                let titleColor = "text-amber-400";
                 const checkText = `${card.content || ''}`;
-                let titleColor = "text-amber-400"; 
+
+                if (viewMode === 'all' && colCount >= 3) {
+                  if (checkText.includes('[법]')) colClass = "md:col-start-1";
+                  else if (checkText.includes('[령]')) colClass = "md:col-start-2";
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) colClass = "md:col-start-3";
+                }
 
                 if (checkText.includes('[법]')) titleColor = "text-red-500";
                 else if (checkText.includes('[령]')) titleColor = "text-blue-400";
                 else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
 
-                // 💡 [복구 완료] 원래의 3단 자리 지정 함수
-                const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
-
                 return (
-                  <div key={card.id} className="relative transition-all w-full h-full" style={gridStyle}>
+                  <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all h-full flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
                       
                       <div className="flex flex-row justify-between items-center w-full gap-2">
