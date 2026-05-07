@@ -53,9 +53,7 @@ function MainApp() {
 
   const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-30));
 
-  useEffect(() => {
-    document.title = "빈칸개발(BlankD)";
-  }, []);
+  useEffect(() => { document.title = "빈칸개발(BlankD)"; }, []);
 
   useEffect(() => {
     if (window.location.hash) {
@@ -72,6 +70,7 @@ function MainApp() {
         fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`).then(r=>r.json())
       ]);
       setCategories(catRes.categories || []); setSavedCards(cardRes.cards || []); setExams(examRes.exams || []);
+      addLog(`🟢 데이터 로드 완료 (카테고리: ${catRes.categories?.length || 0}개)`);
     } catch (e: any) { addLog(`❌ 데이터 로드 실패: ${e.message}`); }
   };
 
@@ -113,35 +112,53 @@ function MainApp() {
     }
   };
 
-  // 💡 [버그 픽스] 카운트 유실 방지를 위해 Promise를 반환하도록 변경
-  const handleUpdateMemo = async (id: number, memo: string) => {
+  // 💡 [수정] 텍스트 박스 입력 중 사용하는 단순 백그라운드용 함수
+  const handleUpdateMemoBackground = (id: number, memo: string) => {
     setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
-    return fetch("https://api.blankd.top/api/update-card-memo", { 
-      method: "POST", 
-      headers: { "Content-Type": "application/json" }, 
-      body: JSON.stringify({ wallet_address: safeAddress, id, memo }) 
-    });
+    fetch("https://api.blankd.top/api/update-card-memo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id, memo }) }).catch(e => console.error(e));
   };
 
-  const submitCombatAnswer = async (isCorrect: boolean, time: number = 999.0) => {
-    if (!activeCard) return;
+  // 💡 [핵심 버그 수정] 빈칸 풀이가 완료되었을 때 실행되는 함수
+  const finishCard = async () => {
+    if (!activeCard) return; // 카드가 이미 닫혔다면 무시
     const currentId = activeCard.id;
+    const finalTime = elapsed;
+    const wrongArr = Array.from(statsRef.current.wrongIndices);
+    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+    const isCorrect = wrongArr.length === 0;
+
+    // 1. 서버 응답을 기다리지 않고 화면부터 즉시 닫고 로컬 데이터 갱신 (화면 멈춤 완전 해결)
     setActiveCard(null); 
-    
+    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
+
+    // 2. 백그라운드에서 순차적으로 안전하게 서버에 전송 (카운트 증발 완전 해결)
     try {
-      await fetch("https://api.blankd.top/api/submit-answer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ card_id: currentId, is_correct: isCorrect, clear_time: time }) });
-      await loadAllData(); // 💡 반드시 제출 후에 데이터 다시 로드
+      await fetch("https://api.blankd.top/api/update-card-memo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: currentId, memo: newMemo }) });
+      await fetch("https://api.blankd.top/api/submit-answer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ card_id: currentId, is_correct: isCorrect, clear_time: finalTime }) });
+      await loadAllData(); // 모든 저장이 끝난 후 안전하게 최신화
     } catch (e) {
-      addLog("❌ 답변 제출 에러");
+      addLog("❌ 카드 완료 통신 에러");
     }
   };
 
-  const finishCard = async () => {
+  // 💡 [핵심 버그 수정] 모달 바깥이나 닫기 버튼을 눌러 중간에 종료할 때 실행되는 함수
+  const handleCloseModal = async () => {
+    if (!activeCard) return;
+    const currentId = activeCard.id;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
-    // 💡 [핵심] 메모 업데이트가 끝날 때까지 기다립니다. (await 추가)
-    await handleUpdateMemo(activeCard.id, newMemo); 
-    submitCombatAnswer(wrongArr.length === 0, elapsed);
+
+    // 1. 즉시 화면 닫고 로컬 데이터 갱신
+    setActiveCard(null);
+    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
+
+    // 2. 서버에 안전하게 메모 전송 후 동기화
+    try {
+      await fetch("https://api.blankd.top/api/update-card-memo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: currentId, memo: newMemo }) });
+      await loadAllData();
+    } catch (e) {
+      addLog("❌ 창 닫기 통신 에러");
+    }
   };
 
   useEffect(() => {
@@ -166,7 +183,7 @@ function MainApp() {
         const diff = (Date.now() - startTime) / 1000; setElapsed(diff);
         if (diff >= totalTimeLimit) { 
           clearInterval(interval); 
-          alert("시간 초과! 지금까지의 기록이 저장됩니다.");
+          alert("시간 초과! 지금까지의 기록이 자동 저장됩니다.");
           finishCard(); 
         }
       }, 100);
@@ -200,8 +217,10 @@ function MainApp() {
 
   const handleShowAnswer = () => {
     if (!blanks[currentBlankIdx]) return;
+    
     setInputStatus('wrong');
     statsRef.current.wrongIndices.add(currentBlankIdx); 
+    
     const nb = [...blanks];
     nb[currentBlankIdx].correct = true; 
     setBlanks(nb);
@@ -211,13 +230,6 @@ function MainApp() {
       if (currentBlankIdx + 1 < nb.length) setCurrentBlankIdx(currentBlankIdx + 1);
       else finishCard();
     }, 1000); 
-  };
-
-  const handleCloseModal = async () => {
-    const wrongArr = Array.from(statsRef.current.wrongIndices);
-    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
-    await handleUpdateMemo(activeCard.id, newMemo);
-    setActiveCard(null);
   };
 
   return (
@@ -288,7 +300,7 @@ function MainApp() {
                 </div>
                 <div className="pt-4 border-t border-white/10 w-full animate-in fade-in">
                   <div className="text-[11px] text-teal-500/50 mb-2 font-bold uppercase tracking-widest">📝 Memo</div>
-                  <input defaultValue={statsRef.current.text || ""} placeholder="메모 입력..." onBlur={(e) => { statsRef.current.text = e.target.value; const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices)); handleUpdateMemo(activeCard.id, newMemo); }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-colors" />
+                  <input defaultValue={statsRef.current.text || ""} placeholder="메모 입력..." onBlur={(e) => { statsRef.current.text = e.target.value; const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices)); handleUpdateMemoBackground(activeCard.id, newMemo); }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-colors" />
                 </div>
               </div>
             );
