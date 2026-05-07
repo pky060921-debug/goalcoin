@@ -123,25 +123,26 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-          {/* 💡 겹침을 방지하기 위해 auto-rows-fr을 제거하고 items-start를 적용했습니다. */}
-          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
+          {/* 💡 [복구] 원래의 그리드 형태와 auto-rows-fr을 다시 살려 카드가 일정 높이로 늘어나게 합니다. */}
+          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 auto-rows-fr`}>
             {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => (a.title || "").localeCompare((b.title || ""), undefined, {numeric: true})).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const contentToUse = cat.content || cat.title || "";
                 
                 const checkText = `${cat.title || ''} ${cat.content || ''}`;
-                let titleColor = "text-amber-400";
+                let titleColor = "text-amber-400"; // 기본 색상
 
+                // 색상 부여 로직
                 if (checkText.includes('[법]')) titleColor = "text-red-500";
                 else if (checkText.includes('[령]')) titleColor = "text-blue-400";
                 else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
                 
-                // 💡 원래의 완벽한 3단 HTML 정렬 로직 복구
+                // 💡 [핵심 복구] 예전부터 사용하시던 완벽한 3단 정렬 함수
                 const gridStyle = getGridStyle(contentToUse, viewMode, isExpanded, colCount);
                 const cleanTitle = getStrictTitleOnly(contentToUse);
 
                 return (
-                  <div key={cat.id} className="relative transition-all w-full" style={gridStyle}>
+                  <div key={cat.id} className="relative transition-all w-full h-full" style={gridStyle}>
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} 
                         onClick={() => { 
