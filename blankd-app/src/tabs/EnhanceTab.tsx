@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getStrictTitleOnly, formatCardText, parseCardStats } from '../utils/constants';
+import { getStrictTitleOnly, formatCardText, parseCardStats, getGridStyle } from '../utils/constants';
 
 const getGridClass = (cols: number) => {
   if(cols === 1) return "md:grid-cols-1";
@@ -36,9 +36,10 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
       
       {enhanceFolders.map((folder: string) => openFolders[folder] && (
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
-          <div className="text-xs sm:text-sm text-white/50 mb-4 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
+          <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 auto-rows-fr`}>
+          {/* 💡 겹침을 방지하기 위해 auto-rows-fr을 제거하고 items-start를 적용했습니다. */}
+          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => (getStrictTitleOnly(a.content) || "").localeCompare((getStrictTitleOnly(b.content) || ""), undefined, {numeric: true})).map((card: any) => {
                 const cleanTitle = getStrictTitleOnly(card.content);
                 const { body } = formatCardText(card.content);
@@ -47,27 +48,20 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 const hasWrong = stats.wrongIndices.length > 0;
 
                 const checkText = `${card.content || ''}`;
-                let colClass = "";
-                let titleColor = "text-amber-400"; // 기본 색상
+                let titleColor = "text-amber-400"; 
 
-                // 💡 [수정] 3단 배치 유지 및 색상 부여
-                if (checkText.includes('[법]')) {
-                  if (viewMode === 'all' && colCount >= 3) colClass = "md:col-start-1";
-                  titleColor = "text-red-500";
-                } else if (checkText.includes('[령]')) {
-                  if (viewMode === 'all' && colCount >= 3) colClass = "md:col-start-2";
-                  titleColor = "text-blue-400";
-                } else if (checkText.includes('[칙]') || checkText.includes('[규]')) {
-                  if (viewMode === 'all' && colCount >= 3) colClass = "md:col-start-3";
-                  titleColor = "text-green-500";
-                }
+                if (checkText.includes('[법]')) titleColor = "text-red-500";
+                else if (checkText.includes('[령]')) titleColor = "text-blue-400";
+                else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
+
+                // 💡 원래의 완벽한 3단 HTML 정렬 로직 복구
+                const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
 
                 return (
-                  <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
+                  <div key={card.id} className="relative transition-all w-full" style={gridStyle}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all h-full flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
                       
                       <div className="flex flex-row justify-between items-center w-full gap-2">
-                        {/* 💡 [수정] 제목에 동적 색상(titleColor) 적용 */}
                         <div className={`font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1 ${titleColor}`}>{cleanTitle}</div>
                         
                         <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
