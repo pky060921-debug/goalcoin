@@ -136,11 +136,9 @@ function MainApp() {
     if (res.ok) { setExamFile(null); setTimeout(() => loadAllData(), 2000); }
   };
 
-  // 💡 [수정] DB에 저장할 때 구분선(##PAGE_BREAK##)을 함께 문자열에 박아넣습니다.
   const handleMakeBlankCard = async (cat: any, wordsArray: string[], selectedIndices: Set<number>, pageBreaks: Set<number>, memo: string, onComplete: () => void) => {
     let bodyContent = ""; let answerText = ""; let isBlanking = false;
     wordsArray.forEach((word, index) => {
-      // 해당 인덱스에 도달하면 구분선 삽입
       if (pageBreaks.has(index)) { bodyContent += " ##PAGE_BREAK## "; }
 
       if (selectedIndices.has(index)) {
@@ -340,7 +338,6 @@ function MainApp() {
             const { body } = formatCardText(activeCard.content);
             const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== ''); 
             
-            // 💡 [수정] 오직 '현재 진행 중인 빈칸이 속한 페이지'만 필터링하여 렌더링
             let displayPage = 0;
             let tempGlobalBlank = 0;
             let tempPage = 0;
@@ -383,7 +380,7 @@ function MainApp() {
               <div className="flex flex-col gap-4 sm:gap-6 w-full">
                 <div className="flex justify-between items-center border-b border-white/10 pb-2">
                     <span className="text-amber-400 font-bold text-[12px] sm:text-[14px]">
-                      {activeCard.content.split('\n')[0]} {/* 제목 */}
+                      {activeCard.content.split('\n')[0]} 
                     </span>
                     <span className="text-[10px] sm:text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded">
                       Page {displayPage + 1}
