@@ -262,7 +262,6 @@ def get_my_cards():
         logging.error(f"[오류 진단] my-cards 에러:\n{traceback.format_exc()}")
         return jsonify({"error": "조회 실패"}), 500
 
-# 💡 [로컬 우선 아키텍처] 묶어서 한 번에 전송받는 동기화(Batch Sync) API 신설
 @api_bp.route('/sync-batch', methods=['POST'])
 def sync_batch():
     try:
@@ -277,11 +276,9 @@ def sync_batch():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-        # 1. 큐에 쌓인 메모/통계들 일괄 업데이트
         for m in memos:
             cursor.execute("UPDATE cards SET memo = ? WHERE id = ? AND wallet_address = ?", (m.get('memo', ''), m.get('id'), wallet_address))
 
-        # 2. 큐에 쌓인 학습 결과(O/X) 일괄 채점 및 에빙하우스 스케줄링
         for a in answers:
             card_id = a.get('card_id')
             is_correct = a.get('is_correct')
@@ -392,3 +389,28 @@ def delete_all():
         return jsonify({"message": "초기화 성공"})
     except Exception as e:
         return jsonify({"error": "초기화 실패"}), 500
+
+# 💡 [신규] 본문을 2개로 강제 분할하는 API
+@api_bp.route('/split-category', methods=['POST'])
+def split_category():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        cat_id = data.get('id')
+        text1 = data.get('text1')
+        text2 = data.get('text2')
+        title1 = data.get('title1')
+        title2 = data.get('title2')
+        folder_name = data.get('folder_name', '기본 폴더')
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM categories WHERE id = ? AND wallet_address = ?", (cat_id, wallet_address))
+        cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", (wallet_address, title1, text1, folder_name))
+        cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", (wallet_address, title2, text2, folder_name))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "본문 분할 완료"})
+    except Exception as e:
+        logging.error(f"[분할 에러] {traceback.format_exc()}")
+        return jsonify({"error": "분할 실패"}), 500
