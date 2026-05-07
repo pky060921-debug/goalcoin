@@ -29,7 +29,6 @@ export const EnhanceTab = ({ savedCards, setActiveCard, handleDeleteCard }: any)
         <div key={folder} className="mb-8 border-l border-white/5 pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-4 border-b border-white/10 pb-2 font-bold">{folder}</div>
           
-          {/* 💡 [복구] PC 버전에서의 3단 헤더 */}
           <div className="hidden md:grid grid-cols-3 gap-4 mb-4 text-center font-bold text-white/20 text-[10px] uppercase tracking-widest">
              <div>법</div><div>시행령</div><div>시행규칙</div>
           </div>
@@ -42,7 +41,6 @@ export const EnhanceTab = ({ savedCards, setActiveCard, handleDeleteCard }: any)
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
                 
-                // 💡 [복구] 3단 구조 강제 적용 로직
                 const gridStyle = getGridStyle(card.content, 'all', false, 3);
 
                 return (
@@ -51,18 +49,16 @@ export const EnhanceTab = ({ savedCards, setActiveCard, handleDeleteCard }: any)
                          onClick={() => setActiveCard(card)} 
                          className={`w-full h-full p-4 rounded-sm border transition-all flex flex-col justify-between ${hasWrong ? "border-red-500/40 bg-red-900/10 shadow-[0_0_10px_rgba(220,38,38,0.1)]" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer`}>
                       
-                      <div className="flex flex-col gap-3 w-full">
+                      <div className="flex flex-col gap-3 w-full h-full">
                         <div className={`font-bold text-[12px] sm:text-[13px] text-left leading-relaxed break-keep ${hasWrong ? "text-red-300" : "text-amber-400"}`}>
                           {cleanTitle}
                         </div>
                         
-                        {/* 💡 [개선] 뱃지들이 제목과 겹치지 않게 하단으로 정렬 */}
+                        {/* 💡 [수정] 약어 제거 및 0일 때도 항상 틀림:X 표시 */}
                         <div className="flex flex-wrap gap-1.5 justify-start mt-auto">
-                          <span className="text-[9px] sm:text-[10px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono">V:{totalBlanks}</span>
-                          <span className="text-[9px] sm:text-[10px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono">O:{stats.filled}</span>
-                          {hasWrong && (
-                            <span className="text-[9px] sm:text-[10px] text-white border border-red-500/50 px-1.5 py-0.5 rounded bg-red-600 font-bold animate-pulse shadow-sm">X:{stats.wrongIndices.length}</span>
-                          )}
+                          <span className="text-[9px] sm:text-[10px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono">빈칸:{totalBlanks}</span>
+                          <span className="text-[9px] sm:text-[10px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono">채움:{stats.filled}</span>
+                          <span className={`text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded font-mono border ${hasWrong ? 'text-white border-red-500/50 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                         </div>
                       </div>
                     </div>
