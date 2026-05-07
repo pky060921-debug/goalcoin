@@ -45,36 +45,32 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
-
-                let colClass = "";
-                let titleColor = "text-amber-400";
                 const checkText = `${card.content || ''}`;
 
+                // 💡 원본 colClass 로직 복구 및 색상 추가
+                let colClass = "";
+                let titleColor = "text-amber-400";
                 if (viewMode === 'all' && colCount >= 3) {
-                  if (checkText.includes('[법]')) colClass = "md:col-start-1";
-                  else if (checkText.includes('[령]')) colClass = "md:col-start-2";
-                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) colClass = "md:col-start-3";
+                  if (checkText.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
+                  else if (checkText.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
+                } else {
+                  if (checkText.includes('[법]')) titleColor = "text-red-500";
+                  else if (checkText.includes('[령]')) titleColor = "text-blue-400";
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
                 }
-
-                if (checkText.includes('[법]')) titleColor = "text-red-500";
-                else if (checkText.includes('[령]')) titleColor = "text-blue-400";
-                else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
 
                 return (
                   <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all h-full flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
-                      
                       <div className="flex flex-row justify-between items-center w-full gap-2">
-                        {/* 💡 색상 적용 */}
                         <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{cleanTitle}</div>
-                        
                         <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
                           <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
                           <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">채움:{stats.filled}</span>
-                          <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
+                          <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                         </div>
                       </div>
-
                     </div>
                   </div>
                 );
