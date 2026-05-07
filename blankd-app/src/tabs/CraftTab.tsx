@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { formatCardText, getStrictTitleOnly, SPLIT_REGEX } from '../utils/constants';
 
-// 💡 [핵심] 설정의 열 갯수(colCount)를 실제 그리드 레이아웃에 적용하는 함수
 const getGridClass = (cols: number) => {
   if(cols === 1) return "md:grid-cols-1";
   if(cols === 2) return "md:grid-cols-2";
@@ -34,7 +33,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
   };
 
-  // 💡 [복구] 짧게 터치(클릭) 시 1개 선택
   const handleWordClick = (idx: number) => {
     const s = new Set(selectedWords);
     if(s.has(idx)) s.delete(idx); else s.add(idx);
@@ -42,7 +40,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     setLastSelected(idx);
   };
 
-  // 💡 [복구] 길게 터치(롱프레스/우클릭) 시, 이전에 누른 곳부터 현재 위치까지 쫙! 범위 선택
   const handleWordLongPress = (idx: number, e: any) => {
     e.preventDefault(); 
     if (lastSelected !== null) {
@@ -57,7 +54,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     }
   };
 
-  // 💡 [기능 추가] AI 추천 빈칸 연동 함수
   const triggerAiRecommend = async (cat: any, bodyText: string) => {
     addLog(`▶️ [AI 추천] ${cat.title} 분석 시작...`);
     try {
@@ -105,17 +101,32 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-          {/* 💡 [적용] 설정에서 선택한 colCount 레이아웃을 그대로 따름 */}
+          {/* 💡 [복구] PC 버전에서만 나타나는 3단 헤더 텍스트 */}
+          {viewMode === 'all' && colCount >= 3 && (
+            <div className="hidden md:grid gap-3 sm:gap-4 mb-3 text-center font-bold text-white/40 text-[10px] sm:text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
+               <div>법 (Act)</div><div>시행령 (Decree)</div><div>시행규칙 (Rule)</div>
+            </div>
+          )}
+
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 auto-rows-fr`}>
             {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
-                const gridStyle = isExpanded ? { gridColumn: "1 / -1" } : {};
                 const contentToUse = cat.content || cat.title || "";
+                
+                // 💡 [핵심 복구] 모바일을 깨뜨리지 않고 PC에서만 제자리를 찾아가도록 반응형 클래스 적용
+                let colClass = "";
+                if (viewMode === 'all' && colCount >= 3) {
+                  if (contentToUse.includes('[법]')) colClass = "md:col-start-1";
+                  else if (contentToUse.includes('[령]')) colClass = "md:col-start-2";
+                  else if (contentToUse.includes('[칙]') || contentToUse.includes('[규]')) colClass = "md:col-start-3";
+                }
+                if (isExpanded) colClass = "col-span-full";
+
                 const { body } = formatCardText(contentToUse);
                 const cleanTitle = getStrictTitleOnly(contentToUse);
 
                 return (
-                  <div key={cat.id} className="relative transition-all w-full" style={gridStyle}>
+                  <div key={cat.id} className={`relative transition-all w-full ${colClass}`}>
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} 
                         onClick={() => { setExpandedId(cat.id); setSelectedWords(new Set()); setParsedText(body); setMemoInput(cat.memo || ""); setLastSelected(null); }} 
@@ -127,8 +138,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                       <div className="w-full p-4 sm:p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-3 sm:space-y-4 shadow-xl z-20 relative animate-in zoom-in-95">
                         <div className="flex justify-between items-center mb-1 sm:mb-2">
                           <span className="text-amber-400 font-bold text-[12px] sm:text-[14px] cursor-pointer" onClick={() => setExpandedId(null)}>{cleanTitle}</span>
-                          
-                          {/* 💡 [기능 부활] 설정의 AI 추천이 ON일 때만 등장하는 버튼 */}
                           {useAiRecommend && (
                             <button onClick={(e) => { e.stopPropagation(); triggerAiRecommend(cat, body); }} className="text-[9px] sm:text-[11px] bg-indigo-600/30 text-indigo-300 border border-indigo-500/50 px-2 py-1 rounded hover:bg-indigo-600/50 transition-colors whitespace-nowrap">✨ AI 추천</button>
                           )}
