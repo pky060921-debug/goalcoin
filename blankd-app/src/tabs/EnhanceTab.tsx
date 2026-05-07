@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { getGridStyle, getStrictTitleOnly, formatCardText } from '../utils/constants';
+import { getGridStyle, getStrictTitleOnly, formatCardText, parseCardStats } from '../utils/constants';
 
-export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleUpdateMemo, handleDeleteCard }: any) => {
+export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
@@ -38,16 +38,32 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
                 const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
                 const cleanTitle = getStrictTitleOnly(card.content);
+                
+                // 💡 해당 카드의 통계 계산
+                const { body } = formatCardText(card.content);
+                const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
+                const stats = parseCardStats(card.memo);
+                const hasWrong = stats.wrongIndices.length > 0;
 
                 return (
                   <div key={card.id} className="relative transition-all" style={gridStyle}>
-                    {/* 💡 기존의 메모 <input> 태그를 완전히 제거하고, 카드 전체를 클릭 가능하도록 병합했습니다. */}
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} 
                          onClick={() => setActiveCard(card)} 
-                         className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col justify-start ${card.status === "BURNED" ? "border-white/5 bg-white/5" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40 cursor-pointer"}`}>
+                         className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col justify-start ${hasWrong ? "border-red-500/30 bg-red-900/10" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer`}>
                       <div className="flex justify-between items-start w-full gap-2">
                         <div className="text-amber-400 font-bold text-[13px] text-left flex-1 leading-snug">{cleanTitle}</div>
-                        <div className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-1 rounded whitespace-nowrap shrink-0 mt-0.5">반복.{card.level}</div>
+                        
+                        {/* 💡 반복을 빼고 빈칸 완료/오답 갯수 뱃지 표시 */}
+                        <div className="flex flex-col gap-1 items-end shrink-0 mt-0.5">
+                          <div className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-0.5 rounded whitespace-nowrap bg-teal-900/20">
+                            완료 {stats.filled}/{totalBlanks}
+                          </div>
+                          {hasWrong && (
+                            <div className="text-[10px] text-red-400 border border-red-500/30 px-2 py-0.5 rounded whitespace-nowrap bg-red-900/20 animate-pulse">
+                              오답 {stats.wrongIndices.length}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
