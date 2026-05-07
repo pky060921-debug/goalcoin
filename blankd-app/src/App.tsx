@@ -50,10 +50,14 @@ function MainApp() {
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
+  // 💡 [핵심 방어막] 화면 멈춤 및 중복 저장을 차단하는 클로저 방어 Ref
+  const isClosingRef = useRef(false);
 
   const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-30));
 
-  useEffect(() => { document.title = "빈칸개발(BlankD)"; }, []);
+  useEffect(() => {
+    document.title = "빈칸개발(BlankD)";
+  }, []);
 
   useEffect(() => {
     if (window.location.hash) {
@@ -112,57 +116,18 @@ function MainApp() {
     }
   };
 
-  // 💡 [수정] 텍스트 박스 입력 중 사용하는 단순 백그라운드용 함수
-  const handleUpdateMemoBackground = (id: number, memo: string) => {
+  const handleUpdateMemoBackground = async (id: number, memo: string) => {
     setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
-    fetch("https://api.blankd.top/api/update-card-memo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id, memo }) }).catch(e => console.error(e));
-  };
-
-  // 💡 [핵심 버그 수정] 빈칸 풀이가 완료되었을 때 실행되는 함수
-  const finishCard = async () => {
-    if (!activeCard) return; // 카드가 이미 닫혔다면 무시
-    const currentId = activeCard.id;
-    const finalTime = elapsed;
-    const wrongArr = Array.from(statsRef.current.wrongIndices);
-    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
-    const isCorrect = wrongArr.length === 0;
-
-    // 1. 서버 응답을 기다리지 않고 화면부터 즉시 닫고 로컬 데이터 갱신 (화면 멈춤 완전 해결)
-    setActiveCard(null); 
-    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
-
-    // 2. 백그라운드에서 순차적으로 안전하게 서버에 전송 (카운트 증발 완전 해결)
     try {
-      await fetch("https://api.blankd.top/api/update-card-memo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: currentId, memo: newMemo }) });
-      await fetch("https://api.blankd.top/api/submit-answer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ card_id: currentId, is_correct: isCorrect, clear_time: finalTime }) });
-      await loadAllData(); // 모든 저장이 끝난 후 안전하게 최신화
-    } catch (e) {
-      addLog("❌ 카드 완료 통신 에러");
-    }
+      const res = await fetch("https://api.blankd.top/api/update-card-memo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id, memo }) });
+      if (!res.ok) addLog(`⚠️ 메모 텍스트 저장 실패 (${res.status})`);
+    } catch (e: any) { addLog(`❌ 메모 텍스트 통신 에러: ${e.message}`); }
   };
 
-  // 💡 [핵심 버그 수정] 모달 바깥이나 닫기 버튼을 눌러 중간에 종료할 때 실행되는 함수
-  const handleCloseModal = async () => {
-    if (!activeCard) return;
-    const currentId = activeCard.id;
-    const wrongArr = Array.from(statsRef.current.wrongIndices);
-    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
-
-    // 1. 즉시 화면 닫고 로컬 데이터 갱신
-    setActiveCard(null);
-    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
-
-    // 2. 서버에 안전하게 메모 전송 후 동기화
-    try {
-      await fetch("https://api.blankd.top/api/update-card-memo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: currentId, memo: newMemo }) });
-      await loadAllData();
-    } catch (e) {
-      addLog("❌ 창 닫기 통신 에러");
-    }
-  };
-
+  // 💡 [수정] 모달창이 열릴 때 방어막 해제
   useEffect(() => {
     if (activeCard) {
+      isClosingRef.current = false;
       const { body } = formatCardText(activeCard.content);
       const foundBlanks: {answer: string, correct: boolean}[] = [];
       const regex = /\[\s*(.*?)\s*\]/g; let match;
@@ -176,6 +141,70 @@ function MainApp() {
       statsRef.current = { text: stats.text, filled: stats.filled, wrongIndices: new Set(stats.wrongIndices) };
     }
   }, [activeCard]);
+
+  // 💡 [완벽 개선] 정답 제출 완료 시 - 무조건 화면부터 닫고, 통신은 뒤에서!
+  const finishCard = async () => {
+    if (isClosingRef.current || !activeCard) return;
+    isClosingRef.current = true; // 중복 실행 원천 차단
+
+    const currentId = activeCard.id;
+    const finalTime = elapsed;
+    const wrongArr = Array.from(statsRef.current.wrongIndices);
+    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+    const isCorrect = wrongArr.length === 0;
+
+    // 1. 서버 통신 전에 화면을 1순위로 즉시 닫고 로컬 데이터부터 갱신! (카운트 증발 원천 차단)
+    setActiveCard(null); 
+    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
+
+    let hasError = false;
+
+    // 2. 백그라운드 서버 통신 (각각 분리하여 하나가 실패해도 다른 건 살리도록 구성)
+    try {
+      const res1 = await fetch("https://api.blankd.top/api/update-card-memo", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, id: currentId, memo: newMemo })
+      });
+      if (!res1.ok) { addLog(`⚠️ 통계 갱신 실패 (${res1.status})`); hasError = true; }
+    } catch (e: any) { addLog(`❌ 통계 통신 에러: ${e.message}`); hasError = true; }
+
+    try {
+      const res2 = await fetch("https://api.blankd.top/api/submit-answer", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        // 안전을 위해 지갑 주소 동봉
+        body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, is_correct: isCorrect, clear_time: finalTime })
+      });
+      if (!res2.ok) { addLog(`⚠️ 답변 기록 실패 (${res2.status})`); hasError = true; }
+    } catch (e: any) { addLog(`❌ 답변 기록 통신 에러: ${e.message}`); hasError = true; }
+
+    if (!hasError) addLog(`✅ 카드 학습 완료 (ID:${currentId})`);
+
+    // 3. 모든 통신이 끝난 후 여유롭게 최신화
+    await loadAllData(); 
+  };
+
+  // 💡 [완벽 개선] 중간에 닫기 버튼 눌렀을 때도 즉시 닫기
+  const handleCloseModal = async () => {
+    if (isClosingRef.current || !activeCard) return;
+    isClosingRef.current = true;
+
+    const currentId = activeCard.id;
+    const wrongArr = Array.from(statsRef.current.wrongIndices);
+    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+
+    setActiveCard(null);
+    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
+
+    try {
+      const res = await fetch("https://api.blankd.top/api/update-card-memo", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, id: currentId, memo: newMemo })
+      });
+      if (!res.ok) addLog(`⚠️ 닫기 통계 갱신 실패 (${res.status})`);
+    } catch (e: any) { addLog(`❌ 닫기 통계 통신 에러: ${e.message}`); }
+
+    await loadAllData();
+  };
 
   useEffect(() => {
     if (activeCard && currentBlankIdx < blanks.length) {
