@@ -53,7 +53,6 @@ function MainApp() {
 
   const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-30));
 
-  // 💡 [수정됨] 브라우저 탭(창)의 제목을 코드로 강제 고정합니다.
   useEffect(() => {
     document.title = "빈칸개발(BlankD)";
   }, []);
@@ -115,21 +114,30 @@ function MainApp() {
     }
   };
 
-  const handleUpdateMemo = async (id: number, memo: string) => {
+  // 💡 [수정] 백그라운드에서 저장만 실행하고 UI를 가로막지 않게 처리
+  const handleUpdateMemo = (id: number, memo: string) => {
     setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
-    await fetch("https://api.blankd.top/api/update-card-memo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id, memo }) });
+    fetch("https://api.blankd.top/api/update-card-memo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id, memo }) }).catch(e => console.error(e));
   };
 
+  // 💡 [핵심 버그 수정] 모달을 즉시 끄도록 로직 위치 변경
   const submitCombatAnswer = async (isCorrect: boolean, time: number = 999.0) => {
     if (!activeCard) return;
-    await fetch("https://api.blankd.top/api/submit-answer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ card_id: activeCard.id, is_correct: isCorrect, clear_time: time }) });
-    setActiveCard(null); loadAllData();
+    const currentId = activeCard.id;
+    setActiveCard(null); // 화면을 1순위로 즉시 닫습니다!
+    
+    try {
+      await fetch("https://api.blankd.top/api/submit-answer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ card_id: currentId, is_correct: isCorrect, clear_time: time }) });
+      loadAllData(); // 저장이 완료되면 백그라운드에서 리스트 갱신
+    } catch (e) {
+      addLog("❌ 답변 제출 통신 에러 발생");
+    }
   };
 
-  const finishCard = async () => {
+  const finishCard = () => {
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
-    await handleUpdateMemo(activeCard.id, newMemo); 
+    handleUpdateMemo(activeCard.id, newMemo); 
     submitCombatAnswer(wrongArr.length === 0, elapsed);
   };
 
@@ -153,7 +161,12 @@ function MainApp() {
     if (activeCard && currentBlankIdx < blanks.length) {
       const interval = setInterval(() => {
         const diff = (Date.now() - startTime) / 1000; setElapsed(diff);
-        if (diff >= totalTimeLimit) { clearInterval(interval); finishCard(); }
+        if (diff >= totalTimeLimit) { 
+          clearInterval(interval); 
+          // 💡 [신규] 시간 초과 시 멈추지 않고 알림창을 띄운 뒤 즉시 종료합니다.
+          alert("시간 초과! 지금까지 푼 결과가 저장됩니다.");
+          finishCard(); 
+        }
       }, 100);
       return () => clearInterval(interval);
     }
@@ -200,17 +213,17 @@ function MainApp() {
     }, 1000); 
   };
 
-  const handleCloseModal = async () => {
+  // 💡 [핵심 버그 수정] 모달 바깥 닫기 버튼 클릭 시 무조건 창부터 즉각 닫히게 처리
+  const handleCloseModal = () => {
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
-    await handleUpdateMemo(activeCard.id, newMemo);
-    setActiveCard(null);
+    handleUpdateMemo(activeCard.id, newMemo); // 백그라운드 저장
+    setActiveCard(null); // 즉시 닫기
   };
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-6 relative pb-56 font-sans">
       <header className="max-w-6xl mx-auto border-b border-white/10 pb-6 mb-12 flex items-center gap-10">
-        {/* 💡 [수정됨] 헤더 로고 텍스트 변경: 오직 BlankD만 남김 */}
         <h1 className="text-2xl font-bold tracking-widest text-white shrink-0">
           BlankD
         </h1>
@@ -225,7 +238,6 @@ function MainApp() {
 
       {!isLoggedIn ? (
         <main className="max-w-md mx-auto mt-24 flex flex-col items-center">
-          {/* 로그인 화면 중앙 텍스트 */}
           <h2 className="text-2xl font-serif text-white mb-4">빈칸개발(BlankD)</h2>
           <p className="text-sm text-white/40 mb-12 text-center text-pretty">인지 과학 기반의 간격 반복 학습으로<br/>영구 기억을 형성합니다.</p>
           <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-white text-black font-bold rounded-sm mb-6 transition-transform active:scale-95">Google 계정으로 시작하기</button>
