@@ -222,10 +222,17 @@ def get_categories():
 def save_card():
     try:
         data = request.json
-        wallet_address, card_content, answer_text, folder_name = data.get('wallet_address'), data.get('card_content'), data.get('answer_text'), data.get('folder_name', '기본 폴더')
+        wallet_address = data.get('wallet_address')
+        card_content = data.get('card_content')
+        answer_text = data.get('answer_text')
+        folder_name = data.get('folder_name', '기본 폴더')
+        # 💡 [수정] 새롭게 전송되는 memo 필드 수신
+        memo = data.get('memo', '')
+        
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('''INSERT INTO cards (wallet_address, card_content, answer_text, options_json, next_review_time, folder_name) VALUES (?, ?, ?, '[]', ?, ?)''', (wallet_address, card_content, answer_text, get_next_review_time(0), folder_name))
+        # 💡 [수정] DB에 카드를 저장할 때 memo 데이터도 함께 삽입
+        cursor.execute('''INSERT INTO cards (wallet_address, card_content, answer_text, options_json, next_review_time, folder_name, memo) VALUES (?, ?, ?, '[]', ?, ?, ?)''', (wallet_address, card_content, answer_text, get_next_review_time(0), folder_name, memo))
         conn.commit()
         conn.close()
         return jsonify({"message": "카드 제작 완료"}), 201
@@ -249,19 +256,46 @@ def get_my_cards():
                 elif (next_review - now).total_seconds() < 7200: cursor.execute("UPDATE cards SET status = 'AT_RISK' WHERE id = ?", (card_id,))
         conn.commit()
         
-        cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name FROM cards WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
-        cards = [{"id": r[0], "content": r[1], "answer": r[2], "options": json.loads(r[3]), "level": r[4], "next_review": r[5], "status": r[6], "best_time": r[7], "folder_name": r[8]} for r in cursor.fetchall()]
+        # 💡 [수정] 데이터를 가져올 때 memo 필드 포함하여 프론트엔드로 전달
+        cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo FROM cards WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
+        cards = [{"id": r[0], "content": r[1], "answer": r[2], "options": json.loads(r[3]), "level": r[4], "next_review": r[5], "status": r[6], "best_time": r[7], "folder_name": r[8], "memo": r[9] or ""} for r in cursor.fetchall()]
         conn.close()
         return jsonify({"cards": cards})
     except Exception as e:
         logging.error(f"[오류 진단] my-cards 에러:\n{traceback.format_exc()}")
         return jsonify({"error": "조회 실패"}), 500
 
+# 💡 [신규] 프론트엔드에서 통계 업데이트를 위해 호출하던 잃어버린 API 신설
+@api_bp.route('/update-card-memo', methods=['POST'])
+def update_card_memo():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        card_id = data.get('id')
+        memo = data.get('memo', '')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE cards SET memo = ? WHERE id = ? AND wallet_address = ?", (memo, card_id, wallet_address))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "메모 및 통계 업데이트 완료"}), 200
+    except Exception as e:
+        logging.error(f"[오류 진단] update-card-memo 에러:\n{traceback.format_exc()}")
+        return jsonify({"error": "메모 업데이트 실패"}), 500
+
 @api_bp.route('/submit-answer', methods=['POST'])
 def submit_answer():
     try:
         data = request.json
-        card_id, is_correct, clear_time = data.get('card_id'), data.get('is_correct'), data.get('clear_time', 999.0)
+        card_id = data.get('card_id')
+        is_correct = data.get('is_correct')
+        clear_time = data.get('clear_time', 999.0)
+        
+        # 💡 [수정] 프론트엔드에서 넘어온 시간 데이터를 안전하게 실수형(float)으로 강제 변환
+        try: clear_time = float(clear_time)
+        except: clear_time = 999.0
+
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT level, best_time FROM cards WHERE id = ?", (card_id,))
@@ -270,8 +304,13 @@ def submit_answer():
         current_lv, best_time = row[0], row[1]
         
         if is_correct:
-            new_lv = min(current_lv + 1, 50)
-            new_best = clear_time if best_time is None else min(best_time, clear_time)
+            new_lv = min(int(current_lv) + 1, 50)
+            # DB에 저장된 best_time도 안전하게 변환
+            try: best_time_float = float(best_time) if best_time is not None else float('inf')
+            except: best_time_float = float('inf')
+            
+            new_best = clear_time if best_time_float == float('inf') else min(best_time_float, clear_time)
+            
             cursor.execute("UPDATE cards SET level = ?, next_review_time = ?, status = 'OWNED', best_time = ? WHERE id = ?", (new_lv, get_next_review_time(new_lv), new_best, card_id))
             msg = f"방어 성공! 레벨이 {new_lv}로 올랐습니다."
         else:
