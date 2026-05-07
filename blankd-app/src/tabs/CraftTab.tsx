@@ -123,26 +123,25 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-          {/* 💡 [복구] 원래의 그리드 형태와 auto-rows-fr을 다시 살려 카드가 일정 높이로 늘어나게 합니다. */}
+          {/* 💡 [복원 완료] 아키님의 원본 auto-rows-fr 레이아웃 */}
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 auto-rows-fr`}>
             {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => (a.title || "").localeCompare((b.title || ""), undefined, {numeric: true})).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const contentToUse = cat.content || cat.title || "";
                 
+                // 💡 [신규] 제목 텍스트 대신 제목 색상으로 직관적 표시
                 const checkText = `${cat.title || ''} ${cat.content || ''}`;
-                let titleColor = "text-amber-400"; // 기본 색상
-
-                // 색상 부여 로직
+                let titleColor = "text-amber-400"; 
                 if (checkText.includes('[법]')) titleColor = "text-red-500";
                 else if (checkText.includes('[령]')) titleColor = "text-blue-400";
                 else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
-                
-                // 💡 [핵심 복구] 예전부터 사용하시던 완벽한 3단 정렬 함수
+
+                // 💡 [복원 완료] 아키님이 설계하신 완벽한 3단 배열 로직
                 const gridStyle = getGridStyle(contentToUse, viewMode, isExpanded, colCount);
                 const cleanTitle = getStrictTitleOnly(contentToUse);
 
                 return (
-                  <div key={cat.id} className="relative transition-all w-full h-full" style={gridStyle}>
+                  <div key={cat.id} className={`relative transition-all w-full`} style={gridStyle}>
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} 
                         onClick={() => { 
@@ -151,6 +150,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                           setWordArray(body.split(SPLIT_REGEX).filter((w:string) => w !== undefined && w !== null && w !== ""));
                         }} 
                         className="w-full h-full min-h-[60px] p-3 sm:p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-1.5 sm:gap-2 text-left">
+                        {/* 💡 색상만 다르게 적용 */}
                         <span className={`${titleColor} font-bold text-[11px] sm:text-[13px] leading-snug break-keep`}>{cleanTitle}</span>
                         {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
                       </button>
