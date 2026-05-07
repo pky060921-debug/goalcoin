@@ -7,99 +7,81 @@ export const DashboardTab = ({ categories, savedCards }: any) => {
   let totalWrong = 0;
 
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
-  
-  // 💡 장(폴더)별 통계를 저장할 객체
   const folderStats: Record<string, { total: number; filled: number; wrong: number }> = {};
   
   safeCards.forEach((card: any) => {
-    const folder = card.folder_name || '분류 안 됨';
-    if (!folderStats[folder]) {
-      folderStats[folder] = { total: 0, filled: 0, wrong: 0 };
-    }
+    const folder = card.folder_name || '기본 폴더';
+    if (!folderStats[folder]) folderStats[folder] = { total: 0, filled: 0, wrong: 0 };
 
     const { body } = formatCardText(card.content);
     const blanks = body.match(/\[\s*(.*?)\s*\]/g) || [];
     const blankCount = blanks.length;
     
     const stats = parseCardStats(card.memo);
-    const filledCount = stats.filled;
-    const wrongCount = stats.wrongIndices.length;
-
-    // 전체 통계 누적
     totalBlanks += blankCount;
-    totalFilled += filledCount;
-    totalWrong += wrongCount;
+    totalFilled += stats.filled;
+    totalWrong += stats.wrongIndices.length;
 
-    // 장별 통계 누적
     folderStats[folder].total += blankCount;
-    folderStats[folder].filled += filledCount;
-    folderStats[folder].wrong += wrongCount;
+    folderStats[folder].filled += stats.filled;
+    folderStats[folder].wrong += stats.wrongIndices.length;
   });
 
   const progressPercent = totalBlanks > 0 ? Math.round((totalFilled / totalBlanks) * 100) : 0;
   const sortedFolders = Object.keys(folderStats).sort();
 
   return (
-    <div className="space-y-8 animate-in fade-in">
-      {/* 상단: 전체 요약 수치 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-[#0a0a0c] border border-indigo-500/30 p-6 rounded-sm shadow-lg flex flex-col gap-2">
-          <span className="text-teal-500/50 font-bold text-xs uppercase tracking-widest">전체 생성 빈칸</span>
-          <span className="text-3xl font-light text-white">{totalBlanks} <span className="text-sm text-white/40">개</span></span>
+    <div className="space-y-4 animate-in fade-in max-w-full overflow-hidden">
+      {/* 💡 [수정] 상단 전체 요약 구역: 아주 작고 콤팩트하게 변경 */}
+      <div className="flex flex-wrap gap-3 items-end">
+        <div className="bg-[#0a0a0c] border border-white/5 px-4 py-3 rounded-sm flex flex-col gap-1 min-w-[120px]">
+          <span className="text-[10px] text-white/30 font-bold uppercase tracking-widest">전체 빈칸</span>
+          <span className="text-xl font-light text-white">{totalBlanks} <span className="text-[10px] text-white/20">EA</span></span>
         </div>
-        <div className="bg-[#0a0a0c] border border-indigo-500/30 p-6 rounded-sm shadow-lg flex flex-col gap-2">
-          <span className="text-teal-500/50 font-bold text-xs uppercase tracking-widest">누적 정답 (채운 빈칸)</span>
-          <span className="text-3xl font-light text-teal-400">{totalFilled} <span className="text-sm text-white/40">개</span></span>
+        <div className="bg-[#0a0a0c] border border-white/5 px-4 py-3 rounded-sm flex flex-col gap-1 min-w-[120px]">
+          <span className="text-[10px] text-teal-500/40 font-bold uppercase tracking-widest">누적 정답</span>
+          <span className="text-xl font-light text-teal-400">{totalFilled} <span className="text-[10px] text-white/20">EA</span></span>
         </div>
-        <div className="bg-[#0a0a0c] border border-indigo-500/30 p-6 rounded-sm shadow-lg flex flex-col gap-2">
-          <span className="text-red-500/50 font-bold text-xs uppercase tracking-widest">현재 오답 누적</span>
-          <span className="text-3xl font-light text-red-400">{totalWrong} <span className="text-sm text-white/40">개</span></span>
+        <div className="bg-[#0a0a0c] border border-white/5 px-4 py-3 rounded-sm flex flex-col gap-1 min-w-[120px]">
+          <span className="text-[10px] text-red-500/40 font-bold uppercase tracking-widest">누적 오답</span>
+          <span className="text-xl font-light text-red-400">{totalWrong} <span className="text-[10px] text-white/20">EA</span></span>
         </div>
-      </div>
-
-      {/* 중단: 전체 지식 동기화율 프로그레스 바 */}
-      <div className="bg-[#0a0a0c] border border-white/10 p-8 rounded-sm shadow-2xl relative overflow-hidden group">
-        <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity">
-          <svg className="w-32 h-32 text-indigo-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zm0 7.5l-10-5v10l10 5 10-5v-10l-10 5z"/></svg>
-        </div>
-        <h3 className="text-lg font-serif text-white mb-4 relative z-10">전체 지식 동기화율 (Total Progress)</h3>
-        <div className="w-full bg-white/5 h-4 rounded-full overflow-hidden mb-2 relative z-10">
-          <div className="bg-indigo-500 h-full transition-all duration-1000 ease-out" style={{ width: `${progressPercent}%` }}></div>
-        </div>
-        <p className="text-right text-sm text-indigo-400 font-bold relative z-10">{progressPercent}% 완료</p>
-      </div>
-
-      {/* 💡 하단: 장별(폴더별) 상세 진행상황 시각화 */}
-      {sortedFolders.length > 0 && (
-        <div className="bg-[#0a0a0c] border border-white/10 p-6 rounded-sm shadow-xl">
-          <h3 className="text-md font-serif text-white/80 mb-6 border-b border-white/10 pb-2">장별 상세 진행상황</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {sortedFolders.map(folder => {
-              const fStats = folderStats[folder];
-              const fPercent = fStats.total > 0 ? Math.round((fStats.filled / fStats.total) * 100) : 0;
-              
-              return (
-                <div key={folder} className="flex flex-col gap-2 p-4 border border-white/5 bg-white/5 rounded-sm hover:bg-white/10 transition-colors">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[13px] font-bold text-amber-400 truncate pr-2">{folder}</span>
-                    <span className="text-xs text-white/60 font-bold">{fPercent}%</span>
-                  </div>
-                  {/* 작은 프로그레스 바 */}
-                  <div className="w-full bg-black/50 h-1.5 rounded-full overflow-hidden">
-                    <div className="bg-amber-500 h-full transition-all duration-700 ease-out" style={{ width: `${fPercent}%` }}></div>
-                  </div>
-                  {/* 세부 수치 */}
-                  <div className="flex gap-3 text-[10px] mt-1 font-mono">
-                    <span className="text-white/40">빈칸 {fStats.total}</span>
-                    <span className="text-teal-400">채움 {fStats.filled}</span>
-                    {fStats.wrong > 0 && <span className="text-red-400 animate-pulse">틀림 {fStats.wrong}</span>}
-                  </div>
-                </div>
-              );
-            })}
+        
+        {/* 전체 진행률 바 - 슬림 버전 */}
+        <div className="flex-1 min-w-[200px] bg-[#0a0a0c] border border-indigo-500/20 px-4 py-3 rounded-sm">
+          <div className="flex justify-between items-center mb-1.5">
+            <span className="text-[10px] text-indigo-400/50 font-bold tracking-widest uppercase">지식 동기화율</span>
+            <span className="text-xs font-bold text-indigo-300">{progressPercent}%</span>
+          </div>
+          <div className="w-full bg-black/50 h-1 rounded-full overflow-hidden">
+            <div className="bg-indigo-500 h-full transition-all duration-1000" style={{ width: `${progressPercent}%` }}></div>
           </div>
         </div>
-      )}
+      </div>
+
+      {/* 💡 [수정] 장별 상세 구역: 스크롤을 최소화하기 위해 타이트한 그리드 적용 */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-2 pt-2 border-t border-white/5">
+        {sortedFolders.map(folder => {
+          const fs = folderStats[folder];
+          const fp = fs.total > 0 ? Math.round((fs.filled / fs.total) * 100) : 0;
+          return (
+            <div key={folder} className="bg-white/5 border border-white/5 p-3 rounded-sm hover:bg-white/10 transition-colors flex flex-col gap-2">
+              <div className="flex justify-between items-start">
+                <span className="text-[11px] font-bold text-amber-500/80 truncate pr-1 flex-1 leading-tight">{folder}</span>
+                <span className="text-[10px] text-white/40 font-mono">{fp}%</span>
+              </div>
+              <div className="w-full bg-black/40 h-1 rounded-full overflow-hidden">
+                <div className="bg-amber-500/60 h-full transition-all duration-700" style={{ width: `${fp}%` }}></div>
+              </div>
+              <div className="flex justify-between text-[9px] font-mono text-white/30 tracking-tighter">
+                <span>V:{fs.total}</span>
+                <span className="text-teal-500/60">O:{fs.filled}</span>
+                {fs.wrong > 0 && <span className="text-red-500/60 animate-pulse">X:{fs.wrong}</span>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 };
