@@ -15,7 +15,7 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
   static getDerivedStateFromError(error: any) { return { hasError: true, errorMessage: error.message }; }
   componentDidCatch(error: any, errorInfo: any) { this.props.fallbackLog(`❌ 에러: ${error.message}`); }
   render() {
-    if (this.state.hasError) return <div className="p-6 text-red-400 font-mono border border-red-500/30">⚠️ 렌더링 에러: {this.state.errorMessage}</div>;
+    if (this.state.hasError) return <div className="p-4 sm:p-6 text-red-400 font-mono border border-red-500/30 text-xs sm:text-sm">⚠️ 렌더링 에러: {this.state.errorMessage}</div>;
     return this.props.children;
   }
 }
@@ -40,6 +40,7 @@ function MainApp() {
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [examFile, setExamFile] = useState<File | null>(null);
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인..."]);
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false); // 💡 터미널 열림/닫힘 상태
 
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
@@ -50,14 +51,11 @@ function MainApp() {
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
-  // 💡 [핵심 방어막] 화면 멈춤 및 중복 저장을 차단하는 클로저 방어 Ref
   const isClosingRef = useRef(false);
 
-  const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-30));
+  const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-40));
 
-  useEffect(() => {
-    document.title = "빈칸개발(BlankD)";
-  }, []);
+  useEffect(() => { document.title = "빈칸개발(BlankD)"; }, []);
 
   useEffect(() => {
     if (window.location.hash) {
@@ -124,7 +122,6 @@ function MainApp() {
     } catch (e: any) { addLog(`❌ 메모 텍스트 통신 에러: ${e.message}`); }
   };
 
-  // 💡 [수정] 모달창이 열릴 때 방어막 해제
   useEffect(() => {
     if (activeCard) {
       isClosingRef.current = false;
@@ -142,10 +139,9 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // 💡 [완벽 개선] 정답 제출 완료 시 - 무조건 화면부터 닫고, 통신은 뒤에서!
   const finishCard = async () => {
     if (isClosingRef.current || !activeCard) return;
-    isClosingRef.current = true; // 중복 실행 원천 차단
+    isClosingRef.current = true; 
 
     const currentId = activeCard.id;
     const finalTime = elapsed;
@@ -153,37 +149,30 @@ function MainApp() {
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     const isCorrect = wrongArr.length === 0;
 
-    // 1. 서버 통신 전에 화면을 1순위로 즉시 닫고 로컬 데이터부터 갱신! (카운트 증발 원천 차단)
     setActiveCard(null); 
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
 
     let hasError = false;
-
-    // 2. 백그라운드 서버 통신 (각각 분리하여 하나가 실패해도 다른 건 살리도록 구성)
     try {
       const res1 = await fetch("https://api.blankd.top/api/update-card-memo", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ wallet_address: safeAddress, id: currentId, memo: newMemo })
       });
       if (!res1.ok) { addLog(`⚠️ 통계 갱신 실패 (${res1.status})`); hasError = true; }
-    } catch (e: any) { addLog(`❌ 통계 통신 에러: ${e.message}`); hasError = true; }
+    } catch (e: any) { addLog(`❌ 통계 갱신 통신 에러: ${e.message}`); hasError = true; }
 
     try {
       const res2 = await fetch("https://api.blankd.top/api/submit-answer", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        // 안전을 위해 지갑 주소 동봉
         body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, is_correct: isCorrect, clear_time: finalTime })
       });
-      if (!res2.ok) { addLog(`⚠️ 답변 기록 실패 (${res2.status})`); hasError = true; }
-    } catch (e: any) { addLog(`❌ 답변 기록 통신 에러: ${e.message}`); hasError = true; }
+      if (!res2.ok) { addLog(`⚠️ 백엔드 내부 에러 발생 (코드 ${res2.status})`); hasError = true; }
+    } catch (e: any) { addLog(`❌ 카드 완료 통신 에러: 백엔드 서버 문제`); hasError = true; }
 
     if (!hasError) addLog(`✅ 카드 학습 완료 (ID:${currentId})`);
-
-    // 3. 모든 통신이 끝난 후 여유롭게 최신화
     await loadAllData(); 
   };
 
-  // 💡 [완벽 개선] 중간에 닫기 버튼 눌렀을 때도 즉시 닫기
   const handleCloseModal = async () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
@@ -262,26 +251,28 @@ function MainApp() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-6 relative pb-56 font-sans text-pretty">
-      <header className="max-w-6xl mx-auto border-b border-white/10 pb-6 mb-12 flex items-center gap-10">
-        <h1 className="text-2xl font-bold tracking-widest text-white shrink-0">BlankD</h1>
+    <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden">
+      <header className="max-w-6xl mx-auto border-b border-white/10 pb-4 sm:pb-6 mb-8 sm:mb-12 flex items-center justify-between gap-4">
+        <h1 className="text-xl sm:text-2xl font-bold tracking-widest text-white shrink-0">
+          BlankD
+        </h1>
         {isLoggedIn && (
-          <nav className="flex gap-6 overflow-x-auto w-full scrollbar-hide">
+          <nav className="flex gap-2 sm:gap-6 overflow-x-auto w-full scrollbar-hide justify-end sm:justify-start">
             {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '강화' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`text-sm font-bold tracking-widest whitespace-nowrap px-2 py-1 transition-all ${activeTab === tab.id ? 'text-white border-b-2 border-white' : 'text-white/40 hover:text-white'}`}>{tab.label}</button>
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`text-[11px] sm:text-sm font-bold tracking-widest whitespace-nowrap px-2 py-1 transition-all ${activeTab === tab.id ? 'text-white border-b-2 border-white' : 'text-white/40 hover:text-white'}`}>{tab.label}</button>
             ))}
           </nav>
         )}
       </header>
 
       {!isLoggedIn ? (
-        <main className="max-w-md mx-auto mt-24 flex flex-col items-center">
-          <h2 className="text-2xl font-serif text-white mb-4">빈칸개발(BlankD)</h2>
-          <p className="text-sm text-white/40 mb-12 text-center">인지 과학 기반의 간격 반복 학습으로<br/>영구 기억을 형성합니다.</p>
-          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-white text-black font-bold rounded-sm mb-6 transition-transform active:scale-95">Google 계정으로 시작하기</button>
+        <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
+          <h2 className="text-xl sm:text-2xl font-serif text-white mb-4">빈칸개발(BlankD)</h2>
+          <p className="text-xs sm:text-sm text-white/40 mb-10 sm:mb-12 text-center leading-relaxed">인지 과학 기반의 간격 반복 학습으로<br/>영구 기억을 형성합니다.</p>
+          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-3 sm:py-4 bg-white text-black text-sm sm:text-base font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
         </main>
       ) : (
-        <main className="max-w-6xl mx-auto">
+        <main className="max-w-6xl mx-auto w-full">
           <ErrorBoundary fallbackLog={addLog}>
             {activeTab === 'progress' && <DashboardTab categories={categories} savedCards={savedCards} />}
             {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} addLog={addLog} handleDeleteCategory={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />}
@@ -292,16 +283,27 @@ function MainApp() {
         </main>
       )}
 
-      <div className="fixed bottom-0 left-0 w-full h-40 bg-black/95 border-t border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto z-[999] shadow-2xl">
-        <div className="flex justify-between items-center mb-2 border-b border-teal-500/10 pb-1 sticky top-0 bg-black/95">
-          <span className="uppercase tracking-widest text-teal-500/50">Diagnostic Terminal</span>
-          <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2">Clear</button>
-        </div>
-        <div className="space-y-1">
-          {systemLogs.map((l, i) => (
-            <div key={i} className={l.includes('❌') ? 'text-red-400 font-bold' : l.includes('▶️') ? 'text-amber-300' : ''}>{l}</div>
-          ))}
-        </div>
+      {/* 💡 터미널 토글 버튼 및 모달 패널 */}
+      <div className="fixed bottom-4 right-4 z-[999] flex flex-col items-end gap-2">
+        {isTerminalOpen && (
+          <div className="w-[85vw] max-w-lg h-56 sm:h-64 bg-black/95 border border-teal-500/30 p-3 sm:p-4 font-mono text-[9px] sm:text-[11px] text-teal-400 overflow-y-auto rounded shadow-2xl flex flex-col custom-scrollbar animate-in slide-in-from-bottom-5 fade-in">
+            <div className="flex justify-between items-center mb-2 border-b border-teal-500/10 pb-2 sticky top-0 bg-black/95">
+              <span className="uppercase tracking-widest text-teal-500/50 font-bold">Diagnostic Terminal</span>
+              <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2 py-0.5 bg-white/5 rounded transition-colors">Clear</button>
+            </div>
+            <div className="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
+              {systemLogs.map((l, i) => (
+                <div key={i} className={`leading-snug break-all ${l.includes('❌') ? 'text-red-400 font-bold' : l.includes('▶️') ? 'text-amber-300' : ''}`}>{l}</div>
+              ))}
+            </div>
+          </div>
+        )}
+        <button 
+          onClick={() => setIsTerminalOpen(!isTerminalOpen)} 
+          className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-full font-bold text-[10px] sm:text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}
+        >
+          {isTerminalOpen ? 'Close Terminal' : 'Open Terminal'}
+        </button>
       </div>
 
       {activeCard && (
@@ -310,8 +312,9 @@ function MainApp() {
             const { body } = formatCardText(activeCard.content);
             const parts = body.split(/(\[.*?\])/g); let bIdx = 0;
             return (
-              <div className="flex flex-col gap-6 w-full">
-                <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif">
+              <div className="flex flex-col gap-4 sm:gap-6 w-full">
+                {/* 💡 빈칸 텍스트 크기 반응형 조절 */}
+                <div className="whitespace-pre-wrap leading-relaxed text-[13px] sm:text-[14px] md:text-[15px] font-serif break-keep">
                   {parts.map((part: string, i: number) => {
                     if (part.startsWith('[') && part.endsWith(']')) {
                       const isCorrect = blanks[bIdx]?.correct; 
@@ -319,17 +322,19 @@ function MainApp() {
                       const isWrong = statsRef.current.wrongIndices.has(bIdx); 
                       bIdx++;
                       if (isCorrect) return <span key={i} className={`font-bold mx-1 ${isWrong ? 'text-red-400' : 'text-green-400'}`}>{part.replace(/\[|\]/g, '')}</span>;
-                      else if (isCurrent) return <span key={i} className="inline-block min-w-[60px] h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>;
-                      else return <span key={i} className="inline-block min-w-[60px] h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
+                      else if (isCurrent) return <span key={i} className="inline-block min-w-[50px] sm:min-w-[60px] h-4 sm:h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>;
+                      else return <span key={i} className="inline-block min-w-[50px] sm:min-w-[60px] h-4 sm:h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
                     } return <span key={i}>{part}</span>;
                   })}
                 </div>
-                <div className="flex justify-end w-full mb-2">
-                  <button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-colors shadow">정답 보기 (오답 처리)</button>
+                
+                <div className="flex justify-end w-full mb-1 sm:mb-2">
+                  <button onClick={handleShowAnswer} className="px-2 sm:px-3 py-1 sm:py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-colors shadow-sm">정답 보기 (오답 처리)</button>
                 </div>
-                <div className="pt-4 border-t border-white/10 w-full animate-in fade-in">
-                  <div className="text-[11px] text-teal-500/50 mb-2 font-bold uppercase tracking-widest">📝 Memo</div>
-                  <input defaultValue={statsRef.current.text || ""} placeholder="메모 입력..." onBlur={(e) => { statsRef.current.text = e.target.value; const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices)); handleUpdateMemoBackground(activeCard.id, newMemo); }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-colors" />
+
+                <div className="pt-3 sm:pt-4 border-t border-white/10 w-full animate-in fade-in">
+                  <div className="text-[10px] sm:text-[11px] text-teal-500/50 mb-1.5 sm:mb-2 font-bold uppercase tracking-widest">📝 Memo</div>
+                  <input defaultValue={statsRef.current.text || ""} placeholder="메모 입력..." onBlur={(e) => { statsRef.current.text = e.target.value; const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices)); handleUpdateMemoBackground(activeCard.id, newMemo); }} className="text-[12px] sm:text-[13px] text-teal-300 bg-teal-950/20 p-2.5 sm:p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-colors" />
                 </div>
               </div>
             );
