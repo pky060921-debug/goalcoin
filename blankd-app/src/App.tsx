@@ -95,7 +95,6 @@ function MainApp() {
     });
     if (isBlanking) bodyContent += " ]";
     
-    // 💡 저장 시 제목과 본문을 확실한 구분선(\n\n)으로 나눕니다.
     const finalCardContent = `${cat.title}\n\n${bodyContent}`;
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
@@ -183,7 +182,7 @@ function MainApp() {
         </main>
       )}
 
-      {/* 💡 전역 시스템 터미널 */}
+      {/* 전역 시스템 터미널 */}
       <div className="fixed bottom-0 left-0 w-full h-40 bg-black/90 border-t border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto z-[999]">
         <div className="flex justify-between items-center mb-2 border-b border-teal-500/30 pb-1 sticky top-0 bg-black/90">
           <span className="uppercase tracking-widest text-teal-500/50">Diagnostic Terminal</span>
@@ -202,15 +201,28 @@ function MainApp() {
             const { body } = formatCardText(activeCard.content);
             const parts = body.split(/(\[.*?\])/g); let bIdx = 0;
             return (
-              <div className="whitespace-pre-wrap leading-relaxed">
-                {parts.map((part: string, i: number) => {
-                  if (part.startsWith('[') && part.endsWith(']')) {
-                    const isCorrect = blanks[bIdx]?.correct; const isCurrent = bIdx === currentBlankIdx; bIdx++;
-                    if (isCorrect) return <span key={i} className="text-green-400 font-bold mx-1">{part.replace(/\[|\]/g, '')}</span>;
-                    else if (isCurrent) return <span key={i} className="inline-block min-w-[60px] h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>;
-                    else return <span key={i} className="inline-block min-w-[60px] h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
-                  } return <span key={i}>{part}</span>;
-                })}
+              <div className="flex flex-col gap-6 w-full">
+                <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif">
+                  {parts.map((part: string, i: number) => {
+                    if (part.startsWith('[') && part.endsWith(']')) {
+                      const isCorrect = blanks[bIdx]?.correct; const isCurrent = bIdx === currentBlankIdx; bIdx++;
+                      if (isCorrect) return <span key={i} className="text-green-400 font-bold mx-1">{part.replace(/\[|\]/g, '')}</span>;
+                      else if (isCurrent) return <span key={i} className="inline-block min-w-[60px] h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>;
+                      else return <span key={i} className="inline-block min-w-[60px] h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
+                    } return <span key={i}>{part}</span>;
+                  })}
+                </div>
+                
+                {/* 💡 강화 탭 로비에서 사라진 메모 입력창을 모달 안쪽으로 이동 */}
+                <div className="pt-4 border-t border-white/10 w-full animate-in fade-in">
+                  <div className="text-[11px] text-teal-500/50 mb-2 font-bold uppercase tracking-widest">📝 Memo</div>
+                  <input 
+                    defaultValue={activeCard.memo || ""} 
+                    placeholder="여기에 암기 메모를 입력하세요 (저장: 바깥 클릭)..." 
+                    onBlur={(e) => handleUpdateMemo(activeCard.id, e.target.value)} 
+                    className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 focus:bg-teal-950/40 transition-colors"
+                  />
+                </div>
               </div>
             );
           }} 
