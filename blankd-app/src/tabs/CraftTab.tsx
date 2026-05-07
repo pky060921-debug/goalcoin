@@ -101,7 +101,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-          {/* 💡 [복구] PC 버전에서만 나타나는 3단 헤더 텍스트 */}
+          {/* 💡 PC 버전에서만 나타나는 3단 헤더 텍스트 */}
           {viewMode === 'all' && colCount >= 3 && (
             <div className="hidden md:grid gap-3 sm:gap-4 mb-3 text-center font-bold text-white/40 text-[10px] sm:text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
                <div>법 (Act)</div><div>시행령 (Decree)</div><div>시행규칙 (Rule)</div>
@@ -113,13 +113,17 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                 const isExpanded = expandedId === cat.id;
                 const contentToUse = cat.content || cat.title || "";
                 
-                // 💡 [핵심 복구] 모바일을 깨뜨리지 않고 PC에서만 제자리를 찾아가도록 반응형 클래스 적용
+                // 💡 [핵심 복구] 제목과 본문을 모두 합쳐서 검사하여 [법], [령], [칙]을 완벽하게 찾아냅니다.
+                const checkText = `${cat.title || ''} ${cat.content || ''}`;
+                
                 let colClass = "";
                 if (viewMode === 'all' && colCount >= 3) {
-                  if (contentToUse.includes('[법]')) colClass = "md:col-start-1";
-                  else if (contentToUse.includes('[령]')) colClass = "md:col-start-2";
-                  else if (contentToUse.includes('[칙]') || contentToUse.includes('[규]')) colClass = "md:col-start-3";
+                  if (checkText.includes('[법]')) colClass = "md:col-start-1";
+                  else if (checkText.includes('[령]')) colClass = "md:col-start-2";
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) colClass = "md:col-start-3";
                 }
+                
+                // 확장 모드일 때는 화면 전체를 쓰도록 덮어씌움
                 if (isExpanded) colClass = "col-span-full";
 
                 const { body } = formatCardText(contentToUse);
