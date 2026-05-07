@@ -38,8 +38,8 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-          {/* 💡 겹침을 방지하기 위해 auto-rows-fr을 제거하고 items-start를 적용했습니다. */}
-          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
+          {/* 💡 [복구] 원래의 그리드 형태와 auto-rows-fr 복구 완료 */}
+          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 auto-rows-fr`}>
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => (getStrictTitleOnly(a.content) || "").localeCompare((getStrictTitleOnly(b.content) || ""), undefined, {numeric: true})).map((card: any) => {
                 const cleanTitle = getStrictTitleOnly(card.content);
                 const { body } = formatCardText(card.content);
@@ -54,11 +54,11 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 else if (checkText.includes('[령]')) titleColor = "text-blue-400";
                 else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
 
-                // 💡 원래의 완벽한 3단 HTML 정렬 로직 복구
+                // 💡 [핵심 복구] 예전부터 사용하시던 완벽한 3단 정렬 함수 복구!
                 const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
 
                 return (
-                  <div key={card.id} className="relative transition-all w-full" style={gridStyle}>
+                  <div key={card.id} className="relative transition-all w-full h-full" style={gridStyle}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all h-full flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
                       
                       <div className="flex flex-row justify-between items-center w-full gap-2">
