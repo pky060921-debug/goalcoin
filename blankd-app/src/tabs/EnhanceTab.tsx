@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getStrictTitleOnly, formatCardText, parseCardStats, getGridStyle } from '../utils/constants';
+import { getStrictTitleOnly, formatCardText, parseCardStats } from '../utils/constants';
 
 const getGridClass = (cols: number) => {
   if(cols === 1) return "md:grid-cols-1";
@@ -38,31 +38,35 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-          {/* 💡 [복원 완료] 아키님의 원본 auto-rows-fr 레이아웃 */}
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 auto-rows-fr`}>
-            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => (getStrictTitleOnly(a.content) || "").localeCompare((getStrictTitleOnly(b.content) || ""), undefined, {numeric: true})).map((card: any) => {
+            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
                 const cleanTitle = getStrictTitleOnly(card.content);
                 const { body } = formatCardText(card.content);
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
 
-                // 💡 [신규] 제목 텍스트 대신 제목 색상으로 직관적 표시
-                const checkText = `${card.content || ''}`;
-                let titleColor = "text-amber-400"; 
-                if (checkText.includes('[법]')) titleColor = "text-red-500";
-                else if (checkText.includes('[령]')) titleColor = "text-blue-400";
-                else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
-
-                // 💡 [복원 완료] 아키님이 설계하신 완벽한 3단 배열 로직
-                const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
+                let colClass = "";
+                // 💡 [추가] 색상 변수 설정
+                let titleColor = "text-amber-400";
+                
+                // 💡 [기존 로직 유지 + 색상 부여]
+                if (viewMode === 'all' && colCount >= 3) {
+                  if (card.content.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
+                  else if (card.content.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
+                  else if (card.content.includes('[칙]') || card.content.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
+                } else {
+                  if (card.content.includes('[법]')) titleColor = "text-red-500";
+                  else if (card.content.includes('[령]')) titleColor = "text-blue-400";
+                  else if (card.content.includes('[칙]') || card.content.includes('[규]')) titleColor = "text-green-500";
+                }
 
                 return (
-                  <div key={card.id} className="relative transition-all w-full" style={gridStyle}>
+                  <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all h-full flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
                       
                       <div className="flex flex-row justify-between items-center w-full gap-2">
-                        {/* 💡 색상만 다르게 적용 */}
+                        {/* 💡 [적용] 제목 색상 변경 */}
                         <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{cleanTitle}</div>
                         
                         <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
