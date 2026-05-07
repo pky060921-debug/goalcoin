@@ -10,7 +10,7 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory }: any) => {
+export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, handleSplitCategory, addLog, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
@@ -18,7 +18,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   
   const [wordArray, setWordArray] = useState<string[]>([]);
   const [selectedWords, setSelectedWords] = useState<Set<number>>(new Set());
-  // 💡 [신규] 페이지 구분선 인덱스를 저장할 세트
   const [pageBreaks, setPageBreaks] = useState<Set<number>>(new Set());
   const [memoInput, setMemoInput] = useState(""); 
   const [lastSelected, setLastSelected] = useState<number | null>(null);
@@ -42,12 +41,11 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     setSelectedWords(s);
   };
 
-  // 💡 [핵심] 우클릭 시 해당 단어 앞에 페이지 구분선(Page Break) 삽입
   const handleWordSplit = (idx: number, e: any) => {
     e.preventDefault(); 
     const p = new Set(pageBreaks);
     if (p.has(idx)) {
-        p.delete(idx); // 이미 선이 있으면 제거
+        p.delete(idx); 
     } else {
         if (window.confirm("이 위치에서 페이지를 나누시겠습니까? (빈칸 풀 때 다음 장으로 넘어갑니다)")) {
             p.add(idx);
@@ -71,7 +69,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     newSet.add(idx); 
     setSelectedWords(newSet);
 
-    // 병합 시 페이지 구분선 위치 보정
     const newPageBreaks = new Set<number>();
     pageBreaks.forEach(i => {
         if (i <= idx) newPageBreaks.add(i);
@@ -124,13 +121,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       
       {craftFolders.map((folder: string) => openFolders[folder] && (
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
-          <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
-
-          {viewMode === 'all' && colCount >= 3 && (
-            <div className="hidden md:grid gap-3 sm:gap-4 mb-3 text-center font-bold text-white/40 text-[10px] sm:text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-               <div>법 (Act)</div><div>시행령 (Decree)</div><div>시행규칙 (Rule)</div>
-            </div>
-          )}
+          <div className="text-xs sm:text-sm text-white/50 mb-4 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 auto-rows-fr`}>
             {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => (a.title || "").localeCompare((b.title || ""), undefined, {numeric: true})).map((cat: any) => {
@@ -139,11 +130,20 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                 
                 const checkText = `${cat.title || ''} ${cat.content || ''}`;
                 let colClass = "";
-                if (viewMode === 'all' && colCount >= 3) {
-                  if (checkText.includes('[법]')) colClass = "md:col-start-1";
-                  else if (checkText.includes('[령]')) colClass = "md:col-start-2";
-                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) colClass = "md:col-start-3";
+                let titleColor = "text-amber-400"; // 기본 색상
+
+                // 💡 [수정] 3단 배치 유지 및 색상 부여
+                if (checkText.includes('[법]')) {
+                  if (viewMode === 'all' && colCount >= 3) colClass = "md:col-start-1";
+                  titleColor = "text-red-500";
+                } else if (checkText.includes('[령]')) {
+                  if (viewMode === 'all' && colCount >= 3) colClass = "md:col-start-2";
+                  titleColor = "text-blue-400";
+                } else if (checkText.includes('[칙]') || checkText.includes('[규]')) {
+                  if (viewMode === 'all' && colCount >= 3) colClass = "md:col-start-3";
+                  titleColor = "text-green-500";
                 }
+                
                 if (isExpanded) colClass = "col-span-full";
 
                 const cleanTitle = getStrictTitleOnly(contentToUse);
@@ -158,13 +158,14 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                           setWordArray(body.split(SPLIT_REGEX).filter((w:string) => w !== undefined && w !== null && w !== ""));
                         }} 
                         className="w-full h-full min-h-[60px] p-3 sm:p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-1.5 sm:gap-2 text-left">
-                        <span className="text-amber-400 font-bold text-[11px] sm:text-[13px] leading-snug break-keep">{cleanTitle}</span>
+                        {/* 💡 [수정] 제목에 동적 색상(titleColor) 적용 */}
+                        <span className={`${titleColor} font-bold text-[11px] sm:text-[13px] leading-snug break-keep`}>{cleanTitle}</span>
                         {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
                       </button>
                     ) : (
                       <div className="w-full p-4 sm:p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-3 sm:space-y-4 shadow-xl z-20 relative animate-in zoom-in-95">
                         <div className="flex justify-between items-center mb-1 sm:mb-2">
-                          <span className="text-amber-400 font-bold text-[12px] sm:text-[14px] cursor-pointer" onClick={() => setExpandedId(null)}>{cleanTitle}</span>
+                          <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{cleanTitle}</span>
                           {useAiRecommend && (
                             <button onClick={(e) => { e.stopPropagation(); triggerAiRecommend(cat, wordArray.join("")); }} className="text-[9px] sm:text-[11px] bg-indigo-600/30 text-indigo-300 border border-indigo-500/50 px-2 py-1 rounded hover:bg-indigo-600/50 transition-colors whitespace-nowrap">✨ AI 추천</button>
                           )}
@@ -181,7 +182,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                             const hasPageBreak = pageBreaks.has(idx);
                             return (
                               <React.Fragment key={idx}>
-                                {/* 💡 화면에 붉은색 페이지 구분선을 그려줍니다. */}
                                 {hasPageBreak && <div className="w-full border-t-2 border-red-500/50 my-2 relative"><span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-[#0a0a0c] px-2 text-[10px] text-red-400 font-bold">다음 페이지</span></div>}
                                 <span 
                                   onClick={() => handleWordClick(idx)} 
