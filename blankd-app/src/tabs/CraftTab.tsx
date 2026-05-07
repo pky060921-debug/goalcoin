@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, getStrictTitleOnly, SPLIT_REGEX } from '../utils/constants';
+import { formatCardText, getStrictTitleOnly, SPLIT_REGEX, getGridStyle } from '../utils/constants';
 
 const getGridClass = (cols: number) => {
   if(cols === 1) return "md:grid-cols-1";
@@ -123,35 +123,31 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-          {/* 💡 [적용] 잘 작동하던 배열인 auto-rows-fr을 그대로 유지합니다. */}
+          {/* 💡 [복구 완료] 아키님의 완벽한 3단 그리드와 auto-rows-fr */}
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 auto-rows-fr`}>
-            {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => (a.title || "").localeCompare((b.title || ""), undefined, {numeric: true})).map((cat: any) => {
+            {/* 💡 [핵심 해결] 가나다순 역전 방지 이중 정렬: 법(1) -> 령(2) -> 칙(3) 순서를 최우선 보장 */}
+            {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => {
+                const textA = a.title || a.content || "";
+                const textB = b.title || b.content || "";
+                const wA = textA.includes('[법]') ? 1 : textA.includes('[령]') ? 2 : (textA.includes('[칙]') || textA.includes('[규]')) ? 3 : 4;
+                const wB = textB.includes('[법]') ? 1 : textB.includes('[령]') ? 2 : (textB.includes('[칙]') || textB.includes('[규]')) ? 3 : 4;
+                if (wA !== wB) return wA - wB;
+                return textA.localeCompare(textB, undefined, {numeric: true});
+            }).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const contentToUse = cat.content || cat.title || "";
                 
-                const checkText = `${cat.title || ''} ${cat.content || ''}`;
-                
-                // 💡 [핵심] 원본 코드의 colClass 배치 로직에 제목 색상(titleColor)만 추가
-                let colClass = "";
                 let titleColor = "text-amber-400";
-                
-                if (checkText.includes('[법]')) {
-                  titleColor = "text-red-500";
-                  if (viewMode === 'all' && colCount >= 3) colClass = "md:col-start-1";
-                } else if (checkText.includes('[령]')) {
-                  titleColor = "text-blue-400";
-                  if (viewMode === 'all' && colCount >= 3) colClass = "md:col-start-2";
-                } else if (checkText.includes('[칙]') || checkText.includes('[규]')) {
-                  titleColor = "text-green-500";
-                  if (viewMode === 'all' && colCount >= 3) colClass = "md:col-start-3";
-                }
-                
-                if (isExpanded) colClass = "col-span-full";
+                if (contentToUse.includes('[법]')) titleColor = "text-red-500";
+                else if (contentToUse.includes('[령]')) titleColor = "text-blue-400";
+                else if (contentToUse.includes('[칙]') || contentToUse.includes('[규]')) titleColor = "text-green-500";
 
+                // 💡 [복구 완료] 원래의 3단 자리 지정 함수
+                const gridStyle = getGridStyle(contentToUse, viewMode, isExpanded, colCount);
                 const cleanTitle = getStrictTitleOnly(contentToUse);
 
                 return (
-                  <div key={cat.id} className={`relative transition-all w-full ${colClass}`}>
+                  <div key={cat.id} className="relative transition-all w-full h-full" style={gridStyle}>
                     {!isExpanded ? (
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} 
                         onClick={() => { 
@@ -160,7 +156,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                           setWordArray(body.split(SPLIT_REGEX).filter((w:string) => w !== undefined && w !== null && w !== ""));
                         }} 
                         className="w-full h-full min-h-[60px] p-3 sm:p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-1.5 sm:gap-2 text-left">
-                        {/* 💡 [적용] 제목 글자에 동적으로 결정된 색상 적용 */}
+                        {/* 💡 색상 적용 */}
                         <span className={`${titleColor} font-bold text-[11px] sm:text-[13px] leading-snug break-keep`}>{cleanTitle}</span>
                         {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
                       </button>
