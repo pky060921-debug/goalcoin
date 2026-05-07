@@ -11,9 +11,9 @@ def init_db():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 기본 테이블 생성 (장별 폴더 구분을 위한 folder_name 포함)
+        # 기본 테이블 생성 (장별 폴더 구분을 위한 folder_name, 통계 및 메모를 위한 memo 포함)
         cursor.execute('CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, title TEXT, content TEXT, folder_name TEXT DEFAULT "기본 폴더")')
-        cursor.execute('CREATE TABLE IF NOT EXISTS cards (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, category_id INTEGER, card_content TEXT, answer_text TEXT, options_json TEXT, level INTEGER DEFAULT 0, next_review_time DATETIME, status TEXT DEFAULT "OWNED", best_time REAL DEFAULT NULL, folder_name TEXT DEFAULT "기본 폴더")')
+        cursor.execute('CREATE TABLE IF NOT EXISTS cards (id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, category_id INTEGER, card_content TEXT, answer_text TEXT, options_json TEXT, level INTEGER DEFAULT 0, next_review_time DATETIME, status TEXT DEFAULT "OWNED", best_time REAL DEFAULT NULL, folder_name TEXT DEFAULT "기본 폴더", memo TEXT DEFAULT "")')
         cursor.execute('''CREATE TABLE IF NOT EXISTS exams (
             id INTEGER PRIMARY KEY AUTOINCREMENT, wallet_address TEXT, title TEXT, question TEXT, answer TEXT, explanation TEXT, related_law_keywords TEXT
         )''')
@@ -25,6 +25,9 @@ def init_db():
         try: cursor.execute('ALTER TABLE categories ADD COLUMN folder_name TEXT DEFAULT "기본 폴더"')
         except Exception: pass
         try: cursor.execute('ALTER TABLE cards ADD COLUMN folder_name TEXT DEFAULT "기본 폴더"')
+        except Exception: pass
+        # 💡 [신규 추가] 통계 저장을 위한 memo 컬럼 안전 추가
+        try: cursor.execute('ALTER TABLE cards ADD COLUMN memo TEXT DEFAULT ""')
         except Exception: pass
             
         conn.commit()
