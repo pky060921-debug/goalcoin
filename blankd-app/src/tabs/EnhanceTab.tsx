@@ -39,7 +39,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
                 const cleanTitle = getStrictTitleOnly(card.content);
                 
-                // 💡 해당 카드의 통계 계산
                 const { body } = formatCardText(card.content);
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
                 const stats = parseCardStats(card.memo);
@@ -50,18 +49,21 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} 
                          onClick={() => setActiveCard(card)} 
                          className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col justify-start ${hasWrong ? "border-red-500/30 bg-red-900/10" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer`}>
-                      <div className="flex justify-between items-start w-full gap-2">
-                        <div className="text-amber-400 font-bold text-[13px] text-left flex-1 leading-snug">{cleanTitle}</div>
+                      <div className="flex flex-col items-start w-full gap-2">
+                        <div className="text-amber-400 font-bold text-[13px] text-left w-full leading-snug">{cleanTitle}</div>
                         
-                        {/* 💡 반복을 빼고 빈칸 완료/오답 갯수 뱃지 표시 */}
-                        <div className="flex flex-col gap-1 items-end shrink-0 mt-0.5">
-                          <div className="text-[10px] text-teal-400 border border-teal-500/30 px-2 py-0.5 rounded whitespace-nowrap bg-teal-900/20">
-                            완료 {stats.filled}/{totalBlanks}
-                          </div>
+                        {/* 💡 [직관적인 UI 변경] 빈칸 / 채움 / 틀림 뱃지 */}
+                        <div className="flex gap-1.5 flex-wrap w-full mt-1">
+                          <span className="text-[10px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded whitespace-nowrap bg-indigo-900/20">
+                            빈칸 {totalBlanks}개
+                          </span>
+                          <span className="text-[10px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded whitespace-nowrap bg-teal-900/20">
+                            채움 {stats.filled}개
+                          </span>
                           {hasWrong && (
-                            <div className="text-[10px] text-red-400 border border-red-500/30 px-2 py-0.5 rounded whitespace-nowrap bg-red-900/20 animate-pulse">
-                              오답 {stats.wrongIndices.length}
-                            </div>
+                            <span className="text-[10px] text-red-300 border border-red-500/30 px-1.5 py-0.5 rounded whitespace-nowrap bg-red-900/20 animate-pulse">
+                              틀림 {stats.wrongIndices.length}개
+                            </span>
                           )}
                         </div>
                       </div>
