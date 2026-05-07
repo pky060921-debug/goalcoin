@@ -70,10 +70,11 @@ export const DashboardTab = ({ categories, savedCards }: any) => {
               <div className="w-full bg-black/40 h-1 rounded-full overflow-hidden">
                 <div className="bg-amber-500/60 h-full transition-all duration-700" style={{ width: `${fp}%` }}></div>
               </div>
-              <div className="flex justify-between text-[8px] sm:text-[9px] font-mono text-white/30 tracking-tighter">
-                <span>V:{fs.total}</span>
-                <span className="text-teal-500/60">O:{fs.filled}</span>
-                {fs.wrong > 0 && <span className="text-red-500/60 animate-pulse">X:{fs.wrong}</span>}
+              {/* 💡 [수정] 영문 약어 제거, 한국어로 변경 및 항상 표시 */}
+              <div className="flex justify-between text-[8px] sm:text-[9px] font-mono tracking-tighter mt-0.5">
+                <span className="text-white/40">빈칸:{fs.total}</span>
+                <span className="text-teal-400">채움:{fs.filled}</span>
+                <span className={fs.wrong > 0 ? "text-red-400 font-bold animate-pulse" : "text-white/20"}>틀림:{fs.wrong}</span>
               </div>
             </div>
           );
