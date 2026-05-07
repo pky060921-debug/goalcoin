@@ -72,7 +72,6 @@ function MainApp() {
         fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`).then(r=>r.json())
       ]);
       setCategories(catRes.categories || []); setSavedCards(cardRes.cards || []); setExams(examRes.exams || []);
-      addLog(`🟢 데이터 로드 완료 (카테고리: ${catRes.categories?.length || 0}개)`);
     } catch (e: any) { addLog(`❌ 데이터 로드 실패: ${e.message}`); }
   };
 
@@ -114,30 +113,34 @@ function MainApp() {
     }
   };
 
-  // 💡 [수정] 백그라운드에서 저장만 실행하고 UI를 가로막지 않게 처리
-  const handleUpdateMemo = (id: number, memo: string) => {
+  // 💡 [버그 픽스] 카운트 유실 방지를 위해 Promise를 반환하도록 변경
+  const handleUpdateMemo = async (id: number, memo: string) => {
     setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
-    fetch("https://api.blankd.top/api/update-card-memo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id, memo }) }).catch(e => console.error(e));
+    return fetch("https://api.blankd.top/api/update-card-memo", { 
+      method: "POST", 
+      headers: { "Content-Type": "application/json" }, 
+      body: JSON.stringify({ wallet_address: safeAddress, id, memo }) 
+    });
   };
 
-  // 💡 [핵심 버그 수정] 모달을 즉시 끄도록 로직 위치 변경
   const submitCombatAnswer = async (isCorrect: boolean, time: number = 999.0) => {
     if (!activeCard) return;
     const currentId = activeCard.id;
-    setActiveCard(null); // 화면을 1순위로 즉시 닫습니다!
+    setActiveCard(null); 
     
     try {
       await fetch("https://api.blankd.top/api/submit-answer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ card_id: currentId, is_correct: isCorrect, clear_time: time }) });
-      loadAllData(); // 저장이 완료되면 백그라운드에서 리스트 갱신
+      await loadAllData(); // 💡 반드시 제출 후에 데이터 다시 로드
     } catch (e) {
-      addLog("❌ 답변 제출 통신 에러 발생");
+      addLog("❌ 답변 제출 에러");
     }
   };
 
-  const finishCard = () => {
+  const finishCard = async () => {
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
-    handleUpdateMemo(activeCard.id, newMemo); 
+    // 💡 [핵심] 메모 업데이트가 끝날 때까지 기다립니다. (await 추가)
+    await handleUpdateMemo(activeCard.id, newMemo); 
     submitCombatAnswer(wrongArr.length === 0, elapsed);
   };
 
@@ -163,8 +166,7 @@ function MainApp() {
         const diff = (Date.now() - startTime) / 1000; setElapsed(diff);
         if (diff >= totalTimeLimit) { 
           clearInterval(interval); 
-          // 💡 [신규] 시간 초과 시 멈추지 않고 알림창을 띄운 뒤 즉시 종료합니다.
-          alert("시간 초과! 지금까지 푼 결과가 저장됩니다.");
+          alert("시간 초과! 지금까지의 기록이 저장됩니다.");
           finishCard(); 
         }
       }, 100);
@@ -198,10 +200,8 @@ function MainApp() {
 
   const handleShowAnswer = () => {
     if (!blanks[currentBlankIdx]) return;
-    
     setInputStatus('wrong');
     statsRef.current.wrongIndices.add(currentBlankIdx); 
-    
     const nb = [...blanks];
     nb[currentBlankIdx].correct = true; 
     setBlanks(nb);
@@ -213,24 +213,21 @@ function MainApp() {
     }, 1000); 
   };
 
-  // 💡 [핵심 버그 수정] 모달 바깥 닫기 버튼 클릭 시 무조건 창부터 즉각 닫히게 처리
-  const handleCloseModal = () => {
+  const handleCloseModal = async () => {
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
-    handleUpdateMemo(activeCard.id, newMemo); // 백그라운드 저장
-    setActiveCard(null); // 즉시 닫기
+    await handleUpdateMemo(activeCard.id, newMemo);
+    setActiveCard(null);
   };
 
   return (
-    <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-6 relative pb-56 font-sans">
+    <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-6 relative pb-56 font-sans text-pretty">
       <header className="max-w-6xl mx-auto border-b border-white/10 pb-6 mb-12 flex items-center gap-10">
-        <h1 className="text-2xl font-bold tracking-widest text-white shrink-0">
-          BlankD
-        </h1>
+        <h1 className="text-2xl font-bold tracking-widest text-white shrink-0">BlankD</h1>
         {isLoggedIn && (
-          <nav className="flex gap-6 overflow-x-auto w-full">
+          <nav className="flex gap-6 overflow-x-auto w-full scrollbar-hide">
             {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '강화' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`text-sm font-bold tracking-widest whitespace-nowrap px-2 py-1 ${activeTab === tab.id ? 'text-white border-b-2 border-white' : 'text-white/40 hover:text-white'}`}>{tab.label}</button>
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`text-sm font-bold tracking-widest whitespace-nowrap px-2 py-1 transition-all ${activeTab === tab.id ? 'text-white border-b-2 border-white' : 'text-white/40 hover:text-white'}`}>{tab.label}</button>
             ))}
           </nav>
         )}
@@ -239,7 +236,7 @@ function MainApp() {
       {!isLoggedIn ? (
         <main className="max-w-md mx-auto mt-24 flex flex-col items-center">
           <h2 className="text-2xl font-serif text-white mb-4">빈칸개발(BlankD)</h2>
-          <p className="text-sm text-white/40 mb-12 text-center text-pretty">인지 과학 기반의 간격 반복 학습으로<br/>영구 기억을 형성합니다.</p>
+          <p className="text-sm text-white/40 mb-12 text-center">인지 과학 기반의 간격 반복 학습으로<br/>영구 기억을 형성합니다.</p>
           <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-white text-black font-bold rounded-sm mb-6 transition-transform active:scale-95">Google 계정으로 시작하기</button>
         </main>
       ) : (
@@ -254,8 +251,8 @@ function MainApp() {
         </main>
       )}
 
-      <div className="fixed bottom-0 left-0 w-full h-40 bg-black/90 border-t border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto z-[999]">
-        <div className="flex justify-between items-center mb-2 border-b border-teal-500/30 pb-1 sticky top-0 bg-black/90">
+      <div className="fixed bottom-0 left-0 w-full h-40 bg-black/95 border-t border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto z-[999] shadow-2xl">
+        <div className="flex justify-between items-center mb-2 border-b border-teal-500/10 pb-1 sticky top-0 bg-black/95">
           <span className="uppercase tracking-widest text-teal-500/50">Diagnostic Terminal</span>
           <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2">Clear</button>
         </div>
@@ -280,32 +277,18 @@ function MainApp() {
                       const isCurrent = bIdx === currentBlankIdx; 
                       const isWrong = statsRef.current.wrongIndices.has(bIdx); 
                       bIdx++;
-                      
-                      if (isCorrect) {
-                        return <span key={i} className={`font-bold mx-1 ${isWrong ? 'text-red-400' : 'text-green-400'}`}>{part.replace(/\[|\]/g, '')}</span>;
-                      }
+                      if (isCorrect) return <span key={i} className={`font-bold mx-1 ${isWrong ? 'text-red-400' : 'text-green-400'}`}>{part.replace(/\[|\]/g, '')}</span>;
                       else if (isCurrent) return <span key={i} className="inline-block min-w-[60px] h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>;
                       else return <span key={i} className="inline-block min-w-[60px] h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
                     } return <span key={i}>{part}</span>;
                   })}
                 </div>
-                
                 <div className="flex justify-end w-full mb-2">
                   <button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-colors shadow">정답 보기 (오답 처리)</button>
                 </div>
-
                 <div className="pt-4 border-t border-white/10 w-full animate-in fade-in">
                   <div className="text-[11px] text-teal-500/50 mb-2 font-bold uppercase tracking-widest">📝 Memo</div>
-                  <input 
-                    defaultValue={statsRef.current.text || ""} 
-                    placeholder="여기에 암기 메모를 입력하세요 (저장: 바깥 클릭)..." 
-                    onBlur={(e) => {
-                      statsRef.current.text = e.target.value;
-                      const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices));
-                      handleUpdateMemo(activeCard.id, newMemo);
-                    }} 
-                    className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 focus:bg-teal-950/40 transition-colors"
-                  />
+                  <input defaultValue={statsRef.current.text || ""} placeholder="메모 입력..." onBlur={(e) => { statsRef.current.text = e.target.value; const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices)); handleUpdateMemo(activeCard.id, newMemo); }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-colors" />
                 </div>
               </div>
             );
