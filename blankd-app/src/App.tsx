@@ -53,6 +53,11 @@ function MainApp() {
 
   const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-30));
 
+  // 💡 [수정됨] 브라우저 탭(창)의 제목을 코드로 강제 고정합니다.
+  useEffect(() => {
+    document.title = "빈칸개발(BlankD)";
+  }, []);
+
   useEffect(() => {
     if (window.location.hash) {
       enokiFlow.handleAuthCallback().then(() => { window.history.replaceState(null, '', window.location.pathname); addLog("✅ 로그인 콜백 완료"); }).catch((err: any) => addLog(`❌ 인증 실패: ${err.message}`));
@@ -205,8 +210,9 @@ function MainApp() {
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-6 relative pb-56 font-sans">
       <header className="max-w-6xl mx-auto border-b border-white/10 pb-6 mb-12 flex items-center gap-10">
-        <h1 className="text-xl font-bold tracking-widest text-white shrink-0">
-          빈칸개발(BlankD) <span className="text-sm font-light text-white/50 ml-1">BlankD</span>
+        {/* 💡 [수정됨] 헤더 로고 텍스트 변경: 오직 BlankD만 남김 */}
+        <h1 className="text-2xl font-bold tracking-widest text-white shrink-0">
+          BlankD
         </h1>
         {isLoggedIn && (
           <nav className="flex gap-6 overflow-x-auto w-full">
@@ -219,6 +225,7 @@ function MainApp() {
 
       {!isLoggedIn ? (
         <main className="max-w-md mx-auto mt-24 flex flex-col items-center">
+          {/* 로그인 화면 중앙 텍스트 */}
           <h2 className="text-2xl font-serif text-white mb-4">빈칸개발(BlankD)</h2>
           <p className="text-sm text-white/40 mb-12 text-center text-pretty">인지 과학 기반의 간격 반복 학습으로<br/>영구 기억을 형성합니다.</p>
           <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-white text-black font-bold rounded-sm mb-6 transition-transform active:scale-95">Google 계정으로 시작하기</button>
