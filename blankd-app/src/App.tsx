@@ -20,13 +20,12 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
   }
 }
 
-// 💡 [핵심] 오프라인 저장을 위한 로컬 장바구니(Queue) 함수
 const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
   try {
     const qStr = localStorage.getItem('blankd_sync_queue');
     const q = qStr ? JSON.parse(qStr) : { memos: [], answers: [] };
     if (type === 'MEMO') {
-      q.memos = q.memos.filter((m: any) => m.id !== payload.id); // 중복 방지 (최신 덮어쓰기)
+      q.memos = q.memos.filter((m: any) => m.id !== payload.id); 
       q.memos.push(payload);
     } else if (type === 'ANSWER') {
       q.answers.push(payload);
@@ -90,7 +89,6 @@ function MainApp() {
     } catch (e: any) { addLog(`❌ 데이터 로드 실패: ${e.message}`); }
   };
 
-  // 💡 [핵심] 장바구니에 쌓인 로컬 데이터를 서버로 한 번에 전송하는 백그라운드 함수
   const flushQueue = async () => {
     if (!safeAddress) return;
     try {
@@ -108,11 +106,10 @@ function MainApp() {
         addLog(`🔄 백그라운드 일괄 동기화 (메모 ${q.memos.length}건, 결과 ${q.answers.length}건)`);
       }
     } catch (e) {
-      addLog("⚠️ 오프라인 상태: 동기화 대기 중..."); // 에러가 나도 로컬에 남으므로 안전!
+      addLog("⚠️ 오프라인 상태: 동기화 대기 중..."); 
     }
   };
 
-  // 💡 [핵심] 30초마다, 혹은 화면 탭을 닫거나 다른 곳으로 갈 때 자동 동기화
   useEffect(() => {
     if (!safeAddress) return;
     const interval = setInterval(flushQueue, 30000); 
@@ -163,7 +160,6 @@ function MainApp() {
     }
   };
 
-  // 💡 [수정] 메모 입력 시 서버 안 찌르고 로컬 장바구니에 담음
   const handleUpdateMemoBackground = (id: number, memo: string) => {
     setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
     pushToQueue('MEMO', { id, memo });
@@ -186,7 +182,6 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // 💡 [핵심] 카드 완료 시 무조건 화면 먼저 닫고 로컬 장바구니에만 넣습니다!
   const finishCard = () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true; 
@@ -197,17 +192,13 @@ function MainApp() {
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     const isCorrect = wrongArr.length === 0;
 
-    // 1. 화면 즉시 종료 및 로컬 상태 갱신 (반응속도 0.001초)
     setActiveCard(null); 
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
 
-    // 2. 오프라인 장바구니(큐)에 적재
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime });
 
     addLog(`✅ 로컬 기기에 임시 저장 (ID:${currentId})`);
-    
-    // (선택) 여유가 되면 큐를 지금 바로 한 번 비워봅니다 (백그라운드 통신)
     flushQueue();
   };
 
@@ -257,6 +248,11 @@ function MainApp() {
     actual = actual.replace(/\s+/g, '').toLowerCase();
     
     if (expected === actual) {
+      // 💡 [핵심 해결] 한글 IME 조합 잔여물 방지를 위해 포커스를 강제로 잠깐 뺍니다.
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+
       setInputStatus('correct');
       const nb = [...blanks]; nb[currentBlankIdx].correct = true; setBlanks(nb);
       
