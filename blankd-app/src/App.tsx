@@ -121,11 +121,10 @@ function MainApp() {
     setActiveCard(null); loadAllData();
   };
 
-  // 💡 [핵심 버그 수정] 비동기 함수로 변경하여, DB 저장이 완벽히 끝난 후 데이터를 다시 불러오게 수정
   const finishCard = async () => {
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
-    await handleUpdateMemo(activeCard.id, newMemo); // 통계 저장이 끝날 때까지 대기!
+    await handleUpdateMemo(activeCard.id, newMemo); 
     submitCombatAnswer(wrongArr.length === 0, elapsed);
   };
 
@@ -164,13 +163,12 @@ function MainApp() {
       setInputStatus('correct');
       const nb = [...blanks]; nb[currentBlankIdx].correct = true; setBlanks(nb);
       
-      // 💡 [수정] 정답 맞히면 오답에서 제거 & 채운 갯수 한계 없이 계속 증가하도록 변경!
       statsRef.current.wrongIndices.delete(currentBlankIdx);
       statsRef.current.filled += 1; 
 
       setTimeout(() => { 
         setAnswerInput(""); setInputStatus('idle'); 
-        if (currentBlankIdx + 1 < blanks.length) setCurrentBlankIdx(currentBlankIdx + 1); 
+        if (currentBlankIdx + 1 < nb.length) setCurrentBlankIdx(currentBlankIdx + 1); 
         else finishCard(); 
       }, 200);
     } else { 
@@ -180,21 +178,25 @@ function MainApp() {
     }
   };
 
+  // 💡 [버그 픽스] 정답 보기 기능 정상 작동 (빈칸 열기 및 1초 대기 후 이동)
   const handleShowAnswer = () => {
     if (!blanks[currentBlankIdx]) return;
-    const expected = blanks[currentBlankIdx].answer.replace(/\[|\]/g, '');
-    setAnswerInput(expected);
+    
     setInputStatus('wrong');
-    statsRef.current.wrongIndices.add(currentBlankIdx); 
+    statsRef.current.wrongIndices.add(currentBlankIdx); // 오답으로 기록
+    
+    const nb = [...blanks];
+    nb[currentBlankIdx].correct = true; // 화면에 정답이 노출되도록 빈칸을 강제로 엽니다
+    setBlanks(nb);
 
     setTimeout(() => {
       setAnswerInput(""); setInputStatus('idle');
-      if (currentBlankIdx + 1 < blanks.length) setCurrentBlankIdx(currentBlankIdx + 1);
+      // 다음 문제로 넘어가거나 끝내기
+      if (currentBlankIdx + 1 < nb.length) setCurrentBlankIdx(currentBlankIdx + 1);
       else finishCard();
     }, 1000); 
   };
 
-  // 💡 [수정] 모달을 끄기만 해도 현재까지 풀었던 내용이 저장되도록 방어 로직 추가
   const handleCloseModal = async () => {
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
@@ -205,7 +207,6 @@ function MainApp() {
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-6 relative pb-56 font-sans">
       <header className="max-w-6xl mx-auto border-b border-white/10 pb-6 mb-12 flex items-center gap-10">
-        {/* 💡 앱 이름 변경: 빈칸개발 (Blank Develop) */}
         <h1 className="text-xl font-bold tracking-widest text-white shrink-0">
           빈칸개발 <span className="text-sm font-light text-white/50 ml-1">Blank Develop</span>
         </h1>
@@ -220,7 +221,6 @@ function MainApp() {
 
       {!isLoggedIn ? (
         <main className="max-w-md mx-auto mt-24 flex flex-col items-center">
-          {/* 💡 로그인 화면 앱 이름 변경 */}
           <h2 className="text-2xl font-serif text-white mb-4">빈칸개발 (Blank Develop)</h2>
           <p className="text-sm text-white/40 mb-12 text-center text-pretty">인지 과학 기반의 간격 반복 학습으로<br/>영구 기억을 형성합니다.</p>
           <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-white text-black font-bold rounded-sm mb-6 transition-transform active:scale-95">Google 계정으로 시작하기</button>
@@ -259,8 +259,15 @@ function MainApp() {
                 <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif">
                   {parts.map((part: string, i: number) => {
                     if (part.startsWith('[') && part.endsWith(']')) {
-                      const isCorrect = blanks[bIdx]?.correct; const isCurrent = bIdx === currentBlankIdx; bIdx++;
-                      if (isCorrect) return <span key={i} className="text-green-400 font-bold mx-1">{part.replace(/\[|\]/g, '')}</span>;
+                      const isCorrect = blanks[bIdx]?.correct; 
+                      const isCurrent = bIdx === currentBlankIdx; 
+                      const isWrong = statsRef.current.wrongIndices.has(bIdx); // 💡 오답 여부 확인
+                      bIdx++;
+                      
+                      // 💡 오답으로 열린 빈칸은 초록색이 아니라 '붉은색 텍스트'로 표시하여 복습 유도
+                      if (isCorrect) {
+                        return <span key={i} className={`font-bold mx-1 ${isWrong ? 'text-red-400' : 'text-green-400'}`}>{part.replace(/\[|\]/g, '')}</span>;
+                      }
                       else if (isCurrent) return <span key={i} className="inline-block min-w-[60px] h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>;
                       else return <span key={i} className="inline-block min-w-[60px] h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>;
                     } return <span key={i}>{part}</span>;
@@ -287,7 +294,7 @@ function MainApp() {
               </div>
             );
           }} 
-          onClose={handleCloseModal} // 💡 닫을 때도 무조건 현재 상태를 DB에 저장
+          onClose={handleCloseModal} 
         />
       )}
     </div>
