@@ -226,12 +226,10 @@ def save_card():
         card_content = data.get('card_content')
         answer_text = data.get('answer_text')
         folder_name = data.get('folder_name', '기본 폴더')
-        # 💡 [수정] 새롭게 전송되는 memo 필드 수신
         memo = data.get('memo', '')
         
         conn = get_db_connection()
         cursor = conn.cursor()
-        # 💡 [수정] DB에 카드를 저장할 때 memo 데이터도 함께 삽입
         cursor.execute('''INSERT INTO cards (wallet_address, card_content, answer_text, options_json, next_review_time, folder_name, memo) VALUES (?, ?, ?, '[]', ?, ?, ?)''', (wallet_address, card_content, answer_text, get_next_review_time(0), folder_name, memo))
         conn.commit()
         conn.close()
@@ -256,7 +254,6 @@ def get_my_cards():
                 elif (next_review - now).total_seconds() < 7200: cursor.execute("UPDATE cards SET status = 'AT_RISK' WHERE id = ?", (card_id,))
         conn.commit()
         
-        # 💡 [수정] 데이터를 가져올 때 memo 필드 포함하여 프론트엔드로 전달
         cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo FROM cards WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
         cards = [{"id": r[0], "content": r[1], "answer": r[2], "options": json.loads(r[3]), "level": r[4], "next_review": r[5], "status": r[6], "best_time": r[7], "folder_name": r[8], "memo": r[9] or ""} for r in cursor.fetchall()]
         conn.close()
@@ -265,7 +262,51 @@ def get_my_cards():
         logging.error(f"[오류 진단] my-cards 에러:\n{traceback.format_exc()}")
         return jsonify({"error": "조회 실패"}), 500
 
-# 💡 [신규] 프론트엔드에서 통계 업데이트를 위해 호출하던 잃어버린 API 신설
+# 💡 [로컬 우선 아키텍처] 묶어서 한 번에 전송받는 동기화(Batch Sync) API 신설
+@api_bp.route('/sync-batch', methods=['POST'])
+def sync_batch():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        memos = data.get('memos', [])
+        answers = data.get('answers', [])
+        
+        if not wallet_address:
+            return jsonify({"error": "인증 정보 없음"}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # 1. 큐에 쌓인 메모/통계들 일괄 업데이트
+        for m in memos:
+            cursor.execute("UPDATE cards SET memo = ? WHERE id = ? AND wallet_address = ?", (m.get('memo', ''), m.get('id'), wallet_address))
+
+        # 2. 큐에 쌓인 학습 결과(O/X) 일괄 채점 및 에빙하우스 스케줄링
+        for a in answers:
+            card_id = a.get('card_id')
+            is_correct = a.get('is_correct')
+            clear_time = float(a.get('clear_time', 999.0))
+
+            cursor.execute("SELECT level, best_time FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
+            row = cursor.fetchone()
+            if row:
+                current_lv, best_time = row[0], row[1]
+                if is_correct:
+                    new_lv = min(int(current_lv) + 1, 50)
+                    try: best_time_float = float(best_time) if best_time is not None else float('inf')
+                    except: best_time_float = float('inf')
+                    new_best = clear_time if best_time_float == float('inf') else min(best_time_float, clear_time)
+                    cursor.execute("UPDATE cards SET level = ?, next_review_time = ?, status = 'OWNED', best_time = ? WHERE id = ?", (new_lv, get_next_review_time(new_lv), new_best, card_id))
+                else:
+                    cursor.execute("UPDATE cards SET level = 0, next_review_time = ?, status = 'AT_RISK' WHERE id = ?", (get_next_review_time(0), card_id))
+
+        conn.commit()
+        conn.close()
+        return jsonify({"message": f"일괄 동기화 성공 (메모:{len(memos)}건, 학습:{len(answers)}건)"}), 200
+    except Exception as e:
+        logging.error(f"[오류 진단] sync-batch 에러:\n{traceback.format_exc()}")
+        return jsonify({"error": "배치 동기화 실패"}), 500
+
 @api_bp.route('/update-card-memo', methods=['POST'])
 def update_card_memo():
     try:
@@ -281,7 +322,6 @@ def update_card_memo():
         conn.close()
         return jsonify({"message": "메모 및 통계 업데이트 완료"}), 200
     except Exception as e:
-        logging.error(f"[오류 진단] update-card-memo 에러:\n{traceback.format_exc()}")
         return jsonify({"error": "메모 업데이트 실패"}), 500
 
 @api_bp.route('/submit-answer', methods=['POST'])
@@ -290,10 +330,7 @@ def submit_answer():
         data = request.json
         card_id = data.get('card_id')
         is_correct = data.get('is_correct')
-        clear_time = data.get('clear_time', 999.0)
-        
-        # 💡 [수정] 프론트엔드에서 넘어온 시간 데이터를 안전하게 실수형(float)으로 강제 변환
-        try: clear_time = float(clear_time)
+        try: clear_time = float(data.get('clear_time', 999.0))
         except: clear_time = 999.0
 
         conn = get_db_connection()
@@ -305,12 +342,9 @@ def submit_answer():
         
         if is_correct:
             new_lv = min(int(current_lv) + 1, 50)
-            # DB에 저장된 best_time도 안전하게 변환
             try: best_time_float = float(best_time) if best_time is not None else float('inf')
             except: best_time_float = float('inf')
-            
             new_best = clear_time if best_time_float == float('inf') else min(best_time_float, clear_time)
-            
             cursor.execute("UPDATE cards SET level = ?, next_review_time = ?, status = 'OWNED', best_time = ? WHERE id = ?", (new_lv, get_next_review_time(new_lv), new_best, card_id))
             msg = f"방어 성공! 레벨이 {new_lv}로 올랐습니다."
         else:
@@ -320,7 +354,6 @@ def submit_answer():
         conn.close()
         return jsonify({"message": msg})
     except Exception as e:
-        logging.error(f"[오류 진단] submit-answer 에러:\n{traceback.format_exc()}")
         return jsonify({"error": "제출 처리 실패"}), 500
 
 @api_bp.route('/delete-category', methods=['POST'])
@@ -333,7 +366,6 @@ def delete_category():
         conn.close()
         return jsonify({"message": "삭제되었습니다."})
     except Exception as e:
-        logging.error(traceback.format_exc())
         return jsonify({"error": "삭제 실패"}), 500
 
 @api_bp.route('/delete-card', methods=['POST'])
@@ -346,7 +378,6 @@ def delete_card():
         conn.close()
         return jsonify({"message": "삭제되었습니다."})
     except Exception as e:
-        logging.error(traceback.format_exc())
         return jsonify({"error": "삭제 실패"}), 500
 
 @api_bp.route('/delete-all', methods=['POST'])
@@ -360,5 +391,4 @@ def delete_all():
         conn.close()
         return jsonify({"message": "초기화 성공"})
     except Exception as e:
-        logging.error(f"[오류 진단] delete-all 에러:\n{traceback.format_exc()}")
         return jsonify({"error": "초기화 실패"}), 500
