@@ -47,18 +47,19 @@ export const EnhanceTab = ({ savedCards, setActiveCard, handleDeleteCard }: any)
                   <div key={card.id} className="relative transition-all" style={gridStyle}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} 
                          onClick={() => setActiveCard(card)} 
-                         className={`w-full h-full p-4 rounded-sm border transition-all flex flex-col justify-between ${hasWrong ? "border-red-500/40 bg-red-900/10 shadow-[0_0_10px_rgba(220,38,38,0.1)]" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer`}>
+                         className={`w-full h-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/10 shadow-[0_0_10px_rgba(220,38,38,0.1)]" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer`}>
                       
-                      <div className="flex flex-col gap-3 w-full h-full">
-                        <div className={`font-bold text-[12px] sm:text-[13px] text-left leading-relaxed break-keep ${hasWrong ? "text-red-300" : "text-amber-400"}`}>
+                      {/* 💡 [수정] 제목과 뱃지들을 가로로 나란히 배치 (제목은 왼쪽, 뱃지는 우측 끝) */}
+                      <div className="flex flex-row justify-between items-start w-full gap-3">
+                        <div className={`font-bold text-[11px] sm:text-[12px] md:text-[13px] text-left leading-snug break-keep flex-1 ${hasWrong ? "text-red-300" : "text-amber-400"}`}>
                           {cleanTitle}
                         </div>
                         
-                        {/* 💡 [수정] 약어 제거 및 0일 때도 항상 틀림:X 표시 */}
-                        <div className="flex flex-wrap gap-1.5 justify-start mt-auto">
-                          <span className="text-[9px] sm:text-[10px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono">빈칸:{totalBlanks}</span>
-                          <span className="text-[9px] sm:text-[10px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono">채움:{stats.filled}</span>
-                          <span className={`text-[9px] sm:text-[10px] px-1.5 py-0.5 rounded font-mono border ${hasWrong ? 'text-white border-red-500/50 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
+                        {/* 우측 뱃지 구역 */}
+                        <div className="flex flex-wrap gap-1 justify-end shrink-0 mt-0.5 max-w-[120px]">
+                          <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
+                          <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">채움:{stats.filled}</span>
+                          <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/50 bg-red-600 font-bold animate-pulse' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                         </div>
                       </div>
                     </div>
