@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { getStrictTitleOnly, formatCardText, parseCardStats } from '../utils/constants';
 
-// 💡 [핵심] 설정의 열 갯수(colCount)를 실제 그리드 레이아웃에 적용하는 함수
 const getGridClass = (cols: number) => {
   if(cols === 1) return "md:grid-cols-1";
   if(cols === 2) return "md:grid-cols-2";
@@ -39,7 +38,13 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-          {/* 💡 [적용] 설정에서 선택한 colCount 레이아웃을 그대로 따름 */}
+          {/* 💡 [복구] PC 버전에서만 나타나는 3단 헤더 텍스트 */}
+          {viewMode === 'all' && colCount >= 3 && (
+            <div className="hidden md:grid gap-3 sm:gap-4 mb-3 text-center font-bold text-white/40 text-[10px] sm:text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
+               <div>법 (Act)</div><div>시행령 (Decree)</div><div>시행규칙 (Rule)</div>
+            </div>
+          )}
+
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 auto-rows-fr`}>
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
                 const cleanTitle = getStrictTitleOnly(card.content);
@@ -48,14 +53,21 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
 
+                // 💡 [핵심 복구] 모바일을 깨뜨리지 않고 PC에서만 제자리를 찾아가도록 반응형 클래스 적용
+                let colClass = "";
+                if (viewMode === 'all' && colCount >= 3) {
+                  if (card.content.includes('[법]')) colClass = "md:col-start-1";
+                  else if (card.content.includes('[령]')) colClass = "md:col-start-2";
+                  else if (card.content.includes('[칙]') || card.content.includes('[규]')) colClass = "md:col-start-3";
+                }
+
                 return (
-                  <div key={card.id} className="relative transition-all w-full">
+                  <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all h-full flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
                       
                       <div className="flex flex-row justify-between items-center w-full gap-2">
                         <div className={`font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1 ${hasWrong ? "text-red-300" : "text-amber-400"}`}>{cleanTitle}</div>
                         
-                        {/* 💡 [개선] 뱃지 구역에 flex-nowrap을 주어 절대 아래로 떨어지지 않게 강제 */}
                         <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
                           <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
                           <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">채움:{stats.filled}</span>
