@@ -178,20 +178,18 @@ function MainApp() {
     }
   };
 
-  // 💡 [버그 픽스] 정답 보기 기능 정상 작동 (빈칸 열기 및 1초 대기 후 이동)
   const handleShowAnswer = () => {
     if (!blanks[currentBlankIdx]) return;
     
     setInputStatus('wrong');
-    statsRef.current.wrongIndices.add(currentBlankIdx); // 오답으로 기록
+    statsRef.current.wrongIndices.add(currentBlankIdx); 
     
     const nb = [...blanks];
-    nb[currentBlankIdx].correct = true; // 화면에 정답이 노출되도록 빈칸을 강제로 엽니다
+    nb[currentBlankIdx].correct = true; 
     setBlanks(nb);
 
     setTimeout(() => {
       setAnswerInput(""); setInputStatus('idle');
-      // 다음 문제로 넘어가거나 끝내기
       if (currentBlankIdx + 1 < nb.length) setCurrentBlankIdx(currentBlankIdx + 1);
       else finishCard();
     }, 1000); 
@@ -208,7 +206,7 @@ function MainApp() {
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-6 relative pb-56 font-sans">
       <header className="max-w-6xl mx-auto border-b border-white/10 pb-6 mb-12 flex items-center gap-10">
         <h1 className="text-xl font-bold tracking-widest text-white shrink-0">
-          빈칸개발 <span className="text-sm font-light text-white/50 ml-1">Blank Develop</span>
+          빈칸개발(BlankD) <span className="text-sm font-light text-white/50 ml-1">BlankD</span>
         </h1>
         {isLoggedIn && (
           <nav className="flex gap-6 overflow-x-auto w-full">
@@ -221,7 +219,7 @@ function MainApp() {
 
       {!isLoggedIn ? (
         <main className="max-w-md mx-auto mt-24 flex flex-col items-center">
-          <h2 className="text-2xl font-serif text-white mb-4">빈칸개발 (Blank Develop)</h2>
+          <h2 className="text-2xl font-serif text-white mb-4">빈칸개발(BlankD)</h2>
           <p className="text-sm text-white/40 mb-12 text-center text-pretty">인지 과학 기반의 간격 반복 학습으로<br/>영구 기억을 형성합니다.</p>
           <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-white text-black font-bold rounded-sm mb-6 transition-transform active:scale-95">Google 계정으로 시작하기</button>
         </main>
@@ -261,10 +259,9 @@ function MainApp() {
                     if (part.startsWith('[') && part.endsWith(']')) {
                       const isCorrect = blanks[bIdx]?.correct; 
                       const isCurrent = bIdx === currentBlankIdx; 
-                      const isWrong = statsRef.current.wrongIndices.has(bIdx); // 💡 오답 여부 확인
+                      const isWrong = statsRef.current.wrongIndices.has(bIdx); 
                       bIdx++;
                       
-                      // 💡 오답으로 열린 빈칸은 초록색이 아니라 '붉은색 텍스트'로 표시하여 복습 유도
                       if (isCorrect) {
                         return <span key={i} className={`font-bold mx-1 ${isWrong ? 'text-red-400' : 'text-green-400'}`}>{part.replace(/\[|\]/g, '')}</span>;
                       }
