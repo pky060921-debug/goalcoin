@@ -20,6 +20,21 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
   }
 }
 
+// 💡 [핵심] 오프라인 저장을 위한 로컬 장바구니(Queue) 함수
+const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
+  try {
+    const qStr = localStorage.getItem('blankd_sync_queue');
+    const q = qStr ? JSON.parse(qStr) : { memos: [], answers: [] };
+    if (type === 'MEMO') {
+      q.memos = q.memos.filter((m: any) => m.id !== payload.id); // 중복 방지 (최신 덮어쓰기)
+      q.memos.push(payload);
+    } else if (type === 'ANSWER') {
+      q.answers.push(payload);
+    }
+    localStorage.setItem('blankd_sync_queue', JSON.stringify(q));
+  } catch (e) { console.error("큐 저장 에러", e); }
+};
+
 function MainApp() {
   const enokiFlow = useEnokiFlow();
   const zkLogin = useZkLogin();
@@ -72,9 +87,43 @@ function MainApp() {
         fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`).then(r=>r.json())
       ]);
       setCategories(catRes.categories || []); setSavedCards(cardRes.cards || []); setExams(examRes.exams || []);
-      addLog(`🟢 데이터 로드 완료 (카테고리: ${catRes.categories?.length || 0}개)`);
     } catch (e: any) { addLog(`❌ 데이터 로드 실패: ${e.message}`); }
   };
+
+  // 💡 [핵심] 장바구니에 쌓인 로컬 데이터를 서버로 한 번에 전송하는 백그라운드 함수
+  const flushQueue = async () => {
+    if (!safeAddress) return;
+    try {
+      const qStr = localStorage.getItem('blankd_sync_queue');
+      if (!qStr) return;
+      const q = JSON.parse(qStr);
+      if (q.memos.length === 0 && q.answers.length === 0) return;
+
+      const res = await fetch("https://api.blankd.top/api/sync-batch", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, memos: q.memos, answers: q.answers })
+      });
+      if (res.ok) {
+        localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
+        addLog(`🔄 백그라운드 일괄 동기화 (메모 ${q.memos.length}건, 결과 ${q.answers.length}건)`);
+      }
+    } catch (e) {
+      addLog("⚠️ 오프라인 상태: 동기화 대기 중..."); // 에러가 나도 로컬에 남으므로 안전!
+    }
+  };
+
+  // 💡 [핵심] 30초마다, 혹은 화면 탭을 닫거나 다른 곳으로 갈 때 자동 동기화
+  useEffect(() => {
+    if (!safeAddress) return;
+    const interval = setInterval(flushQueue, 30000); 
+    const handleVisibility = () => { if(document.visibilityState === 'hidden') flushQueue(); };
+    document.addEventListener('visibilitychange', handleVisibility);
+    
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [safeAddress]);
 
   const uploadLaw = async () => {
     if (!lawFile) return alert("파일을 선택해주세요.");
@@ -114,11 +163,10 @@ function MainApp() {
     }
   };
 
-  const handleUpdateMemoBackground = async (id: number, memo: string) => {
+  // 💡 [수정] 메모 입력 시 서버 안 찌르고 로컬 장바구니에 담음
+  const handleUpdateMemoBackground = (id: number, memo: string) => {
     setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
-    try {
-      await fetch("https://api.blankd.top/api/update-card-memo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id, memo }) });
-    } catch (e: any) { addLog(`❌ 메모 텍스트 통신 에러: ${e.message}`); }
+    pushToQueue('MEMO', { id, memo });
   };
 
   useEffect(() => {
@@ -138,7 +186,8 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  const finishCard = async () => {
+  // 💡 [핵심] 카드 완료 시 무조건 화면 먼저 닫고 로컬 장바구니에만 넣습니다!
+  const finishCard = () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true; 
 
@@ -148,29 +197,21 @@ function MainApp() {
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     const isCorrect = wrongArr.length === 0;
 
+    // 1. 화면 즉시 종료 및 로컬 상태 갱신 (반응속도 0.001초)
     setActiveCard(null); 
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
 
-    let hasError = false;
-    try {
-      await fetch("https://api.blankd.top/api/update-card-memo", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: safeAddress, id: currentId, memo: newMemo })
-      });
-    } catch (e: any) { hasError = true; }
+    // 2. 오프라인 장바구니(큐)에 적재
+    pushToQueue('MEMO', { id: currentId, memo: newMemo });
+    pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime });
 
-    try {
-      await fetch("https://api.blankd.top/api/submit-answer", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, is_correct: isCorrect, clear_time: finalTime })
-      });
-    } catch (e: any) { hasError = true; }
-
-    if (!hasError) addLog(`✅ 카드 학습 완료 (ID:${currentId})`);
-    await loadAllData(); 
+    addLog(`✅ 로컬 기기에 임시 저장 (ID:${currentId})`);
+    
+    // (선택) 여유가 되면 큐를 지금 바로 한 번 비워봅니다 (백그라운드 통신)
+    flushQueue();
   };
 
-  const handleCloseModal = async () => {
+  const handleCloseModal = () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
 
@@ -181,14 +222,8 @@ function MainApp() {
     setActiveCard(null);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
 
-    try {
-      await fetch("https://api.blankd.top/api/update-card-memo", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: safeAddress, id: currentId, memo: newMemo })
-      });
-    } catch (e: any) { addLog(`❌ 닫기 통계 통신 에러: ${e.message}`); }
-
-    await loadAllData();
+    pushToQueue('MEMO', { id: currentId, memo: newMemo });
+    flushQueue();
   };
 
   useEffect(() => {
@@ -205,14 +240,11 @@ function MainApp() {
     }
   }, [activeCard, currentBlankIdx, blanks.length, startTime, totalTimeLimit]);
 
-  // 💡 [핵심 구현] 글자를 입력할 때마다 실시간으로 정답인지 체크하여 자동으로 넘깁니다.
   useEffect(() => {
     if (inputStatus === 'idle' && blanks[currentBlankIdx] && answerInput) {
       const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
       const actual = answerInput.replace(/\s+/g, '').toLowerCase();
-      if (expected === actual) {
-        handleSequentialInput(actual); // 정답 감지 시 즉시 패스!
-      }
+      if (expected === actual) handleSequentialInput(actual); 
     }
   }, [answerInput, inputStatus, blanks, currentBlankIdx]);
 
@@ -285,7 +317,6 @@ function MainApp() {
         <main className="max-w-6xl mx-auto w-full">
           <ErrorBoundary fallbackLog={addLog}>
             {activeTab === 'progress' && <DashboardTab categories={categories} savedCards={savedCards} />}
-            {/* 💡 [수정] 자식 컴포넌트에 safeAddress와 설정값들을 확실하게 전달 */}
             {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} addLog={addLog} handleDeleteCategory={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />}
             {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleDeleteCard={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});setActiveCard(null);loadAllData();}}} />}
             {activeTab === 'exam' && <ExamTab exams={exams} examFile={examFile} setExamFile={setExamFile} uploadExam={uploadExam} />}
@@ -343,7 +374,7 @@ function MainApp() {
 
                 <div className="pt-3 sm:pt-4 border-t border-white/10 w-full animate-in fade-in">
                   <div className="text-[10px] sm:text-[11px] text-teal-500/50 mb-1.5 sm:mb-2 font-bold uppercase tracking-widest">📝 Memo</div>
-                  <input defaultValue={statsRef.current.text || ""} placeholder="메모 입력..." onBlur={(e) => { statsRef.current.text = e.target.value; const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices)); handleUpdateMemoBackground(activeCard.id, newMemo); }} className="text-[12px] sm:text-[13px] text-teal-300 bg-teal-950/20 p-2.5 sm:p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-colors" />
+                  <input defaultValue={statsRef.current.text || ""} placeholder="메모 입력..." onBlur={(e) => { statsRef.current.text = e.target.value; handleUpdateMemoBackground(activeCard.id, stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices))); }} className="text-[12px] sm:text-[13px] text-teal-300 bg-teal-950/20 p-2.5 sm:p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-colors" />
                 </div>
               </div>
             );
