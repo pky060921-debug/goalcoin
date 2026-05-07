@@ -36,16 +36,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
       
       {enhanceFolders.map((folder: string) => openFolders[folder] && (
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
-          <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
-
-          {viewMode === 'all' && colCount >= 3 && (
-            <div className="hidden md:grid gap-3 sm:gap-4 mb-3 text-center font-bold text-white/40 text-[10px] sm:text-[11px] uppercase tracking-widest" style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}>
-               <div>법 (Act)</div><div>시행령 (Decree)</div><div>시행규칙 (Rule)</div>
-            </div>
-          )}
+          <div className="text-xs sm:text-sm text-white/50 mb-4 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 auto-rows-fr`}>
-            {/* 💡 [핵심 복구] 강화 탭도 카드 제목을 기준으로 스마트 정렬하여 분할 카드가 제자리에 있게 만듦 */}
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => (getStrictTitleOnly(a.content) || "").localeCompare((getStrictTitleOnly(b.content) || ""), undefined, {numeric: true})).map((card: any) => {
                 const cleanTitle = getStrictTitleOnly(card.content);
                 const { body } = formatCardText(card.content);
@@ -53,11 +46,20 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
 
+                const checkText = `${card.content || ''}`;
                 let colClass = "";
-                if (viewMode === 'all' && colCount >= 3) {
-                  if (card.content.includes('[법]')) colClass = "md:col-start-1";
-                  else if (card.content.includes('[령]')) colClass = "md:col-start-2";
-                  else if (card.content.includes('[칙]') || card.content.includes('[규]')) colClass = "md:col-start-3";
+                let titleColor = "text-amber-400"; // 기본 색상
+
+                // 💡 [수정] 3단 배치 유지 및 색상 부여
+                if (checkText.includes('[법]')) {
+                  if (viewMode === 'all' && colCount >= 3) colClass = "md:col-start-1";
+                  titleColor = "text-red-500";
+                } else if (checkText.includes('[령]')) {
+                  if (viewMode === 'all' && colCount >= 3) colClass = "md:col-start-2";
+                  titleColor = "text-blue-400";
+                } else if (checkText.includes('[칙]') || checkText.includes('[규]')) {
+                  if (viewMode === 'all' && colCount >= 3) colClass = "md:col-start-3";
+                  titleColor = "text-green-500";
                 }
 
                 return (
@@ -65,7 +67,8 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all h-full flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
                       
                       <div className="flex flex-row justify-between items-center w-full gap-2">
-                        <div className={`font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1 ${hasWrong ? "text-red-300" : "text-amber-400"}`}>{cleanTitle}</div>
+                        {/* 💡 [수정] 제목에 동적 색상(titleColor) 적용 */}
+                        <div className={`font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1 ${titleColor}`}>{cleanTitle}</div>
                         
                         <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
                           <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
