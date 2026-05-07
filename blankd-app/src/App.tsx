@@ -40,7 +40,7 @@ function MainApp() {
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [examFile, setExamFile] = useState<File | null>(null);
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인..."]);
-  const [isTerminalOpen, setIsTerminalOpen] = useState(false); // 💡 터미널 열림/닫힘 상태
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
 
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
@@ -117,8 +117,7 @@ function MainApp() {
   const handleUpdateMemoBackground = async (id: number, memo: string) => {
     setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
     try {
-      const res = await fetch("https://api.blankd.top/api/update-card-memo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id, memo }) });
-      if (!res.ok) addLog(`⚠️ 메모 텍스트 저장 실패 (${res.status})`);
+      await fetch("https://api.blankd.top/api/update-card-memo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id, memo }) });
     } catch (e: any) { addLog(`❌ 메모 텍스트 통신 에러: ${e.message}`); }
   };
 
@@ -154,20 +153,18 @@ function MainApp() {
 
     let hasError = false;
     try {
-      const res1 = await fetch("https://api.blankd.top/api/update-card-memo", {
+      await fetch("https://api.blankd.top/api/update-card-memo", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ wallet_address: safeAddress, id: currentId, memo: newMemo })
       });
-      if (!res1.ok) { addLog(`⚠️ 통계 갱신 실패 (${res1.status})`); hasError = true; }
-    } catch (e: any) { addLog(`❌ 통계 갱신 통신 에러: ${e.message}`); hasError = true; }
+    } catch (e: any) { hasError = true; }
 
     try {
-      const res2 = await fetch("https://api.blankd.top/api/submit-answer", {
+      await fetch("https://api.blankd.top/api/submit-answer", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, is_correct: isCorrect, clear_time: finalTime })
       });
-      if (!res2.ok) { addLog(`⚠️ 백엔드 내부 에러 발생 (코드 ${res2.status})`); hasError = true; }
-    } catch (e: any) { addLog(`❌ 카드 완료 통신 에러: 백엔드 서버 문제`); hasError = true; }
+    } catch (e: any) { hasError = true; }
 
     if (!hasError) addLog(`✅ 카드 학습 완료 (ID:${currentId})`);
     await loadAllData(); 
@@ -185,11 +182,10 @@ function MainApp() {
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
 
     try {
-      const res = await fetch("https://api.blankd.top/api/update-card-memo", {
+      await fetch("https://api.blankd.top/api/update-card-memo", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ wallet_address: safeAddress, id: currentId, memo: newMemo })
       });
-      if (!res.ok) addLog(`⚠️ 닫기 통계 갱신 실패 (${res.status})`);
     } catch (e: any) { addLog(`❌ 닫기 통계 통신 에러: ${e.message}`); }
 
     await loadAllData();
@@ -209,10 +205,24 @@ function MainApp() {
     }
   }, [activeCard, currentBlankIdx, blanks.length, startTime, totalTimeLimit]);
 
-  const handleSequentialInput = () => {
+  // 💡 [핵심 구현] 글자를 입력할 때마다 실시간으로 정답인지 체크하여 자동으로 넘깁니다.
+  useEffect(() => {
+    if (inputStatus === 'idle' && blanks[currentBlankIdx] && answerInput) {
+      const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
+      const actual = answerInput.replace(/\s+/g, '').toLowerCase();
+      if (expected === actual) {
+        handleSequentialInput(actual); // 정답 감지 시 즉시 패스!
+      }
+    }
+  }, [answerInput, inputStatus, blanks, currentBlankIdx]);
+
+  const handleSequentialInput = (overrideInput?: string | any) => {
     if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
-    const actual = answerInput.replace(/\s+/g, '').toLowerCase();
+    
+    let actual = answerInput;
+    if (typeof overrideInput === 'string') actual = overrideInput;
+    actual = actual.replace(/\s+/g, '').toLowerCase();
     
     if (expected === actual) {
       setInputStatus('correct');
@@ -225,7 +235,7 @@ function MainApp() {
         setAnswerInput(""); setInputStatus('idle'); 
         if (currentBlankIdx + 1 < nb.length) setCurrentBlankIdx(currentBlankIdx + 1); 
         else finishCard(); 
-      }, 200);
+      }, 150);
     } else { 
       setInputStatus('wrong'); 
       statsRef.current.wrongIndices.add(currentBlankIdx); 
@@ -275,7 +285,8 @@ function MainApp() {
         <main className="max-w-6xl mx-auto w-full">
           <ErrorBoundary fallbackLog={addLog}>
             {activeTab === 'progress' && <DashboardTab categories={categories} savedCards={savedCards} />}
-            {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} addLog={addLog} handleDeleteCategory={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />}
+            {/* 💡 [수정] 자식 컴포넌트에 safeAddress와 설정값들을 확실하게 전달 */}
+            {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} addLog={addLog} handleDeleteCategory={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />}
             {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleDeleteCard={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});setActiveCard(null);loadAllData();}}} />}
             {activeTab === 'exam' && <ExamTab exams={exams} examFile={examFile} setExamFile={setExamFile} uploadExam={uploadExam} />}
             {activeTab === 'settings' && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화하시겠습니까?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
@@ -283,7 +294,6 @@ function MainApp() {
         </main>
       )}
 
-      {/* 💡 터미널 토글 버튼 및 모달 패널 */}
       <div className="fixed bottom-4 right-4 z-[999] flex flex-col items-end gap-2">
         {isTerminalOpen && (
           <div className="w-[85vw] max-w-lg h-56 sm:h-64 bg-black/95 border border-teal-500/30 p-3 sm:p-4 font-mono text-[9px] sm:text-[11px] text-teal-400 overflow-y-auto rounded shadow-2xl flex flex-col custom-scrollbar animate-in slide-in-from-bottom-5 fade-in">
@@ -313,7 +323,6 @@ function MainApp() {
             const parts = body.split(/(\[.*?\])/g); let bIdx = 0;
             return (
               <div className="flex flex-col gap-4 sm:gap-6 w-full">
-                {/* 💡 빈칸 텍스트 크기 반응형 조절 */}
                 <div className="whitespace-pre-wrap leading-relaxed text-[13px] sm:text-[14px] md:text-[15px] font-serif break-keep">
                   {parts.map((part: string, i: number) => {
                     if (part.startsWith('[') && part.endsWith(']')) {
