@@ -38,7 +38,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-          {/* 💡 [복구] 원래의 그리드 형태와 auto-rows-fr 복구 완료 */}
+          {/* 💡 [복원 완료] 아키님의 원본 auto-rows-fr 레이아웃 */}
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 auto-rows-fr`}>
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => (getStrictTitleOnly(a.content) || "").localeCompare((getStrictTitleOnly(b.content) || ""), undefined, {numeric: true})).map((card: any) => {
                 const cleanTitle = getStrictTitleOnly(card.content);
@@ -47,22 +47,23 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
 
+                // 💡 [신규] 제목 텍스트 대신 제목 색상으로 직관적 표시
                 const checkText = `${card.content || ''}`;
                 let titleColor = "text-amber-400"; 
-
                 if (checkText.includes('[법]')) titleColor = "text-red-500";
                 else if (checkText.includes('[령]')) titleColor = "text-blue-400";
                 else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
 
-                // 💡 [핵심 복구] 예전부터 사용하시던 완벽한 3단 정렬 함수 복구!
+                // 💡 [복원 완료] 아키님이 설계하신 완벽한 3단 배열 로직
                 const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
 
                 return (
-                  <div key={card.id} className="relative transition-all w-full h-full" style={gridStyle}>
+                  <div key={card.id} className="relative transition-all w-full" style={gridStyle}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all h-full flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
                       
                       <div className="flex flex-row justify-between items-center w-full gap-2">
-                        <div className={`font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1 ${titleColor}`}>{cleanTitle}</div>
+                        {/* 💡 색상만 다르게 적용 */}
+                        <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{cleanTitle}</div>
                         
                         <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
                           <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
