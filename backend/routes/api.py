@@ -390,7 +390,6 @@ def delete_all():
     except Exception as e:
         return jsonify({"error": "초기화 실패"}), 500
 
-# 💡 [신규] 본문을 2개로 강제 분할하는 API
 @api_bp.route('/split-category', methods=['POST'])
 def split_category():
     try:
@@ -401,7 +400,8 @@ def split_category():
         text2 = data.get('text2')
         title1 = data.get('title1')
         title2 = data.get('title2')
-        folder_name = data.get('folder_name', '기본 폴더')
+        # 💡 [핵심] folder_name이 빈 값이면 무조건 '기본 폴더'로 지정하여 카테고리 실종 방지
+        folder_name = data.get('folder_name') or '기본 폴더'
 
         conn = get_db_connection()
         cursor = conn.cursor()
