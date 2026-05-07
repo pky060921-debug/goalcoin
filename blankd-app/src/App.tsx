@@ -1,8 +1,8 @@
-import React, { useState, useEffect, Component, ReactNode } from "react";
+import React, { useState, useEffect, Component, ReactNode, useRef } from "react";
 import { useCurrentAccount } from "@mysten/dapp-kit";
 import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 import { api } from "./services/api";
-import { SPLIT_REGEX, formatCardText } from "./utils/constants";
+import { SPLIT_REGEX, formatCardText, parseCardStats, stringifyCardStats } from "./utils/constants";
 import { CardModal } from "./components/CardModal";
 import { DashboardTab } from "./tabs/DashboardTab";
 import { CraftTab } from "./tabs/CraftTab";
@@ -48,6 +48,8 @@ function MainApp() {
   const [startTime, setStartTime] = useState<number>(0);
   const [elapsed, setElapsed] = useState<number>(0);
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
+
+  const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
 
   const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-30));
 
@@ -96,9 +98,11 @@ function MainApp() {
     if (isBlanking) bodyContent += " ]";
     
     const finalCardContent = `${cat.title}\n\n${bodyContent}`;
+    const initialMemo = stringifyCardStats(memo, 0, []);
+
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
-      body: JSON.stringify({ wallet_address: safeAddress, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo }) 
+      body: JSON.stringify({ wallet_address: safeAddress, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo }) 
     });
     if (res.ok) {
       await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
@@ -117,6 +121,14 @@ function MainApp() {
     setActiveCard(null); loadAllData();
   };
 
+  // 💡 [핵심 버그 수정] 비동기 함수로 변경하여, DB 저장이 완벽히 끝난 후 데이터를 다시 불러오게 수정
+  const finishCard = async () => {
+    const wrongArr = Array.from(statsRef.current.wrongIndices);
+    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+    await handleUpdateMemo(activeCard.id, newMemo); // 통계 저장이 끝날 때까지 대기!
+    submitCombatAnswer(wrongArr.length === 0, elapsed);
+  };
+
   useEffect(() => {
     if (activeCard) {
       const { body } = formatCardText(activeCard.content);
@@ -127,6 +139,9 @@ function MainApp() {
       }
       setBlanks(foundBlanks); setCurrentBlankIdx(0); setAnswerInput(""); setInputStatus('idle');
       setTotalTimeLimit(5.0 * foundBlanks.length); setStartTime(Date.now()); setElapsed(0);
+      
+      const stats = parseCardStats(activeCard.memo);
+      statsRef.current = { text: stats.text, filled: stats.filled, wrongIndices: new Set(stats.wrongIndices) };
     }
   }, [activeCard]);
 
@@ -134,7 +149,7 @@ function MainApp() {
     if (activeCard && currentBlankIdx < blanks.length) {
       const interval = setInterval(() => {
         const diff = (Date.now() - startTime) / 1000; setElapsed(diff);
-        if (diff >= totalTimeLimit) { clearInterval(interval); submitCombatAnswer(false, diff); }
+        if (diff >= totalTimeLimit) { clearInterval(interval); finishCard(); }
       }, 100);
       return () => clearInterval(interval);
     }
@@ -144,17 +159,56 @@ function MainApp() {
     if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     const actual = answerInput.replace(/\s+/g, '').toLowerCase();
+    
     if (expected === actual) {
       setInputStatus('correct');
       const nb = [...blanks]; nb[currentBlankIdx].correct = true; setBlanks(nb);
-      setTimeout(() => { setAnswerInput(""); setInputStatus('idle'); if (currentBlankIdx + 1 < blanks.length) setCurrentBlankIdx(currentBlankIdx + 1); else submitCombatAnswer(true, elapsed); }, 200);
-    } else { setInputStatus('wrong'); setTimeout(() => setInputStatus('idle'), 500); }
+      
+      // 💡 [수정] 정답 맞히면 오답에서 제거 & 채운 갯수 한계 없이 계속 증가하도록 변경!
+      statsRef.current.wrongIndices.delete(currentBlankIdx);
+      statsRef.current.filled += 1; 
+
+      setTimeout(() => { 
+        setAnswerInput(""); setInputStatus('idle'); 
+        if (currentBlankIdx + 1 < blanks.length) setCurrentBlankIdx(currentBlankIdx + 1); 
+        else finishCard(); 
+      }, 200);
+    } else { 
+      setInputStatus('wrong'); 
+      statsRef.current.wrongIndices.add(currentBlankIdx); 
+      setTimeout(() => setInputStatus('idle'), 500); 
+    }
+  };
+
+  const handleShowAnswer = () => {
+    if (!blanks[currentBlankIdx]) return;
+    const expected = blanks[currentBlankIdx].answer.replace(/\[|\]/g, '');
+    setAnswerInput(expected);
+    setInputStatus('wrong');
+    statsRef.current.wrongIndices.add(currentBlankIdx); 
+
+    setTimeout(() => {
+      setAnswerInput(""); setInputStatus('idle');
+      if (currentBlankIdx + 1 < blanks.length) setCurrentBlankIdx(currentBlankIdx + 1);
+      else finishCard();
+    }, 1000); 
+  };
+
+  // 💡 [수정] 모달을 끄기만 해도 현재까지 풀었던 내용이 저장되도록 방어 로직 추가
+  const handleCloseModal = async () => {
+    const wrongArr = Array.from(statsRef.current.wrongIndices);
+    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+    await handleUpdateMemo(activeCard.id, newMemo);
+    setActiveCard(null);
   };
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-6 relative pb-56 font-sans">
       <header className="max-w-6xl mx-auto border-b border-white/10 pb-6 mb-12 flex items-center gap-10">
-        <h1 className="text-2xl font-light tracking-widest text-white shrink-0">Blank_D</h1>
+        {/* 💡 앱 이름 변경: 빈칸개발 (Blank Develop) */}
+        <h1 className="text-xl font-bold tracking-widest text-white shrink-0">
+          빈칸개발 <span className="text-sm font-light text-white/50 ml-1">Blank Develop</span>
+        </h1>
         {isLoggedIn && (
           <nav className="flex gap-6 overflow-x-auto w-full">
             {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '강화' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
@@ -166,7 +220,8 @@ function MainApp() {
 
       {!isLoggedIn ? (
         <main className="max-w-md mx-auto mt-24 flex flex-col items-center">
-          <h2 className="text-2xl font-serif text-white mb-4">빈칸 기억강화 시스템</h2>
+          {/* 💡 로그인 화면 앱 이름 변경 */}
+          <h2 className="text-2xl font-serif text-white mb-4">빈칸개발 (Blank Develop)</h2>
           <p className="text-sm text-white/40 mb-12 text-center text-pretty">인지 과학 기반의 간격 반복 학습으로<br/>영구 기억을 형성합니다.</p>
           <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-white text-black font-bold rounded-sm mb-6 transition-transform active:scale-95">Google 계정으로 시작하기</button>
         </main>
@@ -175,14 +230,13 @@ function MainApp() {
           <ErrorBoundary fallbackLog={addLog}>
             {activeTab === 'progress' && <DashboardTab categories={categories} savedCards={savedCards} />}
             {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} addLog={addLog} handleDeleteCategory={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />}
-            {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleUpdateMemo={handleUpdateMemo} handleDeleteCard={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});setActiveCard(null);loadAllData();}}} />}
+            {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleDeleteCard={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});setActiveCard(null);loadAllData();}}} />}
             {activeTab === 'exam' && <ExamTab exams={exams} examFile={examFile} setExamFile={setExamFile} uploadExam={uploadExam} />}
             {activeTab === 'settings' && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화하시겠습니까?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
           </ErrorBoundary>
         </main>
       )}
 
-      {/* 전역 시스템 터미널 */}
       <div className="fixed bottom-0 left-0 w-full h-40 bg-black/90 border-t border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto z-[999]">
         <div className="flex justify-between items-center mb-2 border-b border-teal-500/30 pb-1 sticky top-0 bg-black/90">
           <span className="uppercase tracking-widest text-teal-500/50">Diagnostic Terminal</span>
@@ -213,20 +267,27 @@ function MainApp() {
                   })}
                 </div>
                 
-                {/* 💡 강화 탭 로비에서 사라진 메모 입력창을 모달 안쪽으로 이동 */}
+                <div className="flex justify-end w-full mb-2">
+                  <button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-colors shadow">정답 보기 (오답 처리)</button>
+                </div>
+
                 <div className="pt-4 border-t border-white/10 w-full animate-in fade-in">
                   <div className="text-[11px] text-teal-500/50 mb-2 font-bold uppercase tracking-widest">📝 Memo</div>
                   <input 
-                    defaultValue={activeCard.memo || ""} 
+                    defaultValue={statsRef.current.text || ""} 
                     placeholder="여기에 암기 메모를 입력하세요 (저장: 바깥 클릭)..." 
-                    onBlur={(e) => handleUpdateMemo(activeCard.id, e.target.value)} 
+                    onBlur={(e) => {
+                      statsRef.current.text = e.target.value;
+                      const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices));
+                      handleUpdateMemo(activeCard.id, newMemo);
+                    }} 
                     className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 focus:bg-teal-950/40 transition-colors"
                   />
                 </div>
               </div>
             );
           }} 
-          onClose={() => setActiveCard(null)} 
+          onClose={handleCloseModal} // 💡 닫을 때도 무조건 현재 상태를 DB에 저장
         />
       )}
     </div>
