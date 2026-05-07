@@ -1,11 +1,29 @@
 export const SPLIT_REGEX = /(\s+|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]+|(?:은|는|이|가|을|를|의|에|에게|과|와|로서|로써|로|으로|도|만|부터|까지|이다|한다|하다|함|됨|됨을|함을|함으로써|됨으로써|대하여|대해|대한|관하여|관해|관한|등|및|에서|에서는|에서의|로부터|에의|로부터의|에도|에는|이나|나|라도|이라도|인가|든가|이든지|든지|적|적인|적으로|할|한|하는|된|될|되는|인|일|이고|이며|이면|이지|입니다|합니다|습니다)(?=\s|$|[ㆍ\.,!?()[\]{}<>"'「」『』“”‘’○①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮\-~·]))/g;
 
+// 💡 [신규 추가] DB의 memo 필드에 일반 메모와 통계(채운 갯수, 오답 배열)를 분리/저장하는 함수
+export const parseCardStats = (memoStr?: string) => {
+  if (!memoStr) return { text: "", filled: 0, wrongIndices: [] };
+  const delim = '###STATS###';
+  if (memoStr.includes(delim)) {
+    try {
+      const [text, statsStr] = memoStr.split(delim);
+      const stats = JSON.parse(statsStr);
+      return { text: text || "", filled: stats.filled || 0, wrongIndices: stats.wrongIndices || [] };
+    } catch (e) {
+      return { text: memoStr, filled: 0, wrongIndices: [] };
+    }
+  }
+  return { text: memoStr, filled: 0, wrongIndices: [] };
+};
+
+export const stringifyCardStats = (text: string, filled: number, wrongIndices: number[]) => {
+  return `${text}###STATS###${JSON.stringify({ filled, wrongIndices })}`;
+};
+
 export const formatCardText = (text?: string) => {
   if (!text) return { title: "제목 없음", body: "" };
   const str = String(text);
   
-  // 💡 [핵심 패치] 강화 탭의 카드는 이미 "\n\n"으로 제목과 본문이 나뉘어 저장되어 있습니다.
-  // 이 경우 정규식을 돌리지 않고 무조건 앞부분 전체를 제목으로 100% 보존합니다!
   if (str.includes('\n\n')) {
     const parts = str.split('\n\n');
     return {
@@ -17,14 +35,12 @@ export const formatCardText = (text?: string) => {
   let tag = "";
   let remaining = str.trimStart();
   
-  // 1. [법], [령] 시스템 태그 분리
   const tagMatch = remaining.match(/^(\[(?:법|령|칙|규)\])/);
   if (tagMatch) {
     tag = tagMatch[1];
     remaining = remaining.substring(tag.length).trimStart();
   }
 
-  // 2. 조항번호와 조항제목 추출 (반각/전각 괄호 및 띄어쓰기 모두 지원)
   const titleRegex = /(제\s*\d+\s*조(?:\s*의\s*\d+)?\s*(?:[(（][^)）]+[)）])?)/;
   const match = remaining.match(titleRegex);
 
@@ -33,7 +49,6 @@ export const formatCardText = (text?: string) => {
     const beforeTitle = remaining.substring(0, match.index).trim();
     const afterTitle = remaining.substring(match.index + match[1].length).trimStart();
     
-    // 조항번호 앞뒤의 <개정...>, [본조신설] 등 모든 잡동사니를 모아 본문으로 합칩니다.
     let bodyPart = (beforeTitle ? beforeTitle + "\n" : "") + afterTitle;
     bodyPart = bodyPart.replace(/^[*]/, '').trimStart();
 
@@ -43,7 +58,6 @@ export const formatCardText = (text?: string) => {
     };
   }
 
-  // 3. 위 패턴이 없으면 동그라미나 줄바꿈에서 자릅니다.
   const circleMatch = remaining.match(/([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]|\n)/);
   if (circleMatch && circleMatch.index !== undefined) {
     const splitIdx = circleMatch.index;
@@ -63,7 +77,6 @@ export const extractLawTag = (title: string) => {
   return '';
 };
 
-// 💡 시스템 태그 제거 후 깔끔한 제목만 반환
 export const getStrictTitleOnly = (text?: string) => {
   if (!text) return "제목 없음";
   const { title } = formatCardText(text);
