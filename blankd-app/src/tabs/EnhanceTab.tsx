@@ -38,7 +38,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
                 const gridStyle = getGridStyle(card.content, viewMode, false, colCount);
                 const cleanTitle = getStrictTitleOnly(card.content);
-                
                 const { body } = formatCardText(card.content);
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
                 const stats = parseCardStats(card.memo);
@@ -46,29 +45,15 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
 
                 return (
                   <div key={card.id} className="relative transition-all" style={gridStyle}>
-                    <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} 
-                         onClick={() => setActiveCard(card)} 
-                         className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col justify-start ${hasWrong ? "border-red-500/30 bg-red-900/10" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer`}>
-                      
-                      {/* 💡 [수정됨] 제목과 뱃지들을 나란히(좌우) 배치하도록 flex-row 적용 */}
+                    <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-4 rounded-sm border transition-all h-full flex flex-col justify-start ${hasWrong ? "border-red-500/30 bg-red-900/10" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer`}>
                       <div className="flex justify-between items-start w-full gap-3">
                         <div className="text-amber-400 font-bold text-[13px] text-left leading-snug break-keep flex-1">{cleanTitle}</div>
-                        
                         <div className="flex gap-1 flex-wrap justify-end shrink-0 items-start mt-0.5">
-                          <span className="text-[10px] text-indigo-300 border border-indigo-500/30 px-1 py-0.5 rounded whitespace-nowrap bg-indigo-900/20">
-                            빈칸 {totalBlanks}
-                          </span>
-                          <span className="text-[10px] text-teal-300 border border-teal-500/30 px-1 py-0.5 rounded whitespace-nowrap bg-teal-900/20">
-                            채움 {stats.filled}
-                          </span>
-                          {hasWrong && (
-                            <span className="text-[10px] text-red-300 border border-red-500/30 px-1 py-0.5 rounded whitespace-nowrap bg-red-900/20 animate-pulse">
-                              틀림 {stats.wrongIndices.length}
-                            </span>
-                          )}
+                          <span className="text-[10px] text-indigo-300 border border-indigo-500/30 px-1 py-0.5 rounded whitespace-nowrap bg-indigo-900/20">빈칸 {totalBlanks}</span>
+                          <span className="text-[10px] text-teal-300 border border-teal-500/30 px-1 py-0.5 rounded whitespace-nowrap bg-teal-900/20">채움 {stats.filled}</span>
+                          {hasWrong && <span className="text-[10px] text-red-300 border border-red-500/30 px-1 py-0.5 rounded whitespace-nowrap bg-red-900/20 animate-pulse text-pretty">틀림 {stats.wrongIndices.length}</span>}
                         </div>
                       </div>
-                      
                     </div>
                   </div>
                 );
