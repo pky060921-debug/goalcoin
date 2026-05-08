@@ -169,13 +169,13 @@ function MainApp() {
     });
     if (isBlanking) bodyContent += " ]";
     
-    // 💡 [핵심 기술] 본문 맨 끝에 원본 ID(cat.id)를 보이지 않는 HTML 주석으로 쾅 찍어 보냅니다!
-    const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n`;
+    // 💡 [핵심] 마크다운이 지울 수 없는 형태의 특수 마커 사용
+    const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n[[ORIG_ID:${cat.id}]]`;
     const initialMemo = stringifyCardStats(memo, 0, []);
 
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
-      body: JSON.stringify({ wallet_address: safeAddress, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo }) 
+      body: JSON.stringify({ wallet_address: safeAddress, card_id: cat.id, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo }) 
     });
     if (res.ok) {
       await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
@@ -192,8 +192,8 @@ function MainApp() {
   useEffect(() => {
     if (activeCard) {
       isClosingRef.current = false;
-      // 💡 화면에 띄울 땐 보이지 않도록 주석을 지워줍니다.
-      const cleanContent = activeCard.content.replace(/\n\n/g, '');
+      // 💡 [핵심] 화면에 띄울 땐 마커 지우기
+      const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
       const { body } = formatCardText(cleanContent);
       const foundBlanks: {answer: string, correct: boolean}[] = [];
       const parts = body.split(/(\[.*?\])/g);
@@ -351,7 +351,7 @@ function MainApp() {
       {activeCard && (
         <CardModal activeCard={activeCard} totalTimeLimit={totalTimeLimit} elapsed={elapsed} answerInput={answerInput} setAnswerInput={setAnswerInput} inputStatus={inputStatus} handleSequentialInput={handleSequentialInput} 
           renderContent={() => {
-            const cleanContent = activeCard.content.replace(/\n\n/g, '');
+            const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
             const { body } = formatCardText(cleanContent);
             const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== ''); 
             
