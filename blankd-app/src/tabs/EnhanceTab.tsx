@@ -40,14 +40,13 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
 
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             
-            {/* 💡 [아키님 아이디어] 서버의 가짜 ID를 버리고, 우리가 숨겨둔 원본 ID를 뽑아내서 정렬합니다! */}
+            {/* 💡 [핵심 해결] 마크다운에 먹히지 않는 마커 정규식으로 안전하게 추출 */}
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => {
-                const origIdA = parseInt(a.content.match(//)?.[1] || a.id, 10);
-                const origIdB = parseInt(b.content.match(//)?.[1] || b.id, 10);
+                const origIdA = parseInt(a.content.match(/\[\[ORIG_ID:(\d+)\]\]/)?.[1] || a.id, 10);
+                const origIdB = parseInt(b.content.match(/\[\[ORIG_ID:(\d+)\]\]/)?.[1] || b.id, 10);
                 return origIdA - origIdB;
             }).map((card: any) => {
-                // 화면에 뿌릴 때는 보이지 않는 도장을 싹 지워줍니다.
-                const cleanContent = card.content.replace(/\n\n/g, '');
+                const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
                 const cleanTitle = getStrictTitleOnly(cleanContent);
                 const { body } = formatCardText(cleanContent);
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
@@ -57,7 +56,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 let colClass = "";
                 let titleColor = "text-amber-400";
                 
-                // 💡 만들기 탭과 완벽하게 동일한 3단 꽂아넣기
                 if (viewMode === 'all' && colCount >= 3) {
                   if (cleanContent.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
                   else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
