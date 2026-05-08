@@ -40,42 +40,32 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
 
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             
-            {/* 💡 [핵심 해결] DB에서 발급된 가짜 ID(생성순서)를 무시하고, 제목의 "제X조" 숫자를 추출하여 정렬합니다. */}
+            {/* 💡 [아키님 아이디어] 서버의 가짜 ID를 버리고, 우리가 숨겨둔 원본 ID를 뽑아내서 정렬합니다! */}
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => {
-                // 1. "제11조", "[법] 제2조" 등에서 숫자만 깔끔하게 뽑아냅니다.
-                const titleA = getStrictTitleOnly(a.content) || "";
-                const titleB = getStrictTitleOnly(b.content) || "";
-                
-                const numA = parseInt(titleA.match(/제(\d+)조/)?.[1] || "99999", 10);
-                const numB = parseInt(titleB.match(/제(\d+)조/)?.[1] || "99999", 10);
-
-                // 2. 숫자가 다르면 숫자(조항) 순서대로 오름차순 정렬! (1조 -> 2조 -> 3조...)
-                if (numA !== numB) return numA - numB;
-
-                // 3. 만약 같은 "제1조"라면? 법(1열) -> 령(2열) -> 규칙(3열) 순서대로 정렬!
-                const getW = (t:string) => t.includes('[법]') ? 1 : t.includes('[령]') ? 2 : (t.includes('[칙]') || t.includes('[규]')) ? 3 : 4;
-                return getW(a.content) - getW(b.content);
-                
+                const origIdA = parseInt(a.content.match(//)?.[1] || a.id, 10);
+                const origIdB = parseInt(b.content.match(//)?.[1] || b.id, 10);
+                return origIdA - origIdB;
             }).map((card: any) => {
-                const cleanTitle = getStrictTitleOnly(card.content);
-                const { body } = formatCardText(card.content);
+                // 화면에 뿌릴 때는 보이지 않는 도장을 싹 지워줍니다.
+                const cleanContent = card.content.replace(/\n\n/g, '');
+                const cleanTitle = getStrictTitleOnly(cleanContent);
+                const { body } = formatCardText(cleanContent);
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
-                const checkText = `${card.content || ''}`;
-
+                
                 let colClass = "";
                 let titleColor = "text-amber-400";
                 
-                // 💡 HTML 지정: 법은 1열, 령은 2열, 칙은 3열 고정
+                // 💡 만들기 탭과 완벽하게 동일한 3단 꽂아넣기
                 if (viewMode === 'all' && colCount >= 3) {
-                  if (checkText.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
-                  else if (checkText.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
-                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
+                  if (cleanContent.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
+                  else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
+                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
                 } else {
-                  if (checkText.includes('[법]')) titleColor = "text-red-500";
-                  else if (checkText.includes('[령]')) titleColor = "text-blue-400";
-                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
+                  if (cleanContent.includes('[법]')) titleColor = "text-red-500";
+                  else if (cleanContent.includes('[령]')) titleColor = "text-blue-400";
+                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
                 }
 
                 return (
