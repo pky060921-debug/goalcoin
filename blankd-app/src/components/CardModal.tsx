@@ -57,7 +57,7 @@ export const CardModal: React.FC<CardModalProps> = ({
 
         <div className="p-4 sm:p-6 border-t border-white/10 bg-black/40 shrink-0">
           <div className="flex items-center gap-3 w-full max-w-2xl mx-auto">
-            <span className="text-[10px] text-white/30 uppercase tracking-widest font-bold whitespace-nowrap hidden sm:inline-block">Answer Input</span>
+            {/* 💡 아키님 요청대로 Answer Input 글자를 삭제했습니다. */}
             <input
               ref={inputRef}
               type="text"
