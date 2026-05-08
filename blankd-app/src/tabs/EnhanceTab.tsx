@@ -40,30 +40,34 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
 
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             
-            {/* 💡 [핵심 해결] 마크다운에 먹히지 않는 마커 정규식으로 안전하게 추출 */}
+            {/* 💡 만들기 탭의 정렬(Sort) 로직을 토씨 하나 안 틀리고 그대로 가져왔습니다 */}
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => {
-                const origIdA = parseInt(a.content.match(/\[\[ORIG_ID:(\d+)\]\]/)?.[1] || a.id, 10);
-                const origIdB = parseInt(b.content.match(/\[\[ORIG_ID:(\d+)\]\]/)?.[1] || b.id, 10);
-                return origIdA - origIdB;
+                const textA = a.content || "";
+                const textB = b.content || "";
+                const getW = (t:string) => t.includes('[법]') ? 1 : t.includes('[령]') ? 2 : (t.includes('[칙]') || t.includes('[규]')) ? 3 : 4;
+                const diff = getW(textA) - getW(textB);
+                if (diff !== 0) return diff;
+                return textA.localeCompare(textB, undefined, {numeric: true});
             }).map((card: any) => {
-                const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-                const cleanTitle = getStrictTitleOnly(cleanContent);
-                const { body } = formatCardText(cleanContent);
+                const cleanTitle = getStrictTitleOnly(card.content);
+                const { body } = formatCardText(card.content);
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
                 
+                // 💡 만들기 탭의 색상 지정 및 col-start 로직을 토씨 하나 안 틀리고 그대로 가져왔습니다
                 let colClass = "";
                 let titleColor = "text-amber-400";
-                
+                const checkText = card.content || "";
+
                 if (viewMode === 'all' && colCount >= 3) {
-                  if (cleanContent.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
-                  else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
-                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
+                  if (checkText.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
+                  else if (checkText.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
                 } else {
-                  if (cleanContent.includes('[법]')) titleColor = "text-red-500";
-                  else if (cleanContent.includes('[령]')) titleColor = "text-blue-400";
-                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
+                  if (checkText.includes('[법]')) titleColor = "text-red-500";
+                  else if (checkText.includes('[령]')) titleColor = "text-blue-400";
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
                 }
 
                 return (
