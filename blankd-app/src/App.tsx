@@ -173,13 +173,22 @@ function MainApp() {
     const finalCardContent = `${cat.title}\n\n${bodyContent}`;
     const initialMemo = stringifyCardStats(memo, 0, []);
 
+    // 💡 [핵심 수정] 원본 ID(cat.id)를 card_id로 함께 보냅니다.
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
-      body: JSON.stringify({ wallet_address: safeAddress, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo }) 
+      body: JSON.stringify({ 
+        wallet_address: safeAddress, 
+        card_id: cat.id, // 원본 ID 유지
+        card_content: finalCardContent, 
+        answer_text: answerText, 
+        folder_name: cat.folder_name, 
+        memo: initialMemo 
+      }) 
     });
+
     if (res.ok) {
       await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
-      addLog("✅ 지식 추출 완료: 새 카드가 생성되었습니다.");
+      addLog("✅ 지식 추출 완료: 원본 배열 순서가 유지됩니다.");
       await loadAllData(); onComplete(); setActiveTab('enhance');
     }
   };
