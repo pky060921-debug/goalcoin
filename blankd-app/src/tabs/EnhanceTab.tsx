@@ -34,79 +34,54 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
         {enhanceFolders.map((f: string) => <button key={f} onClick={() => setOpenFolders(p => ({...p, [f]: !p[f]}))} className={`px-2.5 sm:px-4 py-1.5 sm:py-2 text-[10px] sm:text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-amber-600 border-amber-500 text-white shadow-sm' : 'bg-amber-900/30 text-amber-300 border-amber-500/30'}`}>📁 {f}</button>)}
       </div>
       
-      {enhanceFolders.map((folder: string) => {
-        if (!openFolders[folder]) return null;
+      {enhanceFolders.map((folder: string) => openFolders[folder] && (
+        <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
+          <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-        // 💡 [핵심 알고리즘] 지퍼식 교차 정렬 (Interleaved Sort)
-        // 세로 쏠림 현상을 막기 위해 법, 령, 규칙을 각각 모은 후 번갈아가며 하나씩 뽑아서 섞어줍니다.
-        const folderCards = safeCards.filter((c:any) => c.folder_name === folder);
-        
-        const sortByTitle = (a: any, b: any) => {
-            const tA = getStrictTitleOnly(a.content) || "";
-            const tB = getStrictTitleOnly(b.content) || "";
-            return tA.localeCompare(tB, undefined, {numeric: true});
-        };
+          {/* 💡 만들기 탭과 100% 동일한 컨테이너 (억지 속성 전부 제거) */}
+          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
+            
+            {/* 💡 만들기 탭과 100% 동일한 정렬 방식 (생성된 순서대로 정렬하여, 빈자리는 빈자리 그대로 둠) */}
+            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
+                const cleanTitle = getStrictTitleOnly(card.content);
+                const { body } = formatCardText(card.content);
+                const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
+                const stats = parseCardStats(card.memo);
+                const hasWrong = stats.wrongIndices.length > 0;
+                const checkText = `${card.content || ''}`;
 
-        const laws = folderCards.filter((c:any) => c.content.includes('[법]')).sort(sortByTitle);
-        const decrees = folderCards.filter((c:any) => c.content.includes('[령]')).sort(sortByTitle);
-        const rules = folderCards.filter((c:any) => c.content.includes('[칙]') || c.content.includes('[규]')).sort(sortByTitle);
-        const others = folderCards.filter((c:any) => !c.content.includes('[법]') && !c.content.includes('[령]') && !c.content.includes('[칙]') && !c.content.includes('[규]')).sort(sortByTitle);
+                let colClass = "";
+                let titleColor = "text-amber-400";
+                
+                // 💡 지정된 자리에 꽂아 넣기 (법=1열, 령=2열, 규칙=3열)
+                if (viewMode === 'all' && colCount >= 3) {
+                  if (checkText.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
+                  else if (checkText.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
+                } else {
+                  if (checkText.includes('[법]')) titleColor = "text-red-500";
+                  else if (checkText.includes('[령]')) titleColor = "text-blue-400";
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
+                }
 
-        const interleavedCards = [];
-        const maxLen = Math.max(laws.length, decrees.length, rules.length, others.length);
-        for(let i=0; i<maxLen; i++) {
-            if (laws[i]) interleavedCards.push(laws[i]);
-            if (decrees[i]) interleavedCards.push(decrees[i]);
-            if (rules[i]) interleavedCards.push(rules[i]);
-            if (others[i]) interleavedCards.push(others[i]);
-        }
-
-        return (
-          <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
-            <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
-
-            <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
-              {/* 💡 기존 safeCards 대신, 교차로 예쁘게 섞인 interleavedCards를 화면에 뿌립니다. */}
-              {interleavedCards.map((card: any) => {
-                  const cleanTitle = getStrictTitleOnly(card.content);
-                  const { body } = formatCardText(card.content);
-                  const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
-                  const stats = parseCardStats(card.memo);
-                  const hasWrong = stats.wrongIndices.length > 0;
-                  const checkText = `${card.content || ''}`;
-
-                  let colClass = "";
-                  let titleColor = "text-amber-400";
-                  
-                  if (viewMode === 'all' && colCount >= 3) {
-                    if (checkText.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
-                    else if (checkText.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
-                    else if (checkText.includes('[칙]') || checkText.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
-                  } else {
-                    if (checkText.includes('[법]')) titleColor = "text-red-500";
-                    else if (checkText.includes('[령]')) titleColor = "text-blue-400";
-                    else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
-                  }
-
-                  return (
-                    <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
-                      <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
-                        <div className="flex flex-row justify-between items-center w-full gap-2">
-                          <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{cleanTitle}</div>
-                          <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
-                            <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
-                            <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">채움:{stats.filled}</span>
-                            <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
-                          </div>
+                return (
+                  <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
+                    <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
+                      <div className="flex flex-row justify-between items-center w-full gap-2">
+                        <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{cleanTitle}</div>
+                        <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
+                          <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
+                          <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">채움:{stats.filled}</span>
+                          <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                         </div>
                       </div>
                     </div>
-                  );
-              })}
-            </div>
+                  </div>
+                );
+            })}
           </div>
-        );
-      })}
+        </div>
+      ))}
     </div>
   );
 };
