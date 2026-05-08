@@ -40,14 +40,23 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
 
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             
-            {/* 💡 만들기 탭의 정렬(Sort) 로직을 토씨 하나 안 틀리고 그대로 가져왔습니다 */}
+            {/* 💡 [궁극의 해결책] DB 저장 순서(id)를 완전히 버리고, "제X조" 글자 자체로 정렬합니다! */}
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => {
-                const textA = a.content || "";
-                const textB = b.content || "";
-                const getW = (t:string) => t.includes('[법]') ? 1 : t.includes('[령]') ? 2 : (t.includes('[칙]') || t.includes('[규]')) ? 3 : 4;
-                const diff = getW(textA) - getW(textB);
+                const titleA = getStrictTitleOnly(a.content) || "";
+                const titleB = getStrictTitleOnly(b.content) || "";
+                
+                // 1. "[법]", "[령]" 꼬리표를 떼어내고 순수하게 "제1조 (관장)", "제2조" 등만 남깁니다.
+                const cleanA = titleA.replace(/\[.*?\]\s*/g, "").trim();
+                const cleanB = titleB.replace(/\[.*?\]\s*/g, "").trim();
+                
+                // 2. 남은 글자를 기준으로 오름차순 정렬 (제1조 -> 제2조 -> 제11조...)
+                const diff = cleanA.localeCompare(cleanB, undefined, { numeric: true });
                 if (diff !== 0) return diff;
-                return textA.localeCompare(textB, undefined, {numeric: true});
+                
+                // 3. 만약 둘 다 "제2조"로 조항 이름이 똑같다면, 법(1열)->령(2열)->칙(3열) 순서로 맞춥니다.
+                const getW = (t:string) => t.includes('[법]') ? 1 : t.includes('[령]') ? 2 : (t.includes('[칙]') || t.includes('[규]')) ? 3 : 4;
+                return getW(a.content) - getW(b.content);
+                
             }).map((card: any) => {
                 const cleanTitle = getStrictTitleOnly(card.content);
                 const { body } = formatCardText(card.content);
@@ -55,11 +64,11 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
                 
-                // 💡 만들기 탭의 색상 지정 및 col-start 로직을 토씨 하나 안 틀리고 그대로 가져왔습니다
                 let colClass = "";
                 let titleColor = "text-amber-400";
                 const checkText = card.content || "";
 
+                // 💡 지정된 1, 2, 3열 자리에 정확히 꽂아넣기
                 if (viewMode === 'all' && colCount >= 3) {
                   if (checkText.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
                   else if (checkText.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
