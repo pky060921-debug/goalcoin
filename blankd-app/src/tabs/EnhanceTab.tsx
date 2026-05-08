@@ -39,7 +39,14 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
-            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
+            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => {
+                const textA = a.content || "";
+                const textB = b.content || "";
+                const getW = (t:string) => t.includes('[법]') ? 1 : t.includes('[령]') ? 2 : (t.includes('[칙]') || t.includes('[규]')) ? 3 : 4;
+                const diff = getW(textA) - getW(textB);
+                if (diff !== 0) return diff;
+                return (getStrictTitleOnly(textA) || "").localeCompare((getStrictTitleOnly(textB) || ""), undefined, {numeric: true});
+            }).map((card: any) => {
                 const cleanTitle = getStrictTitleOnly(card.content);
                 const { body } = formatCardText(card.content);
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
@@ -50,23 +57,23 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 let colClass = "";
                 let titleColor = "text-amber-400";
                 if (viewMode === 'all' && colCount >= 3) {
-                  if (checkText.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
-                  else if (checkText.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
-                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
+                  if (checkText.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-600"; }
+                  else if (checkText.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-600"; }
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-600"; }
                 } else {
-                  if (checkText.includes('[법]')) titleColor = "text-red-500";
-                  else if (checkText.includes('[령]')) titleColor = "text-blue-400";
-                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
+                  if (checkText.includes('[법]')) titleColor = "text-red-600";
+                  else if (checkText.includes('[령]')) titleColor = "text-blue-600";
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-600";
                 }
 
                 return (
                   <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
-                    <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? \"border-red-500/40 bg-red-900/20\" : \"border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40\"} cursor-pointer shadow-sm hover:shadow-md`}>
-                      <div className=\"flex flex-row justify-between items-center w-full gap-2\">
+                    <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
+                      <div className="flex flex-row justify-between items-center w-full gap-2">
                         <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{cleanTitle}</div>
-                        <div className=\"flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible\">
-                          <span className=\"text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap\">빈칸:{totalBlanks}</span>
-                          <span className=\"text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap\">채움:{stats.filled}</span>
+                        <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
+                          <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
+                          <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">채움:{stats.filled}</span>
                           <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                         </div>
                       </div>
