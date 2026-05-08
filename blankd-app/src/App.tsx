@@ -61,7 +61,6 @@ function MainApp() {
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   
-  // 💡 메모 입력창 열림 상태 관리
   const [isMemoOpen, setIsMemoOpen] = useState(false);
 
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
@@ -170,25 +169,17 @@ function MainApp() {
     });
     if (isBlanking) bodyContent += " ]";
     
-    const finalCardContent = `${cat.title}\n\n${bodyContent}`;
+    // 💡 [핵심 기술] 본문 맨 끝에 원본 ID(cat.id)를 보이지 않는 HTML 주석으로 쾅 찍어 보냅니다!
+    const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n`;
     const initialMemo = stringifyCardStats(memo, 0, []);
 
-    // 💡 [핵심 수정] 원본 ID(cat.id)를 card_id로 함께 보냅니다.
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
-      body: JSON.stringify({ 
-        wallet_address: safeAddress, 
-        card_id: cat.id, // 원본 ID 유지
-        card_content: finalCardContent, 
-        answer_text: answerText, 
-        folder_name: cat.folder_name, 
-        memo: initialMemo 
-      }) 
+      body: JSON.stringify({ wallet_address: safeAddress, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo }) 
     });
-
     if (res.ok) {
       await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
-      addLog("✅ 지식 추출 완료: 원본 배열 순서가 유지됩니다.");
+      addLog("✅ 지식 추출 완료: 원본 배열이 영구 보존됩니다.");
       await loadAllData(); onComplete(); setActiveTab('enhance');
     }
   };
@@ -201,7 +192,9 @@ function MainApp() {
   useEffect(() => {
     if (activeCard) {
       isClosingRef.current = false;
-      const { body } = formatCardText(activeCard.content);
+      // 💡 화면에 띄울 땐 보이지 않도록 주석을 지워줍니다.
+      const cleanContent = activeCard.content.replace(/\n\n/g, '');
+      const { body } = formatCardText(cleanContent);
       const foundBlanks: {answer: string, correct: boolean}[] = [];
       const parts = body.split(/(\[.*?\])/g);
       parts.forEach(part => {
@@ -358,7 +351,8 @@ function MainApp() {
       {activeCard && (
         <CardModal activeCard={activeCard} totalTimeLimit={totalTimeLimit} elapsed={elapsed} answerInput={answerInput} setAnswerInput={setAnswerInput} inputStatus={inputStatus} handleSequentialInput={handleSequentialInput} 
           renderContent={() => {
-            const { body } = formatCardText(activeCard.content);
+            const cleanContent = activeCard.content.replace(/\n\n/g, '');
+            const { body } = formatCardText(cleanContent);
             const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== ''); 
             
             let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
@@ -390,7 +384,7 @@ function MainApp() {
             return (
               <div className="flex flex-col gap-6 w-full">
                 <div className="flex justify-between items-center border-b border-white/10 pb-2">
-                    <span className="text-amber-400 font-bold text-[14px] leading-tight">{activeCard.content.split('\n')[0]}</span>
+                    <span className="text-amber-400 font-bold text-[14px] leading-tight">{cleanContent.split('\n')[0]}</span>
                     <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
                 </div>
                 
