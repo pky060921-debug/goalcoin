@@ -40,43 +40,32 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
 
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             
-            {/* 💡 [궁극의 해결책] DB 저장 순서(id)를 완전히 버리고, "제X조" 글자 자체로 정렬합니다! */}
+            {/* 💡 핵심: 마커를 이용해 만들기 탭의 원본 ID 순서로 정렬 */}
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => {
-                const titleA = getStrictTitleOnly(a.content) || "";
-                const titleB = getStrictTitleOnly(b.content) || "";
-                
-                // 1. "[법]", "[령]" 꼬리표를 떼어내고 순수하게 "제1조 (관장)", "제2조" 등만 남깁니다.
-                const cleanA = titleA.replace(/\[.*?\]\s*/g, "").trim();
-                const cleanB = titleB.replace(/\[.*?\]\s*/g, "").trim();
-                
-                // 2. 남은 글자를 기준으로 오름차순 정렬 (제1조 -> 제2조 -> 제11조...)
-                const diff = cleanA.localeCompare(cleanB, undefined, { numeric: true });
-                if (diff !== 0) return diff;
-                
-                // 3. 만약 둘 다 "제2조"로 조항 이름이 똑같다면, 법(1열)->령(2열)->칙(3열) 순서로 맞춥니다.
-                const getW = (t:string) => t.includes('[법]') ? 1 : t.includes('[령]') ? 2 : (t.includes('[칙]') || t.includes('[규]')) ? 3 : 4;
-                return getW(a.content) - getW(b.content);
-                
+                const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
+                const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
+                return origIdA - origIdB;
             }).map((card: any) => {
-                const cleanTitle = getStrictTitleOnly(card.content);
-                const { body } = formatCardText(card.content);
+                // 화면 표시를 위해 꼬리표 삭제
+                const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+                const cleanTitle = getStrictTitleOnly(cleanContent);
+                const { body } = formatCardText(cleanContent);
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
                 
                 let colClass = "";
                 let titleColor = "text-amber-400";
-                const checkText = card.content || "";
-
-                // 💡 지정된 1, 2, 3열 자리에 정확히 꽂아넣기
+                
+                // 💡 핵심: 꼬리표가 온전히 살아있는 cleanContent를 검사하여 자리와 색상을 완벽하게 지정!
                 if (viewMode === 'all' && colCount >= 3) {
-                  if (checkText.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
-                  else if (checkText.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
-                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
+                  if (cleanContent.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
+                  else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
+                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
                 } else {
-                  if (checkText.includes('[법]')) titleColor = "text-red-500";
-                  else if (checkText.includes('[령]')) titleColor = "text-blue-400";
-                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
+                  if (cleanContent.includes('[법]')) titleColor = "text-red-500";
+                  else if (cleanContent.includes('[령]')) titleColor = "text-blue-400";
+                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
                 }
 
                 return (
