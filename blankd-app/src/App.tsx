@@ -10,7 +10,6 @@ import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
-// [시스템] 런타임 에러 방어용 ErrorBoundary
 class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
   constructor(props: any) { super(props); this.state = { hasError: false, errorMessage: "" }; }
   static getDerivedStateFromError(error: any) { return { hasError: true, errorMessage: error.message }; }
@@ -26,7 +25,6 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
   }
 }
 
-// [로컬 우선 아키텍처] 서버 통신 최소화를 위한 데이터 큐 시스템
 const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
   try {
     const qStr = localStorage.getItem('blankd_sync_queue');
@@ -48,25 +46,21 @@ function MainApp() {
   const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
   const isLoggedIn = safeAddress.length > 0;
   
-  // 상태 관리: 탭 및 데이터
   const [activeTab, setActiveTab] = useState('progress');
   const [categories, setCategories] = useState<any[]>([]);
   const [savedCards, setSavedCards] = useState<any[]>([]);
   const [exams, setExams] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
   
-  // 상태 관리: 설정 및 UI
   const [viewMode, setViewMode] = useState('all');
   const [colCount, setColCount] = useState(3);
   const [useAiRecommend, setUseAiRecommend] = useState(true);
   
-  // 파일 업로드 및 시스템 로그
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [examFile, setExamFile] = useState<File | null>(null);
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
 
-  // 빈칸 학습 엔진 상태
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [answerInput, setAnswerInput] = useState("");
@@ -106,7 +100,6 @@ function MainApp() {
     } catch (e: any) { addLog(`❌ 데이터 동기화 실패: ${e.message}`); }
   };
 
-  // [일괄 동기화] 주기적으로 혹은 화면 이탈 시 로컬 큐를 서버에 전송
   const flushQueue = async () => {
     if (!safeAddress) return;
     try {
@@ -150,7 +143,6 @@ function MainApp() {
     if (res.ok) { setExamFile(null); addLog("✅ 기출문제 분석 및 반영 완료"); setTimeout(() => loadAllData(), 2500); }
   };
 
-  // [신규 로직] 조문 텍스트 분할 요청 처리
   const handleSplitCategory = async (cat: any, text1: string, text2: string, title1: string, title2: string) => {
     try {
         const res = await fetch("https://api.blankd.top/api/split-category", {
@@ -161,7 +153,6 @@ function MainApp() {
     } catch (e: any) { addLog(`❌ 분할 처리 통신 에러`); }
   };
 
-  // 지식 추출 및 카드 생성
   const handleMakeBlankCard = async (cat: any, wordsArray: string[], selectedIndices: Set<number>, pageBreaks: Set<number>, memo: string, onComplete: () => void) => {
     let bodyContent = ""; let answerText = ""; let isBlanking = false;
     wordsArray.forEach((word, index) => {
@@ -195,7 +186,6 @@ function MainApp() {
     pushToQueue('MEMO', { id, memo });
   };
 
-  // 카드 학습 로직 (모달 연동)
   useEffect(() => {
     if (activeCard) {
       isClosingRef.current = false;
@@ -253,7 +243,6 @@ function MainApp() {
     }
   }, [activeCard, currentBlankIdx, blanks.length, startTime, totalTimeLimit]);
 
-  // 실시간 입력 처리 로직 (IME 버그 방어 포함)
   useEffect(() => {
     if (inputStatus === 'idle' && blanks[currentBlankIdx] && answerInput) {
       const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
@@ -262,22 +251,33 @@ function MainApp() {
     }
   }, [answerInput, inputStatus, blanks, currentBlankIdx]);
 
+  // 💡 [핵심 패치] 한글 마지막 글자 딸려오는 현상 방어 로직
   const handleSequentialInput = (overrideInput?: string | any) => {
     if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput : answerInput.replace(/\s+/g, '').toLowerCase();
     
     if (expected === actual) {
-      if (document.activeElement instanceof HTMLElement) { document.activeElement.blur(); } // 정답 시 한글 조합 강제 종료
+      // 1. 강제 블러로 현재 조합 중인 한글(찌꺼기)을 강제로 완성(Commit) 시킵니다.
+      const activeEl = document.activeElement as HTMLElement;
+      if (activeEl) activeEl.blur(); 
+
       setInputStatus('correct');
       const nb = [...blanks]; nb[currentBlankIdx].correct = true; setBlanks(nb);
       statsRef.current.wrongIndices.delete(currentBlankIdx);
       statsRef.current.filled += 1; 
+
+      // 2. Commit이 완료될 수 있도록 아주 짧은 시간(0.02초)을 기다린 후 비웁니다.
       setTimeout(() => { 
-        setAnswerInput(""); setInputStatus('idle'); 
-        if (currentBlankIdx + 1 < nb.length) setCurrentBlankIdx(currentBlankIdx + 1); 
-        else finishCard(); 
-      }, 150);
+        setAnswerInput(""); 
+        
+        // 3. 비워진 상태를 확인하고 다음 빈칸으로 넘어갑니다. (총 0.15초)
+        setTimeout(() => {
+          setInputStatus('idle'); 
+          if (currentBlankIdx + 1 < nb.length) setCurrentBlankIdx(currentBlankIdx + 1); 
+          else finishCard(); 
+        }, 130);
+      }, 20);
     } else { 
       setInputStatus('wrong'); 
       statsRef.current.wrongIndices.add(currentBlankIdx); 
@@ -349,7 +349,6 @@ function MainApp() {
             const { body } = formatCardText(activeCard.content);
             const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== ''); 
             
-            // 페이지 분할 로직: 현재 풀어야 할 빈칸의 고유 페이지 번호 계산
             let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
             for (let part of parts) {
                 if (part === '##PAGE_BREAK##') tempPage++;
