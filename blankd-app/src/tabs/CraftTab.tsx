@@ -20,7 +20,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   const [selectedWords, setSelectedWords] = useState<Set<number>>(new Set());
   const [pageBreaks, setPageBreaks] = useState<Set<number>>(new Set());
   const [memoInput, setMemoInput] = useState(""); 
-  const [lastSelected, setLastSelected] = useState<number | null>(null);
 
   useEffect(() => {
     const initial: Record<string, boolean> = {};
@@ -60,35 +59,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     setSelectedWords(newSet);
   };
 
-  const triggerAiRecommend = async (cat: any, bodyText: string) => {
-    addLog(`▶️ [AI 추천] ${cat.title} 분석 시작...`);
-    try {
-        const res = await fetch("https://api.blankd.top/api/recommend-blank", {
-            method: "POST", headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({ wallet_address: safeAddress, content: bodyText })
-        });
-        const data = await res.json();
-        if(data.task_id) {
-            const poll = setInterval(async () => {
-                const sRes = await fetch(`https://api.blankd.top/api/task-status?task_id=${data.task_id}`);
-                const sData = await sRes.json();
-                if(sData.status === 'completed') {
-                    clearInterval(poll);
-                    addLog(`✅ AI 추천 키워드 발견: ${sData.result.keyword}`);
-                    const newSet = new Set(selectedWords);
-                    wordArray.forEach((w:string, i:number) => {
-                        if(w.includes(sData.result.keyword)) newSet.add(i);
-                    });
-                    setSelectedWords(newSet);
-                } else if(sData.status === 'error') {
-                    clearInterval(poll);
-                    addLog(`❌ AI 추천 실패: ${sData.message}`);
-                }
-            }, 2000);
-        }
-    } catch(e:any) { addLog(`❌ AI 통신 오류`); }
-  };
-
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in w-full">
       <div className="flex gap-2 mb-2 sm:mb-4">
@@ -106,9 +76,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-          {/* 💡 [수정1] auto-rows-fr을 제거하고 items-start를 넣어 카드가 멋대로 늘어나는 현상 차단! */}
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
-            {/* 💡 아키님의 원본 정렬(a.id - b.id) 복구 */}
             {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
                 const contentToUse = cat.content || cat.title || "";
@@ -147,14 +115,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                       <div className="w-full p-4 sm:p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-3 shadow-xl z-20 relative animate-in zoom-in-95">
                         <div className="flex justify-between items-center mb-1">
                           <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{cleanTitle}</span>
-                          {useAiRecommend && (
-                            <button onClick={(e) => { e.stopPropagation(); triggerAiRecommend(cat, wordArray.join("")); }} className="text-[9px] sm:text-[11px] bg-indigo-600/30 text-indigo-300 border border-indigo-500/50 px-2 py-1 rounded hover:bg-indigo-600/50 transition-colors whitespace-nowrap">✨ AI 추천</button>
-                          )}
-                        </div>
-                        <div className="text-[10px] text-white/40 mb-2 font-mono bg-white/5 p-2 rounded leading-relaxed">
-                          👉 <span className="text-amber-400">터치(클릭)</span>: 빈칸 지정<br/>
-                          👉 <span className="text-red-400">길게 누르기(우클릭)</span>: <span className="text-white">이 단어 위치에 페이지 나누기 선(---) 긋기</span><br/>
-                          👉 <span className="text-teal-400">따닥 두번 누르기(더블클릭)</span>: 다음 글자와 한 덩어리로 병합
                         </div>
                         <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-2 text-xs text-teal-200 outline-none rounded-sm" />
                         <div className="font-serif text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border border-white/10 max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative">
@@ -165,8 +125,8 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                             </React.Fragment>
                           ))}
                         </div>
-                        {/* 💡 [수정2] 함수 파라미터 순서 버그 해결! memoInput을 5번째 인자로 정확히 넘겨서 ()=>x(null) 저장을 방지했습니다. */}
-                        <button onClick={() => handleMakeBlankCard({ ...cat, title: cleanTitle }, wordArray, selectedWords, pageBreaks, memoInput, () => setExpandedId(null))} className="w-full py-2.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs sm:text-sm font-bold rounded-sm mt-2 hover:bg-amber-500/30 transition-all">지식 추출 저장</button>
+                        {/* 💡 핵심: 꼬리표가 잘리지 않은 원본 'cat'을 그대로 전송합니다! */}
+                        <button onClick={() => handleMakeBlankCard(cat, wordArray, selectedWords, pageBreaks, memoInput, () => setExpandedId(null))} className="w-full py-2.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs sm:text-sm font-bold rounded-sm mt-2 hover:bg-amber-500/30 transition-all">지식 추출 저장</button>
                       </div>
                     )}
                   </div>
