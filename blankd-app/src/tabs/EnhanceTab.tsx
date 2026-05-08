@@ -38,10 +38,25 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-x-3 gap-y-3 sm:gap-x-4 sm:gap-y-4 items-start`}>
+          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             
-            {/* 💡 [아키님의 핵심 아이디어 적용] 만들기 탭의 ID 순서(a.id - b.id)로 정렬하여 위임 관계 복원 */}
-            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
+            {/* 💡 [핵심 해결] DB에서 발급된 가짜 ID(생성순서)를 무시하고, 제목의 "제X조" 숫자를 추출하여 정렬합니다. */}
+            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => {
+                // 1. "제11조", "[법] 제2조" 등에서 숫자만 깔끔하게 뽑아냅니다.
+                const titleA = getStrictTitleOnly(a.content) || "";
+                const titleB = getStrictTitleOnly(b.content) || "";
+                
+                const numA = parseInt(titleA.match(/제(\d+)조/)?.[1] || "99999", 10);
+                const numB = parseInt(titleB.match(/제(\d+)조/)?.[1] || "99999", 10);
+
+                // 2. 숫자가 다르면 숫자(조항) 순서대로 오름차순 정렬! (1조 -> 2조 -> 3조...)
+                if (numA !== numB) return numA - numB;
+
+                // 3. 만약 같은 "제1조"라면? 법(1열) -> 령(2열) -> 규칙(3열) 순서대로 정렬!
+                const getW = (t:string) => t.includes('[법]') ? 1 : t.includes('[령]') ? 2 : (t.includes('[칙]') || t.includes('[규]')) ? 3 : 4;
+                return getW(a.content) - getW(b.content);
+                
+            }).map((card: any) => {
                 const cleanTitle = getStrictTitleOnly(card.content);
                 const { body } = formatCardText(card.content);
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
@@ -52,7 +67,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 let colClass = "";
                 let titleColor = "text-amber-400";
                 
-                // 💡 [배열 고정] 원본 위치를 지키기 위해 열(Column) 자리를 강제 지정합니다.
+                // 💡 HTML 지정: 법은 1열, 령은 2열, 칙은 3열 고정
                 if (viewMode === 'all' && colCount >= 3) {
                   if (checkText.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
                   else if (checkText.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
@@ -70,6 +85,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                         <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{cleanTitle}</div>
                         <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
                           <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
+                          <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">채움:{stats.filled}</span>
                           <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                         </div>
                       </div>
