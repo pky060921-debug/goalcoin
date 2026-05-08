@@ -38,32 +38,28 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
+          {/* 💡 [수정] auto-rows-fr을 제거하고 items-start를 넣어 카드가 멋대로 늘어나는 현상 차단! */}
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
-            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => {
-                const textA = a.content || "";
-                const textB = b.content || "";
-                const getW = (t:string) => t.includes('[법]') ? 1 : t.includes('[령]') ? 2 : (t.includes('[칙]') || t.includes('[규]')) ? 3 : 4;
-                const diff = getW(textA) - getW(textB);
-                if (diff !== 0) return diff;
-                return (getStrictTitleOnly(textA) || "").localeCompare((getStrictTitleOnly(textB) || ""), undefined, {numeric: true});
-            }).map((card: any) => {
+            {/* 💡 아키님의 원본 정렬(a.id - b.id) 복구 */}
+            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
                 const cleanTitle = getStrictTitleOnly(card.content);
                 const { body } = formatCardText(card.content);
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
-                const checkText = `${card.content || ''}`;
 
                 let colClass = "";
                 let titleColor = "text-amber-400";
+                const checkText = `${card.content || ''}`;
+
                 if (viewMode === 'all' && colCount >= 3) {
-                  if (checkText.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-600"; }
-                  else if (checkText.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-600"; }
-                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-600"; }
+                  if (checkText.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
+                  else if (checkText.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
                 } else {
-                  if (checkText.includes('[법]')) titleColor = "text-red-600";
-                  else if (checkText.includes('[령]')) titleColor = "text-blue-600";
-                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-600";
+                  if (checkText.includes('[법]')) titleColor = "text-red-500";
+                  else if (checkText.includes('[령]')) titleColor = "text-blue-400";
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
                 }
 
                 return (
