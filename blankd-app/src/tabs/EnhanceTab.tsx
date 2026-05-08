@@ -10,17 +10,6 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-// 💡 [핵심 해결] 제목의 키워드에 따라 무조건 1열, 2열, 3열에 박아넣는 절대 위치 함수
-const getGridStyle = (text: string, viewMode: string, isExpanded: boolean, colCount: number) => {
-    if (isExpanded) return { gridColumn: "1 / -1" };
-    if (viewMode === 'all' && colCount >= 3) {
-      if (text.includes('[법]')) return { gridColumnStart: 1 };
-      if (text.includes('[령]')) return { gridColumnStart: 2 };
-      if (text.includes('[칙]') || text.includes('[규]')) return { gridColumnStart: 3 };
-    }
-    return {};
-};
-
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
@@ -49,19 +38,22 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
-          {/* 💡 그리드 기본 속성은 유지 */}
+          {/* 💡 만들기 탭과 동일하게 items-start 속성 적용 */}
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             
-            {/* 💡 카드의 본문(content)을 기준으로 법->령->칙 순서가 되도록 1차 정렬 */}
+            {/* 💡 [궁극의 해결책] 만들기 탭의 원래 순서를 "조문 번호"를 추출하여 완벽하게 복원하는 정렬 로직 */}
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => {
-                const textA = a.content || "";
-                const textB = b.content || "";
-                const getW = (t:string) => t.includes('[법]') ? 1 : t.includes('[령]') ? 2 : (t.includes('[칙]') || t.includes('[규]')) ? 3 : 4;
-                const diff = getW(textA) - getW(textB);
+                // "[법]" 같은 접두사를 제거하고 순수하게 "제1조(목적)" 형태만 추출합니다.
+                const titleA = (getStrictTitleOnly(a.content) || "").replace(/\[.*?\]\s*/g, '').trim();
+                const titleB = (getStrictTitleOnly(b.content) || "").replace(/\[.*?\]\s*/g, '').trim();
+                
+                // 1차 정렬: 조문 번호(제1조, 제2조...) 기준으로 정렬 (자연스러운 숫자 인식)
+                const diff = titleA.localeCompare(titleB, undefined, { numeric: true });
                 if (diff !== 0) return diff;
                 
-                // 조문 번호 숫자 기준으로 2차 정렬
-                return (getStrictTitleOnly(textA) || "").localeCompare((getStrictTitleOnly(textB) || ""), undefined, {numeric: true});
+                // 2차 정렬: 조문 번호가 같다면 무조건 법(1) -> 령(2) -> 규칙(3) 순서로 정렬
+                const getW = (t:string) => t.includes('[법]') ? 1 : t.includes('[령]') ? 2 : (t.includes('[칙]') || t.includes('[규]')) ? 3 : 4;
+                return getW(a.content) - getW(b.content);
             }).map((card: any) => {
                 const cleanTitle = getStrictTitleOnly(card.content);
                 const { body } = formatCardText(card.content);
@@ -70,17 +62,22 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 const hasWrong = stats.wrongIndices.length > 0;
                 const checkText = `${card.content || ''}`;
 
+                let colClass = "";
                 let titleColor = "text-amber-400";
-                if (checkText.includes('[법]')) titleColor = "text-red-500";
-                else if (checkText.includes('[령]')) titleColor = "text-blue-400";
-                else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
-
-                // 💡 [핵심 해결] getGridStyle 함수를 호출하여 카드가 들어가야 할 정확한 열 번호를 받아옴!
-                const gridStyle = getGridStyle(checkText, viewMode, false, colCount);
+                
+                // 💡 HTML의 1열, 2열, 3열 자리에 강제로 지정 (만들기 탭과 100% 동일)
+                if (viewMode === 'all' && colCount >= 3) {
+                  if (checkText.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
+                  else if (checkText.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
+                } else {
+                  if (checkText.includes('[법]')) titleColor = "text-red-500";
+                  else if (checkText.includes('[령]')) titleColor = "text-blue-400";
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
+                }
 
                 return (
-                  // 💡 받아온 gridStyle 객체를 style 속성으로 강제 주입!
-                  <div key={card.id} className="relative transition-all w-full" style={gridStyle}>
+                  <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
                       <div className="flex flex-row justify-between items-center w-full gap-2">
                         <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{cleanTitle}</div>
