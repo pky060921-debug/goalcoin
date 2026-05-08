@@ -60,6 +60,9 @@ function MainApp() {
   const [examFile, setExamFile] = useState<File | null>(null);
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  
+  // 💡 메모 입력창 열림 상태 관리
+  const [isMemoOpen, setIsMemoOpen] = useState(false);
 
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
@@ -199,8 +202,16 @@ function MainApp() {
       });
       setBlanks(foundBlanks); setCurrentBlankIdx(0); setAnswerInput(""); setInputStatus('idle');
       setTotalTimeLimit(5.0 * foundBlanks.length); setStartTime(Date.now()); setElapsed(0);
+      
+      // 💡 [핵심] 메모 창 닫아두기 및 ()=>x(null) 자동 지우개 발동!
+      setIsMemoOpen(false); 
       const stats = parseCardStats(activeCard.memo);
-      statsRef.current = { text: stats.text, filled: stats.filled, wrongIndices: new Set(stats.wrongIndices) };
+      let cleanText = stats.text;
+      if (cleanText) {
+         // 정규식으로 공백 포함된 모든 형태의 ()=>x(null) 완벽 삭제
+         cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim();
+      }
+      statsRef.current = { text: cleanText, filled: stats.filled, wrongIndices: new Set(stats.wrongIndices) };
     }
   }, [activeCard]);
 
@@ -251,14 +262,12 @@ function MainApp() {
     }
   }, [answerInput, inputStatus, blanks, currentBlankIdx]);
 
-  // 💡 [핵심 패치] 한글 마지막 글자 딸려오는 현상 방어 로직
   const handleSequentialInput = (overrideInput?: string | any) => {
     if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput : answerInput.replace(/\s+/g, '').toLowerCase();
     
     if (expected === actual) {
-      // 1. 강제 블러로 현재 조합 중인 한글(찌꺼기)을 강제로 완성(Commit) 시킵니다.
       const activeEl = document.activeElement as HTMLElement;
       if (activeEl) activeEl.blur(); 
 
@@ -267,11 +276,8 @@ function MainApp() {
       statsRef.current.wrongIndices.delete(currentBlankIdx);
       statsRef.current.filled += 1; 
 
-      // 2. Commit이 완료될 수 있도록 아주 짧은 시간(0.02초)을 기다린 후 비웁니다.
       setTimeout(() => { 
         setAnswerInput(""); 
-        
-        // 3. 비워진 상태를 확인하고 다음 빈칸으로 넘어갑니다. (총 0.15초)
         setTimeout(() => {
           setInputStatus('idle'); 
           if (currentBlankIdx + 1 < nb.length) setCurrentBlankIdx(currentBlankIdx + 1); 
@@ -327,7 +333,6 @@ function MainApp() {
         </main>
       )}
 
-      {/* 실시간 진단 터미널 패널 */}
       <div className="fixed bottom-4 right-4 z-[999] flex flex-col items-end gap-2">
         {isTerminalOpen && (
           <div className="w-[85vw] max-w-lg h-64 bg-black/95 border border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto rounded shadow-2xl flex flex-col custom-scrollbar animate-in slide-in-from-bottom-5 fade-in">
@@ -381,12 +386,34 @@ function MainApp() {
                     <span className="text-amber-400 font-bold text-[14px] leading-tight">{activeCard.content.split('\n')[0]}</span>
                     <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
                 </div>
+                
                 <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
-                <div className="flex justify-end w-full mb-2"><button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">정답 보기 (오답 처리)</button></div>
-                <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
-                  <div className="text-[11px] text-teal-500/50 mb-2 font-bold uppercase tracking-widest">📝 아키텍트 메모</div>
-                  <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { statsRef.current.text = e.target.value; handleUpdateMemoBackground(activeCard.id, stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices))); }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all" />
+                
+                {/* 💡 [핵심] 정답보기 버튼과 메모 열기 버튼의 완벽한 대칭 배치 */}
+                <div className="flex justify-between items-center w-full mb-2">
+                  <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
+                    {isMemoOpen ? '닫기 ✕' : '📝 메모 열기'}
+                  </button>
+                  <button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
+                    정답 보기 (오답 처리)
+                  </button>
                 </div>
+                
+                {/* 💡 메모 열기 버튼을 누르면 나타나는 입력창 */}
+                {isMemoOpen && (
+                  <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
+                    <input 
+                      defaultValue={statsRef.current.text || ""} 
+                      placeholder="학습 인사이트 기록..." 
+                      onBlur={(e) => { 
+                        statsRef.current.text = e.target.value; 
+                        handleUpdateMemoBackground(activeCard.id, stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices))); 
+                      }} 
+                      className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all" 
+                      autoFocus
+                    />
+                  </div>
+                )}
               </div>
             );
           }} 
