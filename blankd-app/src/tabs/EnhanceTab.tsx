@@ -39,7 +39,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
 
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
-            {/* 💡 [핵심 해결] 억지 분류 정렬을 지우고, 만들기 탭과 동일하게 생성순(a.id - b.id)으로 복구하여 가로 3단이 제대로 채워지게 함! */}
+            {/* 💡 [핵심 해결] 세로 쏠림 현상의 주범인 '글자 기준 정렬'을 없애고, 만들기 탭과 동일하게 생성순(a.id - b.id)으로 복구했습니다. */}
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
                 const cleanTitle = getStrictTitleOnly(card.content);
                 const { body } = formatCardText(card.content);
@@ -51,7 +51,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 let colClass = "";
                 let titleColor = "text-amber-400";
                 
-                // 💡 HTML 각 자리에 3단으로 들어가는 로직 (만들기 탭과 100% 동일)
+                // 💡 [핵심 복구] 만들기 탭과 100% 동일한 열 지정(col-start) 및 색상 로직
                 if (viewMode === 'all' && colCount >= 3) {
                   if (checkText.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
                   else if (checkText.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
