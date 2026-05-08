@@ -169,17 +169,17 @@ function MainApp() {
     });
     if (isBlanking) bodyContent += " ]";
     
-    // 💡 [핵심] 마크다운이 지울 수 없는 형태의 특수 마커 사용
+    // 💡 핵심: 원본 ID 마커 추가 
     const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n[[ORIG_ID:${cat.id}]]`;
     const initialMemo = stringifyCardStats(memo, 0, []);
 
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
-      body: JSON.stringify({ wallet_address: safeAddress, card_id: cat.id, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo }) 
+      body: JSON.stringify({ wallet_address: safeAddress, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo }) 
     });
     if (res.ok) {
       await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
-      addLog("✅ 지식 추출 완료: 원본 배열이 영구 보존됩니다.");
+      addLog("✅ 지식 추출 완료: 원본 배열 유지");
       await loadAllData(); onComplete(); setActiveTab('enhance');
     }
   };
@@ -192,7 +192,6 @@ function MainApp() {
   useEffect(() => {
     if (activeCard) {
       isClosingRef.current = false;
-      // 💡 [핵심] 화면에 띄울 땐 마커 지우기
       const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
       const { body } = formatCardText(cleanContent);
       const foundBlanks: {answer: string, correct: boolean}[] = [];
