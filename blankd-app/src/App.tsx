@@ -203,12 +203,10 @@ function MainApp() {
       setBlanks(foundBlanks); setCurrentBlankIdx(0); setAnswerInput(""); setInputStatus('idle');
       setTotalTimeLimit(5.0 * foundBlanks.length); setStartTime(Date.now()); setElapsed(0);
       
-      // 💡 [핵심] 메모 창 닫아두기 및 ()=>x(null) 자동 지우개 발동!
       setIsMemoOpen(false); 
       const stats = parseCardStats(activeCard.memo);
       let cleanText = stats.text;
       if (cleanText) {
-         // 정규식으로 공백 포함된 모든 형태의 ()=>x(null) 완벽 삭제
          cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim();
       }
       statsRef.current = { text: cleanText, filled: stats.filled, wrongIndices: new Set(stats.wrongIndices) };
@@ -389,7 +387,6 @@ function MainApp() {
                 
                 <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
                 
-                {/* 💡 [핵심] 정답보기 버튼과 메모 열기 버튼의 완벽한 대칭 배치 */}
                 <div className="flex justify-between items-center w-full mb-2">
                   <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
                     {isMemoOpen ? '닫기 ✕' : '📝 메모 열기'}
@@ -399,7 +396,6 @@ function MainApp() {
                   </button>
                 </div>
                 
-                {/* 💡 메모 열기 버튼을 누르면 나타나는 입력창 */}
                 {isMemoOpen && (
                   <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
                     <input 
