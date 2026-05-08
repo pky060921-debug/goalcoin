@@ -21,6 +21,9 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   const [pageBreaks, setPageBreaks] = useState<Set<number>>(new Set());
   const [memoInput, setMemoInput] = useState(""); 
 
+  // 💡 [복구됨] 지우개 모드 상태 관리
+  const [isEraserMode, setIsEraserMode] = useState(false);
+
   useEffect(() => {
     const initial: Record<string, boolean> = {};
     craftFolders.forEach(f => initial[f] = true);
@@ -35,6 +38,31 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   };
 
   const handleWordClick = (idx: number) => {
+    // 💡 [복구됨] 지우개 모드가 켜져 있다면 글자 자체를 삭제합니다.
+    if (isEraserMode) {
+      const newArray = [...wordArray];
+      newArray.splice(idx, 1); // 배열에서 해당 글자 영구 삭제
+      setWordArray(newArray);
+      
+      // 글자가 하나 줄었으므로, 뒤에 있는 빈칸이나 페이지 나눔 기호의 위치도 앞으로 한 칸씩 땡겨줍니다.
+      const newSelected = new Set<number>();
+      selectedWords.forEach(i => {
+        if (i < idx) newSelected.add(i);
+        else if (i > idx) newSelected.add(i - 1);
+      });
+      setSelectedWords(newSelected);
+
+      const newPageBreaks = new Set<number>();
+      pageBreaks.forEach(i => {
+        if (i < idx) newPageBreaks.add(i);
+        else if (i > idx) newPageBreaks.add(i - 1);
+      });
+      setPageBreaks(newPageBreaks);
+      
+      return; // 삭제 로직 끝, 함수 종료
+    }
+
+    // 지우개 모드가 꺼져있다면 기존의 '빈칸 만들기' 모드로 정상 작동합니다.
     const s = new Set(selectedWords);
     if(s.has(idx)) s.delete(idx); else s.add(idx);
     setSelectedWords(s);
@@ -42,6 +70,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
 
   const handleWordSplit = (idx: number, e: any) => {
     e.preventDefault(); 
+    if (isEraserMode) return; // 지우개 모드일 때는 오작동 방지
     const p = new Set(pageBreaks);
     if (p.has(idx)) p.delete(idx);
     else if (window.confirm("이 위치에서 페이지를 나누시겠습니까?")) p.add(idx);
@@ -49,6 +78,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   };
 
   const handleWordMerge = (idx: number) => {
+    if (isEraserMode) return; // 지우개 모드일 때는 오작동 방지
     if (idx >= wordArray.length - 1) return;
     const newArray = [...wordArray];
     newArray[idx] = newArray[idx] + newArray[idx + 1];
@@ -104,6 +134,8 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} 
                         onClick={() => { 
                           setExpandedId(cat.id); setSelectedWords(new Set()); setPageBreaks(new Set()); setMemoInput(cat.memo || "");
+                          // 창을 처음 열 때 지우개 모드는 항상 꺼진 상태로 안전하게 초기화
+                          setIsEraserMode(false);
                           const { body } = formatCardText(contentToUse);
                           setWordArray(body.split(SPLIT_REGEX).filter(w => w !== ""));
                         }} 
@@ -115,17 +147,35 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                       <div className="w-full p-4 sm:p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-3 shadow-xl z-20 relative animate-in zoom-in-95">
                         <div className="flex justify-between items-center mb-1">
                           <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{cleanTitle}</span>
+                          
+                          {/* 💡 [복구됨] 지우개 On/Off 토글 버튼 */}
+                          <button 
+                            onClick={() => setIsEraserMode(!isEraserMode)}
+                            className={`px-3 py-1 text-[11px] font-bold rounded-sm border transition-all ${isEraserMode ? 'bg-red-600 border-red-500 text-white animate-pulse' : 'bg-white/5 border-white/20 text-white/50 hover:bg-white/10'}`}
+                          >
+                            {isEraserMode ? '🗑️ 지우개 켜짐 (터치시 삭제)' : '✏️ 지우개 모드'}
+                          </button>
                         </div>
                         <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-2 text-xs text-teal-200 outline-none rounded-sm" />
-                        <div className="font-serif text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border border-white/10 max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative">
+                        
+                        <div className={`font-serif text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative transition-all ${isEraserMode ? 'border-red-500/50 ring-1 ring-red-500/30' : 'border-white/10'}`}>
                           {wordArray.map((word, idx) => (
                             <React.Fragment key={idx}>
                               {pageBreaks.has(idx) && <div className="w-full border-t border-red-500/50 my-2 relative"><span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black px-1 text-[8px] text-red-400 font-bold uppercase tracking-tighter">Page Break</span></div>}
-                              <span onClick={() => handleWordClick(idx)} onContextMenu={(e) => handleWordSplit(idx, e)} onDoubleClick={() => handleWordMerge(idx)} className={`cursor-pointer px-[1px] rounded transition-colors ${selectedWords.has(idx) ? 'bg-amber-500 text-black font-bold' : 'hover:bg-white/10'}`}>{word}</span>
+                              
+                              <span 
+                                onClick={() => handleWordClick(idx)} 
+                                onContextMenu={(e) => handleWordSplit(idx, e)} 
+                                onDoubleClick={() => handleWordMerge(idx)} 
+                                // 지우개 모드일 때는 마우스를 올리거나 누를 때 빨간색 경고 표시
+                                className={`cursor-pointer px-[1px] rounded transition-colors ${selectedWords.has(idx) ? 'bg-amber-500 text-black font-bold' : isEraserMode ? 'hover:bg-red-500/50 hover:text-white text-red-100' : 'hover:bg-white/10'}`}
+                              >
+                                {word}
+                              </span>
                             </React.Fragment>
                           ))}
                         </div>
-                        {/* 💡 핵심: 꼬리표가 잘리지 않은 원본 'cat'을 그대로 전송합니다! */}
+                        
                         <button onClick={() => handleMakeBlankCard(cat, wordArray, selectedWords, pageBreaks, memoInput, () => setExpandedId(null))} className="w-full py-2.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs sm:text-sm font-bold rounded-sm mt-2 hover:bg-amber-500/30 transition-all">지식 추출 저장</button>
                       </div>
                     )}
