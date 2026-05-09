@@ -169,13 +169,12 @@ function MainApp() {
     });
     if (isBlanking) bodyContent += " ]";
     
-    // 💡 핵심: 원본 ID 마커 추가 
     const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n[[ORIG_ID:${cat.id}]]`;
     const initialMemo = stringifyCardStats(memo, 0, []);
 
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
-      body: JSON.stringify({ wallet_address: safeAddress, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo }) 
+      body: JSON.stringify({ wallet_address: safeAddress, card_id: cat.id, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo }) 
     });
     if (res.ok) {
       await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
@@ -253,6 +252,7 @@ function MainApp() {
     }
   }, [activeCard, currentBlankIdx, blanks.length, startTime, totalTimeLimit]);
 
+  // 💡 정답 체크 로직 유지
   useEffect(() => {
     if (inputStatus === 'idle' && blanks[currentBlankIdx] && answerInput) {
       const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
@@ -347,8 +347,12 @@ function MainApp() {
         <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>{isTerminalOpen ? 'Close Terminal' : 'Open Terminal'}</button>
       </div>
 
+      {/* 💡 카드 모달 렌더링 영역 */}
       {activeCard && (
-        <CardModal activeCard={activeCard} totalTimeLimit={totalTimeLimit} elapsed={elapsed} answerInput={answerInput} setAnswerInput={setAnswerInput} inputStatus={inputStatus} handleSequentialInput={handleSequentialInput} 
+        <CardModal 
+          activeCard={activeCard} 
+          totalTimeLimit={totalTimeLimit} 
+          elapsed={elapsed} 
           renderContent={() => {
             const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
             const { body } = formatCardText(cleanContent);
@@ -372,11 +376,40 @@ function MainApp() {
                     const isCorrect = blanks[bIdx]?.correct; 
                     const isCurrent = bIdx === currentBlankIdx; 
                     const isWrong = statsRef.current.wrongIndices.has(bIdx); 
-                    if (isCorrect) contentToRender.push(<span key={i} className={`font-bold mx-1 ${isWrong ? 'text-red-400' : 'text-green-400'}`}>{part.replace(/\[|\]/g, '')}</span>);
-                    else if (isCurrent) contentToRender.push(<span key={i} className="inline-block min-w-[60px] h-5 bg-indigo-500/30 border-b-2 border-indigo-400 mx-1 animate-pulse align-middle"></span>);
-                    else contentToRender.push(<span key={i} className="inline-block min-w-[60px] h-5 bg-white/10 border-b border-white/50 mx-1 align-middle"></span>);
+                    
+                    if (isCorrect) {
+                      contentToRender.push(<span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>);
+                    }
+                    else if (isCurrent) {
+                      // 💡 [핵심] 현재 차례인 빈칸 자리에 '직접 입력 가능한 <input>'을 삽입합니다!
+                      contentToRender.push(
+                        <input 
+                          key={i}
+                          autoFocus
+                          value={answerInput}
+                          onChange={(e) => setAnswerInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            // 엔터를 누르면 수동으로 오답/정답 체크를 강제 실행합니다.
+                            if(e.key === 'Enter') handleSequentialInput(e.currentTarget.value);
+                          }}
+                          placeholder="입력..."
+                          // 타이핑하는 글자 수에 맞춰서 입력창 길이가 가변적으로 늘어납니다!
+                          style={{ width: `${Math.max(60, answerInput.length * 15 + 40)}px` }}
+                          className={`inline-block h-6 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-all mx-1 px-1 rounded-t-sm ${
+                            inputStatus === 'wrong' 
+                              ? 'border-red-500 text-red-400 bg-red-900/40 animate-shake' 
+                              : 'border-indigo-400 text-amber-300 focus:border-amber-400'
+                          }`}
+                        />
+                      );
+                    }
+                    else {
+                      contentToRender.push(<span key={i} className="inline-block min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
+                    }
                     bIdx++;
-                  } else contentToRender.push(<span key={i}>{part}</span>);
+                  } else {
+                    contentToRender.push(<span key={i}>{part}</span>);
+                  }
               } else if (part.startsWith('[') && part.endsWith(']')) bIdx++;
             });
 
