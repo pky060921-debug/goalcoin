@@ -22,5 +22,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ wallet_address: address })
     });
+  },
+  // 💡 신규 추가: CBT 100문제 요청 함수
+  async getCbtSession() {
+    const res = await fetch(`${BASE_URL}/get-cbt-session`);
+    return res.json();
   }
 };
