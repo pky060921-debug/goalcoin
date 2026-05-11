@@ -8,6 +8,7 @@ import logging
 import traceback
 import os
 import random
+import re
 from datetime import datetime
 from config import OLLAMA_API_URL, MODEL_NAME, TASK_STATUS
 from database import get_db_connection
@@ -27,30 +28,89 @@ def task_status():
     return jsonify({"status": "not_found"}), 404
 
 # ==========================================
-# 💡 [신규 추가] CBT 실전 모의고사 100제 출제 로직
+# 💡 CBT 실전 모의고사 100제 출제 로직
 # ==========================================
 @api_bp.route('/get-cbt-session', methods=['GET'])
 def get_cbt_session():
-    """RAG 분석이 완료된 JSON에서 100문제를 랜덤 추출하여 반환"""
     json_path = os.path.expanduser("~/goalcoin/test/problem_bank_final_rag.json")
     try:
         if not os.path.exists(json_path):
             return jsonify({"error": "분석된 문제 은행 파일이 없습니다."}), 404
-            
         with open(json_path, 'r', encoding='utf-8') as f:
             problems = json.load(f)
-        
-        # 전체 문제 중 100개 랜덤 추출
         selected = random.sample(problems, min(100, len(problems)))
-        
-        # 프론트엔드 호환성을 위해 options를 JSON 문자열로 직렬화
         for p in selected:
             if isinstance(p.get('options'), list):
                 p['options'] = json.dumps(p['options'], ensure_ascii=False)
-                
         return jsonify(selected)
     except Exception as e:
-        logging.error(f"CBT 세션 생성 실패: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# ==========================================
+# 💡 [신규 추가] 10대 출제 스타일 샘플 생성 엔진
+# ==========================================
+@api_bp.route('/generate-styles', methods=['POST'])
+def generate_styles():
+    data = request.json
+    article_text = data.get('article_text', '')
+    if not article_text:
+        return jsonify({"error": "법령 텍스트가 없습니다."}), 400
+        
+    prompt = f"""당신은 국민건강보험공단 승진시험 최고 출제위원장입니다.
+아래 [법령 조문]을 바탕으로, 서로 완전히 다른 10가지 스타일의 객관식(4지 선다) 문제를 반드시 '모두' 창작하세요.
+중간에 멈추지 말고 10개를 꽉 채워야 합니다.
+
+[법령 조문]
+{article_text}
+
+[10가지 필수 출제 스타일]
+1. 단순 목록형
+2. NCS 실무/상황형 (가상 인물 상황 부여)
+3. 계산/숫자/기한형
+4. 박스 조합형 (ㄱ, ㄴ, ㄷ, ㄹ 조합)
+5. 예외 및 단서형 (단서 조항 함정)
+6. 주체(권한자) 오답형 (결정권자 바꿔치기)
+7. OX 판별형 (옳은 것의 갯수 등)
+8. 단어장 괄호 넣기형
+9. 목적/취지 추론형
+10. 타 조문 융합형
+
+[출력 지시사항]
+반드시 아래 JSON 배열 형식으로만 10개를 출력하세요. 인사말은 생략합니다.
+[
+  {{
+    "style": "스타일 이름",
+    "question": "문제 내용",
+    "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
+    "answer": "정답 번호 (숫자)",
+    "explanation": "해설 내용"
+  }}
+]
+"""
+    try:
+        response = requests.post(OLLAMA_API_URL, json={
+            "model": MODEL_NAME,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json",
+            "options": {"temperature": 0.5, "num_predict": 4000}
+        }, timeout=180)
+        
+        result_text = response.json().get('response', '[]')
+        clean_json_str = re.sub(r'```json|```', '', result_text).strip()
+        result_data = json.loads(clean_json_str)
+        
+        if isinstance(result_data, dict):
+            for k, v in result_data.items():
+                if isinstance(v, list):
+                    result_data = v
+                    break
+            else:
+                result_data = [result_data]
+                
+        return jsonify({"samples": result_data})
+    except Exception as e:
+        logging.error(f"스타일 생성 실패: {e}")
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/upload-pdf', methods=['POST'])
@@ -78,7 +138,6 @@ def upload_law():
                     text = raw_bytes.decode('utf-8', errors='ignore')
                     normalized_text = normalize_text(clean_korean_law_text(text))
                     categories = []
-                    import re
                     parts = re.split(r'(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)', normalized_text)
                     if parts and len(parts) > 1:
                         if parts[0].strip(): categories.append({"title": "총칙 및 서론", "content": parts[0].strip(), "folder_name": custom_folder})
