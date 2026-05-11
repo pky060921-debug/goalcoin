@@ -28,22 +28,41 @@ def task_status():
     return jsonify({"status": "not_found"}), 404
 
 # ==========================================
-# 💡 CBT 실전 모의고사 100제 출제 로직
+# 💡 CBT 실전 모의고사 100제 출제 로직 (필터링 강화버전)
 # ==========================================
 @api_bp.route('/get-cbt-session', methods=['GET'])
 def get_cbt_session():
+    """RAG 분석이 완료된 JSON에서 '정상적인' 100문제를 랜덤 추출하여 반환"""
     json_path = os.path.expanduser("~/goalcoin/test/problem_bank_final_rag.json")
     try:
         if not os.path.exists(json_path):
             return jsonify({"error": "분석된 문제 은행 파일이 없습니다."}), 404
+            
         with open(json_path, 'r', encoding='utf-8') as f:
             problems = json.load(f)
-        selected = random.sample(problems, min(100, len(problems)))
+        
+        # 💡 [핵심 거름망] 비정상적인 불량 문제를 걸러냅니다!
+        valid_problems = []
+        for p in problems:
+            options = p.get('options', [])
+            question_text = p.get('question', '')
+            
+            # 조건 1: 보기가 정상적인 리스트(배열) 형태이고, 최소 2개 이상(보통 4개)일 것
+            # 조건 2: 문제 지문이 비정상적으로 길지 않을 것 (예: 800자 이하)
+            if isinstance(options, list) and len(options) >= 2 and len(question_text) < 800:
+                valid_problems.append(p)
+                
+        # 만약 필터링 후 100문제가 안 되면 있는 만큼만 추출
+        selected_count = min(100, len(valid_problems))
+        selected = random.sample(valid_problems, selected_count)
+        
         for p in selected:
             if isinstance(p.get('options'), list):
                 p['options'] = json.dumps(p['options'], ensure_ascii=False)
+                
         return jsonify(selected)
     except Exception as e:
+        logging.error(f"CBT 세션 생성 실패: {e}")
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
