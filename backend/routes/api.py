@@ -6,6 +6,8 @@ import uuid
 import json
 import logging
 import traceback
+import os
+import random
 from datetime import datetime
 from config import OLLAMA_API_URL, MODEL_NAME, TASK_STATUS
 from database import get_db_connection
@@ -23,6 +25,33 @@ def task_status():
     if task_id in TASK_STATUS:
         return jsonify(TASK_STATUS[task_id])
     return jsonify({"status": "not_found"}), 404
+
+# ==========================================
+# 💡 [신규 추가] CBT 실전 모의고사 100제 출제 로직
+# ==========================================
+@api_bp.route('/get-cbt-session', methods=['GET'])
+def get_cbt_session():
+    """RAG 분석이 완료된 JSON에서 100문제를 랜덤 추출하여 반환"""
+    json_path = os.path.expanduser("~/goalcoin/test/problem_bank_final_rag.json")
+    try:
+        if not os.path.exists(json_path):
+            return jsonify({"error": "분석된 문제 은행 파일이 없습니다."}), 404
+            
+        with open(json_path, 'r', encoding='utf-8') as f:
+            problems = json.load(f)
+        
+        # 전체 문제 중 100개 랜덤 추출
+        selected = random.sample(problems, min(100, len(problems)))
+        
+        # 프론트엔드 호환성을 위해 options를 JSON 문자열로 직렬화
+        for p in selected:
+            if isinstance(p.get('options'), list):
+                p['options'] = json.dumps(p['options'], ensure_ascii=False)
+                
+        return jsonify(selected)
+    except Exception as e:
+        logging.error(f"CBT 세션 생성 실패: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/upload-pdf', methods=['POST'])
 def upload_law():
@@ -400,7 +429,6 @@ def split_category():
         text2 = data.get('text2')
         title1 = data.get('title1')
         title2 = data.get('title2')
-        # 💡 [핵심] folder_name이 빈 값이면 무조건 '기본 폴더'로 지정하여 카테고리 실종 방지
         folder_name = data.get('folder_name') or '기본 폴더'
 
         conn = get_db_connection()
