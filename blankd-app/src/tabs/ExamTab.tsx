@@ -1,12 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
 
 export const ExamTab = ({ exams, examFile, setExamFile, uploadExam, walletAddress }: any) => {
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
   
   const [mode, setMode] = useState<'list' | 'coop'>('list');
-  
-  // 💡 DB에서 불러온 대기열 상태 (id 포함)
   const [pendingExams, setPendingExams] = useState<Array<{id: number, filename: string, chunks: string[]}>>([]);
   
   const [currentExamId, setCurrentExamId] = useState<number | null>(null);
@@ -16,7 +14,9 @@ export const ExamTab = ({ exams, examFile, setExamFile, uploadExam, walletAddres
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [parsedResult, setParsedResult] = useState<any>(null);
 
-  // 💡 앱 진입 시 DB에서 대기열 불러오기
+  // 💡 [신규] 숨겨진 파일 첨부창을 원격으로 클릭하기 위한 Ref
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const fetchPendingExams = async () => {
     if (!walletAddress) return;
     try {
@@ -31,20 +31,27 @@ export const ExamTab = ({ exams, examFile, setExamFile, uploadExam, walletAddres
     fetchPendingExams();
   }, [walletAddress]);
 
-  // 업로드 시 DB에 저장 후 목록 갱신
+  // 💡 [개선] 업로드 로직 (에러 세분화 및 파일창 자동 열기)
   const handleUploadForReview = async () => {
-    if (!examFile || !walletAddress) return alert("먼저 파일을 선택해주세요.");
+    if (!examFile) {
+      // 에러를 띄우는 대신, 숨겨져 있는 파일 탐색기를 대신 열어줍니다!
+      fileInputRef.current?.click();
+      return;
+    }
+    if (!walletAddress) {
+      return alert("지갑 연동(로그인) 정보가 확인되지 않았습니다. 잠시 후 다시 시도해주세요.");
+    }
+    
     try {
       await api.uploadExamCoop(examFile, walletAddress);
       setExamFile(null); 
-      alert("파일이 DB에 안전하게 저장되었습니다! 스마트폰/PC 어디서든 검수를 이어갈 수 있습니다.");
-      fetchPendingExams(); // 목록 갱신
+      alert("파일이 DB에 안전하게 저장되었습니다! 이제 검수 대기소에서 확인 가능합니다.");
+      fetchPendingExams(); 
     } catch (err) {
       alert("파일 분석 및 저장에 실패했습니다.");
     }
   };
 
-  // 대기열 목록에서 우측의 [검수 시작] 버튼 클릭 시
   const startCoopReview = (exam: {id: number, filename: string, chunks: string[]}) => {
     setCurrentExamId(exam.id);
     setChunks(exam.chunks);
@@ -90,12 +97,11 @@ export const ExamTab = ({ exams, examFile, setExamFile, uploadExam, walletAddres
       setChunkIndex(chunkIndex + 1);
       setParsedResult(null);
     } else {
-      // 💡 마지막 문단 검수 완료 시 DB 대기열에서 완전히 삭제
       if (currentExamId && walletAddress) {
         await api.deletePendingExam(walletAddress, currentExamId);
       }
       alert("🎉 해당 모의고사의 모든 검수가 완료되었습니다! 골든 DB에 저장되었습니다.");
-      fetchPendingExams(); // 목록 갱신
+      fetchPendingExams(); 
       setMode('list');
     }
   };
@@ -178,13 +184,15 @@ export const ExamTab = ({ exams, examFile, setExamFile, uploadExam, walletAddres
   return (
     <div className="space-y-8 animate-in fade-in">
       <div className="flex gap-2 mb-8">
-        <label className="flex-1 border border-teal-900/40 p-2 text-center text-xs hover:bg-teal-900/20 cursor-pointer text-teal-400">
-          <input type="file" accept=".txt,.pdf,.html" onChange={e => setExamFile(e.target.files?.[0] || null)} className="hidden"/> 
-          {examFile ? `✅ ${examFile.name}` : '+ 모의고사 파일 첨부하기'}
+        <label className="flex-1 border border-teal-900/40 p-2 text-center text-xs hover:bg-teal-900/20 cursor-pointer text-teal-400 flex items-center justify-center">
+          {/* 💡 [신규] ref 연결 */}
+          <input ref={fileInputRef} type="file" accept=".txt,.pdf,.html" onChange={e => setExamFile(e.target.files?.[0] || null)} className="hidden"/> 
+          {examFile ? `✅ ${examFile.name} (선택됨)` : '+ 모의고사 파일 첨부하기'}
         </label>
         
+        {/* 💡 [개선] 파일이 없으면 자동으로 탐색기 호출 */}
         <button onClick={handleUploadForReview} className="px-6 bg-teal-500 text-teal-950 font-bold text-xs hover:bg-teal-400 transition-colors">
-          모의고사 업로드 🚀
+          {examFile ? '이 파일 업로드 🚀' : '새 모의고사 업로드 🚀'}
         </button>
 
         <button onClick={uploadExam} className="px-4 border border-teal-900/40 text-xs text-white/30 hover:text-white/60">
