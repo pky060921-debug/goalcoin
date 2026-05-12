@@ -14,9 +14,14 @@ from config import OLLAMA_API_URL, MODEL_NAME, TASK_STATUS
 from database import get_db_connection
 from services.parser import parse_html_3col_law, normalize_text, clean_korean_law_text, get_next_review_time
 
+# 💡 [핵심 추가] PDF 바이너리 해독 라이브러리
+try:
+    import fitz  # PyMuPDF
+except ImportError:
+    logging.error("PyMuPDF(fitz) 라이브러리가 설치되지 않았습니다. pip install PyMuPDF 를 실행하세요.")
+
 api_bp = Blueprint('api', __name__)
 
-# 💡 [신규] 무결점 골든 데이터를 저장할 전용 테이블 자동 생성
 def init_golden_db():
     conn = get_db_connection()
     conn.execute('''CREATE TABLE IF NOT EXISTS golden_exams (
@@ -46,7 +51,7 @@ def task_status():
     return jsonify({"status": "not_found"}), 404
 
 # ==========================================
-# 💡 [신규 합동 검수 1단계] 파일 업로드 및 문단 쪼개기
+# 💡 [업그레이드] 합동 검수 1단계: PDF 완벽 해독 및 쪼개기
 # ==========================================
 @api_bp.route('/upload-exam-coop', methods=['POST'])
 def upload_exam_coop():
@@ -54,31 +59,61 @@ def upload_exam_coop():
         file = request.files.get('file')
         if not file: return jsonify({"error": "파일이 없습니다."}), 400
         
-        raw_text = file.read().decode('utf-8', errors='ignore')
+        filename = file.filename.lower()
+        raw_text = ""
+
+        # 💡 [1. 정밀 텍스트 추출] 파일 확장자에 따른 분기 처리
+        if filename.endswith('.pdf'):
+            try:
+                # PDF 바이너리를 메모리에서 직접 읽어 해독합니다.
+                pdf_document = fitz.open(stream=file.read(), filetype="pdf")
+                for page_num in range(len(pdf_document)):
+                    page = pdf_document.load_page(page_num)
+                    raw_text += page.get_text("text") + "\n\n"
+                pdf_document.close()
+            except Exception as pdf_e:
+                logging.error(f"PDF 읽기 실패: {pdf_e}")
+                return jsonify({"error": "PDF 파일 해독 중 오류가 발생했습니다."}), 500
+        else:
+            # 텍스트 파일(.txt 등)일 경우
+            raw_text = file.read().decode('utf-8', errors='ignore')
         
-        # 불순물 세탁
-        raw_text = re.sub(r'-\s*\d+\s*-', '', raw_text) 
-        raw_text = re.sub(r'【[^】]+】', '', raw_text) 
-        raw_text = re.sub(r'\[[^\]]+\]', '', raw_text) 
+        # 💡 [2. 오염물질 1차 세탁]
+        raw_text = re.sub(r'-\s*\d+\s*-', '', raw_text) # 페이지 번호 제거
+        raw_text = re.sub(r'【[^】]+】', '', raw_text) # 워터마크 제거
         
+        # 💡 [3. 스마트 문단 쪼개기]
+        # PDF는 문장 중간에서 임의로 줄바꿈(\n)이 일어나는 경우가 많습니다.
         chunks = []
         current_chunk = ""
-        for line in raw_text.split('\n'):
-            if line.strip():
-                current_chunk += line.strip() + " "
-            else:
-                if len(current_chunk) > 100:
-                    chunks.append(current_chunk.strip())
-                    current_chunk = ""
-        if len(current_chunk) > 100:
+        
+        # 빈 줄 단위로 문단을 나눕니다 (PDF에서 단락 구분을 인식하기 위함)
+        paragraphs = re.split(r'\n\s*\n', raw_text)
+        
+        for para in paragraphs:
+            para = para.strip()
+            if not para: continue
+            
+            # PDF 특유의 문장 중간 줄바꿈을 공백으로 이어붙여 가독성을 높입니다.
+            para = para.replace('\n', ' ') 
+            
+            current_chunk += para + "\n\n"
+            
+            # 약 400자가 넘어가면 하나의 검수 블록(Chunk)으로 잘라냅니다.
+            if len(current_chunk) > 400:
+                chunks.append(current_chunk.strip())
+                current_chunk = ""
+                
+        if current_chunk.strip():
             chunks.append(current_chunk.strip())
             
         return jsonify({"filename": file.filename, "chunks": chunks})
     except Exception as e:
+        logging.error(f"Coop 업로드 실패: {e}")
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# 💡 [신규 합동 검수 2단계] 개별 문단 분석
+# 💡 합동 검수 2단계: AI 문단 정밀 분석
 # ==========================================
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
@@ -86,16 +121,17 @@ def analyze_chunk():
     chunk_text = data.get('chunk_text', '')
     
     prompt = f"""당신은 출제위원이자 국어 교열 전문가입니다.
-아래 텍스트의 띄어쓰기를 완벽히 교정하고, 1개의 객관식 문제, 4개의 보기, 정답, 해설을 명확히 분리해 JSON으로 반환하세요.
+아래 PDF 텍스트에서 1개의 객관식 문제, 4개의 보기, 정답, 해설을 명확히 분리해 JSON으로 반환하세요.
+표나 복잡한 형식이 깨져있다면 문맥을 파악해 알맞은 문장으로 복원하세요.
 
-[텍스트]
+[원본 텍스트]
 {chunk_text}
 
-[출력형식 - JSON만 출력]
+[출력형식 - 오직 JSON만 출력]
 {{
   "question": "교정된 문제 내용",
   "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
-  "answer": "정답 번호 (숫자)",
+  "answer": "정답 번호 (숫자만)",
   "explanation": "해설"
 }}"""
     try:
@@ -111,7 +147,7 @@ def analyze_chunk():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# 💡 [신규 합동 검수 3단계] 골든 DB 저장
+# 💡 합동 검수 3단계: 골든 DB 저장
 # ==========================================
 @api_bp.route('/save-golden-exam', methods=['POST'])
 def save_golden_exam():
@@ -129,7 +165,7 @@ def save_golden_exam():
     return jsonify({"message": "골든 DB 저장 완료!"})
 
 # ==========================================
-# 💡 [신규] 10대 출제 스타일 생성 엔진
+# 💡 10대 출제 스타일 생성 엔진
 # ==========================================
 @api_bp.route('/generate-styles', methods=['POST'])
 def generate_styles():
@@ -156,7 +192,7 @@ def generate_styles():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# 🛑 여기서부터는 기존에 대표님이 작성하신 모든 원본 라우터입니다! (100% 보존)
+# 🛑 원본 라우터 100% 보존 구역
 # ==========================================
 
 @api_bp.route('/get-cbt-session', methods=['GET'])
@@ -231,9 +267,19 @@ def upload_exam():
         wallet_address = request.form.get('wallet_address')
         file = request.files.get('file')
         if not file: return jsonify({"error": "파일이 없습니다."}), 400
-        raw_text = file.read().decode('utf-8', errors='ignore')
+        
+        # 기존 모의고사 일괄 업로드도 PDF를 지원하도록 보강
+        filename = file.filename.lower()
+        if filename.endswith('.pdf'):
+            pdf_document = fitz.open(stream=file.read(), filetype="pdf")
+            raw_text = ""
+            for page_num in range(len(pdf_document)):
+                raw_text += pdf_document.load_page(page_num).get_text("text") + "\n"
+            pdf_document.close()
+        else:
+            raw_text = file.read().decode('utf-8', errors='ignore')
+            
         raw_text = normalize_text(clean_korean_law_text(raw_text))
-        filename = file.filename
         
         task_id = str(uuid.uuid4())
         TASK_STATUS[task_id] = {"status": "running", "progress": 20, "message": f"{MODEL_NAME} 엔진에 텍스트 주입 완료. 모의고사 분석 중..."}
