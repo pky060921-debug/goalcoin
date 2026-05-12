@@ -13,7 +13,7 @@ from datetime import datetime
 from google import genai
 from google.genai import types
 
-# 💡 [업그레이드] 단일 키 대신 리스트(KEYS)를 불러옵니다.
+# 💡 [핵심 에러 해결] 옛날 OLLAMA 변수를 지우고 GEMINI_API_KEYS를 가져옵니다!
 from config import GEMINI_API_KEYS, TASK_STATUS
 from database import get_db_connection
 from services.parser import parse_html_3col_law, normalize_text, clean_korean_law_text, get_next_review_time
@@ -50,7 +50,7 @@ def generate_gemini_json(prompt, temperature=0.1):
             
         except Exception as e:
             error_msg = str(e).lower()
-            # 💡 구글 API 한도 초과(429) 에러가 나면 다음 키로 교체!
+            # 구글 API 한도 초과(429) 에러가 나면 다음 키로 교체!
             if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
                 logging.warning(f"⚠️ API 키 {current_api_key_index} 한도 초과! 다음 키로 전환합니다.")
                 current_api_key_index = (current_api_key_index + 1) % len(GEMINI_API_KEYS)
@@ -188,7 +188,6 @@ def analyze_chunk():
   "explanation": "해설"
 }}"""
     try:
-        # 💡 [적용] 키 로테이션 함수 사용
         response_text = generate_gemini_json(prompt, temperature=0.1)
         result_data = json.loads(response_text)
         return jsonify({"result": result_data})
@@ -261,7 +260,6 @@ def generate_styles():
 
 [법령 조문]\n{article_text}\n"""
     try:
-        # 💡 [적용] 키 로테이션 함수 사용
         response_text = generate_gemini_json(prompt, temperature=0.5)
         result_data = json.loads(response_text)
         if isinstance(result_data, dict): result_data = result_data.get('problems', [result_data])
@@ -271,7 +269,7 @@ def generate_styles():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# 🛑 기타 기존 라우터
+# 🛑 기타 기존 라우터 (제미나이 로테이션 적용 완료)
 # ==========================================
 @api_bp.route('/upload-pdf', methods=['POST'])
 def upload_law():
@@ -347,7 +345,6 @@ def recommend_blank():
                 {{ "keyword": "추출한단어", "related_exam": "연관된 기출문제 내용 요약" }}
                 [기출 모의고사 DB]:\n{all_exams}\n[법령 본문]:\n{content}'''
                 
-                # 💡 [적용] 키 로테이션 함수 사용
                 response_text = generate_gemini_json(prompt)
                 result = json.loads(response_text)
                 
@@ -388,7 +385,6 @@ def upload_exam():
                 [{{ "question": "문제 내용 및 보기", "answer": "정답", "explanation": "해설" }}]
                 텍스트: {raw_text[:4000]}'''
                 
-                # 💡 [적용] 키 로테이션 함수 사용
                 response_text = generate_gemini_json(prompt)
                 exam_data = json.loads(response_text)
                 
