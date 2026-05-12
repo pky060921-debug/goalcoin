@@ -14,14 +14,14 @@ from config import OLLAMA_API_URL, MODEL_NAME, TASK_STATUS
 from database import get_db_connection
 from services.parser import parse_html_3col_law, normalize_text, clean_korean_law_text, get_next_review_time
 
-# 💡 [핵심 추가] PDF 바이너리 해독 라이브러리
 try:
     import fitz  # PyMuPDF
 except ImportError:
-    logging.error("PyMuPDF(fitz) 라이브러리가 설치되지 않았습니다. pip install PyMuPDF 를 실행하세요.")
+    logging.error("PyMuPDF(fitz) 라이브러리가 설치되지 않았습니다.")
 
 api_bp = Blueprint('api', __name__)
 
+# 💡 [업그레이드] 골든 DB와 함께 '검수 대기열(pending_exams)' 테이블도 자동 생성합니다.
 def init_golden_db():
     conn = get_db_connection()
     conn.execute('''CREATE TABLE IF NOT EXISTS golden_exams (
@@ -33,6 +33,13 @@ def init_golden_db():
         answer TEXT,
         explanation TEXT,
         category TEXT
+    )''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS pending_exams (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wallet_address TEXT,
+        filename TEXT,
+        chunks_json TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
     conn.commit()
     conn.close()
@@ -51,66 +58,80 @@ def task_status():
     return jsonify({"status": "not_found"}), 404
 
 # ==========================================
-# 💡 [업그레이드] 합동 검수 1단계: PDF 완벽 해독 및 쪼개기
+# 💡 [업그레이드] 합동 검수 1단계: PDF 쪼개기 및 DB에 대기열로 저장!
 # ==========================================
 @api_bp.route('/upload-exam-coop', methods=['POST'])
 def upload_exam_coop():
     try:
+        wallet_address = request.form.get('wallet_address')
         file = request.files.get('file')
-        if not file: return jsonify({"error": "파일이 없습니다."}), 400
+        if not file or not wallet_address: return jsonify({"error": "파일이나 인증 정보가 없습니다."}), 400
         
         filename = file.filename.lower()
         raw_text = ""
 
-        # 💡 [1. 정밀 텍스트 추출] 파일 확장자에 따른 분기 처리
         if filename.endswith('.pdf'):
             try:
-                # PDF 바이너리를 메모리에서 직접 읽어 해독합니다.
                 pdf_document = fitz.open(stream=file.read(), filetype="pdf")
                 for page_num in range(len(pdf_document)):
                     page = pdf_document.load_page(page_num)
                     raw_text += page.get_text("text") + "\n\n"
                 pdf_document.close()
             except Exception as pdf_e:
-                logging.error(f"PDF 읽기 실패: {pdf_e}")
                 return jsonify({"error": "PDF 파일 해독 중 오류가 발생했습니다."}), 500
         else:
-            # 텍스트 파일(.txt 등)일 경우
             raw_text = file.read().decode('utf-8', errors='ignore')
         
-        # 💡 [2. 오염물질 1차 세탁]
-        raw_text = re.sub(r'-\s*\d+\s*-', '', raw_text) # 페이지 번호 제거
-        raw_text = re.sub(r'【[^】]+】', '', raw_text) # 워터마크 제거
+        raw_text = re.sub(r'-\s*\d+\s*-', '', raw_text)
+        raw_text = re.sub(r'【[^】]+】', '', raw_text)
         
-        # 💡 [3. 스마트 문단 쪼개기]
-        # PDF는 문장 중간에서 임의로 줄바꿈(\n)이 일어나는 경우가 많습니다.
         chunks = []
         current_chunk = ""
-        
-        # 빈 줄 단위로 문단을 나눕니다 (PDF에서 단락 구분을 인식하기 위함)
         paragraphs = re.split(r'\n\s*\n', raw_text)
         
         for para in paragraphs:
             para = para.strip()
             if not para: continue
-            
-            # PDF 특유의 문장 중간 줄바꿈을 공백으로 이어붙여 가독성을 높입니다.
             para = para.replace('\n', ' ') 
-            
             current_chunk += para + "\n\n"
-            
-            # 약 400자가 넘어가면 하나의 검수 블록(Chunk)으로 잘라냅니다.
             if len(current_chunk) > 400:
                 chunks.append(current_chunk.strip())
                 current_chunk = ""
                 
         if current_chunk.strip():
             chunks.append(current_chunk.strip())
+
+        # 💡 프론트엔드로 그냥 보내지 않고, DB에 안전하게 저장합니다!
+        conn = get_db_connection()
+        conn.execute("INSERT INTO pending_exams (wallet_address, filename, chunks_json) VALUES (?, ?, ?)",
+                     (wallet_address, file.filename, json.dumps(chunks, ensure_ascii=False)))
+        conn.commit()
+        conn.close()
             
-        return jsonify({"filename": file.filename, "chunks": chunks})
+        return jsonify({"message": "대기열 DB 저장 완료"})
     except Exception as e:
-        logging.error(f"Coop 업로드 실패: {e}")
         return jsonify({"error": str(e)}), 500
+
+# 💡 [신규] 대기열 목록 불러오기 API
+@api_bp.route('/get-pending-exams', methods=['GET'])
+def get_pending_exams():
+    wallet_address = request.args.get('wallet_address')
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, filename, chunks_json FROM pending_exams WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
+    results = [{"id": r[0], "filename": r[1], "chunks": json.loads(r[2])} for r in cursor.fetchall()]
+    conn.close()
+    return jsonify(results)
+
+# 💡 [신규] 검수가 끝난 대기열 삭제 API
+@api_bp.route('/delete-pending-exam', methods=['POST'])
+def delete_pending_exam():
+    data = request.json
+    conn = get_db_connection()
+    conn.execute("DELETE FROM pending_exams WHERE id = ? AND wallet_address = ?", (data['id'], data['wallet_address']))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "대기열에서 삭제 완료"})
 
 # ==========================================
 # 💡 합동 검수 2단계: AI 문단 정밀 분석
@@ -174,11 +195,11 @@ def generate_styles():
     if not article_text: return jsonify({"error": "법령 텍스트가 없습니다."}), 400
         
     prompt = f"""당신은 승진시험 최고 출제위원장입니다. 아래 [법령 조문]을 바탕으로 서로 다른 10가지 스타일의 4지 선다 문제를 창작하세요.
-[법령 조문]\n{article_text}\n
 [10가지 필수 출제 스타일]
 1.단순목록형 2.NCS상황형 3.계산기한형 4.박스조합형 5.단서예외형 6.주체오답형 7.OX판별형 8.괄호형 9.취지추론형 10.융합형
 [출력 지시사항] 반드시 JSON 배열 형식으로 10개를 출력하세요.
-[{{ "style": "스타일 이름", "question": "문제 내용", "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"], "answer": "숫자", "explanation": "해설" }}]"""
+[{{ "style": "스타일 이름", "question": "문제 내용", "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"], "answer": "숫자", "explanation": "해설" }}]
+[법령 조문]\n{article_text}\n"""
     try:
         response = requests.post(OLLAMA_API_URL, json={
             "model": MODEL_NAME, "prompt": prompt, "format": "json", "stream": False,
@@ -268,7 +289,6 @@ def upload_exam():
         file = request.files.get('file')
         if not file: return jsonify({"error": "파일이 없습니다."}), 400
         
-        # 기존 모의고사 일괄 업로드도 PDF를 지원하도록 보강
         filename = file.filename.lower()
         if filename.endswith('.pdf'):
             pdf_document = fitz.open(stream=file.read(), filetype="pdf")
@@ -531,7 +551,7 @@ def delete_all():
     try:
         wallet_address = request.json.get('wallet_address')
         conn = get_db_connection()
-        for table in ['categories', 'cards', 'exams', 'ai_analysis']:
+        for table in ['categories', 'cards', 'exams', 'ai_analysis', 'pending_exams', 'golden_exams']:
             conn.execute(f"DELETE FROM {table} WHERE wallet_address = ?", (wallet_address,))
         conn.commit()
         conn.close()
