@@ -1,3 +1,33 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* 💡 [신규] 해설(Explanation) 텍스트 영역 대폭 확대 및 스크롤 자동화 */
+.explanation-box {
+    min-height: 250px !important; /* 기본 높이를 기존보다 3~4배 이상 시원하게 키움 */
+    height: auto;
+    resize: vertical; /* 사용자가 마우스로 드래그해서 더 키울 수 있음 */
+    line-height: 1.8; /* 가독성을 위해 줄간격 넓힘 */
+    padding: 16px;
+    font-size: 15px;
+    border-radius: 8px;
+    overflow-y: auto;
+    white-space: pre-wrap; /* 줄바꿈 완벽 인식 */
+    word-break: keep-all;
+    background-color: rgba(13, 148, 136, 0.1); /* 테마에 맞춘 고급스러운 배경 (teal-900/10) */
+    border: 1px solid rgba(20, 184, 166, 0.3); /* teal-500/30 */
+    color: #ccfbf1; /* 텍스트 색상 (teal-100) */
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* 해설창 전용 커스텀 스크롤바 (고급스러운 느낌) */
+.explanation-box::-webkit-scrollbar {
+    width: 8px;
+}
+.explanation-box::-webkit-scrollbar-thumb {
+    background: rgba(20, 184, 166, 0.5); 
+    border-radius: 4px;
+}
+.explanation-box::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+}
