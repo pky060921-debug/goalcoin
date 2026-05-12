@@ -6,23 +6,38 @@ export const ExamTab = ({ exams, examFile, setExamFile, uploadExam, walletAddres
   
   // 합동 검수(Co-op) 관련 상태
   const [mode, setMode] = useState<'list' | 'coop'>('list');
+  
+  // 💡 [신규] 검수 대기 중인 모의고사 목록을 관리하는 상태
+  const [pendingExams, setPendingExams] = useState<Array<{filename: string, chunks: string[]}>>([]);
+  
+  // 현재 진행 중인 검수 데이터 상태
   const [chunks, setChunks] = useState<string[]>([]);
   const [chunkIndex, setChunkIndex] = useState(0);
   const [filename, setFilename] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [parsedResult, setParsedResult] = useState<any>(null);
 
-  // 합동 검수 시작 (파일 업로드)
-  const startCoopReview = async () => {
+  // 1. 파일 업로드 후 즉시 시작하지 않고 '대기열'에 추가합니다.
+  const handleUploadForReview = async () => {
     if (!examFile) return alert("먼저 파일을 선택해주세요.");
     const res = await api.uploadExamCoop(examFile);
     if (res.chunks) {
-      setChunks(res.chunks);
-      setFilename(res.filename);
-      setChunkIndex(0);
-      setMode('coop');
-      setParsedResult(null);
+      // 대기열 목록에 추가
+      setPendingExams(prev => [...prev, { filename: res.filename, chunks: res.chunks }]);
+      setExamFile(null); // 업로드 창 초기화
+      alert(`[${res.filename}] 파일이 합동 검수 대기소에 추가되었습니다!`);
+    } else {
+      alert("파일 분석에 실패했습니다.");
     }
+  };
+
+  // 2. 대기열 목록에서 우측의 [검수 시작] 버튼 클릭 시 발동
+  const startCoopReview = (exam: {filename: string, chunks: string[]}) => {
+    setChunks(exam.chunks);
+    setFilename(exam.filename);
+    setChunkIndex(0);
+    setMode('coop');
+    setParsedResult(null);
   };
 
   // AI에게 현재 문단 분석 지시
@@ -64,7 +79,9 @@ export const ExamTab = ({ exams, examFile, setExamFile, uploadExam, walletAddres
       setChunkIndex(chunkIndex + 1);
       setParsedResult(null);
     } else {
-      alert("🎉 모든 검수가 완료되었습니다! 골든 데이터베이스에 완벽히 저장되었습니다.");
+      alert("🎉 해당 모의고사의 모든 검수가 완료되었습니다! 골든 DB에 저장되었습니다.");
+      // 검수가 끝난 모의고사는 대기열 목록에서 제거합니다.
+      setPendingExams(prev => prev.filter(e => e.filename !== filename));
       setMode('list');
     }
   };
@@ -76,10 +93,14 @@ export const ExamTab = ({ exams, examFile, setExamFile, uploadExam, walletAddres
     return (
       <div className="flex flex-col h-[80vh] space-y-4 animate-in fade-in">
         <div className="flex justify-between items-center pb-4 border-b border-white/10">
-          <h2 className="text-xl text-teal-400 font-serif">🤝 AI-대표님 합동 검수소</h2>
+          <h2 className="text-xl text-teal-400 font-serif">🤝 AI-대표님 합동 검수소 [{filename}]</h2>
           <div className="flex gap-4 items-center">
-            <span className="text-white/40 text-sm">진행도: {chunkIndex + 1} / {chunks.length}</span>
-            <button onClick={() => setMode('list')} className="text-xs text-white/40 hover:text-white border border-white/10 px-3 py-1 rounded-sm">검수 종료</button>
+            <span className="text-white/40 text-sm font-bold bg-teal-950/50 px-3 py-1 rounded-sm border border-teal-900/50">
+              진행도: {chunkIndex + 1} / {chunks.length}
+            </span>
+            <button onClick={() => setMode('list')} className="text-xs text-white/40 hover:text-white border border-white/10 px-3 py-1 rounded-sm hover:bg-white/5 transition-all">
+              목록으로 나가기
+            </button>
           </div>
         </div>
 
@@ -99,7 +120,7 @@ export const ExamTab = ({ exams, examFile, setExamFile, uploadExam, walletAddres
             <button 
               onClick={analyzeCurrentChunk} 
               disabled={isAnalyzing}
-              className="mt-4 py-3 bg-teal-900/50 text-teal-400 border border-teal-500/30 hover:bg-teal-800/50 transition-all"
+              className="mt-4 py-3 bg-teal-900/50 text-teal-400 border border-teal-500/30 hover:bg-teal-800/50 transition-all shadow-md"
             >
               {isAnalyzing ? "🧠 AI가 띄어쓰기 교정 및 분석 중..." : "🚀 이 문단 AI에게 풀기 지시"}
             </button>
@@ -150,31 +171,55 @@ export const ExamTab = ({ exams, examFile, setExamFile, uploadExam, walletAddres
   }
 
   // ==========================================
-  // 화면 2: 원본 리스트 뷰 (대표님 기존 코드 100% 복구)
+  // 화면 2: 원본 리스트 뷰 및 대기열
   // ==========================================
   return (
     <div className="space-y-8 animate-in fade-in">
-      {/* 파일 업로드 영역 (합동 검수 버튼 추가) */}
+      {/* 파일 업로드 영역 */}
       <div className="flex gap-2 mb-8">
         <label className="flex-1 border border-teal-900/40 p-2 text-center text-xs hover:bg-teal-900/20 cursor-pointer text-teal-400">
           <input type="file" accept=".txt,.pdf,.html" onChange={e => setExamFile(e.target.files?.[0] || null)} className="hidden"/> 
-          {examFile ? `✅ ${examFile.name}` : '+ 모의고사 파일 업로드'}
+          {examFile ? `✅ ${examFile.name}` : '+ 모의고사 파일 첨부하기'}
         </label>
         
-        {/* 기존 자동 업로드 버튼 */}
-        <button onClick={uploadExam} className="px-4 border border-teal-900/40 text-xs text-teal-400 hover:bg-teal-900/20">
-          기존 자동 전송
+        {/* 💡 신규: 업로드 하여 대기열에 올리기 */}
+        <button onClick={handleUploadForReview} className="px-6 bg-teal-500 text-teal-950 font-bold text-xs hover:bg-teal-400 transition-colors">
+          모의고사 업로드 🚀
         </button>
-        
-        {/* 💡 신규 합동 검수 버튼 */}
-        <button onClick={startCoopReview} className="px-4 bg-teal-500 text-teal-950 font-bold text-xs hover:bg-teal-400 transition-colors">
-          🤝 AI 합동 검수소 입장
+
+        {/* 기존 자동 전송 (혹시 필요할까봐 숨겨두거나 작게 배치) */}
+        <button onClick={uploadExam} className="px-4 border border-teal-900/40 text-xs text-white/30 hover:text-white/60">
+          (구) 자동 전송
         </button>
       </div>
 
-      <div className="text-white/60 text-xs border-b border-white/10 pb-2">CBT 기출문제 열람실</div>
+      {/* 💡 신규: 검수 대기소 (업로드된 모의고사 목록) */}
+      {pendingExams.length > 0 && (
+        <div className="mb-12 p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm shadow-[0_0_15px_rgba(45,212,191,0.1)]">
+          <h3 className="text-teal-400 font-bold mb-2 text-lg">⏳ 합동 검수 대기소</h3>
+          <p className="text-white/50 text-xs mb-6">업로드된 모의고사가 검수를 기다리고 있습니다. 우측의 '검수 시작'을 눌러주세요.</p>
+          <div className="space-y-3">
+            {pendingExams.map((exam, idx) => (
+              <div key={idx} className="flex justify-between items-center p-4 bg-black/40 border border-teal-500/20 rounded-sm hover:border-teal-400 transition-colors group">
+                <div className="flex flex-col">
+                  <span className="text-teal-100 font-bold text-sm">{exam.filename}</span>
+                  <span className="text-white/40 text-xs mt-1">총 {exam.chunks.length} 문단 대기 중</span>
+                </div>
+                <button 
+                  onClick={() => startCoopReview(exam)} 
+                  className="px-6 py-2 bg-teal-500 text-teal-950 font-bold text-sm rounded-sm shadow-lg hover:scale-105 transition-all opacity-90 group-hover:opacity-100"
+                >
+                  검수 시작 🎯
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="text-white/60 text-xs border-b border-white/10 pb-2">완료된 기출문제 열람실</div>
       {exams.length === 0 ? (
-        <div className="py-32 text-center text-white/20 text-xs tracking-widest">저장된 모의고사가 없습니다. 파일을 업로드하세요.</div>
+        <div className="py-20 text-center text-white/20 text-xs tracking-widest">저장된 모의고사가 없습니다. 상단에서 파일을 업로드하세요.</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {exams.map((exam: any) => {
