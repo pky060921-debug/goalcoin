@@ -8,12 +8,12 @@ import traceback
 import os
 import random
 import re
+import time
 from datetime import datetime
 
 from google import genai
 from google.genai import types
 
-# 💡 [핵심 에러 해결] 옛날 OLLAMA 변수를 지우고 GEMINI_API_KEYS를 가져옵니다!
 from config import GEMINI_API_KEYS, TASK_STATUS
 from database import get_db_connection
 from services.parser import parse_html_3col_law, normalize_text, clean_korean_law_text, get_next_review_time
@@ -26,20 +26,23 @@ except ImportError:
 api_bp = Blueprint('api', __name__)
 
 # ==========================================
-# 💡 [신규 엔진] 무한 동력 API 키 로테이션 시스템
+# 💡 [업그레이드] 무한 동력 API 키 + 자동 우회(Fallback) 엔진
 # ==========================================
 current_api_key_index = 0
 
 def generate_gemini_json(prompt, temperature=0.1):
     global current_api_key_index
-    max_retries = len(GEMINI_API_KEYS)
+    # 2.5-flash가 터지면 2.0-flash로, 그것도 터지면 최신 안정화 버전으로 우회합니다.
+    fallback_models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest']
+    max_retries = len(GEMINI_API_KEYS) * len(fallback_models)
     
     for attempt in range(max_retries):
         try:
-            # 현재 순서의 API 키로 제미나이 호출
             client = genai.Client(api_key=GEMINI_API_KEYS[current_api_key_index])
+            current_model = fallback_models[attempt % len(fallback_models)]
+            
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model=current_model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -50,15 +53,18 @@ def generate_gemini_json(prompt, temperature=0.1):
             
         except Exception as e:
             error_msg = str(e).lower()
-            # 구글 API 한도 초과(429) 에러가 나면 다음 키로 교체!
             if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
                 logging.warning(f"⚠️ API 키 {current_api_key_index} 한도 초과! 다음 키로 전환합니다.")
                 current_api_key_index = (current_api_key_index + 1) % len(GEMINI_API_KEYS)
+            elif "503" in error_msg or "unavailable" in error_msg or "high demand" in error_msg:
+                logging.warning(f"⚠️ 구글 서버({current_model}) 폭주(503). 1초 대기 후 다른 모델로 우회합니다...")
+                time.sleep(1) # 1초 숨 고르기 후 재시도
             else:
-                raise e # 한도 문제가 아니라면 정상적으로 에러 보고
+                if attempt == max_retries - 1:
+                    raise e
+                time.sleep(1)
                 
-    raise Exception("🚨 6개의 모든 API 키 한도가 초과되었습니다. 내일 다시 시도해주세요.")
-
+    raise Exception("🚨 구글 서버 불안정 또는 모든 API 키 한도 초과입니다. 잠시 후 시도해주세요.")
 
 def init_golden_db():
     conn = get_db_connection()
@@ -95,9 +101,6 @@ def task_status():
         return jsonify(TASK_STATUS[task_id])
     return jsonify({"status": "not_found"}), 404
 
-# ==========================================
-# 💡 합동 검수 생태계 API 
-# ==========================================
 @api_bp.route('/upload-exam-coop', methods=['POST'])
 def upload_exam_coop():
     try:
@@ -242,9 +245,6 @@ def get_cbt_session():
     selected = random.sample(problems, min(100, len(problems)))
     return jsonify(selected)
 
-# ==========================================
-# 💡 10대 출제 스타일 생성 엔진 (제미나이 적용)
-# ==========================================
 @api_bp.route('/generate-styles', methods=['POST'])
 def generate_styles():
     data = request.json
@@ -268,9 +268,6 @@ def generate_styles():
         logging.error(f"10대 유형 생성 에러: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
-# ==========================================
-# 🛑 기타 기존 라우터 (제미나이 로테이션 적용 완료)
-# ==========================================
 @api_bp.route('/upload-pdf', methods=['POST'])
 def upload_law():
     try:
