@@ -252,7 +252,6 @@ function MainApp() {
     }
   }, [activeCard, currentBlankIdx, blanks.length, startTime, totalTimeLimit]);
 
-  // 💡 정답 체크 로직 유지
   useEffect(() => {
     if (inputStatus === 'idle' && blanks[currentBlankIdx] && answerInput) {
       const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
@@ -325,8 +324,13 @@ function MainApp() {
           <ErrorBoundary fallbackLog={addLog}>
             {activeTab === 'progress' && <DashboardTab categories={categories} savedCards={savedCards} />}
             {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} handleDeleteCategory={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />}
-            {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleDeleteCard={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});setActiveCard(null);loadAllData();}}} />}
-            {activeTab === 'exam' && <ExamTab exams={exams} examFile={examFile} setExamFile={setExamFile} uploadExam={uploadExam} />}
+            
+            {/* 💡 [수정] 지갑 주소 명확히 전달! */}
+            {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} walletAddress={safeAddress} handleDeleteCard={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});setActiveCard(null);loadAllData();}}} />}
+            
+            {/* 💡 [수정] 지갑 주소 명확히 전달! */}
+            {activeTab === 'exam' && <ExamTab exams={exams} examFile={examFile} setExamFile={setExamFile} uploadExam={uploadExam} walletAddress={safeAddress} />}
+            
             {activeTab === 'settings' && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화하시겠습니까?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
           </ErrorBoundary>
         </main>
@@ -381,7 +385,6 @@ function MainApp() {
                       contentToRender.push(<span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>);
                     }
                     else if (isCurrent) {
-                      // 💡 [핵심] 현재 차례인 빈칸 자리에 '직접 입력 가능한 <input>'을 삽입합니다!
                       contentToRender.push(
                         <input 
                           key={i}
@@ -389,11 +392,9 @@ function MainApp() {
                           value={answerInput}
                           onChange={(e) => setAnswerInput(e.target.value)}
                           onKeyDown={(e) => {
-                            // 엔터를 누르면 수동으로 오답/정답 체크를 강제 실행합니다.
                             if(e.key === 'Enter') handleSequentialInput(e.currentTarget.value);
                           }}
                           placeholder="입력..."
-                          // 타이핑하는 글자 수에 맞춰서 입력창 길이가 가변적으로 늘어납니다!
                           style={{ width: `${Math.max(60, answerInput.length * 15 + 40)}px` }}
                           className={`inline-block h-6 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-all mx-1 px-1 rounded-t-sm ${
                             inputStatus === 'wrong' 
