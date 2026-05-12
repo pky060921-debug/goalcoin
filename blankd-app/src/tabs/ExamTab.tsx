@@ -1,20 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
 
-// 💡 [중요 수정] App.tsx에서 넘어오는 지갑 주소 변수명이 다를 경우를 대비한 다중 매핑
 export const ExamTab = ({ walletAddress, address }: any) => {
-  const userAddress = walletAddress || address; // 무엇으로 넘어오든 완벽히 잡습니다.
+  const userAddress = walletAddress || address;
   
-  // 상태: list(대기열+완료목록), coop(합동검수), cbt(시험응시), result(시험결과)
   const [mode, setMode] = useState<'list' | 'coop' | 'cbt' | 'result'>('list');
-  
-  // 데이터 상태
   const [examFile, setExamFile] = useState<File | null>(null);
   const [pendingExams, setPendingExams] = useState<Array<{id: number, filename: string, chunks: string[]}>>([]);
-  const [goldenExams, setGoldenExams] = useState<any[]>([]); // 검수 완료된 무결점 문제들
+  const [goldenExams, setGoldenExams] = useState<any[]>([]); 
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
 
-  // 합동 검수용 내부 상태
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [currentExamId, setCurrentExamId] = useState<number | null>(null);
   const [chunks, setChunks] = useState<string[]>([]);
@@ -23,13 +18,11 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [parsedResult, setParsedResult] = useState<any>(null);
 
-  // CBT 응시용 내부 상태
   const [cbtQuestions, setCbtQuestions] = useState<any[]>([]);
   const [cbtCurrentIndex, setCbtCurrentIndex] = useState(0);
   const [userAnswers, setUserAnswers] = useState<Record<number, string>>({});
   const [wrongNotes, setWrongNotes] = useState<any[]>([]);
 
-  // 1. 초기 데이터 로딩
   const fetchData = async () => {
     if (!userAddress) return;
     try {
@@ -37,7 +30,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         api.getPendingExams(userAddress),
         api.getGoldenExams(userAddress)
       ]);
-      setPendingExams(pending);
+      setPendingExams(Array.isArray(pending) ? pending : []);
       setGoldenExams(golden.exams || []);
     } catch (err) {
       console.error("데이터 로딩 실패", err);
@@ -48,9 +41,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     fetchData();
   }, [userAddress]);
 
-  // ==========================================
-  // [기능 1] 파일 업로드 및 대기열 추가
-  // ==========================================
+  // 💡 [수정] 업로드 중 에러가 나면 정확한 사유를 뱉어내도록 수정
   const handleUploadForReview = async () => {
     if (!examFile) {
       fileInputRef.current?.click();
@@ -65,14 +56,12 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       setExamFile(null); 
       alert("파일이 DB에 안전하게 저장되었습니다! 이제 검수 대기소에서 확인 가능합니다.");
       fetchData(); 
-    } catch (err) {
-      alert("파일 업로드에 실패했습니다.");
+    } catch (err: any) {
+      // 이제 숨지 않고 에러를 화면에 띄웁니다.
+      alert(`업로드 실패: ${err.message}`);
     }
   };
 
-  // ==========================================
-  // [기능 2] 합동 검수소(Co-op) 실행
-  // ==========================================
   const startCoopReview = (exam: {id: number, filename: string, chunks: string[]}) => {
     setCurrentExamId(exam.id);
     setChunks(exam.chunks);
@@ -127,9 +116,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     }
   };
 
-  // ==========================================
-  // [기능 3] 실전 CBT 모의고사 응시 (대표님이 만드신 기능 복구!)
-  // ==========================================
   const startCBT = async () => {
     if (!userAddress) return alert("로그인이 필요합니다.");
     try {
@@ -139,7 +125,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       setUserAnswers({});
       setMode('cbt');
     } catch (e: any) {
-      alert(e.message); // 골든 DB가 비어있을 때 에러 알림
+      alert(e.message);
     }
   };
 
@@ -153,11 +139,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setMode('result');
   };
 
-  // ----------------------------------------------------------------------
-  // 화면 렌더링 영역
-  // ----------------------------------------------------------------------
-
-  // 1. 합동 검수 화면
   if (mode === 'coop') {
     return (
       <div className="flex flex-col h-[80vh] space-y-4 animate-in fade-in pb-10">
@@ -174,7 +155,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         </div>
 
         <div className="flex flex-1 gap-6 overflow-hidden">
-          {/* 원본 텍스트 창 */}
           <div className="flex-1 flex flex-col border border-white/10 rounded-sm bg-black/20 p-4">
             <div className="text-white/40 text-xs mb-4">📄 PDF 원본 문단 (직접 수정 가능)</div>
             <textarea 
@@ -195,7 +175,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
             </button>
           </div>
 
-          {/* AI 분석 및 교정 창 */}
           <div className="flex-1 flex flex-col border border-teal-900/40 rounded-sm bg-teal-950/10 p-4 overflow-y-auto custom-scrollbar">
             <div className="text-teal-400/60 text-xs mb-4">✨ AI 추출 결과 (수정 가능)</div>
             {!parsedResult ? (
@@ -235,7 +214,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     );
   }
 
-  // 2. CBT 응시 화면 (대표님 원본 복구)
   if (mode === 'cbt') {
     const q = cbtQuestions[cbtCurrentIndex];
     if (!q) return null;
@@ -276,7 +254,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     );
   }
 
-  // 3. CBT 오답노트 결과 화면 (대표님 원본 복구)
   if (mode === 'result') {
     return (
       <div className="space-y-8 animate-in fade-in pb-20">
@@ -300,32 +277,34 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     );
   }
 
-  // 4. 기본 리스트 뷰 (대기열 + 완료된 골든 DB + 응시하기 버튼)
   return (
     <div className="space-y-8 animate-in fade-in pb-20">
       
-      {/* 💡 업로드 및 CBT 시작 버튼 라인 */}
       <div className="flex flex-col md:flex-row gap-4 mb-8">
         <label className="flex-1 border border-teal-900/40 p-4 text-center text-sm hover:bg-teal-900/20 cursor-pointer text-teal-400 flex items-center justify-center transition-colors">
           <input ref={fileInputRef} type="file" accept=".pdf,.txt" onChange={e => setExamFile(e.target.files?.[0] || null)} className="hidden"/> 
-          {examFile ? `✅ ${examFile.name} (선택됨)` : '📁 PDF 모의고사 첨부하기'}
+          {examFile ? `✅ ${examFile.name} (선택됨)` : '📁 PDF 모의고사 파일 첨부하기'}
         </label>
         
         <button onClick={handleUploadForReview} className="px-8 bg-teal-500 text-teal-950 font-bold text-sm hover:bg-teal-400 transition-colors shadow-lg">
           {examFile ? '이 모의고사 업로드 🚀' : '새 모의고사 업로드 🚀'}
         </button>
 
-        {/* 🌟 복구된 진짜 기능: 모의고사 응시하기 */}
         <button onClick={startCBT} className="px-8 border border-teal-400 text-teal-400 font-bold text-sm hover:bg-teal-900/30 transition-colors">
           📝 100문제 실전 응시하기
         </button>
       </div>
 
-      {/* 대기열 렌더링 */}
-      {pendingExams.length > 0 && (
-        <div className="mb-12 p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm shadow-[0_0_15px_rgba(45,212,191,0.1)]">
-          <h3 className="text-teal-400 font-bold mb-2 text-lg">⏳ 합동 검수 대기소</h3>
-          <p className="text-white/50 text-xs mb-6">스마트폰에서 올린 파일을 PC에서 편안하게 검수하세요.</p>
+      {/* 💡 [수정] 무조건 검수 대기소가 보이게 렌더링 변경! */}
+      <div className="mb-12 p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm shadow-[0_0_15px_rgba(45,212,191,0.1)]">
+        <h3 className="text-teal-400 font-bold mb-2 text-lg">⏳ 합동 검수 대기소 (클라우드 연동)</h3>
+        <p className="text-white/50 text-xs mb-6">스마트폰이나 PC 어디서든 업로드한 파일이 동기화됩니다.</p>
+        
+        {pendingExams.length === 0 ? (
+          <div className="py-12 text-center border border-dashed border-teal-900/40 rounded-sm text-teal-500/50 text-sm">
+            현재 대기 중인 모의고사가 없습니다.<br/>위 버튼을 눌러 새 모의고사를 업로드해주세요.
+          </div>
+        ) : (
           <div className="space-y-3">
             {pendingExams.map((exam) => (
               <div key={exam.id} className="flex justify-between items-center p-4 bg-black/40 border border-teal-500/20 rounded-sm hover:border-teal-400 transition-colors group">
@@ -339,10 +318,9 @@ export const ExamTab = ({ walletAddress, address }: any) => {
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* 완료된 골든 DB 리스트 */}
       <div className="text-white/60 text-xs border-b border-white/10 pb-2">✅ 검수 완료된 무결점 문제 (골든 DB)</div>
       {goldenExams.length === 0 ? (
         <div className="py-20 text-center text-white/20 text-xs tracking-widest">저장된 문제가 없습니다. 검수를 완료해 주세요.</div>
