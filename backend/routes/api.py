@@ -1,6 +1,5 @@
 from flask import Blueprint, request, jsonify
 import sqlite3
-import requests
 import threading
 import uuid
 import json
@@ -10,7 +9,12 @@ import os
 import random
 import re
 from datetime import datetime
-from config import OLLAMA_API_URL, MODEL_NAME, TASK_STATUS
+
+from google import genai
+from google.genai import types
+
+# 💡 [업그레이드] 단일 키 대신 리스트(KEYS)를 불러옵니다.
+from config import GEMINI_API_KEYS, TASK_STATUS
 from database import get_db_connection
 from services.parser import parse_html_3col_law, normalize_text, clean_korean_law_text, get_next_review_time
 
@@ -20,6 +24,41 @@ except ImportError:
     logging.error("PyMuPDF(fitz) 라이브러리가 설치되지 않았습니다.")
 
 api_bp = Blueprint('api', __name__)
+
+# ==========================================
+# 💡 [신규 엔진] 무한 동력 API 키 로테이션 시스템
+# ==========================================
+current_api_key_index = 0
+
+def generate_gemini_json(prompt, temperature=0.1):
+    global current_api_key_index
+    max_retries = len(GEMINI_API_KEYS)
+    
+    for attempt in range(max_retries):
+        try:
+            # 현재 순서의 API 키로 제미나이 호출
+            client = genai.Client(api_key=GEMINI_API_KEYS[current_api_key_index])
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=temperature
+                )
+            )
+            return response.text
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            # 💡 구글 API 한도 초과(429) 에러가 나면 다음 키로 교체!
+            if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
+                logging.warning(f"⚠️ API 키 {current_api_key_index} 한도 초과! 다음 키로 전환합니다.")
+                current_api_key_index = (current_api_key_index + 1) % len(GEMINI_API_KEYS)
+            else:
+                raise e # 한도 문제가 아니라면 정상적으로 에러 보고
+                
+    raise Exception("🚨 6개의 모든 API 키 한도가 초과되었습니다. 내일 다시 시도해주세요.")
+
 
 def init_golden_db():
     conn = get_db_connection()
@@ -57,7 +96,7 @@ def task_status():
     return jsonify({"status": "not_found"}), 404
 
 # ==========================================
-# 💡 합동 검수 생태계 API
+# 💡 합동 검수 생태계 API 
 # ==========================================
 @api_bp.route('/upload-exam-coop', methods=['POST'])
 def upload_exam_coop():
@@ -135,13 +174,13 @@ def analyze_chunk():
     chunk_text = data.get('chunk_text', '')
     
     prompt = f"""당신은 출제위원이자 국어 교열 전문가입니다.
-아래 PDF 텍스트에서 1개의 객관식 문제, 4개의 보기, 정답, 해설을 명확히 분리해 JSON으로 반환하세요.
+아래 PDF 텍스트에서 1개의 객관식 문제, 4개의 보기, 정답, 해설을 명확히 분리하세요.
 표나 복잡한 형식이 깨져있다면 문맥을 파악해 알맞은 문장으로 복원하세요.
 
 [원본 텍스트]
 {chunk_text}
 
-[출력형식 - 오직 JSON만 출력]
+[출력형식] 반드시 JSON 형식으로만 반환하세요.
 {{
   "question": "교정된 문제 내용",
   "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
@@ -149,15 +188,12 @@ def analyze_chunk():
   "explanation": "해설"
 }}"""
     try:
-        response = requests.post(OLLAMA_API_URL, json={
-            "model": MODEL_NAME, "prompt": prompt, "format": "json", "stream": False,
-            "options": {"temperature": 0.1, "num_predict": 2000}
-        }, timeout=120)
-        
-        result_text = response.json().get('response', '{}')
-        clean_json_str = re.sub(r'```json|```', '', result_text).strip()
-        return jsonify({"result": json.loads(clean_json_str)})
+        # 💡 [적용] 키 로테이션 함수 사용
+        response_text = generate_gemini_json(prompt, temperature=0.1)
+        result_data = json.loads(response_text)
+        return jsonify({"result": result_data})
     except Exception as e:
+        logging.error(f"제미나이 분석 에러: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/save-golden-exam', methods=['POST'])
@@ -185,9 +221,6 @@ def get_golden_exams():
     conn.close()
     return jsonify({"exams": exams})
 
-# ==========================================
-# 💡 [업그레이드] 실전 CBT 출제 (골든 DB 기반)
-# ==========================================
 @api_bp.route('/get-cbt-session', methods=['GET'])
 def get_cbt_session():
     wallet_address = request.args.get('wallet_address')
@@ -211,7 +244,7 @@ def get_cbt_session():
     return jsonify(selected)
 
 # ==========================================
-# 🛑 기타 기존 라우터 (생략 없이 보존)
+# 💡 10대 출제 스타일 생성 엔진 (제미나이 적용)
 # ==========================================
 @api_bp.route('/generate-styles', methods=['POST'])
 def generate_styles():
@@ -222,21 +255,24 @@ def generate_styles():
     prompt = f"""당신은 승진시험 최고 출제위원장입니다. 아래 [법령 조문]을 바탕으로 서로 다른 10가지 스타일의 4지 선다 문제를 창작하세요.
 [10가지 필수 출제 스타일]
 1.단순목록형 2.NCS상황형 3.계산기한형 4.박스조합형 5.단서예외형 6.주체오답형 7.OX판별형 8.괄호형 9.취지추론형 10.융합형
+
 [출력 지시사항] 반드시 JSON 배열 형식으로 10개를 출력하세요.
 [{{ "style": "스타일 이름", "question": "문제 내용", "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"], "answer": "숫자", "explanation": "해설" }}]
+
 [법령 조문]\n{article_text}\n"""
     try:
-        response = requests.post(OLLAMA_API_URL, json={
-            "model": MODEL_NAME, "prompt": prompt, "format": "json", "stream": False,
-            "options": {"temperature": 0.5, "num_predict": 4000}
-        }, timeout=180)
-        clean_json = re.sub(r'```json|```', '', response.json().get('response', '[]')).strip()
-        result_data = json.loads(clean_json)
+        # 💡 [적용] 키 로테이션 함수 사용
+        response_text = generate_gemini_json(prompt, temperature=0.5)
+        result_data = json.loads(response_text)
         if isinstance(result_data, dict): result_data = result_data.get('problems', [result_data])
         return jsonify({"samples": result_data})
     except Exception as e:
+        logging.error(f"10대 유형 생성 에러: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
+# ==========================================
+# 🛑 기타 기존 라우터
+# ==========================================
 @api_bp.route('/upload-pdf', methods=['POST'])
 def upload_law():
     try:
@@ -307,11 +343,13 @@ def recommend_blank():
                 
                 prompt = f'''당신은 대한민국 법령 출제위원입니다. 
                 아래 [기출 모의고사 DB]를 참고하여, 주어진 [법령 본문]에서 빈칸 문제로 내기 가장 좋은 핵심 단어(숫자, 기한, 명사 등) 딱 1개만 골라주세요.
-                형식: {{"keyword": "추출한단어", "related_exam": "연관된 기출문제 내용 요약"}}
+                형식: JSON만 출력
+                {{ "keyword": "추출한단어", "related_exam": "연관된 기출문제 내용 요약" }}
                 [기출 모의고사 DB]:\n{all_exams}\n[법령 본문]:\n{content}'''
                 
-                response = requests.post(OLLAMA_API_URL, json={"model": MODEL_NAME, "prompt": prompt, "format": "json", "stream": False}, timeout=600)
-                result = json.loads(response.json().get('response', '{}'))
+                # 💡 [적용] 키 로테이션 함수 사용
+                response_text = generate_gemini_json(prompt)
+                result = json.loads(response_text)
                 
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "result": result, "message": "AI 추천 완료!"})
             except Exception as e:
@@ -321,6 +359,54 @@ def recommend_blank():
         return jsonify({"task_id": task_id, "message": "AI 추천 작업 시작"})
     except Exception as e:
         return jsonify({"error": "요청 실패", "details": str(e)}), 500
+
+@api_bp.route('/upload-exam', methods=['POST'])
+def upload_exam():
+    try:
+        wallet_address = request.form.get('wallet_address')
+        file = request.files.get('file')
+        if not file: return jsonify({"error": "파일이 없습니다."}), 400
+        
+        filename = file.filename.lower()
+        if filename.endswith('.pdf'):
+            pdf_document = fitz.open(stream=file.read(), filetype="pdf")
+            raw_text = ""
+            for page_num in range(len(pdf_document)):
+                raw_text += pdf_document.load_page(page_num).get_text("text") + "\n"
+            pdf_document.close()
+        else:
+            raw_text = file.read().decode('utf-8', errors='ignore')
+            
+        raw_text = normalize_text(clean_korean_law_text(raw_text))
+        
+        task_id = str(uuid.uuid4())
+        TASK_STATUS[task_id] = {"status": "running", "progress": 20, "message": f"Gemini 엔진에 텍스트 주입 완료. 모의고사 분석 중..."}
+        
+        def process_exam():
+            try:
+                prompt = f'''당신은 CBT 시험지 파서입니다. 텍스트에서 객관식 문제, 정답, 해설을 JSON 배열 형식으로만 출력하세요. 
+                [{{ "question": "문제 내용 및 보기", "answer": "정답", "explanation": "해설" }}]
+                텍스트: {raw_text[:4000]}'''
+                
+                # 💡 [적용] 키 로테이션 함수 사용
+                response_text = generate_gemini_json(prompt)
+                exam_data = json.loads(response_text)
+                
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                for item in exam_data:
+                    cursor.execute("INSERT INTO exams (wallet_address, title, question, answer, explanation) VALUES (?, ?, ?, ?, ?)",
+                                   (wallet_address, filename, item.get('question', ''), item.get('answer', ''), item.get('explanation', '')))
+                conn.commit()
+                conn.close()
+                TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"{len(exam_data)}개의 문항 저장됨."})
+            except Exception as e:
+                TASK_STATUS[task_id].update({"status": "error", "message": f"모의고사 파싱 실패: {str(e)}"})
+                
+        threading.Thread(target=process_exam).start()
+        return jsonify({"task_id": task_id, "message": "모의고사 처리 시작"})
+    except Exception as e:
+        return jsonify({"error": "요청 실패"}), 500
 
 @api_bp.route('/get-categories')
 def get_categories():
@@ -526,3 +612,16 @@ def split_category():
         return jsonify({"message": "본문 분할 완료"})
     except Exception as e:
         return jsonify({"error": "분할 실패"}), 500
+
+@api_bp.route('/get-all-exams')
+def get_all_exams():
+    try:
+        wallet_address = request.args.get('wallet_address')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, title, question, answer, explanation FROM exams WHERE wallet_address = ?", (wallet_address,))
+        exams = [{"id": r[0], "title": r[1], "question": r[2], "answer": r[3], "explanation": r[4]} for r in cursor.fetchall()]
+        conn.close()
+        return jsonify({"exams": exams})
+    except Exception as e:
+        return jsonify({"error": "조회 실패"}), 500
