@@ -9,15 +9,21 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [mode, setMode] = useState<'list' | 'coop' | 'cbt' | 'result'>('list');
   const [examFile, setExamFile] = useState<File | null>(null);
   const [answerFile, setAnswerFile] = useState<File | null>(null);
+  
+  // 💡 법령과 정관 파일 상태 분리
   const [lawFile, setLawFile] = useState<File | null>(null);
+  const [ruleFile, setRuleFile] = useState<File | null>(null);
   
   const [pendingExams, setPendingExams] = useState<Array<{id: number, filename: string, chunks: string[]}>>([]);
   const [goldenExams, setGoldenExams] = useState<any[]>([]); 
-  const [uploadedLaws, setUploadedLaws] = useState<string[]>([]);
-  const [rawLawsData, setRawLawsData] = useState<any[]>([]); // 💡 디버깅용 법령 데이터 보관
+  const [rawLawsData, setRawLawsData] = useState<any[]>([]); 
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
+  
+  // 💡 클릭 시 문서 내용을 보여줄 뷰어 상태
+  const [viewingContent, setViewingContent] = useState<{title: string, content: string} | null>(null);
 
   const lawInputRef = useRef<HTMLInputElement>(null);
+  const ruleInputRef = useRef<HTMLInputElement>(null);
   const examInputRef = useRef<HTMLInputElement>(null);
   const answerInputRef = useRef<HTMLInputElement>(null);
   
@@ -28,7 +34,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [parsedResult, setParsedResult] = useState<any>(null);
 
-  const [isLawUploading, setIsLawUploading] = useState(false);
+  const [isRefUploading, setIsRefUploading] = useState(false);
   const [isExamUploading, setIsExamUploading] = useState(false);
 
   const [cbtQuestions, setCbtQuestions] = useState<any[]>([]);
@@ -48,9 +54,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       setGoldenExams(goldenRes.exams || []);
       
       if (catsRes.categories) {
-        setRawLawsData(catsRes.categories); // 디버깅용 저장
-        const uniqueLawNames = Array.from(new Set(catsRes.categories.map((c: any) => c.title)));
-        setUploadedLaws(uniqueLawNames as string[]);
+        setRawLawsData(catsRes.categories);
       }
     } catch (err: any) {
       console.error("[데이터 로드 에러]", err);
@@ -61,26 +65,15 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     fetchData();
   }, [userAddress]);
 
-  // 💡 [신규] 법령 확인 디버깅 버튼
-  const handleInspectLaws = () => {
-    console.log("==========================================");
-    console.log(`🔍 [AI가 참고 중인 법령 원본 데이터 총 ${rawLawsData.length}개]`);
-    console.log("==========================================");
-    rawLawsData.forEach((law, idx) => {
-        console.log(`\n📚 [${idx + 1}] 파일명: ${law.title}`);
-        console.log(`내용 미리보기 (첫 200자): ${law.content.substring(0, 200)}...`);
-    });
-    alert(`현재 ${rawLawsData.length}개의 법령 조각이 DB에 저장되어 있습니다.\n키보드 F12를 눌러 [Console] 탭에서 원문 텍스트를 확인해보세요!`);
-  };
-
-  const handleLawUpload = async () => {
-    if (!lawFile || !userAddress) return alert("법령 파일을 선택해주세요.");
-    setIsLawUploading(true);
+  // 1. 공통 근거자료 (법령/정관) 업로드 로직
+  const handleRefUpload = async (file: File | null, typeLabel: string) => {
+    if (!file || !userAddress) return alert(`${typeLabel} 파일을 선택해주세요.`);
+    setIsRefUploading(true);
     
     const formData = new FormData();
-    formData.append('file', lawFile);
+    formData.append('file', file);
     formData.append('wallet_address', userAddress);
-    formData.append('custom_folder', lawFile.name);
+    formData.append('custom_folder', file.name);
 
     try {
       const res = await fetch(`${BASE_URL}/upload-pdf`, { method: 'POST', body: formData });
@@ -94,29 +87,31 @@ export const ExamTab = ({ walletAddress, address }: any) => {
              const sData = await sRes.json();
              if (sData.status === 'completed') {
                clearInterval(timer); 
-               setIsLawUploading(false); 
-               setLawFile(null);
-               alert("법령 업로드가 완료되었습니다!");
+               setIsRefUploading(false); 
+               if (typeLabel === '법령') setLawFile(null);
+               if (typeLabel === '정관') setRuleFile(null);
+               alert(`${typeLabel} 업로드가 완료되었습니다!`);
                fetchData();
              } else if (sData.status === 'error') {
                clearInterval(timer); 
-               setIsLawUploading(false); 
-               alert("법령 분석 오류: " + sData.message);
+               setIsRefUploading(false); 
+               alert(`${typeLabel} 분석 오류: ` + sData.message);
              }
            } catch(err) {
              console.error("[상태 체크 통신 에러]", err);
            }
          }, 2000);
       } else {
-         setIsLawUploading(false);
+         setIsRefUploading(false);
          alert("업로드 실패: " + data.error);
       }
     } catch(e: any) {
-      setIsLawUploading(false);
+      setIsRefUploading(false);
       alert(`서버 연결 실패.\n사유: ${e.message}`);
     }
   };
 
+  // 2. 모의고사 첨부 - 업로드 로직
   const handleUploadForReview = async () => {
     if (!examFile || !userAddress) return alert("문제지 파일을 반드시 첨부해주세요.");
     setIsExamUploading(true);
@@ -389,7 +384,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
               <div className="h-full flex flex-col items-center justify-center text-white/30 text-sm space-y-4">
                 <div className="text-4xl">🤖</div>
                 <p>좌측의 원문을 확인하고 [AI에게 분리 지시] 버튼을 눌러주세요.</p>
-                <p>미리 업로드된 법령을 기반으로 상세 해설이 이곳에 작성됩니다.</p>
+                <p>미리 업로드된 근거(법령/정관)를 기반으로 상세 해설이 이곳에 작성됩니다.</p>
               </div>
             ) : (
               <div className="flex flex-col h-full animate-in fade-in">
@@ -398,16 +393,15 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                   <input value={parsedResult.answer || ''} onChange={e => handleEdit('answer', e.target.value)} className="w-full bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 font-black p-3 text-center rounded-sm text-lg" />
                 </div>
                 
-                {/* 💡 협동 검수에서도 장기 기억 출력 */}
                 {parsedResult.search_process && (
                   <div className="mb-4 p-3 bg-black/40 border-l-2 border-indigo-500 rounded-sm">
-                    <div className="text-indigo-400 font-bold text-xs mb-1">🧠 AI 사고 과정</div>
+                    <div className="text-indigo-400 font-bold text-xs mb-1">🧠 AI 사고 과정 (장기 기억)</div>
                     <div className="text-white/60 text-xs leading-relaxed whitespace-pre-wrap">{parsedResult.search_process}</div>
                   </div>
                 )}
 
                 <div className="flex flex-col flex-1">
-                  <label className="text-sm font-bold text-emerald-400 block mb-2">💡 5. AI 지능형 해설 (법령 근거)</label>
+                  <label className="text-sm font-bold text-emerald-400 block mb-2">💡 5. AI 지능형 해설 (근거 기반)</label>
                   <textarea value={parsedResult.explanation || ''} onChange={e => handleEdit('explanation', e.target.value)} className="w-full flex-1 min-h-[250px] bg-emerald-950/20 border border-emerald-500/30 text-emerald-100/90 p-4 text-[15px] leading-loose rounded-sm resize-none" />
                 </div>
                 <button onClick={approveAndNext} className="w-full mt-6 py-4 bg-emerald-600 text-white font-bold rounded-sm hover:scale-[1.01] hover:bg-emerald-500 transition-all shadow-lg">
@@ -482,40 +476,52 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       
       <div className="flex gap-4 border-b border-white/10 pb-4">
         <button onClick={() => setMode('list')} className={`px-4 py-2 ${mode === 'list' ? 'bg-teal-600 text-white' : 'text-teal-400'}`}>목록/업로드</button>
-        <button onClick={() => setMode('coop')} className={`px-4 py-2 ${mode === 'coop' ? 'bg-teal-600 text-white' : 'text-teal-400'}`}>협동 검수</button>
       </div>
 
       {mode === 'list' && (
         <div className="space-y-8">
           
-          {/* 1. 법령/규정 첨부 패널 */}
+          {/* 💡 1. 근거 자료 (법령 및 정관) 분리 업로드 패널 */}
           <div className="flex flex-col gap-4 p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm">
-            <div className="flex justify-between items-center mb-2">
-                <h3 className="text-teal-400 font-bold text-lg">📥 1. 법령 및 규정 업로드</h3>
-                {/* 💡 [신규] 디버깅 버튼 추가 */}
-                <button onClick={handleInspectLaws} className="text-xs text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded hover:bg-emerald-900/30">
-                    🔍 AI가 읽고 있는 법령 원본 확인하기
-                </button>
-            </div>
+            <h3 className="text-teal-400 font-bold text-lg mb-2">📥 1. 근거 자료 (법령 및 정관) 업로드</h3>
             
-            <div className="flex gap-4 items-center">
-              <label className="flex-1 border border-teal-900/40 p-3 text-center text-sm hover:bg-teal-900/20 cursor-pointer text-teal-400 transition-colors">
-                <input ref={lawInputRef} type="file" accept=".pdf,.txt,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/>
-                {lawFile ? `📂 ${lawFile.name} (선택됨)` : '여기를 눌러 법령/규정 파일을 선택하세요'}
-              </label>
-              <button onClick={handleLawUpload} disabled={isLawUploading} className="px-6 py-3 bg-emerald-600 text-white font-bold text-sm shadow-lg w-32 shrink-0 hover:bg-emerald-500 transition-all">
-                {isLawUploading ? "업로드 중..." : "업로드"}
-              </button>
+            <div className="flex flex-col xl:flex-row gap-4">
+              {/* 1-1. 법령 업로드 */}
+              <div className="flex-1 flex gap-2 items-center">
+                <label className="flex-1 border border-teal-900/40 p-3 text-center text-sm hover:bg-teal-900/20 cursor-pointer text-teal-400 transition-colors">
+                  <input ref={lawInputRef} type="file" accept=".pdf,.txt,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/>
+                  {lawFile ? `📂 ${lawFile.name}` : '⚖️ 1-1. 법령 파일 첨부'}
+                </label>
+                <button onClick={() => handleRefUpload(lawFile, '법령')} disabled={isRefUploading} className="px-6 py-3 bg-emerald-600 text-white font-bold text-sm shadow-lg w-28 shrink-0 hover:bg-emerald-500 transition-all">
+                  {isRefUploading ? "..." : "업로드"}
+                </button>
+              </div>
+
+              {/* 1-2. 정관 업로드 */}
+              <div className="flex-1 flex gap-2 items-center">
+                <label className="flex-1 border border-teal-900/40 p-3 text-center text-sm hover:bg-teal-900/20 cursor-pointer text-teal-400 transition-colors">
+                  <input ref={ruleInputRef} type="file" accept=".pdf,.txt,.html" onChange={e => setRuleFile(e.target.files?.[0] || null)} className="hidden"/>
+                  {ruleFile ? `📂 ${ruleFile.name}` : '📜 1-2. 정관 파일 첨부'}
+                </label>
+                <button onClick={() => handleRefUpload(ruleFile, '정관')} disabled={isRefUploading} className="px-6 py-3 bg-emerald-600 text-white font-bold text-sm shadow-lg w-28 shrink-0 hover:bg-emerald-500 transition-all">
+                  {isRefUploading ? "..." : "업로드"}
+                </button>
+              </div>
             </div>
 
-            {uploadedLaws.length > 0 && (
+            {/* 💡 업로드된 법령/정관 뷰어 리스트 */}
+            {rawLawsData.length > 0 && (
               <div className="mt-4 p-4 bg-black/30 border border-emerald-900/50 rounded-sm">
-                <div className="text-xs text-emerald-400 mb-2 font-bold">✅ 현재 참고 중인 법령 DB:</div>
+                <div className="text-xs text-emerald-400 mb-3 font-bold">✅ 현재 참고 중인 근거 자료 (클릭하여 내용 확인):</div>
                 <div className="flex flex-wrap gap-2">
-                  {uploadedLaws.map((name, idx) => (
-                    <span key={idx} className="px-2 py-1 bg-emerald-950/50 border border-emerald-800 text-emerald-200 text-xs rounded">
-                      {name}
-                    </span>
+                  {rawLawsData.map((law, idx) => (
+                    <button 
+                      key={idx} 
+                      onClick={() => setViewingContent(law)}
+                      className="px-3 py-2 bg-emerald-950/50 border border-emerald-800 text-emerald-200 text-xs rounded hover:bg-emerald-800 transition-colors"
+                    >
+                      📄 {law.title}
+                    </button>
                   ))}
                 </div>
               </div>
@@ -567,7 +573,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                         수동 검수 시작 🚀
                       </button>
                       <button onClick={() => handleGenerateRAGFromPending(exam.id)} className="px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-sm shadow-lg hover:bg-emerald-500 transition-all">
-                        4. 해설 자동생성 (추천)
+                        4. 해설 자동생성
                       </button>
                       <button onClick={() => handleDeletePendingExam(exam.id)} className="px-3 py-2 bg-red-950/40 border border-red-500/30 text-red-400 font-bold text-xs rounded-sm hover:bg-red-900/50 transition-all">
                         🗑️ 삭제
@@ -577,7 +583,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                 ))}
               </div>
             )}
-            {isAnalyzing && <div className="mt-4 text-emerald-400 text-sm font-bold text-center animate-pulse">✨ AI가 분석 중입니다. 앱 터미널의 로그를 주시해주세요...</div>}
+            {isAnalyzing && <div className="mt-4 text-emerald-400 text-sm font-bold text-center animate-pulse">✨ AI가 분석 중입니다. 터미널의 로그를 주시해주세요...</div>}
           </div>
 
           <div className="text-white/60 text-xs border-b border-white/10 pb-2">✅ 검수 완료된 무결점 문제 (골든 DB)</div>
@@ -619,6 +625,27 @@ export const ExamTab = ({ walletAddress, address }: any) => {
           )}
         </div>
       )}
+
+      {/* 💡 문서 내용 팝업 뷰어 (Modal) */}
+      {viewingContent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 animate-in fade-in">
+          <div className="bg-teal-950 border border-teal-500/50 rounded-sm w-full max-w-4xl h-[80vh] flex flex-col shadow-2xl">
+            <div className="flex justify-between items-center p-4 border-b border-teal-500/30 bg-teal-900/30">
+              <h3 className="text-teal-300 font-bold text-lg">📄 {viewingContent.title}</h3>
+              <button 
+                onClick={() => setViewingContent(null)} 
+                className="text-white/50 hover:text-white text-2xl font-bold px-2"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto custom-scrollbar flex-1 text-white/80 text-sm leading-relaxed whitespace-pre-wrap bg-black/20">
+              {viewingContent.content}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
