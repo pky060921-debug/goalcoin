@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
 
+// 💡 서버 URL을 정확히 명시하여 "연결 실패/삭제 실패" 에러 원천 차단
+const BASE_URL = "https://api.blankd.top/api";
+
 export const ExamTab = ({ walletAddress, address }: any) => {
   const userAddress = walletAddress || address;
   
@@ -12,6 +15,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const smartFileInputRef = useRef<HTMLInputElement>(null);
   const [currentExamId, setCurrentExamId] = useState<number | null>(null);
   const [chunks, setChunks] = useState<string[]>([]);
   const [chunkIndex, setChunkIndex] = useState(0);
@@ -21,6 +25,8 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
   const [isLawUploading, setIsLawUploading] = useState(false);
   const [isExamUploading, setIsExamUploading] = useState(false);
+  const [isSmartUploading, setIsSmartUploading] = useState(false);
+  const [smartUploadStatus, setSmartUploadStatus] = useState("");
 
   const [cbtQuestions, setCbtQuestions] = useState<any[]>([]);
   const [cbtCurrentIndex, setCbtCurrentIndex] = useState(0);
@@ -37,7 +43,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       setPendingExams(Array.isArray(pending) ? pending : []);
       setGoldenExams(golden.exams || []);
     } catch (err) {
-      console.error(err);
+      console.error("데이터 로딩 실패", err);
     }
   };
 
@@ -45,7 +51,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     fetchData();
   }, [userAddress]);
 
-  // 1. 법령규정첨부 - 업로드 로직
+  // 1. 법령규정첨부 - 업로드 로직 (BASE_URL 적용)
   const handleLawUpload = async () => {
     if (!lawFile || !userAddress) return alert("법령 파일을 선택해주세요.");
     setIsLawUploading(true);
@@ -55,12 +61,12 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     formData.append('custom_folder', '자동 업로드 법령');
 
     try {
-      const res = await fetch('/api/upload-pdf', { method: 'POST', body: formData });
+      const res = await fetch(`${BASE_URL}/upload-pdf`, { method: 'POST', body: formData });
       const data = await res.json();
       if (res.ok) {
          const taskId = data.task_id;
          const timer = setInterval(async () => {
-           const sRes = await fetch(`/api/task-status?task_id=${taskId}`);
+           const sRes = await fetch(`${BASE_URL}/task-status?task_id=${taskId}`);
            const sData = await sRes.json();
            if (sData.status === 'completed') {
              clearInterval(timer); 
@@ -99,11 +105,11 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setIsExamUploading(false);
   };
 
-  // 3. 대기열 모의고사 삭제 로직
+  // 3. 대기열 모의고사 삭제 로직 (BASE_URL 적용)
   const handleDeletePendingExam = async (id: number) => {
-    if (!confirm("이 대기열 모의고사를 삭제하시겠습니까? (삭제안됨 문제 해결)")) return;
+    if (!confirm("이 대기열 모의고사를 삭제하시겠습니까?")) return;
     try {
-      const res = await fetch('/api/delete-pending-exam', {
+      const res = await fetch(`${BASE_URL}/delete-pending-exam`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, wallet_address: userAddress })
@@ -112,19 +118,20 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         alert("삭제되었습니다.");
         fetchData();
       } else {
-        alert("삭제 실패");
+        const data = await res.json();
+        alert("삭제 실패: " + (data.error || "알 수 없는 오류"));
       }
     } catch (e) {
-      alert("삭제 중 서버 오류가 발생했습니다.");
+      alert("삭제 중 서버 통신 오류가 발생했습니다.");
     }
   };
 
-  // 4. 대기열에서 해설 자동생성 (RAG)
+  // 4. 대기열에서 해설 자동생성 (BASE_URL 적용)
   const handleGenerateRAGFromPending = async (id: number) => {
     if (!confirm("법령을 참고하여 이 문제들의 해설을 자동 생성하시겠습니까?")) return;
     setIsAnalyzing(true);
     try {
-      const res = await fetch('/api/generate-rag-from-pending', {
+      const res = await fetch(`${BASE_URL}/generate-rag-from-pending`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, wallet_address: userAddress })
@@ -133,7 +140,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       if (res.ok) {
          const taskId = data.task_id;
          const timer = setInterval(async () => {
-           const sRes = await fetch(`/api/task-status?task_id=${taskId}`);
+           const sRes = await fetch(`${BASE_URL}/task-status?task_id=${taskId}`);
            const sData = await sRes.json();
            if (sData.status === 'completed') {
              clearInterval(timer); 
@@ -156,18 +163,25 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     }
   };
 
+  // 무결점 문제(Golden DB) 개별 삭제 (BASE_URL 적용)
   const handleDeleteExam = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
     if (!confirm("이 문제를 영구 삭제하시겠습니까?")) return;
     try {
-      await fetch('/api/delete-exam', {
+      const res = await fetch(`${BASE_URL}/delete-exam`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, wallet_address: userAddress })
       });
-      fetchData();
+      if (res.ok) {
+        alert("삭제되었습니다.");
+        fetchData();
+      } else {
+        const data = await res.json();
+        alert("삭제 실패: " + data.error);
+      }
     } catch (err) {
-      alert("삭제 실패");
+      alert("삭제 실패: 서버 통신 오류");
     }
   };
 
@@ -217,7 +231,11 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       setParsedResult(null);
     } else {
       if (currentExamId && userAddress) {
-        await api.deletePendingExam(userAddress, currentExamId);
+        await fetch(`${BASE_URL}/delete-pending-exam`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: currentExamId, wallet_address: userAddress })
+        });
       }
       alert("해당 모의고사의 모든 검수가 완료되었습니다!");
       fetchData(); 
@@ -391,6 +409,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   return (
     <div className="space-y-8 animate-in fade-in pb-20">
       
+      {/* 원본 탭 메뉴 */}
       <div className="flex gap-4 border-b border-white/10 pb-4">
         <button onClick={() => setMode('list')} className={`px-4 py-2 ${mode === 'list' ? 'bg-teal-600 text-white' : 'text-teal-400'}`}>목록/업로드</button>
         <button onClick={() => setMode('coop')} className={`px-4 py-2 ${mode === 'coop' ? 'bg-teal-600 text-white' : 'text-teal-400'}`}>협동 검수</button>
@@ -457,7 +476,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                 ))}
               </div>
             )}
-            {isAnalyzing && <div className="mt-4 text-emerald-400 text-sm font-bold text-center animate-pulse">✨ AI가 법령을 대조하여 해설을 생성 중입니다. 잠시만 기다려주세요...</div>}
+            {isAnalyzing && <div className="mt-4 text-emerald-400 text-sm font-bold text-center animate-pulse">✨ AI가 분석 중입니다. 터미널의 에러 로그를 주시해주세요...</div>}
           </div>
 
           <div className="text-white/60 text-xs border-b border-white/10 pb-2">✅ 검수 완료된 무결점 문제 (골든 DB)</div>
