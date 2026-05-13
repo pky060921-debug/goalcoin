@@ -121,7 +121,26 @@ def task_status():
         return jsonify(TASK_STATUS[task_id])
     return jsonify({"status": "not_found"}), 404
 
-# 💡 [핵심 수정] 환각 차단 및 대화형 학습 유도 프롬프트
+# 💡 [신규] 업로드된 법령/정관 파일 개별 삭제 라우터
+@api_bp.route('/delete-law-file', methods=['POST'])
+def delete_law_file():
+    try:
+        data = request.json or {}
+        folder_name = data.get('folder_name')
+        wallet_address = data.get('wallet_address')
+        
+        if not folder_name or not wallet_address:
+            return jsonify({"error": "삭제 권한이 없습니다."}), 400
+
+        conn = get_db_connection()
+        conn.execute("DELETE FROM categories WHERE folder_name = ? AND wallet_address = ?", (folder_name, wallet_address))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "법령 파일 삭제 완료"})
+    except Exception as e:
+        print(f"\n[🔥 법령 파일 삭제 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        return jsonify({"error": str(e)}), 500
+
 @api_bp.route('/generate-rag-from-pending', methods=['POST'])
 def generate_rag_from_pending():
     try:
@@ -154,16 +173,14 @@ def generate_rag_from_pending():
 
         def process_rag_pending():
             try:
-                prompt = f'''당신은 승진시험 출제위원이자 보조 학습 AI입니다.
+                prompt = f'''당신은 승진시험 출제위원이자 사용자와 대화하는 보조 학습 AI입니다.
                 아래 [참고 자료 DB(법령 및 정관)]를 철저히 검색하여 사용자의 [시험지 텍스트]를 분석하세요.
 
-                [절대 규칙: 환각(Hallucination) 엄격 금지]
-                1. 오직 제공된 [참고 자료 DB] 안의 텍스트만 근거로 삼으세요. 외부 인터넷 지식이나 당신의 사전 지식은 절대 사용하지 마세요.
-                2. 만약 DB에 '제1조'라는 조항 이름만 있고 실제 내용이 비어있거나, 해당 문제와 관련된 규정을 아예 찾을 수 없다면 억지로 정답을 맞히려고 지어내지 마십시오.
-                3. 내용이 비어있거나 모를 경우, 아래와 같이 작성하여 사용자에게 정답을 가르쳐달라고 정중히 대화를 시도하세요.
-                   - answer: "확인 필요"
-                   - explanation: "현재 업로드된 자료에 해당 조항의 세부 내용이 누락되어 있습니다. 이 내용이 몇 조에 있는지, 혹은 정답이 무엇인지 제게 직접 수정하여 가르쳐주시면 골든 DB에 완벽히 장기기억해 두겠습니다!"
-                   - search_process: "DB를 검색했으나 관련 조항의 세부 내용이 비어있어 판단을 보류했습니다."
+                [절대 규칙: 대화형 파트너십 및 환각 금지]
+                1. 오직 제공된 [참고 자료 DB] 안의 텍스트만 근거로 삼으세요.
+                2. DB에서 일부 보기에 대한 근거를 찾을 수 없거나 내용이 애매하다면, 억지로 지어내지 마세요.
+                3. 대신, 분석한 데까지의 '진행 상황'을 설명하고, 모르는 부분에 대해 "이 부분은 찾을 수 없는데 어디서 찾을까요?", "내용이 조금 애매한데 어떻게 판단해야 될까요?" 라고 `explanation` 필드에 질문을 던지세요.
+                   - 예: "보기 1, 2번은 국민건강보험법 제14조에 따라 옳은 내용입니다. 하지만 보기 3번의 '의료시설' 관련 내용은 현재 DB에서 찾을 수 없네요. 이 부분은 정관을 참고해야 할까요?"
 
                 [참고 자료 DB]
                 {law_context[:35000]}
@@ -174,8 +191,8 @@ def generate_rag_from_pending():
                 [출력 지시사항] 반드시 JSON 배열 형식으로만 출력하세요.
                 [{{ 
                     "question": "문제 내용 및 보기 전체", 
-                    "answer": "정답 번호 (또는 '확인 필요')", 
-                    "explanation": "사용자에게 보여줄 해설 (또는 대화형 질문)",
+                    "answer": "정답 번호 (모를 경우 '확인 필요')", 
+                    "explanation": "해석 내용 (모를 경우 사용자에게 친근하게 질문 작성)",
                     "search_process": "AI의 논리적 사고 과정",
                     "referenced_laws": "참고한 문서명과 조항"
                 }}]'''
@@ -239,14 +256,12 @@ def upload_exam():
                 law_context = "등록된 참고 자료가 없습니다."
                 if laws: law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
                 
-                prompt = f'''당신은 승진시험 출제위원이자 보조 학습 AI입니다.
+                prompt = f'''당신은 승진시험 출제위원이자 사용자와 소통하는 AI입니다.
                 아래 [참고 자료 DB(법령 및 정관)]를 철저히 검색하여 사용자의 [시험지 텍스트]를 분석하세요.
 
-                [절대 규칙: 환각(Hallucination) 엄격 금지]
-                1. 오직 제공된 [참고 자료 DB] 안의 텍스트만 근거로 삼으세요. 외부 지식은 절대 사용하지 마세요.
-                2. 내용이 비어있거나 찾을 수 없을 때는 억지로 지어내지 말고, 아래처럼 작성하여 사용자에게 가르쳐달라고 요청하세요.
-                   - answer: "확인 필요"
-                   - explanation: "현재 업로드된 자료에 해당 내용이 누락되어 판단할 수 없습니다. 빈칸에 정답을 적어 제게 가르쳐주시면 골든 DB에 영구적으로 기억해 두겠습니다!"
+                [절대 규칙: 환각 금지 및 질문 유도]
+                1. 오직 제공된 [참고 자료 DB] 안의 텍스트만 근거로 삼으세요.
+                2. DB에서 내용을 찾을 수 없거나 애매할 때는 억지로 지어내지 말고, `explanation` 필드에 "이 부분은 현재 자료에서 찾을 수 없는데 어디를 참고해야 할까요?" 라고 정중히 사용자에게 물어보세요.
 
                 [참고 자료 DB]
                 {law_context[:35000]}
@@ -257,8 +272,8 @@ def upload_exam():
                 [출력 지시사항] 반드시 JSON 배열 형식으로만 출력하세요.
                 [{{ 
                     "question": "문제 내용 및 보기 전체", 
-                    "answer": "정답 번호 (또는 '확인 필요')", 
-                    "explanation": "해설 또는 대화형 요청 문구",
+                    "answer": "정답 번호 (모를 경우 '확인 필요')", 
+                    "explanation": "해석 내용 (모를 경우 사용자에게 질문 작성)",
                     "search_process": "AI의 논리적 사고 과정",
                     "referenced_laws": "참고 근거명"
                 }}]'''
@@ -365,12 +380,14 @@ def get_pending_exams():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# 💡 [핵심] 사용자의 피드백을 반영하여 다시 풀게 하는 대화형 로직
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
     try:
         data = request.json
         chunk_text = data.get('chunk_text', '')
         wallet_address = data.get('wallet_address')
+        user_feedback = data.get('user_feedback', '') # 💡 프론트에서 온 피드백
 
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -380,29 +397,36 @@ def analyze_chunk():
 
         law_context = "등록된 참고 자료가 없습니다."
         if laws: law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
+        
+        # 💡 피드백이 있으면 프롬프트에 강력하게 주입합니다.
+        feedback_str = f"\n[👨‍💻 사용자 피드백(대화/힌트)]\n{user_feedback}\n-> 위 사용자의 피드백을 적극 반영하여 다시 분석하고 해설과 장기기억을 완성하세요.\n" if user_feedback else ""
 
-        prompt = f"""당신은 출제위원이자 보조 학습 AI입니다.
-        [절대 규칙: 환각(Hallucination) 금지]
-        오직 [참고 자료 DB]만 확인하세요. 내용이 비어있으면 억지로 맞히지 말고 "확인 필요"라고 적고, 사용자에게 가르쳐달라고 질문을 남기세요.
+        prompt = f"""당신은 출제위원이자 사용자와 소통하는 AI입니다.
+        [절대 규칙: 대화형 파트너십 및 환각 금지]
+        1. 오직 [참고 자료 DB]만 확인하세요. 
+        2. 자료가 부족하거나 내용이 애매할 경우, 억지로 정답을 만들지 마세요. 대신 "이 부분은 찾을 수 없는데 어디서 찾을까요?", "내용이 애매한데 어떻게 판단할까요?"라고 사용자에게 `explanation` 필드를 통해 질문하세요.
+        3. 사용자가 [사용자 피드백]을 주었다면, 그 힌트를 바탕으로 정답과 해설을 올바르게 수정하세요!
 
         [참고 자료 DB]
         {law_context[:30000]}
 
         [시험지 원문]
         {chunk_text}
+        {feedback_str}
 
         [출력형식] 반드시 JSON 형식으로만 반환하세요.
         {{
           "question": "교정된 문제 내용",
           "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
           "answer": "정답 번호 (또는 '확인 필요')",
-          "explanation": "상세 해설 (또는 사용자에게 정답을 요구하는 메시지)",
+          "explanation": "상세 해설 (모를 경우 사용자에게 질문을 작성, 피드백을 받았다면 '아하! 힌트 감사합니다' 등 대화형으로 시작)",
           "search_process": "AI의 논리적 사고과정 (장기기억)"
         }}"""
-        response_text = generate_gemini_json(prompt, temperature=0.1)
+        response_text = generate_gemini_json(prompt, temperature=0.2)
         result_data = json.loads(response_text)
         return jsonify({"result": result_data})
     except Exception as e:
+        print(f"\n[🔥 문단 분석 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/save-golden-exam', methods=['POST'])
@@ -666,7 +690,7 @@ def sync_batch():
 
         conn.commit()
         conn.close()
-        return jsonify({"message": f"일괄 동기화 성공 (메모:{len(memos)}건, 학습:{len(answers)}건)"}), 200
+        return jsonify({"message": f"일괄 동기화 성공"}), 200
     except Exception as e:
         return jsonify({"error": "배치 동기화 실패"}), 500
 
