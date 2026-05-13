@@ -102,8 +102,80 @@ def task_status():
     return jsonify({"status": "not_found"}), 404
 
 # ==========================================
-# 💡 [신규 기능 1] 법령 기반 지능형 해설 창작 (RAG)
+# 💡 [신규] 대기열(Pending)에서 해설 자동생성 (RAG)
 # ==========================================
+@api_bp.route('/generate-rag-from-pending', methods=['POST'])
+def generate_rag_from_pending():
+    try:
+        data = request.json
+        pending_id = data.get('id')
+        wallet_address = data.get('wallet_address')
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT filename, chunks_json FROM pending_exams WHERE id = ? AND wallet_address = ?", (pending_id, wallet_address))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"error": "대기열에서 모의고사를 찾을 수 없습니다."}), 404
+
+        filename = row[0]
+        chunks = json.loads(row[1])
+        raw_text = "\n\n".join(chunks)
+
+        cursor.execute("SELECT title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
+        laws = cursor.fetchall()
+        conn.close()
+
+        law_context = "등록된 참고 법령이 없습니다."
+        if laws:
+            law_context = "\n\n".join([f"[{r[0]}]\n{r[1]}" for r in laws])
+
+        task_id = str(uuid.uuid4())
+        TASK_STATUS[task_id] = {"status": "running", "progress": 20, "message": "AI가 대기열의 문제를 법령과 대조하여 분석 중..."}
+
+        def process_rag_pending():
+            try:
+                prompt = f'''당신은 국민건강보험공단 승진시험 최고 출제위원이자 완벽한 해설가입니다.
+                아래 [참고 법령]을 완벽하게 숙지하세요.
+                사용자가 업로드한 [시험지 텍스트]에는 '문제'와 '정답'이 포함되어 있습니다.
+                문제를 분석하고 정답을 확인한 뒤, 왜 그것이 정답인지 [참고 법령]의 구체적인 조항을 근거로 아주 상세하고 명확한 [해설]을 직접 작성해 주세요.
+
+                [참고 법령 DB]
+                {law_context[:35000]}
+
+                [시험지 텍스트]
+                {raw_text[:10000]}
+
+                [출력 지시사항] 반드시 아래 JSON 배열 형식으로만 출력하세요.
+                [{{ "question": "문제 내용 및 보기", "answer": "정답(숫자 등)", "explanation": "법령 조문을 근거로 작성된 상세하고 논리적인 해설" }}]
+                '''
+
+                response_text = generate_gemini_json(prompt)
+                exam_data = json.loads(response_text)
+
+                conn2 = get_db_connection()
+                cursor2 = conn2.cursor()
+                for item in exam_data:
+                    cursor2.execute("INSERT INTO golden_exams (wallet_address, title, question, answer, explanation) VALUES (?, ?, ?, ?, ?)",
+                                   (wallet_address, filename, item.get('question', ''), item.get('answer', ''), item.get('explanation', '')))
+                
+                # 분석 성공 시 대기열에서 완전히 삭제
+                cursor2.execute("DELETE FROM pending_exams WHERE id = ? AND wallet_address = ?", (pending_id, wallet_address))
+                conn2.commit()
+                conn2.close()
+
+                TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"{len(exam_data)}개의 문항 분석 완료."})
+            except Exception as e:
+                logging.error(f"지능형 분석 에러:\n{traceback.format_exc()}")
+                TASK_STATUS[task_id].update({"status": "error", "message": str(e)})
+
+        threading.Thread(target=process_rag_pending).start()
+        return jsonify({"task_id": task_id, "message": "분석 시작"})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @api_bp.route('/upload-exam', methods=['POST'])
 def upload_exam():
     try:
@@ -128,7 +200,6 @@ def upload_exam():
         
         def process_exam():
             try:
-                # 1. DB에 업로드된 '법령' 데이터 먼저 긁어오기 (RAG 파이프라인)
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 cursor.execute("SELECT title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
@@ -137,10 +208,8 @@ def upload_exam():
 
                 law_context = "등록된 참고 법령이 없습니다."
                 if laws:
-                    # 법령을 하나의 거대한 텍스트로 압축
                     law_context = "\n\n".join([f"[{r[0]}]\n{r[1]}" for r in laws])
                 
-                # 2. 강력해진 프롬프트 (문제+정답+법령 크로스체크 지시)
                 prompt = f'''당신은 국민건강보험공단 승진시험 최고 출제위원이자 완벽한 해설가입니다.
                 아래 [참고 법령]을 완벽하게 숙지하세요.
                 사용자가 업로드한 [시험지 텍스트]에는 '문제'와 '정답'이 포함되어 있습니다.
@@ -166,7 +235,7 @@ def upload_exam():
                                    (wallet_address, filename, item.get('question', ''), item.get('answer', ''), item.get('explanation', '')))
                 conn.commit()
                 conn.close()
-                TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"{len(exam_data)}개의 문항(해설 포함) 저장됨."})
+                TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"{len(exam_data)}개의 문항 저장됨."})
             except Exception as e:
                 error_trace = traceback.format_exc()
                 logging.error(f"모의고사 파싱 실패 내역:\n{error_trace}")
@@ -179,9 +248,6 @@ def upload_exam():
         logging.error(f"라우터 진입 에러:\n{error_trace}")
         return jsonify({"error": "요청 실패"}), 500
 
-# ==========================================
-# 💡 [신규 기능 2] 모의고사 개별 삭제 (delete-exam)
-# ==========================================
 @api_bp.route('/delete-exam', methods=['POST'])
 def delete_exam():
     try:
@@ -190,9 +256,7 @@ def delete_exam():
         wallet_address = data.get('wallet_address')
         
         conn = get_db_connection()
-        # 일반 모의고사 DB에서 삭제
         conn.execute("DELETE FROM exams WHERE id = ? AND wallet_address = ?", (exam_id, wallet_address))
-        # 골든 DB(검수완료)에서도 삭제 가능하도록 동시 처리
         conn.execute("DELETE FROM golden_exams WHERE id = ? AND wallet_address = ?", (exam_id, wallet_address))
         conn.commit()
         conn.close()
@@ -201,9 +265,6 @@ def delete_exam():
         logging.error(f"모의고사 삭제 에러:\n{traceback.format_exc()}")
         return jsonify({"error": "삭제 실패"}), 500
 
-# ==========================================
-# 기존 라우터들 (손실 없이 100% 보존)
-# ==========================================
 @api_bp.route('/upload-exam-coop', methods=['POST'])
 def upload_exam_coop():
     try:
