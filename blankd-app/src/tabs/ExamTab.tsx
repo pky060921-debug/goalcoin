@@ -8,12 +8,13 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   
   const [mode, setMode] = useState<'list' | 'coop' | 'cbt' | 'result'>('list');
   const [examFile, setExamFile] = useState<File | null>(null);
-  const [answerFile, setAnswerFile] = useState<File | null>(null); // 💡 정답 파일 상태 추가
+  const [answerFile, setAnswerFile] = useState<File | null>(null);
   const [lawFile, setLawFile] = useState<File | null>(null);
   
   const [pendingExams, setPendingExams] = useState<Array<{id: number, filename: string, chunks: string[]}>>([]);
   const [goldenExams, setGoldenExams] = useState<any[]>([]); 
-  const [uploadedLaws, setUploadedLaws] = useState<string[]>([]); // 💡 업로드된 법령 파일명 목록
+  const [uploadedLaws, setUploadedLaws] = useState<string[]>([]);
+  const [rawLawsData, setRawLawsData] = useState<any[]>([]); // 💡 디버깅용 법령 데이터 보관
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
 
   const lawInputRef = useRef<HTMLInputElement>(null);
@@ -38,7 +39,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const fetchData = async () => {
     if (!userAddress) return;
     try {
-      // 대기열, 완료된 문제, 그리고 업로드된 법령 목록을 동시에 가져옵니다.
       const [pending, goldenRes, catsRes] = await Promise.all([
         api.getPendingExams(userAddress),
         fetch(`${BASE_URL}/get-golden-exams?wallet_address=${userAddress}`).then(r => r.json()),
@@ -47,8 +47,8 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       setPendingExams(Array.isArray(pending) ? pending : []);
       setGoldenExams(goldenRes.exams || []);
       
-      // 중복을 제거하여 법령 파일명만 추출
       if (catsRes.categories) {
+        setRawLawsData(catsRes.categories); // 디버깅용 저장
         const uniqueLawNames = Array.from(new Set(catsRes.categories.map((c: any) => c.title)));
         setUploadedLaws(uniqueLawNames as string[]);
       }
@@ -61,7 +61,18 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     fetchData();
   }, [userAddress]);
 
-  // 1. 법령규정첨부 - 업로드 로직
+  // 💡 [신규] 법령 확인 디버깅 버튼
+  const handleInspectLaws = () => {
+    console.log("==========================================");
+    console.log(`🔍 [AI가 참고 중인 법령 원본 데이터 총 ${rawLawsData.length}개]`);
+    console.log("==========================================");
+    rawLawsData.forEach((law, idx) => {
+        console.log(`\n📚 [${idx + 1}] 파일명: ${law.title}`);
+        console.log(`내용 미리보기 (첫 200자): ${law.content.substring(0, 200)}...`);
+    });
+    alert(`현재 ${rawLawsData.length}개의 법령 조각이 DB에 저장되어 있습니다.\n키보드 F12를 눌러 [Console] 탭에서 원문 텍스트를 확인해보세요!`);
+  };
+
   const handleLawUpload = async () => {
     if (!lawFile || !userAddress) return alert("법령 파일을 선택해주세요.");
     setIsLawUploading(true);
@@ -86,7 +97,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                setIsLawUploading(false); 
                setLawFile(null);
                alert("법령 업로드가 완료되었습니다!");
-               fetchData(); // 법령 목록 새로고침
+               fetchData();
              } else if (sData.status === 'error') {
                clearInterval(timer); 
                setIsLawUploading(false); 
@@ -106,7 +117,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     }
   };
 
-  // 2. 모의고사(문제+정답 한 쌍) 첨부 - 업로드 로직
   const handleUploadForReview = async () => {
     if (!examFile || !userAddress) return alert("문제지 파일을 반드시 첨부해주세요.");
     setIsExamUploading(true);
@@ -137,7 +147,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setIsExamUploading(false);
   };
 
-  // 3. 대기열 모의고사 삭제
   const handleDeletePendingExam = async (id: number) => {
     if (!confirm("이 대기열 모의고사를 삭제하시겠습니까?")) return;
     try {
@@ -158,7 +167,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     }
   };
 
-  // 4. 대기열에서 해설 자동생성 (RAG)
   const handleGenerateRAGFromPending = async (id: number) => {
     if (!confirm("법령을 참고하여 이 문제들의 해설을 자동 생성하시겠습니까?")) return;
     setIsAnalyzing(true);
@@ -389,6 +397,15 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                   <label className="text-sm font-bold text-emerald-400 block mb-2">✅ 4. 정답</label>
                   <input value={parsedResult.answer || ''} onChange={e => handleEdit('answer', e.target.value)} className="w-full bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 font-black p-3 text-center rounded-sm text-lg" />
                 </div>
+                
+                {/* 💡 협동 검수에서도 장기 기억 출력 */}
+                {parsedResult.search_process && (
+                  <div className="mb-4 p-3 bg-black/40 border-l-2 border-indigo-500 rounded-sm">
+                    <div className="text-indigo-400 font-bold text-xs mb-1">🧠 AI 사고 과정</div>
+                    <div className="text-white/60 text-xs leading-relaxed whitespace-pre-wrap">{parsedResult.search_process}</div>
+                  </div>
+                )}
+
                 <div className="flex flex-col flex-1">
                   <label className="text-sm font-bold text-emerald-400 block mb-2">💡 5. AI 지능형 해설 (법령 근거)</label>
                   <textarea value={parsedResult.explanation || ''} onChange={e => handleEdit('explanation', e.target.value)} className="w-full flex-1 min-h-[250px] bg-emerald-950/20 border border-emerald-500/30 text-emerald-100/90 p-4 text-[15px] leading-loose rounded-sm resize-none" />
@@ -465,6 +482,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       
       <div className="flex gap-4 border-b border-white/10 pb-4">
         <button onClick={() => setMode('list')} className={`px-4 py-2 ${mode === 'list' ? 'bg-teal-600 text-white' : 'text-teal-400'}`}>목록/업로드</button>
+        <button onClick={() => setMode('coop')} className={`px-4 py-2 ${mode === 'coop' ? 'bg-teal-600 text-white' : 'text-teal-400'}`}>협동 검수</button>
       </div>
 
       {mode === 'list' && (
@@ -472,7 +490,13 @@ export const ExamTab = ({ walletAddress, address }: any) => {
           
           {/* 1. 법령/규정 첨부 패널 */}
           <div className="flex flex-col gap-4 p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm">
-            <h3 className="text-teal-400 font-bold text-lg mb-2">📥 1. 법령 및 규정 업로드</h3>
+            <div className="flex justify-between items-center mb-2">
+                <h3 className="text-teal-400 font-bold text-lg">📥 1. 법령 및 규정 업로드</h3>
+                {/* 💡 [신규] 디버깅 버튼 추가 */}
+                <button onClick={handleInspectLaws} className="text-xs text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded hover:bg-emerald-900/30">
+                    🔍 AI가 읽고 있는 법령 원본 확인하기
+                </button>
+            </div>
             
             <div className="flex gap-4 items-center">
               <label className="flex-1 border border-teal-900/40 p-3 text-center text-sm hover:bg-teal-900/20 cursor-pointer text-teal-400 transition-colors">
@@ -484,7 +508,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
               </button>
             </div>
 
-            {/* 💡 업로드된 법령 파일명 표시 구역 */}
             {uploadedLaws.length > 0 && (
               <div className="mt-4 p-4 bg-black/30 border border-emerald-900/50 rounded-sm">
                 <div className="text-xs text-emerald-400 mb-2 font-bold">✅ 현재 참고 중인 법령 DB:</div>
@@ -505,13 +528,11 @@ export const ExamTab = ({ walletAddress, address }: any) => {
             <p className="text-white/50 text-xs mb-4">문제지 파일과 정답지 파일을 각각 선택하여 하나의 세트로 묶어서 올립니다.</p>
 
             <div className="flex flex-col md:flex-row gap-4">
-              {/* 문제 파일 */}
               <label className="flex-1 border border-teal-900/40 p-3 text-center text-sm hover:bg-teal-900/20 cursor-pointer text-teal-400 transition-colors">
                 <input ref={examInputRef} type="file" accept=".pdf,.txt" onChange={e => setExamFile(e.target.files?.[0] || null)} className="hidden"/>
                 <span className="font-bold">Q.</span> {examFile ? `📂 ${examFile.name}` : '문제지 파일 선택 (필수)'}
               </label>
 
-              {/* 정답 파일 */}
               <label className="flex-1 border border-emerald-900/40 p-3 text-center text-sm hover:bg-emerald-900/20 cursor-pointer text-emerald-400 transition-colors">
                 <input ref={answerInputRef} type="file" accept=".pdf,.txt" onChange={e => setAnswerFile(e.target.files?.[0] || null)} className="hidden"/>
                 <span className="font-bold">A.</span> {answerFile ? `📂 ${answerFile.name}` : '정답/해설지 파일 선택 (선택)'}
@@ -573,7 +594,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                       <div className="mt-4 pt-4 border-t border-teal-900/50 animate-in fade-in slide-in-from-top-2">
                         <div className="text-teal-400 font-bold text-sm mb-4">정답: {exam.answer}</div>
                         
-                        {/* 💡 장기 기억 (사고 과정 및 참고 법령) 표시 영역 */}
                         {exam.search_process && (
                           <div className="mb-4 p-4 bg-black/40 border-l-2 border-indigo-500 rounded-sm">
                             <div className="text-indigo-400 font-bold text-xs mb-2">🧠 AI 장기기억 (사고 과정)</div>
