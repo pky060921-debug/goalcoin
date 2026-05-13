@@ -102,7 +102,7 @@ def task_status():
     return jsonify({"status": "not_found"}), 404
 
 # ==========================================
-# 🛑 [신규 기능 1] 법령 기반 지능형 해설 창작 기능 탑재 (upload_exam)
+# 💡 [신규 기능 1] 법령 기반 지능형 해설 창작 (RAG)
 # ==========================================
 @api_bp.route('/upload-exam', methods=['POST'])
 def upload_exam():
@@ -145,7 +145,7 @@ def upload_exam():
                 아래 [참고 법령]을 완벽하게 숙지하세요.
                 사용자가 업로드한 [시험지 텍스트]에는 '문제'와 '정답'이 포함되어 있습니다.
                 문제를 분석하고 정답을 확인한 뒤, 왜 그것이 정답인지 [참고 법령]의 구체적인 조항을 근거로 아주 상세하고 명확한 [해설]을 직접 작성해 주세요.
-
+                
                 [참고 법령 DB]
                 {law_context[:35000]}
 
@@ -180,7 +180,7 @@ def upload_exam():
         return jsonify({"error": "요청 실패"}), 500
 
 # ==========================================
-# 🛑 [신규 기능 2] 모의고사 개별 삭제 (delete-exam)
+# 💡 [신규 기능 2] 모의고사 개별 삭제 (delete-exam)
 # ==========================================
 @api_bp.route('/delete-exam', methods=['POST'])
 def delete_exam():
@@ -354,7 +354,8 @@ def generate_styles():
     article_text = data.get('article_text', '')
     if not article_text: return jsonify({"error": "법령 텍스트가 없습니다."}), 400
         
-    prompt = f"""당신은 승진시험 최고 출제위원장입니다. 아래 [법령 조문]을 바탕으로 서로 다른 10가지 스타일의 4지 선다 문제를 창작하세요.
+    prompt = f"""당신은 승진시험 최고 출제위원장입니다.
+아래 [법령 조문]을 바탕으로 서로 다른 10가지 스타일의 4지 선다 문제를 창작하세요.
 [10가지 필수 출제 스타일]
 1.단순목록형 2.NCS상황형 3.계산기한형 4.박스조합형 5.단서예외형 6.주체오답형 7.OX판별형 8.괄호형 9.취지추론형 10.융합형
 
@@ -409,7 +410,7 @@ def upload_law():
                 cursor = conn.cursor()
                 for cat in categories:
                     cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
-                                   (wallet_address, cat['title'], cat['content'], cat.get('folder_name', custom_folder)))
+                                  (wallet_address, cat['title'], cat['content'], cat.get('folder_name', custom_folder)))
                 conn.commit()
                 conn.close()
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": "법령 아카이브 등록 성공"})
