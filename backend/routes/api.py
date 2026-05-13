@@ -26,9 +26,6 @@ except ImportError:
 
 api_bp = Blueprint('api', __name__)
 
-# ==========================================
-# 💡 제미나이 무한 동력 & 우회(Fallback) 엔진
-# ==========================================
 current_api_key_index = 0
 
 def generate_gemini_json(prompt, temperature=0.1):
@@ -54,18 +51,18 @@ def generate_gemini_json(prompt, temperature=0.1):
         except Exception as e:
             error_msg = str(e).lower()
             if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
-                print(f"⚠️ [API 1차 진단] API 키 {current_api_key_index} 한도 초과! 다음 키로 전환합니다.", file=sys.stderr, flush=True)
+                print(f"⚠️ [API 진단] API 키 {current_api_key_index} 한도 초과! 다음 키로 전환합니다.", file=sys.stderr, flush=True)
                 current_api_key_index = (current_api_key_index + 1) % len(GEMINI_API_KEYS)
             elif "503" in error_msg or "unavailable" in error_msg or "high demand" in error_msg:
-                print(f"⚠️ [API 1차 진단] 구글 서버({current_model}) 폭주(503). 1초 대기 후 우회합니다...", file=sys.stderr, flush=True)
+                print(f"⚠️ [API 진단] 구글 서버({current_model}) 폭주(503). 우회합니다...", file=sys.stderr, flush=True)
                 time.sleep(1)
             else:
                 if attempt == max_retries - 1:
-                    print(f"❌ [API 치명적 진단] 제미나이 최종 실패 내역:\n{traceback.format_exc()}", file=sys.stderr, flush=True)
+                    print(f"❌ [API 치명적 진단] 제미나이 최종 실패:\n{traceback.format_exc()}", file=sys.stderr, flush=True)
                     raise e
                 time.sleep(1)
                 
-    raise Exception("🚨 구글 서버 불안정 또는 모든 API 키 한도 초과입니다. 잠시 후 시도해주세요.")
+    raise Exception("🚨 구글 서버 불안정 또는 모든 API 키 한도 초과입니다.")
 
 def init_golden_db():
     try:
@@ -124,9 +121,7 @@ def task_status():
         return jsonify(TASK_STATUS[task_id])
     return jsonify({"status": "not_found"}), 404
 
-# ==========================================
-# 💡 대기열(Pending)에서 해설 자동생성 (장기기억 RAG)
-# ==========================================
+# 💡 [핵심 수정] 환각 차단 및 대화형 학습 유도 프롬프트
 @api_bp.route('/generate-rag-from-pending', methods=['POST'])
 def generate_rag_from_pending():
     try:
@@ -146,7 +141,6 @@ def generate_rag_from_pending():
         chunks = json.loads(row[1])
         raw_text = "\n\n".join(chunks)
 
-        # 💡 [핵심] folder_name(파일명)과 title(조항명)을 모두 가져와서 정확하게 매핑
         cursor.execute("SELECT folder_name, title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
         laws = cursor.fetchall()
         conn.close()
@@ -155,19 +149,21 @@ def generate_rag_from_pending():
         if laws:
             law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
 
-        print("\n=================================================", file=sys.stderr, flush=True)
-        print(f"🔍 [RAG 시스템 가동] 모의고사 '{filename}' 해설 생성 시작!", file=sys.stderr, flush=True)
-        print(f"🔍 DB에서 불러온 참고 조항 개수: {len(laws)}개", file=sys.stderr, flush=True)
-        print("=================================================\n", file=sys.stderr, flush=True)
-
         task_id = str(uuid.uuid4())
-        TASK_STATUS[task_id] = {"status": "running", "progress": 20, "message": "AI가 대기열의 문제를 법령과 대조하여 분석 중..."}
+        TASK_STATUS[task_id] = {"status": "running", "progress": 20, "message": "AI가 문제를 법령과 대조하여 분석 중..."}
 
         def process_rag_pending():
             try:
-                prompt = f'''당신은 승진시험 최고 출제위원이자 완벽한 해설가입니다.
-                아래 [참고 자료 DB(법령 및 정관)]를 숙지하고, 사용자의 [시험지 텍스트(문제+정답)]를 분석하세요.
-                정답의 근거가 되는 법령이나 정관을 찾고, 그 사고 과정(장기기억용)과 완벽한 해설을 분리하여 작성하세요.
+                prompt = f'''당신은 승진시험 출제위원이자 보조 학습 AI입니다.
+                아래 [참고 자료 DB(법령 및 정관)]를 철저히 검색하여 사용자의 [시험지 텍스트]를 분석하세요.
+
+                [절대 규칙: 환각(Hallucination) 엄격 금지]
+                1. 오직 제공된 [참고 자료 DB] 안의 텍스트만 근거로 삼으세요. 외부 인터넷 지식이나 당신의 사전 지식은 절대 사용하지 마세요.
+                2. 만약 DB에 '제1조'라는 조항 이름만 있고 실제 내용이 비어있거나, 해당 문제와 관련된 규정을 아예 찾을 수 없다면 억지로 정답을 맞히려고 지어내지 마십시오.
+                3. 내용이 비어있거나 모를 경우, 아래와 같이 작성하여 사용자에게 정답을 가르쳐달라고 정중히 대화를 시도하세요.
+                   - answer: "확인 필요"
+                   - explanation: "현재 업로드된 자료에 해당 조항의 세부 내용이 누락되어 있습니다. 이 내용이 몇 조에 있는지, 혹은 정답이 무엇인지 제게 직접 수정하여 가르쳐주시면 골든 DB에 완벽히 장기기억해 두겠습니다!"
+                   - search_process: "DB를 검색했으나 관련 조항의 세부 내용이 비어있어 판단을 보류했습니다."
 
                 [참고 자료 DB]
                 {law_context[:35000]}
@@ -178,10 +174,10 @@ def generate_rag_from_pending():
                 [출력 지시사항] 반드시 JSON 배열 형식으로만 출력하세요.
                 [{{ 
                     "question": "문제 내용 및 보기 전체", 
-                    "answer": "정답", 
-                    "explanation": "사용자에게 보여줄 최종 해설",
-                    "search_process": "이 정답을 도출하기 위해 어떤 문서의 몇 조 몇 항을 찾았고 어떻게 판단했는지 논리적 사고 과정을 상세히 기록하세요.",
-                    "referenced_laws": "참고한 문서명과 조항 (예: 정관.pdf - 제12조)"
+                    "answer": "정답 번호 (또는 '확인 필요')", 
+                    "explanation": "사용자에게 보여줄 해설 (또는 대화형 질문)",
+                    "search_process": "AI의 논리적 사고 과정",
+                    "referenced_laws": "참고한 문서명과 조항"
                 }}]'''
 
                 response_text = generate_gemini_json(prompt)
@@ -202,14 +198,14 @@ def generate_rag_from_pending():
 
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"{len(exam_data)}개의 문항 분석 완료."})
             except Exception as e:
-                print(f"\n[🔥 지능형 해설 자동생성 스레드 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+                print(f"\n[🔥 지능형 해설 스레드 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
                 TASK_STATUS[task_id].update({"status": "error", "message": str(e)})
 
         threading.Thread(target=process_rag_pending).start()
         return jsonify({"task_id": task_id, "message": "분석 시작"})
 
     except Exception as e:
-        print(f"\n[🔥 라우터 진입 에러 - /generate-rag-from-pending]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        print(f"\n[🔥 라우터 진입 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/upload-exam', methods=['POST'])
@@ -242,14 +238,16 @@ def upload_exam():
 
                 law_context = "등록된 참고 자료가 없습니다."
                 if laws: law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
+                
+                prompt = f'''당신은 승진시험 출제위원이자 보조 학습 AI입니다.
+                아래 [참고 자료 DB(법령 및 정관)]를 철저히 검색하여 사용자의 [시험지 텍스트]를 분석하세요.
 
-                print("\n=================================================", file=sys.stderr, flush=True)
-                print(f"🔍 [RAG 시스템 가동] 다이렉트 업로드 해설 생성 시작!", file=sys.stderr, flush=True)
-                print("=================================================\n", file=sys.stderr, flush=True)
-                
-                prompt = f'''당신은 승진시험 최고 출제위원이자 AI 해설가입니다.
-                아래 [시험지 텍스트(문제+정답)]를 분석하고, [참고 자료 DB]를 대조하여 상세 해설과 당신의 사고 과정을 함께 기록하세요.
-                
+                [절대 규칙: 환각(Hallucination) 엄격 금지]
+                1. 오직 제공된 [참고 자료 DB] 안의 텍스트만 근거로 삼으세요. 외부 지식은 절대 사용하지 마세요.
+                2. 내용이 비어있거나 찾을 수 없을 때는 억지로 지어내지 말고, 아래처럼 작성하여 사용자에게 가르쳐달라고 요청하세요.
+                   - answer: "확인 필요"
+                   - explanation: "현재 업로드된 자료에 해당 내용이 누락되어 판단할 수 없습니다. 빈칸에 정답을 적어 제게 가르쳐주시면 골든 DB에 영구적으로 기억해 두겠습니다!"
+
                 [참고 자료 DB]
                 {law_context[:35000]}
 
@@ -259,10 +257,10 @@ def upload_exam():
                 [출력 지시사항] 반드시 JSON 배열 형식으로만 출력하세요.
                 [{{ 
                     "question": "문제 내용 및 보기 전체", 
-                    "answer": "정답", 
-                    "explanation": "근거에 기반한 사용자용 해설",
-                    "search_process": "어떤 조항을 찾고 논리적으로 어떻게 도출했는지 AI의 사고과정 (장기기억)",
-                    "referenced_laws": "참고 근거명 (예: 정관.pdf - 제12조)"
+                    "answer": "정답 번호 (또는 '확인 필요')", 
+                    "explanation": "해설 또는 대화형 요청 문구",
+                    "search_process": "AI의 논리적 사고 과정",
+                    "referenced_laws": "참고 근거명"
                 }}]'''
                 
                 response_text = generate_gemini_json(prompt)
@@ -280,13 +278,11 @@ def upload_exam():
                 conn.close()
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"{len(exam_data)}개의 문항 저장됨."})
             except Exception as e:
-                print(f"\n[🔥 직접 모의고사 파싱 스레드 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
-                TASK_STATUS[task_id].update({"status": "error", "message": f"모의고사 파싱 실패: {str(e)}"})
+                TASK_STATUS[task_id].update({"status": "error", "message": f"파싱 실패: {str(e)}"})
                 
         threading.Thread(target=process_exam).start()
         return jsonify({"task_id": task_id, "message": "모의고사 처리 시작"})
     except Exception as e:
-        print(f"\n[🔥 라우터 진입 에러 - /upload-exam]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "요청 실패"}), 500
 
 @api_bp.route('/delete-exam', methods=['POST'])
@@ -305,7 +301,6 @@ def delete_exam():
         conn.close()
         return jsonify({"message": "해당 문제가 삭제되었습니다."})
     except Exception as e:
-        print(f"\n[🔥 골든 DB 삭제 에러 - /delete-exam]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/delete-pending-exam', methods=['POST'])
@@ -323,7 +318,6 @@ def delete_pending_exam():
         conn.close()
         return jsonify({"message": "대기열에서 삭제 완료"})
     except Exception as e:
-        print(f"\n[🔥 대기열 삭제 에러 - /delete-pending-exam]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/upload-exam-coop', methods=['POST'])
@@ -356,7 +350,6 @@ def upload_exam_coop():
             
         return jsonify({"message": "대기열 DB 저장 완료"})
     except Exception as e:
-        print(f"\n[🔥 합동 검수 업로드 에러 - /upload-exam-coop]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/get-pending-exams', methods=['GET'])
@@ -370,7 +363,6 @@ def get_pending_exams():
         conn.close()
         return jsonify(results)
     except Exception as e:
-        print(f"\n[🔥 펜딩 목록 조회 에러 - /get-pending-exams]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/analyze-chunk', methods=['POST'])
@@ -389,29 +381,28 @@ def analyze_chunk():
         law_context = "등록된 참고 자료가 없습니다."
         if laws: law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
 
-        prompt = f"""당신은 출제위원이자 법령 해설 전문가입니다.
-아래 [시험지 원문]에서 1개의 객관식 문제, 보기, 정답, 해설을 명확히 분리하세요.
-해설을 작성할 때는 반드시 [참고 자료 DB]를 대조하여 명확한 근거를 포함하고, 당신의 사고 과정도 기록하세요.
+        prompt = f"""당신은 출제위원이자 보조 학습 AI입니다.
+        [절대 규칙: 환각(Hallucination) 금지]
+        오직 [참고 자료 DB]만 확인하세요. 내용이 비어있으면 억지로 맞히지 말고 "확인 필요"라고 적고, 사용자에게 가르쳐달라고 질문을 남기세요.
 
-[참고 자료 DB]
-{law_context[:30000]}
+        [참고 자료 DB]
+        {law_context[:30000]}
 
-[시험지 원문]
-{chunk_text}
+        [시험지 원문]
+        {chunk_text}
 
-[출력형식] 반드시 JSON 형식으로만 반환하세요.
-{{
-  "question": "교정된 문제 내용",
-  "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
-  "answer": "정답 번호",
-  "explanation": "참고 근거에 기반한 상세 해설",
-  "search_process": "어떤 조항을 찾고 어떻게 도출했는지 AI의 사고과정 (장기기억)"
-}}"""
+        [출력형식] 반드시 JSON 형식으로만 반환하세요.
+        {{
+          "question": "교정된 문제 내용",
+          "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
+          "answer": "정답 번호 (또는 '확인 필요')",
+          "explanation": "상세 해설 (또는 사용자에게 정답을 요구하는 메시지)",
+          "search_process": "AI의 논리적 사고과정 (장기기억)"
+        }}"""
         response_text = generate_gemini_json(prompt, temperature=0.1)
         result_data = json.loads(response_text)
         return jsonify({"result": result_data})
     except Exception as e:
-        print(f"\n[🔥 문단 분석 에러 - /analyze-chunk]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/save-golden-exam', methods=['POST'])
@@ -431,7 +422,6 @@ def save_golden_exam():
         conn.close()
         return jsonify({"message": "골든 DB 저장 완료!"})
     except Exception as e:
-        print(f"\n[🔥 골든 문제 저장 에러 - /save-golden-exam]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/get-golden-exams', methods=['GET'])
@@ -452,7 +442,6 @@ def get_golden_exams():
         conn.close()
         return jsonify({"exams": exams})
     except Exception as e:
-        print(f"\n[🔥 골든 문제 조회 에러 - /get-golden-exams]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/get-cbt-session', methods=['GET'])
@@ -478,7 +467,6 @@ def get_cbt_session():
         selected = random.sample(problems, min(100, len(problems)))
         return jsonify(selected)
     except Exception as e:
-        print(f"\n[🔥 CBT 세션 조회 에러 - /get-cbt-session]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/generate-styles', methods=['POST'])
@@ -490,27 +478,20 @@ def generate_styles():
             
         prompt = f"""당신은 승진시험 최고 출제위원장입니다.
 아래 [법령 조문]을 바탕으로 서로 다른 10가지 스타일의 4지 선다 문제를 창작하세요.
-[10가지 필수 출제 스타일]
-1.단순목록형 2.NCS상황형 3.계산기한형 4.박스조합형 5.단서예외형 6.주체오답형 7.OX판별형 8.괄호형 9.취지추론형 10.융합형
-
-[출력 지시사항] 반드시 JSON 배열 형식으로 10개를 출력하세요.
-[{{ "style": "스타일 이름", "question": "문제 내용", "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"], "answer": "숫자", "explanation": "해설" }}]
-
+[{{ "style": "스타일", "question": "문제 내용", "options": ["1. 보기"], "answer": "숫자", "explanation": "해설" }}]
 [법령 조문]\n{article_text}\n"""
         response_text = generate_gemini_json(prompt, temperature=0.5)
         result_data = json.loads(response_text)
         if isinstance(result_data, dict): result_data = result_data.get('problems', [result_data])
         return jsonify({"samples": result_data})
     except Exception as e:
-        print(f"\n[🔥 스타일 생성 에러 - /generate-styles]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
-# 💡 [핵심] 법령 업로드 시 파일명과 조항명을 명확히 분리 저장
 @api_bp.route('/upload-pdf', methods=['POST'])
 def upload_law():
     try:
         wallet_address = request.form.get('wallet_address')
-        custom_folder = request.form.get('custom_folder') # 파일명이 넘어옴
+        custom_folder = request.form.get('custom_folder') 
         file = request.files.get('file')
         if not file: return jsonify({"error": "업로드된 파일이 없습니다."}), 400
         
@@ -527,19 +508,15 @@ def upload_law():
                     pdf_document = fitz.open(stream=raw_bytes, filetype="pdf")
                     text = "".join([page.get_text("text") for page in pdf_document])
                     pdf_document.close()
-                elif filename.endswith('.html') or filename.endswith('.htm'):
-                    text = raw_bytes.decode('utf-8', errors='ignore')
                 else:
                     text = raw_bytes.decode('utf-8', errors='ignore')
 
                 normalized_text = normalize_text(clean_korean_law_text(text))
                 categories = []
-                # 조항을 기준으로 파싱
                 parts = re.split(r'(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)', normalized_text)
                 if parts and len(parts) > 1:
                     if parts[0].strip(): categories.append({"title": "총칙 및 서론", "content": parts[0].strip(), "folder_name": display_name})
                     for i in range(1, len(parts), 2):
-                        # 💡 핵심: title에는 "제 1조..." 조항명이 들어가고, folder_name에는 "정관.pdf"가 들어갑니다.
                         article_title = parts[i].strip()
                         content = parts[i+1].strip() if i+1 < len(parts) else ""
                         categories.append({"title": article_title, "content": content, "folder_name": display_name})
@@ -554,13 +531,11 @@ def upload_law():
                 conn.close()
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": "근거 아카이브 등록 성공"})
             except Exception as e:
-                print(f"\n[🔥 법령 파싱 스레드 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
                 TASK_STATUS[task_id].update({"status": "error", "message": f"분석 실패: {str(e)}"})
                 
         threading.Thread(target=process_law).start()
         return jsonify({"task_id": task_id, "message": "업로드 완료, 백그라운드 처리 시작"})
     except Exception as e: 
-        print(f"\n[🔥 법령 업로드 에러 - /upload-pdf]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "전송 실패"}), 500
 
 @api_bp.route('/recommend-blank', methods=['POST'])
@@ -592,13 +567,11 @@ def recommend_blank():
                 
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "result": result, "message": "AI 추천 완료!"})
             except Exception as e:
-                print(f"\n[🔥 빈칸 추천 스레드 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
                 TASK_STATUS[task_id].update({"status": "error", "message": f"AI 연산 실패: {str(e)}"})
                 
         threading.Thread(target=process_recommend).start()
         return jsonify({"task_id": task_id, "message": "AI 추천 작업 시작"})
     except Exception as e:
-        print(f"\n[🔥 빈칸 추천 라우터 에러 - /recommend-blank]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "요청 실패", "details": str(e)}), 500
 
 @api_bp.route('/get-categories')
@@ -607,13 +580,11 @@ def get_categories():
         wallet_address = request.args.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
-        # folder_name도 꼭 함께 반환
         cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ?", (wallet_address,))
         cats = [{"id": r[0], "title": r[1], "content": r[2], "folder_name": r[3]} for r in cursor.fetchall()]
         conn.close()
         return jsonify({"categories": cats})
     except Exception as e:
-        print(f"\n[🔥 카테고리 조회 에러 - /get-categories]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "조회 실패"}), 500
 
 @api_bp.route('/save-card', methods=['POST'])
@@ -633,7 +604,6 @@ def save_card():
         conn.close()
         return jsonify({"message": "카드 제작 완료"}), 201
     except Exception as e:
-        print(f"\n[🔥 카드 저장 에러 - /save-card]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "저장 실패"}), 500
 
 @api_bp.route('/my-cards')
@@ -657,7 +627,6 @@ def get_my_cards():
         conn.close()
         return jsonify({"cards": cards})
     except Exception as e:
-        print(f"\n[🔥 카드 조회 에러 - /my-cards]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "조회 실패"}), 500
 
 @api_bp.route('/sync-batch', methods=['POST'])
@@ -699,7 +668,6 @@ def sync_batch():
         conn.close()
         return jsonify({"message": f"일괄 동기화 성공 (메모:{len(memos)}건, 학습:{len(answers)}건)"}), 200
     except Exception as e:
-        print(f"\n[🔥 동기화 에러 - /sync-batch]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "배치 동기화 실패"}), 500
 
 @api_bp.route('/update-card-memo', methods=['POST'])
@@ -717,7 +685,6 @@ def update_card_memo():
         conn.close()
         return jsonify({"message": "메모 및 통계 업데이트 완료"}), 200
     except Exception as e:
-        print(f"\n[🔥 메모 업데이트 에러 - /update-card-memo]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "메모 업데이트 실패"}), 500
 
 @api_bp.route('/submit-answer', methods=['POST'])
@@ -750,7 +717,6 @@ def submit_answer():
         conn.close()
         return jsonify({"message": msg})
     except Exception as e:
-        print(f"\n[🔥 답안 제출 에러 - /submit-answer]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "제출 처리 실패"}), 500
 
 @api_bp.route('/delete-category', methods=['POST'])
@@ -763,7 +729,6 @@ def delete_category():
         conn.close()
         return jsonify({"message": "삭제되었습니다."})
     except Exception as e:
-        print(f"\n[🔥 카테고리 삭제 에러 - /delete-category]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "삭제 실패"}), 500
 
 @api_bp.route('/delete-card', methods=['POST'])
@@ -776,7 +741,6 @@ def delete_card():
         conn.close()
         return jsonify({"message": "삭제되었습니다."})
     except Exception as e:
-        print(f"\n[🔥 카드 삭제 에러 - /delete-card]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "삭제 실패"}), 500
 
 @api_bp.route('/delete-all', methods=['POST'])
@@ -790,7 +754,6 @@ def delete_all():
         conn.close()
         return jsonify({"message": "초기화 성공"})
     except Exception as e:
-        print(f"\n[🔥 전체 초기화 에러 - /delete-all]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "초기화 실패"}), 500
 
 @api_bp.route('/split-category', methods=['POST'])
@@ -814,7 +777,6 @@ def split_category():
         conn.close()
         return jsonify({"message": "본문 분할 완료"})
     except Exception as e:
-        print(f"\n[🔥 카테고리 분할 에러 - /split-category]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "분할 실패"}), 500
 
 @api_bp.route('/get-all-exams')
@@ -828,5 +790,4 @@ def get_all_exams():
         conn.close()
         return jsonify({"exams": exams})
     except Exception as e:
-        print(f"\n[🔥 전체 시험 조회 에러 - /get-all-exams]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "조회 실패"}), 500
