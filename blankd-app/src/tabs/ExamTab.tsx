@@ -9,6 +9,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [mode, setMode] = useState<'list' | 'coop' | 'cbt' | 'result'>('list');
   const [examFile, setExamFile] = useState<File | null>(null);
   const [answerFile, setAnswerFile] = useState<File | null>(null);
+  
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [ruleFile, setRuleFile] = useState<File | null>(null);
   
@@ -18,9 +19,8 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [rawLawsData, setRawLawsData] = useState<any[]>([]); 
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
   
-  // 💡 투 트랙 뷰어를 위한 2단계 상태 관리
-  const [viewingFile, setViewingFile] = useState<string | null>(null); // 어떤 파일을 보고 있는지
-  const [viewingArticle, setViewingArticle] = useState<{title: string, content: string, id: number} | null>(null); // 어떤 조항을 클릭했는지
+  const [viewingFile, setViewingFile] = useState<string | null>(null); 
+  const [viewingArticle, setViewingArticle] = useState<{title: string, content: string, id: number} | null>(null); 
 
   const lawInputRef = useRef<HTMLInputElement>(null);
   const ruleInputRef = useRef<HTMLInputElement>(null);
@@ -55,7 +55,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       
       if (catsRes.categories) {
         setRawLawsData(catsRes.categories);
-        // 백엔드에서 파일명은 folder_name에 저장되도록 수정했습니다.
         const uniqueLawNames = Array.from(new Set(catsRes.categories.map((c: any) => c.folder_name)));
         setUploadedLaws(uniqueLawNames as string[]);
       }
@@ -75,7 +74,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('wallet_address', userAddress);
-    formData.append('custom_folder', file.name); // 💡 여기서 파일명이 백엔드로 넘어갑니다
+    formData.append('custom_folder', file.name);
 
     try {
       const res = await fetch(`${BASE_URL}/upload-pdf`, { method: 'POST', body: formData });
@@ -164,7 +163,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   };
 
   const handleGenerateRAGFromPending = async (id: number) => {
-    if (!confirm("법령을 참고하여 이 문제들의 해설을 자동 생성하시겠습니까?")) return;
+    if (!confirm("법령을 참고하여 이 문제들의 해설을 자동 생성하시겠습니까?\n내용이 비어있을 경우 AI가 학습을 요청할 수 있습니다.")) return;
     setIsAnalyzing(true);
     try {
       const res = await fetch(`${BASE_URL}/generate-rag-from-pending`, {
@@ -183,7 +182,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                clearInterval(timer); 
                setIsAnalyzing(false); 
                fetchData();
-               alert("✨ 해설 자동 생성이 완료되어 골든 DB에 저장되었습니다!");
+               alert("✨ 해설 자동 생성이 완료되어 골든 DB에 저장되었습니다!\n목록에서 결과를 확인하고 필요시 직접 수정/학습시켜 주세요.");
              } else if (sData.status === 'error') {
                clearInterval(timer); 
                setIsAnalyzing(false); 
@@ -291,7 +290,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
             body: JSON.stringify({ id: currentExamId, wallet_address: userAddress })
           });
         }
-        alert("해당 모의고사의 모든 검수가 완료되었습니다!");
+        alert("해당 모의고사의 모든 검수 및 AI 학습이 완료되었습니다!");
         fetchData(); 
         setMode('list');
       }
@@ -328,7 +327,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     return (
       <div className="flex flex-col h-[85vh] space-y-4 animate-in fade-in pb-10">
         <div className="flex justify-between items-center pb-4 border-b border-white/10">
-          <h2 className="text-xl text-teal-400 font-serif">🤝 AI 합동 검수소 [{filename}]</h2>
+          <h2 className="text-xl text-teal-400 font-serif">🤝 AI 합동 검수 및 학습소 [{filename}]</h2>
           <div className="flex gap-4 items-center">
             <span className="text-white/40 text-sm font-bold bg-teal-950/50 px-3 py-1 rounded-sm border border-teal-900/50">
               진행도: {chunkIndex + 1} / {chunks.length}
@@ -348,7 +347,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                 disabled={isAnalyzing}
                 className="py-2 px-4 bg-teal-600 text-white text-xs font-bold rounded-sm shadow-md hover:bg-teal-500 transition-all"
               >
-                {isAnalyzing ? "AI 분석 중..." : "🚀 AI에게 문제/정답/해설 분리 지시"}
+                {isAnalyzing ? "AI 분석 중..." : "🚀 AI에게 분리 및 검색 지시"}
               </button>
             </div>
             <textarea 
@@ -384,29 +383,28 @@ export const ExamTab = ({ walletAddress, address }: any) => {
             {!parsedResult ? (
               <div className="h-full flex flex-col items-center justify-center text-white/30 text-sm space-y-4">
                 <div className="text-4xl">🤖</div>
-                <p>좌측의 원문을 확인하고 [AI에게 분리 지시] 버튼을 눌러주세요.</p>
-                <p>미리 업로드된 근거(법령/정관)를 기반으로 상세 해설이 이곳에 작성됩니다.</p>
+                <p>좌측의 원문을 확인하고 [AI에게 지시] 버튼을 눌러주세요.</p>
+                <p>AI가 모르는 내용이 있다면 이곳에서 직접 가르쳐 주실 수 있습니다.</p>
               </div>
             ) : (
               <div className="flex flex-col h-full animate-in fade-in">
                 <div className="mb-4">
                   <label className="text-sm font-bold text-emerald-400 block mb-2">✅ 4. 정답</label>
-                  <input value={parsedResult.answer || ''} onChange={e => handleEdit('answer', e.target.value)} className="w-full bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 font-black p-3 text-center rounded-sm text-lg" />
+                  <input value={parsedResult.answer || ''} onChange={e => handleEdit('answer', e.target.value)} className={`w-full bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 font-black p-3 text-center rounded-sm text-lg ${parsedResult.answer === '확인 필요' ? 'border-red-500 text-red-400 bg-red-950/30' : ''}`} />
                 </div>
                 
-                {parsedResult.search_process && (
-                  <div className="mb-4 p-3 bg-black/40 border-l-2 border-indigo-500 rounded-sm">
-                    <div className="text-indigo-400 font-bold text-xs mb-1">🧠 AI 사고 과정 (장기 기억)</div>
-                    <div className="text-white/60 text-xs leading-relaxed whitespace-pre-wrap">{parsedResult.search_process}</div>
-                  </div>
-                )}
-
-                <div className="flex flex-col flex-1">
-                  <label className="text-sm font-bold text-emerald-400 block mb-2">💡 5. AI 지능형 해설 (근거 기반)</label>
-                  <textarea value={parsedResult.explanation || ''} onChange={e => handleEdit('explanation', e.target.value)} className="w-full flex-1 min-h-[250px] bg-emerald-950/20 border border-emerald-500/30 text-emerald-100/90 p-4 text-[15px] leading-loose rounded-sm resize-none" />
+                <div className="flex flex-col flex-1 mb-4">
+                  <label className="text-sm font-bold text-emerald-400 block mb-2">💡 5. 해설 및 대화 창 (직접 수정/학습 가능)</label>
+                  <textarea value={parsedResult.explanation || ''} onChange={e => handleEdit('explanation', e.target.value)} className={`w-full flex-1 min-h-[150px] bg-emerald-950/20 border border-emerald-500/30 text-emerald-100/90 p-4 text-[15px] leading-loose rounded-sm resize-none ${parsedResult.answer === '확인 필요' ? 'border-red-500 text-red-100' : ''}`} />
                 </div>
-                <button onClick={approveAndNext} className="w-full mt-6 py-4 bg-emerald-600 text-white font-bold rounded-sm hover:scale-[1.01] hover:bg-emerald-500 transition-all shadow-lg">
-                  ✨ 완벽함! 승인 및 다음 문제로 이동
+
+                <div className="mb-4 flex flex-col">
+                  <label className="text-sm font-bold text-indigo-400 block mb-2">🧠 6. AI 사고 과정 (장기 기억)</label>
+                  <textarea value={parsedResult.search_process || ''} onChange={e => handleEdit('search_process', e.target.value)} className="w-full h-24 bg-indigo-950/20 border border-indigo-500/30 text-indigo-200/80 p-3 text-xs leading-relaxed rounded-sm resize-none" />
+                </div>
+
+                <button onClick={approveAndNext} className="w-full py-4 bg-emerald-600 text-white font-bold rounded-sm hover:scale-[1.01] hover:bg-emerald-500 transition-all shadow-lg">
+                  ✨ 내용 확인 완료! 골든 DB에 영구 저장 (다음으로)
                 </button>
               </div>
             )}
@@ -487,7 +485,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
             <h3 className="text-teal-400 font-bold text-lg mb-2">📥 1. 근거 자료 (법령 및 정관) 업로드</h3>
             
             <div className="flex flex-col xl:flex-row gap-4">
-              {/* 1-1. 법령 업로드 */}
               <div className="flex-1 flex gap-2 items-center">
                 <label className="flex-1 border border-teal-900/40 p-3 text-center text-sm hover:bg-teal-900/20 cursor-pointer text-teal-400 transition-colors">
                   <input ref={lawInputRef} type="file" accept=".pdf,.txt,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/>
@@ -498,7 +495,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                 </button>
               </div>
 
-              {/* 1-2. 정관 업로드 */}
               <div className="flex-1 flex gap-2 items-center">
                 <label className="flex-1 border border-teal-900/40 p-3 text-center text-sm hover:bg-teal-900/20 cursor-pointer text-teal-400 transition-colors">
                   <input ref={ruleInputRef} type="file" accept=".pdf,.txt,.html" onChange={e => setRuleFile(e.target.files?.[0] || null)} className="hidden"/>
@@ -510,7 +506,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
               </div>
             </div>
 
-            {/* 💡 업로드된 법령/정관 리스트 뷰어 트리거 */}
             {uploadedLaws.length > 0 && (
               <div className="mt-4 p-4 bg-black/30 border border-emerald-900/50 rounded-sm">
                 <div className="text-xs text-emerald-400 mb-3 font-bold">✅ 현재 참고 중인 근거 자료 (클릭하여 조항 확인):</div>
@@ -519,7 +514,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                     <button 
                       key={idx} 
                       onClick={() => setViewingFile(name)}
-                      className="px-3 py-2 bg-emerald-950/50 border border-emerald-800 text-emerald-200 text-xs rounded hover:bg-emerald-800 transition-colors"
+                      className="px-3 py-2 bg-emerald-950/50 border border-emerald-800 text-emerald-200 text-xs rounded hover:bg-emerald-800 transition-colors shadow-md"
                     >
                       📄 {name}
                     </button>
@@ -529,7 +524,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
             )}
           </div>
 
-          {/* 2. 모의고사 (문제+정답) 첨부 패널 */}
+          {/* 2. 모의고사 첨부 패널 */}
           <div className="flex flex-col gap-4 p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm">
             <h3 className="text-teal-400 font-bold text-lg mb-2">📥 2. 모의고사 (문제와 정답 한 쌍) 업로드</h3>
             <p className="text-white/50 text-xs mb-4">문제지 파일과 정답지 파일을 각각 선택하여 하나의 세트로 묶어서 올립니다.</p>
@@ -574,7 +569,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                         수동 검수 시작 🚀
                       </button>
                       <button onClick={() => handleGenerateRAGFromPending(exam.id)} className="px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-sm shadow-lg hover:bg-emerald-500 transition-all">
-                        4. 해설 자동생성
+                        4. 해설 자동생성 (추천)
                       </button>
                       <button onClick={() => handleDeletePendingExam(exam.id)} className="px-3 py-2 bg-red-950/40 border border-red-500/30 text-red-400 font-bold text-xs rounded-sm hover:bg-red-900/50 transition-all">
                         🗑️ 삭제
@@ -643,7 +638,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
             </div>
             
             <div className="flex flex-1 overflow-hidden">
-              {/* 왼쪽: 조항 목록 리스트 */}
               <div className="w-1/3 border-r border-teal-500/30 bg-black/40 overflow-y-auto custom-scrollbar p-2 space-y-1">
                 {rawLawsData.filter(l => l.folder_name === viewingFile).map((law, idx) => (
                   <button
@@ -660,7 +654,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                 ))}
               </div>
               
-              {/* 오른쪽: 조항 상세 내용 */}
               <div className="w-2/3 p-6 overflow-y-auto custom-scrollbar bg-black/20 text-white/80 text-[15px] leading-loose whitespace-pre-wrap">
                 {viewingArticle ? (
                   <div className="animate-in fade-in slide-in-from-right-2">
