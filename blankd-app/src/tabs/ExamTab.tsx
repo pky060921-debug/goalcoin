@@ -33,7 +33,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [parsedResult, setParsedResult] = useState<any>(null);
 
-  // 💡 [신규] 사용자가 AI에게 피드백(힌트)을 주는 채팅 텍스트
   const [userFeedback, setUserFeedback] = useState("");
 
   const [isRefUploading, setIsRefUploading] = useState(false);
@@ -69,7 +68,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     fetchData();
   }, [userAddress]);
 
-  // 1. 공통 근거자료 (법령/정관) 업로드 로직
   const handleRefUpload = async (file: File | null, typeLabel: string) => {
     if (!file || !userAddress) return alert(`${typeLabel} 파일을 선택해주세요.`);
     setIsRefUploading(true);
@@ -115,7 +113,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     }
   };
 
-  // 💡 [신규] 법령 파일 개별 삭제 기능
   const handleDeleteLaw = async (folderName: string) => {
     if (!confirm(`[${folderName}] 파일을 삭제하시겠습니까?`)) return;
     try {
@@ -258,10 +255,9 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setChunkIndex(0);
     setMode('coop');
     setParsedResult(null);
-    setUserFeedback(""); // 피드백 초기화
+    setUserFeedback("");
   };
 
-  // 💡 [핵심 수정] 사용자 피드백(힌트)을 포함하여 AI 분석 요청
   const analyzeCurrentChunk = async (isRetry = false) => {
     setIsAnalyzing(true);
     try {
@@ -444,7 +440,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                   <textarea value={parsedResult.search_process || ''} onChange={e => handleEdit('search_process', e.target.value)} className="w-full h-24 bg-indigo-950/20 border border-indigo-500/30 text-indigo-200/80 p-3 text-xs leading-relaxed rounded-sm resize-none" />
                 </div>
 
-                {/* 💡 [신규] AI와 대화하기 (힌트 주기) 영역 */}
                 <div className="mb-4 p-4 bg-indigo-950/30 border border-indigo-500/40 rounded-sm flex flex-col gap-2">
                   <label className="text-sm font-bold text-indigo-300">💬 AI에게 힌트 주기 (자료가 비어있을 때)</label>
                   <div className="flex gap-2">
@@ -569,7 +564,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
               </div>
             </div>
 
-            {/* 💡 업로드된 법령/정관 리스트 + 개별 삭제 버튼 탑재 */}
             {uploadedLaws.length > 0 && (
               <div className="mt-4 p-4 bg-black/30 border border-emerald-900/50 rounded-sm">
                 <div className="text-xs text-emerald-400 mb-3 font-bold">✅ 현재 참고 중인 근거 자료 (클릭하여 조항 확인):</div>
@@ -651,7 +645,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                 ))}
               </div>
             )}
-            {isAnalyzing && <div className="mt-4 text-emerald-400 text-sm font-bold text-center animate-pulse">✨ AI가 분석 중입니다. 터미널의 로그를 주시해주세요...</div>}
+            {isAnalyzing && <div className="mt-4 text-emerald-400 text-sm font-bold text-center animate-pulse">✨ AI가 분석 중입니다. 앱 터미널의 로그를 주시해주세요...</div>}
           </div>
 
           <div className="text-white/60 text-xs border-b border-white/10 pb-2">✅ 검수 완료된 무결점 문제 (골든 DB)</div>
