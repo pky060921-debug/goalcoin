@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
 
-// 💡 서버 URL을 정확히 명시하여 "연결 실패/삭제 실패" 에러 원천 차단
+// 💡 백엔드 정확한 주소 명시 (서버 연결 실패 완벽 차단)
 const BASE_URL = "https://api.blankd.top/api";
 
 export const ExamTab = ({ walletAddress, address }: any) => {
@@ -15,7 +15,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const smartFileInputRef = useRef<HTMLInputElement>(null);
   const [currentExamId, setCurrentExamId] = useState<number | null>(null);
   const [chunks, setChunks] = useState<string[]>([]);
   const [chunkIndex, setChunkIndex] = useState(0);
@@ -25,8 +24,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
   const [isLawUploading, setIsLawUploading] = useState(false);
   const [isExamUploading, setIsExamUploading] = useState(false);
-  const [isSmartUploading, setIsSmartUploading] = useState(false);
-  const [smartUploadStatus, setSmartUploadStatus] = useState("");
 
   const [cbtQuestions, setCbtQuestions] = useState<any[]>([]);
   const [cbtCurrentIndex, setCbtCurrentIndex] = useState(0);
@@ -42,8 +39,8 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       ]);
       setPendingExams(Array.isArray(pending) ? pending : []);
       setGoldenExams(golden.exams || []);
-    } catch (err) {
-      console.error("데이터 로딩 실패", err);
+    } catch (err: any) {
+      console.error("[데이터 로드 에러]", err);
     }
   };
 
@@ -51,41 +48,53 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     fetchData();
   }, [userAddress]);
 
-  // 1. 법령규정첨부 - 업로드 로직 (BASE_URL 적용)
+  // 1. 법령규정첨부 - 업로드 로직
   const handleLawUpload = async () => {
     if (!lawFile || !userAddress) return alert("법령 파일을 선택해주세요.");
     setIsLawUploading(true);
+    
     const formData = new FormData();
     formData.append('file', lawFile);
     formData.append('wallet_address', userAddress);
     formData.append('custom_folder', '자동 업로드 법령');
 
     try {
+      console.log(`[법령 업로드 시도] URL: ${BASE_URL}/upload-pdf`);
       const res = await fetch(`${BASE_URL}/upload-pdf`, { method: 'POST', body: formData });
       const data = await res.json();
+      
       if (res.ok) {
          const taskId = data.task_id;
          const timer = setInterval(async () => {
-           const sRes = await fetch(`${BASE_URL}/task-status?task_id=${taskId}`);
-           const sData = await sRes.json();
-           if (sData.status === 'completed') {
-             clearInterval(timer); 
-             setIsLawUploading(false); 
-             setLawFile(null);
-             alert("법령 업로드가 완료되었습니다!");
-           } else if (sData.status === 'error') {
-             clearInterval(timer); 
-             setIsLawUploading(false); 
-             alert("법령 분석 오류: " + sData.message);
+           try {
+             const sRes = await fetch(`${BASE_URL}/task-status?task_id=${taskId}`);
+             const sData = await sRes.json();
+             if (sData.status === 'completed') {
+               clearInterval(timer); 
+               setIsLawUploading(false); 
+               setLawFile(null);
+               console.log("[법령 업로드 완료]");
+               alert("법령 업로드가 완료되었습니다!");
+             } else if (sData.status === 'error') {
+               clearInterval(timer); 
+               setIsLawUploading(false); 
+               console.error("[백엔드 법령 처리 에러]", sData.message);
+               alert("법령 분석 오류: " + sData.message);
+             }
+           } catch(err) {
+             console.error("[상태 체크 통신 에러]", err);
            }
          }, 2000);
       } else {
          setIsLawUploading(false);
+         console.error("[법령 업로드 백엔드 거절]", data.error);
          alert("업로드 실패: " + data.error);
       }
-    } catch(e) {
+    } catch(e: any) {
       setIsLawUploading(false);
-      alert("서버 연결에 실패했습니다.");
+      // 💡 [핵심] 앱 내 터미널(console.error)로 상세 에러 전송
+      console.error(`[법령 업로드 통신 에러 (Network Error)] 상세 내역:`, e.message || e);
+      alert(`서버 연결 실패. 앱 터미널을 확인하세요.\n사유: ${e.message}`);
     }
   };
 
@@ -95,20 +104,23 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setIsExamUploading(true);
     
     try {
+      console.log("[모의고사 업로드 시도]");
       await api.uploadExamCoop(examFile, userAddress);
       setExamFile(null);
       alert("파일이 대기소에 안전하게 저장되었습니다!");
       fetchData();
     } catch (err: any) {
+      console.error(`[모의고사 업로드 에러] 상세 내역:`, err.message || err);
       alert(`업로드 실패: ${err.message}`);
     }
     setIsExamUploading(false);
   };
 
-  // 3. 대기열 모의고사 삭제 로직 (BASE_URL 적용)
+  // 3. 대기열 모의고사 삭제
   const handleDeletePendingExam = async (id: number) => {
     if (!confirm("이 대기열 모의고사를 삭제하시겠습니까?")) return;
     try {
+      console.log(`[대기열 삭제 시도] ID: ${id}`);
       const res = await fetch(`${BASE_URL}/delete-pending-exam`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -119,18 +131,21 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         fetchData();
       } else {
         const data = await res.json();
-        alert("삭제 실패: " + (data.error || "알 수 없는 오류"));
+        console.error("[대기열 삭제 백엔드 거절]", data.error);
+        alert("삭제 실패: " + data.error);
       }
-    } catch (e) {
-      alert("삭제 중 서버 통신 오류가 발생했습니다.");
+    } catch (e: any) {
+      console.error(`[대기열 삭제 통신 에러] 상세 내역:`, e.message || e);
+      alert("삭제 중 서버 오류가 발생했습니다.");
     }
   };
 
-  // 4. 대기열에서 해설 자동생성 (BASE_URL 적용)
+  // 4. 대기열에서 해설 자동생성 (RAG)
   const handleGenerateRAGFromPending = async (id: number) => {
     if (!confirm("법령을 참고하여 이 문제들의 해설을 자동 생성하시겠습니까?")) return;
     setIsAnalyzing(true);
     try {
+      console.log(`[RAG 자동생성 시도] ID: ${id}`);
       const res = await fetch(`${BASE_URL}/generate-rag-from-pending`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -140,47 +155,57 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       if (res.ok) {
          const taskId = data.task_id;
          const timer = setInterval(async () => {
-           const sRes = await fetch(`${BASE_URL}/task-status?task_id=${taskId}`);
-           const sData = await sRes.json();
-           if (sData.status === 'completed') {
-             clearInterval(timer); 
-             setIsAnalyzing(false); 
-             fetchData();
-             alert("✨ 해설 자동 생성이 완료되어 골든 DB에 저장되었습니다!");
-           } else if (sData.status === 'error') {
-             clearInterval(timer); 
-             setIsAnalyzing(false); 
-             alert("분석 오류: " + sData.message);
+           try {
+             const sRes = await fetch(`${BASE_URL}/task-status?task_id=${taskId}`);
+             const sData = await sRes.json();
+             if (sData.status === 'completed') {
+               clearInterval(timer); 
+               setIsAnalyzing(false); 
+               fetchData();
+               console.log("[RAG 자동생성 완료]");
+               alert("✨ 해설 자동 생성이 완료되어 골든 DB에 저장되었습니다!");
+             } else if (sData.status === 'error') {
+               clearInterval(timer); 
+               setIsAnalyzing(false); 
+               console.error("[RAG 백엔드 처리 에러]", sData.message);
+               alert("분석 오류: " + sData.message);
+             }
+           } catch(err) {
+             console.error("[RAG 상태 체크 에러]", err);
            }
          }, 2000);
       } else {
          setIsAnalyzing(false); 
+         console.error("[RAG 요청 백엔드 거절]", data.error);
          alert(data.error);
       }
-    } catch(e) {
+    } catch(e: any) {
       setIsAnalyzing(false); 
-      alert("서버 연결에 실패했습니다.");
+      console.error(`[RAG 통신 에러] 상세 내역:`, e.message || e);
+      alert(`서버 연결 실패. 앱 터미널을 확인하세요.\n사유: ${e.message}`);
     }
   };
 
-  // 무결점 문제(Golden DB) 개별 삭제 (BASE_URL 적용)
   const handleDeleteExam = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
     if (!confirm("이 문제를 영구 삭제하시겠습니까?")) return;
     try {
+      console.log(`[골든DB 삭제 시도] ID: ${id}`);
       const res = await fetch(`${BASE_URL}/delete-exam`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, wallet_address: userAddress })
       });
       if (res.ok) {
-        alert("삭제되었습니다.");
+        alert("삭제가 완료되었습니다.");
         fetchData();
       } else {
         const data = await res.json();
+        console.error("[골든DB 삭제 거절]", data.error);
         alert("삭제 실패: " + data.error);
       }
-    } catch (err) {
+    } catch (err: any) {
+      console.error(`[골든DB 삭제 통신 에러] 상세 내역:`, err.message || err);
       alert("삭제 실패: 서버 통신 오류");
     }
   };
@@ -199,7 +224,8 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     try {
       const res = await api.analyzeChunk(chunks[chunkIndex]);
       setParsedResult(res.result);
-    } catch (err) {
+    } catch (err: any) {
+      console.error(`[문단 분석 통신 에러] 상세 내역:`, err.message || err);
       alert("AI 분석에 실패했습니다.");
     }
     setIsAnalyzing(false);
@@ -217,29 +243,33 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
   const approveAndNext = async () => {
     if (!parsedResult?.question || !parsedResult?.answer) return alert("데이터가 불완전합니다.");
-    await api.saveGoldenExam({
-      wallet_address: userAddress,
-      title: filename,
-      question: parsedResult.question,
-      options: parsedResult.options,
-      answer: parsedResult.answer,
-      explanation: parsedResult.explanation
-    });
+    try {
+      await api.saveGoldenExam({
+        wallet_address: userAddress,
+        title: filename,
+        question: parsedResult.question,
+        options: parsedResult.options,
+        answer: parsedResult.answer,
+        explanation: parsedResult.explanation
+      });
 
-    if (chunkIndex + 1 < chunks.length) {
-      setChunkIndex(chunkIndex + 1);
-      setParsedResult(null);
-    } else {
-      if (currentExamId && userAddress) {
-        await fetch(`${BASE_URL}/delete-pending-exam`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: currentExamId, wallet_address: userAddress })
-        });
+      if (chunkIndex + 1 < chunks.length) {
+        setChunkIndex(chunkIndex + 1);
+        setParsedResult(null);
+      } else {
+        if (currentExamId && userAddress) {
+          await fetch(`${BASE_URL}/delete-pending-exam`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: currentExamId, wallet_address: userAddress })
+          });
+        }
+        alert("해당 모의고사의 모든 검수가 완료되었습니다!");
+        fetchData(); 
+        setMode('list');
       }
-      alert("해당 모의고사의 모든 검수가 완료되었습니다!");
-      fetchData(); 
-      setMode('list');
+    } catch(err: any) {
+      console.error(`[승인 및 저장 에러] 상세 내역:`, err.message || err);
     }
   };
 
@@ -252,6 +282,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       setUserAnswers({});
       setMode('cbt');
     } catch (e: any) {
+      console.error(`[CBT 시작 에러] 상세 내역:`, e.message || e);
       alert(e.message);
     }
   };
@@ -409,7 +440,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   return (
     <div className="space-y-8 animate-in fade-in pb-20">
       
-      {/* 원본 탭 메뉴 */}
       <div className="flex gap-4 border-b border-white/10 pb-4">
         <button onClick={() => setMode('list')} className={`px-4 py-2 ${mode === 'list' ? 'bg-teal-600 text-white' : 'text-teal-400'}`}>목록/업로드</button>
         <button onClick={() => setMode('coop')} className={`px-4 py-2 ${mode === 'coop' ? 'bg-teal-600 text-white' : 'text-teal-400'}`}>협동 검수</button>
@@ -476,7 +506,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                 ))}
               </div>
             )}
-            {isAnalyzing && <div className="mt-4 text-emerald-400 text-sm font-bold text-center animate-pulse">✨ AI가 분석 중입니다. 터미널의 에러 로그를 주시해주세요...</div>}
+            {isAnalyzing && <div className="mt-4 text-emerald-400 text-sm font-bold text-center animate-pulse">✨ AI가 분석 중입니다. 앱 터미널의 로그를 주시해주세요...</div>}
           </div>
 
           <div className="text-white/60 text-xs border-b border-white/10 pb-2">✅ 검수 완료된 무결점 문제 (골든 DB)</div>
