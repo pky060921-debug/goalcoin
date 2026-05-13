@@ -3,16 +3,15 @@ import { api } from '../services/api';
 
 export const ExamTab = ({ walletAddress, address }: any) => {
   const userAddress = walletAddress || address;
-
+  
   const [mode, setMode] = useState<'list' | 'coop' | 'cbt' | 'result'>('list');
   const [examFile, setExamFile] = useState<File | null>(null);
+  const [lawFile, setLawFile] = useState<File | null>(null);
   const [pendingExams, setPendingExams] = useState<Array<{id: number, filename: string, chunks: string[]}>>([]);
-  const [goldenExams, setGoldenExams] = useState<any[]>([]);
+  const [goldenExams, setGoldenExams] = useState<any[]>([]); 
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const smartFileInputRef = useRef<HTMLInputElement>(null); // 신규: 지능형 해설 업로드용 ref
-
   const [currentExamId, setCurrentExamId] = useState<number | null>(null);
   const [chunks, setChunks] = useState<string[]>([]);
   const [chunkIndex, setChunkIndex] = useState(0);
@@ -20,9 +19,8 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [parsedResult, setParsedResult] = useState<any>(null);
 
-  // 신규: 지능형 분석 상태 관리
-  const [isSmartUploading, setIsSmartUploading] = useState(false);
-  const [smartUploadStatus, setSmartUploadStatus] = useState("");
+  const [isLawUploading, setIsLawUploading] = useState(false);
+  const [isExamUploading, setIsExamUploading] = useState(false);
 
   const [cbtQuestions, setCbtQuestions] = useState<any[]>([]);
   const [cbtCurrentIndex, setCbtCurrentIndex] = useState(0);
@@ -39,7 +37,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       setPendingExams(Array.isArray(pending) ? pending : []);
       setGoldenExams(golden.exams || []);
     } catch (err) {
-      console.error("데이터 로딩 실패", err);
+      console.error(err);
     }
   };
 
@@ -47,97 +45,129 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     fetchData();
   }, [userAddress]);
 
-  // [신규] 개별 삭제 기능
-  const handleDeleteExam = async (e: React.MouseEvent, examId: number) => {
-    e.stopPropagation();
-    if (!window.confirm("이 문제를 정말 삭제하시겠습니까? (삭제 후 복구 불가)")) return;
-    
-    try {
-      const response = await fetch('/api/delete-exam', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: examId, wallet_address: userAddress })
-      });
-      if (response.ok) {
-        alert("성공적으로 삭제되었습니다.");
-        fetchData();
-      } else {
-        alert("삭제 실패");
-      }
-    } catch (error) {
-      console.error("삭제 요청 중 에러:", error);
-      alert("서버 통신 오류로 삭제에 실패했습니다.");
-    }
-  };
-
-  // [신규] 법령 기반 지능형 해설 업로드 (RAG)
-  const handleSmartUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !userAddress) return;
-
-    setIsSmartUploading(true);
-    setSmartUploadStatus("AI가 법령과 문제를 크로스체크하며 해설을 창작 중입니다...");
-
+  // 1. 법령규정첨부 - 업로드 로직
+  const handleLawUpload = async () => {
+    if (!lawFile || !userAddress) return alert("법령 파일을 선택해주세요.");
+    setIsLawUploading(true);
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append('file', lawFile);
     formData.append('wallet_address', userAddress);
+    formData.append('custom_folder', '자동 업로드 법령');
 
     try {
-      const res = await fetch('/api/upload-exam', {
-        method: 'POST',
-        body: formData
-      });
+      const res = await fetch('/api/upload-pdf', { method: 'POST', body: formData });
       const data = await res.json();
-
       if (res.ok) {
-        const taskId = data.task_id;
-        const interval = setInterval(async () => {
-          const statusRes = await fetch(`/api/task-status?task_id=${taskId}`);
-          const statusData = await statusRes.json();
-
-          if (statusData.status === 'completed') {
-            clearInterval(interval);
-            setIsSmartUploading(false);
-            alert("✨ AI 해설 작성이 완료되었습니다! 아래 리스트에서 확인하세요.");
-            fetchData();
-            if (smartFileInputRef.current) smartFileInputRef.current.value = '';
-          } else if (statusData.status === 'error') {
-            clearInterval(interval);
-            setIsSmartUploading(false);
-            alert("분석 중 오류 발생: " + statusData.message);
-            if (smartFileInputRef.current) smartFileInputRef.current.value = '';
-          } else {
-            setSmartUploadStatus(`AI 분석 진행 중... (${statusData.progress || 0}%)`);
-          }
-        }, 2000);
+         const taskId = data.task_id;
+         const timer = setInterval(async () => {
+           const sRes = await fetch(`/api/task-status?task_id=${taskId}`);
+           const sData = await sRes.json();
+           if (sData.status === 'completed') {
+             clearInterval(timer); 
+             setIsLawUploading(false); 
+             setLawFile(null);
+             alert("법령 업로드가 완료되었습니다!");
+           } else if (sData.status === 'error') {
+             clearInterval(timer); 
+             setIsLawUploading(false); 
+             alert("법령 분석 오류: " + sData.message);
+           }
+         }, 2000);
       } else {
-        setIsSmartUploading(false);
-        alert("업로드 실패: " + data.error);
+         setIsLawUploading(false);
+         alert("업로드 실패: " + data.error);
       }
-    } catch (err) {
-      console.error(err);
-      setIsSmartUploading(false);
+    } catch(e) {
+      setIsLawUploading(false);
       alert("서버 연결에 실패했습니다.");
     }
   };
 
-  // 기존 업로드 로직 (협동 검수용)
+  // 2. 모의고사첨부 - 업로드 로직
   const handleUploadForReview = async () => {
-    if (!examFile) {
-      fileInputRef.current?.click();
-      return;
-    }
-    if (!userAddress) {
-      return alert("지갑 주소가 없습니다. 앱 상단에서 로그인을 확인해주세요.");
-    }
+    if (!examFile || !userAddress) return alert("모의고사 파일을 첨부해주세요.");
+    setIsExamUploading(true);
     
     try {
       await api.uploadExamCoop(examFile, userAddress);
       setExamFile(null);
-      alert("파일이 DB에 안전하게 저장되었습니다! 이제 검수 대기소에서 확인 가능합니다.");
+      alert("파일이 대기소에 안전하게 저장되었습니다!");
       fetchData();
     } catch (err: any) {
       alert(`업로드 실패: ${err.message}`);
+    }
+    setIsExamUploading(false);
+  };
+
+  // 3. 대기열 모의고사 삭제 로직
+  const handleDeletePendingExam = async (id: number) => {
+    if (!confirm("이 대기열 모의고사를 삭제하시겠습니까? (삭제안됨 문제 해결)")) return;
+    try {
+      const res = await fetch('/api/delete-pending-exam', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, wallet_address: userAddress })
+      });
+      if (res.ok) {
+        alert("삭제되었습니다.");
+        fetchData();
+      } else {
+        alert("삭제 실패");
+      }
+    } catch (e) {
+      alert("삭제 중 서버 오류가 발생했습니다.");
+    }
+  };
+
+  // 4. 대기열에서 해설 자동생성 (RAG)
+  const handleGenerateRAGFromPending = async (id: number) => {
+    if (!confirm("법령을 참고하여 이 문제들의 해설을 자동 생성하시겠습니까?")) return;
+    setIsAnalyzing(true);
+    try {
+      const res = await fetch('/api/generate-rag-from-pending', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, wallet_address: userAddress })
+      });
+      const data = await res.json();
+      if (res.ok) {
+         const taskId = data.task_id;
+         const timer = setInterval(async () => {
+           const sRes = await fetch(`/api/task-status?task_id=${taskId}`);
+           const sData = await sRes.json();
+           if (sData.status === 'completed') {
+             clearInterval(timer); 
+             setIsAnalyzing(false); 
+             fetchData();
+             alert("✨ 해설 자동 생성이 완료되어 골든 DB에 저장되었습니다!");
+           } else if (sData.status === 'error') {
+             clearInterval(timer); 
+             setIsAnalyzing(false); 
+             alert("분석 오류: " + sData.message);
+           }
+         }, 2000);
+      } else {
+         setIsAnalyzing(false); 
+         alert(data.error);
+      }
+    } catch(e) {
+      setIsAnalyzing(false); 
+      alert("서버 연결에 실패했습니다.");
+    }
+  };
+
+  const handleDeleteExam = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    if (!confirm("이 문제를 영구 삭제하시겠습니까?")) return;
+    try {
+      await fetch('/api/delete-exam', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, wallet_address: userAddress })
+      });
+      fetchData();
+    } catch (err) {
+      alert("삭제 실패");
     }
   };
 
@@ -189,7 +219,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       if (currentExamId && userAddress) {
         await api.deletePendingExam(userAddress, currentExamId);
       }
-      alert("🎉 해당 모의고사의 모든 검수가 완료되었습니다! 골든 DB에 완벽히 저장되었습니다.");
+      alert("해당 모의고사의 모든 검수가 완료되었습니다!");
       fetchData(); 
       setMode('list');
     }
@@ -250,7 +280,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
               disabled={isAnalyzing}
               className="mt-4 py-3 bg-teal-900/50 text-teal-400 border border-teal-500/30 hover:bg-teal-800/50 transition-all shadow-md"
             >
-              {isAnalyzing ? "🧠 AI가 띄어쓰기 교정 및 분석 중..." : "🚀 이 문단 AI에게 풀기 지시"}
+              {isAnalyzing ? "🧠 AI가 분석 중..." : "🚀 이 문단 AI에게 풀기 지시"}
             </button>
           </div>
 
@@ -361,93 +391,105 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   return (
     <div className="space-y-8 animate-in fade-in pb-20">
       
-      <div className="flex flex-col md:flex-row gap-4 mb-8">
-        {/* 기존의 개별 문단 분석(협동 검수)용 파일 업로드 버튼 */}
-        <label className="flex-1 border border-teal-900/40 p-4 text-center text-sm hover:bg-teal-900/20 cursor-pointer text-teal-400 flex items-center justify-center transition-colors">
-          <input ref={fileInputRef} type="file" accept=".pdf,.txt" onChange={e => setExamFile(e.target.files?.[0] || null)} className="hidden"/> 
-          {examFile ? `📂 ${examFile.name} (선택됨)` : '📄 협동 검수용 파일 첨부하기'}
-        </label>
-   
-        <button onClick={handleUploadForReview} className="px-8 bg-teal-500 text-teal-950 font-bold text-sm hover:bg-teal-400 transition-colors shadow-lg">
-          {examFile ? '이 모의고사 업로드 🚀' : '협동 검수 대기소로 업로드 🚀'}
-        </button>
-
-        <button onClick={startCBT} className="px-8 border border-teal-400 text-teal-400 font-bold text-sm hover:bg-teal-900/30 transition-colors">
-          🎯 100문제 실전 응시하기
-        </button>
+      <div className="flex gap-4 border-b border-white/10 pb-4">
+        <button onClick={() => setMode('list')} className={`px-4 py-2 ${mode === 'list' ? 'bg-teal-600 text-white' : 'text-teal-400'}`}>목록/업로드</button>
+        <button onClick={() => setMode('coop')} className={`px-4 py-2 ${mode === 'coop' ? 'bg-teal-600 text-white' : 'text-teal-400'}`}>협동 검수</button>
       </div>
 
-      {/* 💡 [신규] 법령 기반 지능형 해설 업로드 패널 (RAG) */}
-      <div className="mb-12 p-8 border border-emerald-500/40 bg-teal-950/40 rounded-sm shadow-xl text-center">
-        <h3 className="text-emerald-400 font-bold mb-3 text-xl">💡 지능형 해설 자동 생성소 (RAG)</h3>
-        <p className="text-white/60 text-sm mb-6">
-          법령 탭에 규정을 먼저 업로드해두셨나요? 문제지만 업로드하면 AI가 법령을 대조하여 상세 해설을 자동 생성해 골든 DB에 즉시 저장합니다.
-        </p>
-        <input ref={smartFileInputRef} type="file" accept=".pdf,.txt" onChange={handleSmartUpload} className="hidden" id="smart-upload-btn"/>
-        <label htmlFor="smart-upload-btn" className={`px-10 py-4 font-bold rounded-sm shadow-lg cursor-pointer inline-block transition-all ${isSmartUploading ? 'bg-emerald-900/50 text-emerald-500 cursor-wait' : 'bg-emerald-600 text-white hover:bg-emerald-500 hover:scale-105'}`}>
-          {isSmartUploading ? smartUploadStatus : "✨ 지능형 모의고사 업로드 (해설 자동생성)"}
-        </label>
-      </div>
-
-      <div className="mb-12 p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm shadow-[0_0_15px_rgba(45,212,191,0.1)]">
-        <h3 className="text-teal-400 font-bold mb-2 text-lg">📁 합동 검수 대기소 (클라우드 연동)</h3>
-        <p className="text-white/50 text-xs mb-6">스마트폰이나 PC 어디서든 업로드한 파일이 동기화됩니다.</p>
-        
-        {pendingExams.length === 0 ? (
-          <div className="py-12 text-center border border-dashed border-teal-900/40 rounded-sm text-teal-500/50 text-sm">
-            현재 대기 중인 모의고사가 없습니다.<br/>위 버튼을 눌러 새 모의고사를 업로드해주세요.
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {pendingExams.map((exam) => (
-              <div key={exam.id} className="flex justify-between items-center p-4 bg-black/40 border border-teal-500/20 rounded-sm hover:border-teal-400 transition-colors group">
-                <div className="flex flex-col">
-                  <span className="text-teal-100 font-bold text-sm">{exam.filename}</span>
-                  <span className="text-white/40 text-xs mt-1">총 {exam.chunks.length} 문단 대기 중</span>
-                </div>
+      {mode === 'list' && (
+        <div className="space-y-8">
           
-                <button onClick={() => startCoopReview(exam)} className="px-6 py-2 bg-teal-500 text-teal-950 font-bold text-sm rounded-sm shadow-lg hover:scale-105 transition-all opacity-90 group-hover:opacity-100">
-                  검수 시작 🚀
-                </button>
-              </div>
-            ))}
+          {/* 1 & 2. 업로드 패널 */}
+          <div className="flex flex-col gap-4 p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm">
+            <h3 className="text-teal-400 font-bold text-lg mb-2">📥 학습 자료 업로드</h3>
+            
+            <div className="flex gap-4 items-center">
+              <label className="flex-1 border border-teal-900/40 p-3 text-center text-sm hover:bg-teal-900/20 cursor-pointer text-teal-400 transition-colors">
+                <input type="file" accept=".pdf,.txt,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/>
+                {lawFile ? `📂 ${lawFile.name} (법령 선택됨)` : '1. 법령규정 첨부'}
+              </label>
+              <button onClick={handleLawUpload} disabled={isLawUploading} className="px-6 py-3 bg-emerald-600 text-white font-bold text-sm shadow-lg w-32 shrink-0 hover:bg-emerald-500 transition-all">
+                {isLawUploading ? "업로드 중..." : "업로드"}
+              </button>
+            </div>
+
+            <div className="flex gap-4 items-center">
+              <label className="flex-1 border border-teal-900/40 p-3 text-center text-sm hover:bg-teal-900/20 cursor-pointer text-teal-400 transition-colors">
+                <input ref={fileInputRef} type="file" accept=".pdf,.txt" onChange={e => setExamFile(e.target.files?.[0] || null)} className="hidden"/>
+                {examFile ? `📂 ${examFile.name} (모의고사 선택됨)` : '2. 파일 첨부 (모의고사)'}
+              </label>
+              <button onClick={handleUploadForReview} disabled={isExamUploading} className="px-6 py-3 bg-teal-500 text-teal-950 font-bold text-sm shadow-lg w-32 shrink-0 hover:bg-teal-400 transition-all">
+                {isExamUploading ? "업로드 중..." : "업로드"}
+              </button>
+            </div>
           </div>
-        )}
-      </div>
 
-      <div className="text-white/60 text-xs border-b border-white/10 pb-2">✅ 검수 완료된 무결점 문제 (골든 DB)</div>
-      {goldenExams.length === 0 ? (
-        <div className="py-20 text-center text-white/20 text-xs tracking-widest">저장된 문제가 없습니다. 검수를 완료해 주세요.</div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {goldenExams.map((exam: any) => {
-            const isExpanded = expandedExamId === exam.id;
-            return (
-              <div key={exam.id} className="border border-teal-900/40 bg-teal-950/10 p-6 rounded-sm cursor-pointer hover:bg-teal-900/20 transition-all" onClick={() => setExpandedExamId(isExpanded ? null : exam.id)}>
-                <div className="text-[13px] text-teal-100 font-serif leading-loose whitespace-pre-wrap">{exam.question}</div>
-                {isExpanded && (
-                  <div className="mt-4 pt-4 border-t border-teal-900/50 animate-in fade-in slide-in-from-top-2">
-                    <div className="text-teal-400 font-bold text-sm mb-2">정답: {exam.answer}</div>
-                    
-                    {/* 💡 확장 적용된 해설창 클래스 */}
-                    <div className="explanation-box mt-3 text-white/80">
-                      {exam.explanation}
+          {/* 3 & 4. 합동 검수 대기소 (삭제안됨 문제 완벽 해결) */}
+          <div className="p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm shadow-[0_0_15px_rgba(45,212,191,0.1)]">
+            <h3 className="text-teal-400 font-bold mb-2 text-lg">📁 3. 합동 검수 목록 (클라우드 연동)</h3>
+            <p className="text-white/50 text-xs mb-6">스마트폰이나 PC 어디서든 업로드한 파일이 동기화됩니다.</p>
+            
+            {pendingExams.length === 0 ? (
+              <div className="py-12 text-center border border-dashed border-teal-900/40 rounded-sm text-teal-500/50 text-sm">
+                대기 중인 모의고사가 없습니다. 위 버튼을 눌러 모의고사를 업로드해주세요.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {pendingExams.map((exam) => (
+                  <div key={exam.id} className="flex flex-col xl:flex-row justify-between items-center p-4 bg-black/40 border border-teal-500/20 rounded-sm hover:border-teal-400 transition-colors gap-4">
+                    <div className="flex flex-col w-full xl:w-auto">
+                      <span className="text-teal-100 font-bold text-sm">{exam.filename}</span>
+                      <span className="text-white/40 text-xs mt-1">총 {exam.chunks.length} 문단 대기 중</span>
                     </div>
-
-                    {/* 💡 개별 영구 삭제 버튼 */}
-                    <div className="mt-6 flex justify-end">
-                      <button 
-                        onClick={(e) => handleDeleteExam(e, exam.id)} 
-                        className="px-4 py-2 border border-red-500/30 text-red-400 hover:bg-red-500/20 rounded-sm text-xs font-bold transition-all"
-                      >
-                        🗑️ 이 문제 영구 삭제
+              
+                    <div className="flex flex-wrap gap-2 w-full xl:w-auto justify-end">
+                      <button onClick={() => startCoopReview(exam)} className="px-4 py-2 border border-teal-500/50 text-teal-400 font-bold text-xs rounded-sm hover:bg-teal-900/30 transition-all">
+                        합동 검수 시작 🚀
+                      </button>
+                      <button onClick={() => handleGenerateRAGFromPending(exam.id)} className="px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-sm shadow-lg hover:bg-emerald-500 transition-all">
+                        4. 해설 자동생성
+                      </button>
+                      <button onClick={() => handleDeletePendingExam(exam.id)} className="px-3 py-2 bg-red-950/40 border border-red-500/30 text-red-400 font-bold text-xs rounded-sm hover:bg-red-900/50 transition-all">
+                        🗑️ 삭제
                       </button>
                     </div>
                   </div>
-                )}
+                ))}
               </div>
-            );
-          })}
+            )}
+            {isAnalyzing && <div className="mt-4 text-emerald-400 text-sm font-bold text-center animate-pulse">✨ AI가 법령을 대조하여 해설을 생성 중입니다. 잠시만 기다려주세요...</div>}
+          </div>
+
+          <div className="text-white/60 text-xs border-b border-white/10 pb-2">✅ 검수 완료된 무결점 문제 (골든 DB)</div>
+          {goldenExams.length === 0 ? (
+            <div className="py-20 text-center text-white/20 text-xs tracking-widest">저장된 문제가 없습니다. 검수를 완료해 주세요.</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {goldenExams.map((exam: any) => {
+                const isExpanded = expandedExamId === exam.id;
+                return (
+                  <div key={exam.id} className="border border-teal-900/40 bg-teal-950/10 p-6 rounded-sm cursor-pointer hover:bg-teal-900/20 transition-all" onClick={() => setExpandedExamId(isExpanded ? null : exam.id)}>
+                    <div className="text-[13px] text-teal-100 font-serif leading-loose whitespace-pre-wrap">{exam.question}</div>
+                    {isExpanded && (
+                      <div className="mt-4 pt-4 border-t border-teal-900/50 animate-in fade-in slide-in-from-top-2">
+                        <div className="text-teal-400 font-bold text-sm mb-2">정답: {exam.answer}</div>
+                        
+                        <div className="explanation-box mt-3 text-white/80">
+                          {exam.explanation}
+                        </div>
+
+                        <div className="mt-6 flex justify-end">
+                          <button onClick={(e) => handleDeleteExam(e, exam.id)} className="px-4 py-2 border border-red-500/30 text-red-400 hover:bg-red-500/20 rounded-sm text-xs font-bold transition-all">
+                            🗑️ 이 문제 영구 삭제
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>
