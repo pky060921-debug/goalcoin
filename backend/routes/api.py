@@ -121,7 +121,6 @@ def task_status():
         return jsonify(TASK_STATUS[task_id])
     return jsonify({"status": "not_found"}), 404
 
-# 💡 [신규] 업로드된 법령/정관 파일 개별 삭제 라우터
 @api_bp.route('/delete-law-file', methods=['POST'])
 def delete_law_file():
     try:
@@ -180,7 +179,6 @@ def generate_rag_from_pending():
                 1. 오직 제공된 [참고 자료 DB] 안의 텍스트만 근거로 삼으세요.
                 2. DB에서 일부 보기에 대한 근거를 찾을 수 없거나 내용이 애매하다면, 억지로 지어내지 마세요.
                 3. 대신, 분석한 데까지의 '진행 상황'을 설명하고, 모르는 부분에 대해 "이 부분은 찾을 수 없는데 어디서 찾을까요?", "내용이 조금 애매한데 어떻게 판단해야 될까요?" 라고 `explanation` 필드에 질문을 던지세요.
-                   - 예: "보기 1, 2번은 국민건강보험법 제14조에 따라 옳은 내용입니다. 하지만 보기 3번의 '의료시설' 관련 내용은 현재 DB에서 찾을 수 없네요. 이 부분은 정관을 참고해야 할까요?"
 
                 [참고 자료 DB]
                 {law_context[:35000]}
@@ -380,14 +378,13 @@ def get_pending_exams():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 💡 [핵심] 사용자의 피드백을 반영하여 다시 풀게 하는 대화형 로직
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
     try:
         data = request.json
         chunk_text = data.get('chunk_text', '')
         wallet_address = data.get('wallet_address')
-        user_feedback = data.get('user_feedback', '') # 💡 프론트에서 온 피드백
+        user_feedback = data.get('user_feedback', '') 
 
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -398,7 +395,6 @@ def analyze_chunk():
         law_context = "등록된 참고 자료가 없습니다."
         if laws: law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
         
-        # 💡 피드백이 있으면 프롬프트에 강력하게 주입합니다.
         feedback_str = f"\n[👨‍💻 사용자 피드백(대화/힌트)]\n{user_feedback}\n-> 위 사용자의 피드백을 적극 반영하여 다시 분석하고 해설과 장기기억을 완성하세요.\n" if user_feedback else ""
 
         prompt = f"""당신은 출제위원이자 사용자와 소통하는 AI입니다.
@@ -511,6 +507,7 @@ def generate_styles():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# 💡 [핵심 수정] 파편화된 조항 번호("제조 1", "제 조 12" 등) 완벽 분할 로직 탑재
 @api_bp.route('/upload-pdf', methods=['POST'])
 def upload_law():
     try:
@@ -537,14 +534,27 @@ def upload_law():
 
                 normalized_text = normalize_text(clean_korean_law_text(text))
                 categories = []
-                parts = re.split(r'(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)', normalized_text)
+                
+                # 💡 "제 1 조", "제조 1", "제 조 12", "제 12 조의 2", "제조의 43 2" 모두 잡는 강력한 정규식
+                regex_pattern = r'((?:제\s*\d+\s*조|제\s*조\s*\d+|제조\s*\d+)(?:의\s*\d+)?\s*(?:\([^)]+\))?)'
+                parts = re.split(regex_pattern, normalized_text)
+                
                 if parts and len(parts) > 1:
                     if parts[0].strip(): categories.append({"title": "총칙 및 서론", "content": parts[0].strip(), "folder_name": display_name})
                     for i in range(1, len(parts), 2):
-                        article_title = parts[i].strip()
+                        # 파편화된 이름을 깔끔하게 정리 (예: "제조 1" -> "제1조")
+                        raw_title = parts[i].strip()
+                        nums = re.findall(r'\d+', raw_title)
+                        clean_title = raw_title
+                        if len(nums) == 1:
+                            clean_title = f"제{nums[0]}조"
+                        elif len(nums) >= 2:
+                            clean_title = f"제{nums[0]}조의{nums[1]}"
+                            
                         content = parts[i+1].strip() if i+1 < len(parts) else ""
-                        categories.append({"title": article_title, "content": content, "folder_name": display_name})
-                else: categories = [{"title": "문서 전체", "content": normalized_text, "folder_name": display_name}]
+                        categories.append({"title": clean_title, "content": content, "folder_name": display_name})
+                else: 
+                    categories = [{"title": "문서 전체", "content": normalized_text, "folder_name": display_name}]
                 
                 conn = get_db_connection()
                 cursor = conn.cursor()
@@ -555,11 +565,13 @@ def upload_law():
                 conn.close()
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": "근거 아카이브 등록 성공"})
             except Exception as e:
+                print(f"\n[🔥 법령 파싱 스레드 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
                 TASK_STATUS[task_id].update({"status": "error", "message": f"분석 실패: {str(e)}"})
                 
         threading.Thread(target=process_law).start()
         return jsonify({"task_id": task_id, "message": "업로드 완료, 백그라운드 처리 시작"})
     except Exception as e: 
+        print(f"\n[🔥 법령 업로드 에러 - /upload-pdf]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "전송 실패"}), 500
 
 @api_bp.route('/recommend-blank', methods=['POST'])
