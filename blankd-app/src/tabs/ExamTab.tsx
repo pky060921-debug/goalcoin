@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../services/api';
 
-// 💡 백엔드 정확한 주소 명시 (서버 연결 실패 완벽 차단)
+// 💡 백엔드 정확한 주소 명시
 const BASE_URL = "https://api.blankd.top/api";
 
 export const ExamTab = ({ walletAddress, address }: any) => {
@@ -15,6 +15,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const smartFileInputRef = useRef<HTMLInputElement>(null);
   const [currentExamId, setCurrentExamId] = useState<number | null>(null);
   const [chunks, setChunks] = useState<string[]>([]);
   const [chunkIndex, setChunkIndex] = useState(0);
@@ -24,6 +25,8 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
   const [isLawUploading, setIsLawUploading] = useState(false);
   const [isExamUploading, setIsExamUploading] = useState(false);
+  const [isSmartUploading, setIsSmartUploading] = useState(false);
+  const [smartUploadStatus, setSmartUploadStatus] = useState("");
 
   const [cbtQuestions, setCbtQuestions] = useState<any[]>([]);
   const [cbtCurrentIndex, setCbtCurrentIndex] = useState(0);
@@ -48,7 +51,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     fetchData();
   }, [userAddress]);
 
-  // 1. 법령규정첨부 - 업로드 로직
+  // 1. 법령규정첨부 - 업로드 로직 (BASE_URL 적용)
   const handleLawUpload = async () => {
     if (!lawFile || !userAddress) return alert("법령 파일을 선택해주세요.");
     setIsLawUploading(true);
@@ -92,7 +95,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       }
     } catch(e: any) {
       setIsLawUploading(false);
-      // 💡 [핵심] 앱 내 터미널(console.error)로 상세 에러 전송
       console.error(`[법령 업로드 통신 에러 (Network Error)] 상세 내역:`, e.message || e);
       alert(`서버 연결 실패. 앱 터미널을 확인하세요.\n사유: ${e.message}`);
     }
@@ -219,14 +221,24 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setParsedResult(null);
   };
 
+  // 🛑 [핵심 수정] 협동 검수 모드에서도 업로드된 '법령'을 기반으로 해설(RAG) 작성
   const analyzeCurrentChunk = async () => {
     setIsAnalyzing(true);
     try {
-      const res = await api.analyzeChunk(chunks[chunkIndex]);
-      setParsedResult(res.result);
+      const res = await fetch(`${BASE_URL}/analyze-chunk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chunk_text: chunks[chunkIndex], wallet_address: userAddress })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setParsedResult(data.result);
+      } else {
+        alert("AI 분석 실패: " + data.error);
+      }
     } catch (err: any) {
       console.error(`[문단 분석 통신 에러] 상세 내역:`, err.message || err);
-      alert("AI 분석에 실패했습니다.");
+      alert("AI 분석 중 통신 에러가 발생했습니다.");
     }
     setIsAnalyzing(false);
   };
@@ -297,11 +309,13 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setMode('result');
   };
 
+  // 🛑 [핵심 수정] 협동 검수 모드 (coop) 50:50 좌우 분할 및 해설창 거대화
   if (mode === 'coop') {
     return (
-      <div className="flex flex-col h-[80vh] space-y-4 animate-in fade-in pb-10">
+      <div className="flex flex-col h-[85vh] space-y-4 animate-in fade-in pb-10">
+        {/* 상단 헤더 */}
         <div className="flex justify-between items-center pb-4 border-b border-white/10">
-          <h2 className="text-xl text-teal-400 font-serif">🤝 AI-대표님 합동 검수소 [{filename}]</h2>
+          <h2 className="text-xl text-teal-400 font-serif">🤝 AI 합동 검수소 [{filename}]</h2>
           <div className="flex gap-4 items-center">
             <span className="text-white/40 text-sm font-bold bg-teal-950/50 px-3 py-1 rounded-sm border border-teal-900/50">
               진행도: {chunkIndex + 1} / {chunks.length}
@@ -312,9 +326,21 @@ export const ExamTab = ({ walletAddress, address }: any) => {
           </div>
         </div>
 
+        {/* 좌우 50:50 레이아웃 영역 */}
         <div className="flex flex-1 gap-6 overflow-hidden">
-          <div className="flex-1 flex flex-col border border-white/10 rounded-sm bg-black/20 p-4">
-            <div className="text-white/40 text-xs mb-4">📄 PDF 원본 문단 (직접 수정 가능)</div>
+          
+          {/* LEFT: 문제 영역 (원본 수정 + AI 문제/보기 결과) */}
+          <div className="w-1/2 flex flex-col gap-4 border border-white/10 rounded-sm bg-black/20 p-5 overflow-y-auto custom-scrollbar">
+            <div className="flex justify-between items-center">
+              <div className="text-teal-300 font-bold text-sm">📝 1. 문제 원문 (수정 가능)</div>
+              <button 
+                onClick={analyzeCurrentChunk} 
+                disabled={isAnalyzing}
+                className="py-2 px-4 bg-teal-600 text-white text-xs font-bold rounded-sm shadow-md hover:bg-teal-500 transition-all"
+              >
+                {isAnalyzing ? "AI 분석 중..." : "🚀 AI에게 문제/정답/해설 분리 지시"}
+              </button>
+            </div>
             <textarea 
               value={chunks[chunkIndex] || ""} 
               onChange={(e) => {
@@ -322,56 +348,60 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                 newChunks[chunkIndex] = e.target.value;
                 setChunks(newChunks);
               }}
-              className="flex-1 w-full bg-transparent text-white/80 text-sm leading-relaxed outline-none resize-none"
+              className="h-48 w-full bg-black/40 border border-white/10 text-white/80 p-3 text-sm leading-relaxed outline-none resize-none rounded-sm"
             />
-            <button 
-              onClick={analyzeCurrentChunk} 
-              disabled={isAnalyzing}
-              className="mt-4 py-3 bg-teal-900/50 text-teal-400 border border-teal-500/30 hover:bg-teal-800/50 transition-all shadow-md"
-            >
-              {isAnalyzing ? "🧠 AI가 분석 중..." : "🚀 이 문단 AI에게 풀기 지시"}
-            </button>
-          </div>
 
-          <div className="flex-1 flex flex-col border border-teal-900/40 rounded-sm bg-teal-950/10 p-4 overflow-y-auto custom-scrollbar">
-            <div className="text-teal-400/60 text-xs mb-4">💡 AI 추출 결과 (수정 가능)</div>
-            {!parsedResult ? (
-              <div className="flex-1 flex items-center justify-center text-white/20 text-sm">
-                좌측에서 'AI에게 풀기 지시' 버튼을 눌러주세요.
-              </div>
-            ) : (
-              <div className="space-y-4">
+            {parsedResult && (
+              <div className="flex flex-col gap-4 mt-2 animate-in fade-in">
                 <div>
-                  <label className="text-xs text-teal-500 block mb-1">문제</label>
-                  <textarea value={parsedResult.question || ''} onChange={e => handleEdit('question', e.target.value)} className="w-full bg-black/30 border border-white/10 text-white p-3 text-sm rounded-sm" rows={3}/>
+                  <label className="text-sm font-bold text-teal-400 block mb-2">🎯 2. 추출된 문제</label>
+                  <textarea value={parsedResult.question || ''} onChange={e => handleEdit('question', e.target.value)} className="w-full bg-teal-950/20 border border-teal-500/30 text-white p-3 text-sm rounded-sm" rows={3}/>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-xs text-teal-500 block">보기 (4지 선다)</label>
+                  <label className="text-sm font-bold text-teal-400 block mb-2">📋 3. 추출된 보기</label>
                   {(parsedResult.options || ['', '', '', '']).map((opt: string, i: number) => (
-                    <input key={i} value={opt} onChange={e => handleOptionEdit(i, e.target.value)} className="w-full bg-black/30 border border-white/10 text-white p-2 text-sm rounded-sm" />
+                    <div key={i} className="flex gap-2 items-center">
+                      <span className="text-teal-500 font-bold text-xs">{i+1}.</span>
+                      <input value={opt} onChange={e => handleOptionEdit(i, e.target.value)} className="w-full bg-teal-950/20 border border-teal-500/30 text-white p-2 text-sm rounded-sm" />
+                    </div>
                   ))}
                 </div>
-                <div className="flex gap-4">
-                  <div className="w-1/4">
-                    <label className="text-xs text-teal-500 block mb-1">정답 번호</label>
-                    <input value={parsedResult.answer || ''} onChange={e => handleEdit('answer', e.target.value)} className="w-full bg-black/30 border border-white/10 text-teal-400 font-bold p-2 text-center rounded-sm" />
-                  </div>
-                  <div className="flex-1">
-                    <label className="text-xs text-teal-500 block mb-1">해설</label>
-                    <textarea value={parsedResult.explanation || ''} onChange={e => handleEdit('explanation', e.target.value)} className="w-full bg-black/30 border border-white/10 text-white/80 p-2 text-sm rounded-sm" rows={2}/>
-                  </div>
+              </div>
+            )}
+          </div>
+
+          {/* RIGHT: 정답 및 해설 영역 (넓고 광활하게) */}
+          <div className="w-1/2 flex flex-col border border-emerald-900/40 rounded-sm bg-emerald-950/10 p-5 overflow-y-auto custom-scrollbar">
+            {!parsedResult ? (
+              <div className="h-full flex flex-col items-center justify-center text-white/30 text-sm space-y-4">
+                <div className="text-4xl">🤖</div>
+                <p>좌측의 원문을 확인하고 [AI에게 분리 지시] 버튼을 눌러주세요.</p>
+                <p>미리 업로드된 법령을 기반으로 상세 해설이 이곳에 작성됩니다.</p>
+              </div>
+            ) : (
+              <div className="flex flex-col h-full animate-in fade-in">
+                <div className="mb-4">
+                  <label className="text-sm font-bold text-emerald-400 block mb-2">✅ 4. 정답</label>
+                  <input value={parsedResult.answer || ''} onChange={e => handleEdit('answer', e.target.value)} className="w-full bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 font-black p-3 text-center rounded-sm text-lg" />
                 </div>
-                <button onClick={approveAndNext} className="w-full mt-6 py-4 bg-teal-500 text-teal-950 font-bold rounded-sm hover:scale-[1.02] transition-all shadow-lg shadow-teal-500/20">
+                <div className="flex flex-col flex-1">
+                  <label className="text-sm font-bold text-emerald-400 block mb-2">💡 5. AI 지능형 해설 (법령 근거)</label>
+                  {/* 해설창이 하단 전체를 덮도록 min-h를 크게 줌 */}
+                  <textarea value={parsedResult.explanation || ''} onChange={e => handleEdit('explanation', e.target.value)} className="w-full flex-1 min-h-[250px] bg-emerald-950/20 border border-emerald-500/30 text-emerald-100/90 p-4 text-[15px] leading-loose rounded-sm resize-none" />
+                </div>
+                <button onClick={approveAndNext} className="w-full mt-6 py-4 bg-emerald-600 text-white font-bold rounded-sm hover:scale-[1.01] hover:bg-emerald-500 transition-all shadow-lg">
                   ✨ 완벽함! 승인 및 다음 문제로 이동
                 </button>
               </div>
             )}
           </div>
+
         </div>
       </div>
     );
   }
 
+  // --- CBT 모드 유지 ---
   if (mode === 'cbt') {
     const q = cbtQuestions[cbtCurrentIndex];
     if (!q) return null;
@@ -413,6 +443,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     );
   }
 
+  // --- 결과창 유지 ---
   if (mode === 'result') {
     return (
       <div className="space-y-8 animate-in fade-in pb-20">
@@ -473,7 +504,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
             </div>
           </div>
 
-          {/* 3 & 4. 합동 검수 대기소 (삭제안됨 문제 완벽 해결) */}
+          {/* 3 & 4. 합동 검수 대기소 */}
           <div className="p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm shadow-[0_0_15px_rgba(45,212,191,0.1)]">
             <h3 className="text-teal-400 font-bold mb-2 text-lg">📁 3. 합동 검수 목록 (클라우드 연동)</h3>
             <p className="text-white/50 text-xs mb-6">스마트폰이나 PC 어디서든 업로드한 파일이 동기화됩니다.</p>
