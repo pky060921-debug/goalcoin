@@ -9,7 +9,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [mode, setMode] = useState<'list' | 'coop' | 'cbt' | 'result'>('list');
   const [examFile, setExamFile] = useState<File | null>(null);
   const [answerFile, setAnswerFile] = useState<File | null>(null);
-  
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [ruleFile, setRuleFile] = useState<File | null>(null);
   
@@ -33,6 +32,9 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [filename, setFilename] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [parsedResult, setParsedResult] = useState<any>(null);
+
+  // 💡 [신규] 사용자가 AI에게 피드백(힌트)을 주는 채팅 텍스트
+  const [userFeedback, setUserFeedback] = useState("");
 
   const [isRefUploading, setIsRefUploading] = useState(false);
   const [isExamUploading, setIsExamUploading] = useState(false);
@@ -67,6 +69,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     fetchData();
   }, [userAddress]);
 
+  // 1. 공통 근거자료 (법령/정관) 업로드 로직
   const handleRefUpload = async (file: File | null, typeLabel: string) => {
     if (!file || !userAddress) return alert(`${typeLabel} 파일을 선택해주세요.`);
     setIsRefUploading(true);
@@ -109,6 +112,31 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     } catch(e: any) {
       setIsRefUploading(false);
       alert(`서버 연결 실패.\n사유: ${e.message}`);
+    }
+  };
+
+  // 💡 [신규] 법령 파일 개별 삭제 기능
+  const handleDeleteLaw = async (folderName: string) => {
+    if (!confirm(`[${folderName}] 파일을 삭제하시겠습니까?`)) return;
+    try {
+      const res = await fetch(`${BASE_URL}/delete-law-file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_name: folderName, wallet_address: userAddress })
+      });
+      if (res.ok) {
+        alert("법령 파일이 삭제되었습니다.");
+        fetchData();
+        if (viewingFile === folderName) {
+            setViewingFile(null);
+            setViewingArticle(null);
+        }
+      } else {
+        const data = await res.json();
+        alert("삭제 실패: " + data.error);
+      }
+    } catch (e: any) {
+      alert("삭제 중 통신 오류가 발생했습니다.");
     }
   };
 
@@ -230,19 +258,31 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setChunkIndex(0);
     setMode('coop');
     setParsedResult(null);
+    setUserFeedback(""); // 피드백 초기화
   };
 
-  const analyzeCurrentChunk = async () => {
+  // 💡 [핵심 수정] 사용자 피드백(힌트)을 포함하여 AI 분석 요청
+  const analyzeCurrentChunk = async (isRetry = false) => {
     setIsAnalyzing(true);
     try {
+      const payload = {
+        chunk_text: chunks[chunkIndex],
+        wallet_address: userAddress,
+        user_feedback: isRetry ? userFeedback : ""
+      };
+      
       const res = await fetch(`${BASE_URL}/analyze-chunk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chunk_text: chunks[chunkIndex], wallet_address: userAddress })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (res.ok) {
         setParsedResult(data.result);
+        if (isRetry) {
+            setUserFeedback(""); 
+            alert("AI가 대표님의 피드백을 반영하여 다시 분석했습니다!");
+        }
       } else {
         alert("AI 분석 실패: " + data.error);
       }
@@ -282,6 +322,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       if (chunkIndex + 1 < chunks.length) {
         setChunkIndex(chunkIndex + 1);
         setParsedResult(null);
+        setUserFeedback("");
       } else {
         if (currentExamId && userAddress) {
           await fetch(`${BASE_URL}/delete-pending-exam`, {
@@ -343,7 +384,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
             <div className="flex justify-between items-center">
               <div className="text-teal-300 font-bold text-sm">📝 1. 문제 원문 (수정 가능)</div>
               <button 
-                onClick={analyzeCurrentChunk} 
+                onClick={() => analyzeCurrentChunk(false)} 
                 disabled={isAnalyzing}
                 className="py-2 px-4 bg-teal-600 text-white text-xs font-bold rounded-sm shadow-md hover:bg-teal-500 transition-all"
               >
@@ -403,7 +444,29 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                   <textarea value={parsedResult.search_process || ''} onChange={e => handleEdit('search_process', e.target.value)} className="w-full h-24 bg-indigo-950/20 border border-indigo-500/30 text-indigo-200/80 p-3 text-xs leading-relaxed rounded-sm resize-none" />
                 </div>
 
-                <button onClick={approveAndNext} className="w-full py-4 bg-emerald-600 text-white font-bold rounded-sm hover:scale-[1.01] hover:bg-emerald-500 transition-all shadow-lg">
+                {/* 💡 [신규] AI와 대화하기 (힌트 주기) 영역 */}
+                <div className="mb-4 p-4 bg-indigo-950/30 border border-indigo-500/40 rounded-sm flex flex-col gap-2">
+                  <label className="text-sm font-bold text-indigo-300">💬 AI에게 힌트 주기 (자료가 비어있을 때)</label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={userFeedback} 
+                      onChange={e => setUserFeedback(e.target.value)} 
+                      placeholder="예: 3번 보기는 정관 1장에 있어, 다시 찾아봐!"
+                      className="flex-1 bg-black/40 border border-indigo-500/50 text-white p-3 text-sm rounded-sm outline-none focus:border-indigo-400"
+                      onKeyDown={e => e.key === 'Enter' && analyzeCurrentChunk(true)}
+                    />
+                    <button 
+                      onClick={() => analyzeCurrentChunk(true)} 
+                      disabled={isAnalyzing || !userFeedback.trim()}
+                      className="px-6 py-2 bg-indigo-600 text-white font-bold text-sm rounded-sm hover:bg-indigo-500 transition-all disabled:opacity-50"
+                    >
+                      {isAnalyzing ? "..." : "재분석 🚀"}
+                    </button>
+                  </div>
+                </div>
+
+                <button onClick={approveAndNext} className="w-full py-4 bg-emerald-600 text-white font-bold rounded-sm hover:scale-[1.01] hover:bg-emerald-500 transition-all shadow-lg mt-2">
                   ✨ 내용 확인 완료! 골든 DB에 영구 저장 (다음으로)
                 </button>
               </div>
@@ -506,18 +569,27 @@ export const ExamTab = ({ walletAddress, address }: any) => {
               </div>
             </div>
 
+            {/* 💡 업로드된 법령/정관 리스트 + 개별 삭제 버튼 탑재 */}
             {uploadedLaws.length > 0 && (
               <div className="mt-4 p-4 bg-black/30 border border-emerald-900/50 rounded-sm">
                 <div className="text-xs text-emerald-400 mb-3 font-bold">✅ 현재 참고 중인 근거 자료 (클릭하여 조항 확인):</div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-3">
                   {uploadedLaws.map((name, idx) => (
-                    <button 
-                      key={idx} 
-                      onClick={() => setViewingFile(name)}
-                      className="px-3 py-2 bg-emerald-950/50 border border-emerald-800 text-emerald-200 text-xs rounded hover:bg-emerald-800 transition-colors shadow-md"
-                    >
-                      📄 {name}
-                    </button>
+                    <div key={idx} className="flex items-center bg-emerald-950/50 border border-emerald-800 rounded shadow-md overflow-hidden">
+                      <button 
+                        onClick={() => setViewingFile(name)}
+                        className="px-3 py-2 text-emerald-200 text-xs hover:bg-emerald-800 transition-colors"
+                      >
+                        📄 {name}
+                      </button>
+                      <button 
+                        onClick={() => handleDeleteLaw(name)}
+                        className="px-3 py-2 bg-red-950/40 text-red-400 hover:bg-red-900/60 hover:text-red-200 transition-colors text-xs border-l border-emerald-800"
+                        title="이 문서 삭제"
+                      >
+                        ✕
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
