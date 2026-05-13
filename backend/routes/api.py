@@ -154,10 +154,9 @@ def generate_rag_from_pending():
         if laws:
             law_context = "\n\n".join([f"[{r[0]}]\n{r[1]}" for r in laws])
 
-        # 💡 [터미널 확인용 디버깅 출력]
         print("\n=================================================", file=sys.stderr, flush=True)
         print(f"🔍 [RAG 시스템 가동] 모의고사 '{filename}' 해설 생성 시작!", file=sys.stderr, flush=True)
-        print(f"🔍 DB에서 불러온 참고 법령 개수: {len(laws)}개", file=sys.stderr, flush=True)
+        print(f"🔍 DB에서 불러온 참고 자료 개수: {len(laws)}개", file=sys.stderr, flush=True)
         for idx, r in enumerate(laws):
             print(f"   👉 [{idx+1}] {r[0]} (글자수: {len(r[1])}자)", file=sys.stderr, flush=True)
         print("=================================================\n", file=sys.stderr, flush=True)
@@ -168,10 +167,10 @@ def generate_rag_from_pending():
         def process_rag_pending():
             try:
                 prompt = f'''당신은 국민건강보험공단 승진시험 최고 출제위원이자 완벽한 해설가입니다.
-                아래 [참고 법령 DB]를 숙지하고, 사용자의 [시험지 텍스트(문제+정답)]를 분석하세요.
-                정답의 근거가 되는 법령을 찾고, 그 사고 과정(장기기억용)과 완벽한 해설을 분리하여 작성하세요.
+                아래 [참고 자료 DB(법령 및 정관)]를 숙지하고, 사용자의 [시험지 텍스트(문제+정답)]를 분석하세요.
+                정답의 근거가 되는 법령이나 정관을 찾고, 그 사고 과정(장기기억용)과 완벽한 해설을 분리하여 작성하세요.
 
-                [참고 법령 DB]
+                [참고 자료 DB]
                 {law_context[:35000]}
 
                 [시험지 텍스트]
@@ -182,8 +181,8 @@ def generate_rag_from_pending():
                     "question": "문제 내용 및 보기 전체", 
                     "answer": "정답", 
                     "explanation": "사용자에게 보여줄 최종 해설",
-                    "search_process": "이 정답을 도출하기 위해 어떤 법령의 몇 조 몇 항을 찾았고 어떻게 논리적으로 판단했는지 사고 과정을 기록하세요.",
-                    "referenced_laws": "참고한 법령명과 조항"
+                    "search_process": "이 정답을 도출하기 위해 어떤 근거의 몇 조 몇 항을 찾았고 어떻게 논리적으로 판단했는지 사고 과정을 기록하세요.",
+                    "referenced_laws": "참고한 문서명과 조항"
                 }}]'''
 
                 response_text = generate_gemini_json(prompt)
@@ -245,16 +244,10 @@ def upload_exam():
                 law_context = "등록된 참고 법령이 없습니다."
                 if laws: law_context = "\n\n".join([f"[{r[0]}]\n{r[1]}" for r in laws])
 
-                # 💡 [터미널 확인용 디버깅 출력]
-                print("\n=================================================", file=sys.stderr, flush=True)
-                print(f"🔍 [RAG 시스템 가동] 다이렉트 업로드 해설 생성 시작!", file=sys.stderr, flush=True)
-                print(f"🔍 DB에서 불러온 참고 법령 개수: {len(laws)}개", file=sys.stderr, flush=True)
-                print("=================================================\n", file=sys.stderr, flush=True)
-                
                 prompt = f'''당신은 승진시험 최고 출제위원이자 AI 해설가입니다.
-                아래 [시험지 텍스트(문제+정답)]를 분석하고, [참고 법령]을 대조하여 상세 해설과 당신의 사고 과정을 함께 기록하세요.
+                아래 [시험지 텍스트(문제+정답)]를 분석하고, [참고 자료]를 대조하여 상세 해설과 당신의 사고 과정을 함께 기록하세요.
                 
-                [참고 법령 DB]
+                [참고 자료 DB]
                 {law_context[:35000]}
 
                 [시험지 텍스트]
@@ -264,9 +257,9 @@ def upload_exam():
                 [{{ 
                     "question": "문제 내용 및 보기 전체", 
                     "answer": "정답", 
-                    "explanation": "법령에 기반한 사용자용 해설",
+                    "explanation": "근거에 기반한 사용자용 해설",
                     "search_process": "어떤 조항을 찾고 논리적으로 어떻게 도출했는지 AI의 사고과정 (장기기억)",
-                    "referenced_laws": "참고 법령명"
+                    "referenced_laws": "참고 근거명"
                 }}]'''
                 
                 response_text = generate_gemini_json(prompt)
@@ -395,9 +388,9 @@ def analyze_chunk():
 
         prompt = f"""당신은 출제위원이자 법령 해설 전문가입니다.
 아래 [시험지 원문]에서 1개의 객관식 문제, 보기, 정답, 해설을 명확히 분리하세요.
-해설을 작성할 때는 반드시 [참고 법령 DB]를 대조하여 명확한 법적 근거를 포함하고, 당신의 사고 과정도 기록하세요.
+해설을 작성할 때는 반드시 [참고 자료 DB]를 대조하여 명확한 근거를 포함하고, 당신의 사고 과정도 기록하세요.
 
-[참고 법령 DB]
+[참고 자료 DB]
 {law_context[:30000]}
 
 [시험지 원문]
@@ -408,7 +401,7 @@ def analyze_chunk():
   "question": "교정된 문제 내용",
   "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
   "answer": "정답 번호",
-  "explanation": "참고 법령을 근거로 한 상세 해설",
+  "explanation": "참고 근거에 기반한 상세 해설",
   "search_process": "어떤 조항을 찾고 논리적으로 어떻게 도출했는지 AI의 사고과정 (장기기억)"
 }}"""
         response_text = generate_gemini_json(prompt, temperature=0.1)
@@ -509,7 +502,6 @@ def generate_styles():
         print(f"\n[🔥 스타일 생성 에러 - /generate-styles]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
-# 🛑 [핵심 수정] PDF 전용 해독기(fitz) 복구 완료
 @api_bp.route('/upload-pdf', methods=['POST'])
 def upload_law():
     try:
@@ -552,7 +544,7 @@ def upload_law():
                                   (wallet_address, cat['title'], cat['content'], cat.get('folder_name', filename)))
                 conn.commit()
                 conn.close()
-                TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": "법령 아카이브 등록 성공"})
+                TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": "근거 아카이브 등록 성공"})
             except Exception as e:
                 print(f"\n[🔥 법령 파싱 스레드 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
                 TASK_STATUS[task_id].update({"status": "error", "message": f"분석 실패: {str(e)}"})
