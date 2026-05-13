@@ -6,6 +6,7 @@ import json
 import logging
 import traceback
 import os
+import sys
 import random
 import re
 import time
@@ -53,40 +54,43 @@ def generate_gemini_json(prompt, temperature=0.1):
         except Exception as e:
             error_msg = str(e).lower()
             if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
-                logging.warning(f"⚠️ API 키 {current_api_key_index} 한도 초과! 다음 키로 전환합니다.")
+                print(f"⚠️ [API 1차 진단] API 키 {current_api_key_index} 한도 초과! 다음 키로 전환합니다.", file=sys.stderr, flush=True)
                 current_api_key_index = (current_api_key_index + 1) % len(GEMINI_API_KEYS)
             elif "503" in error_msg or "unavailable" in error_msg or "high demand" in error_msg:
-                logging.warning(f"⚠️ 구글 서버({current_model}) 폭주(503). 1초 대기 후 우회합니다...")
+                print(f"⚠️ [API 1차 진단] 구글 서버({current_model}) 폭주(503). 1초 대기 후 우회합니다...", file=sys.stderr, flush=True)
                 time.sleep(1)
             else:
                 if attempt == max_retries - 1:
-                    logging.error(f"❌ 제미나이 최종 실패 내역:\n{traceback.format_exc()}")
+                    print(f"❌ [API 치명적 진단] 제미나이 최종 실패 내역:\n{traceback.format_exc()}", file=sys.stderr, flush=True)
                     raise e
                 time.sleep(1)
                 
     raise Exception("🚨 구글 서버 불안정 또는 모든 API 키 한도 초과입니다. 잠시 후 시도해주세요.")
 
 def init_golden_db():
-    conn = get_db_connection()
-    conn.execute('''CREATE TABLE IF NOT EXISTS golden_exams (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        wallet_address TEXT,
-        title TEXT,
-        question TEXT,
-        options_json TEXT,
-        answer TEXT,
-        explanation TEXT,
-        category TEXT
-    )''')
-    conn.execute('''CREATE TABLE IF NOT EXISTS pending_exams (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        wallet_address TEXT,
-        filename TEXT,
-        chunks_json TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )''')
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        conn.execute('''CREATE TABLE IF NOT EXISTS golden_exams (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            wallet_address TEXT,
+            title TEXT,
+            question TEXT,
+            options_json TEXT,
+            answer TEXT,
+            explanation TEXT,
+            category TEXT
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS pending_exams (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            wallet_address TEXT,
+            filename TEXT,
+            chunks_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"\n[🔥 DB 초기화 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
 
 init_golden_db()
 
@@ -102,7 +106,7 @@ def task_status():
     return jsonify({"status": "not_found"}), 404
 
 # ==========================================
-# 💡 [신규] 대기열(Pending)에서 해설 자동생성 (RAG)
+# 💡 대기열(Pending)에서 해설 자동생성 (RAG)
 # ==========================================
 @api_bp.route('/generate-rag-from-pending', methods=['POST'])
 def generate_rag_from_pending():
@@ -160,20 +164,20 @@ def generate_rag_from_pending():
                     cursor2.execute("INSERT INTO golden_exams (wallet_address, title, question, answer, explanation) VALUES (?, ?, ?, ?, ?)",
                                    (wallet_address, filename, item.get('question', ''), item.get('answer', ''), item.get('explanation', '')))
                 
-                # 분석 성공 시 대기열에서 완전히 삭제
                 cursor2.execute("DELETE FROM pending_exams WHERE id = ? AND wallet_address = ?", (pending_id, wallet_address))
                 conn2.commit()
                 conn2.close()
 
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"{len(exam_data)}개의 문항 분석 완료."})
             except Exception as e:
-                logging.error(f"지능형 분석 에러:\n{traceback.format_exc()}")
+                print(f"\n[🔥 지능형 해설 자동생성 스레드 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
                 TASK_STATUS[task_id].update({"status": "error", "message": str(e)})
 
         threading.Thread(target=process_rag_pending).start()
         return jsonify({"task_id": task_id, "message": "분석 시작"})
 
     except Exception as e:
+        print(f"\n[🔥 라우터 진입 에러 - /generate-rag-from-pending]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/upload-exam', methods=['POST'])
@@ -237,18 +241,15 @@ def upload_exam():
                 conn.close()
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"{len(exam_data)}개의 문항 저장됨."})
             except Exception as e:
-                error_trace = traceback.format_exc()
-                logging.error(f"모의고사 파싱 실패 내역:\n{error_trace}")
+                print(f"\n[🔥 직접 모의고사 파싱 스레드 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
                 TASK_STATUS[task_id].update({"status": "error", "message": f"모의고사 파싱 실패: {str(e)}"})
                 
         threading.Thread(target=process_exam).start()
         return jsonify({"task_id": task_id, "message": "모의고사 처리 시작"})
     except Exception as e:
-        error_trace = traceback.format_exc()
-        logging.error(f"라우터 진입 에러:\n{error_trace}")
+        print(f"\n[🔥 라우터 진입 에러 - /upload-exam]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "요청 실패"}), 500
 
-# 🛑 [핵심 수정] 모의고사 (골든 DB) 삭제 방어 로직 강화
 @api_bp.route('/delete-exam', methods=['POST'])
 def delete_exam():
     try:
@@ -266,10 +267,9 @@ def delete_exam():
         conn.close()
         return jsonify({"message": "해당 문제가 삭제되었습니다."})
     except Exception as e:
-        logging.error(f"모의고사 삭제 에러:\n{traceback.format_exc()}")
+        print(f"\n[🔥 골든 DB 삭제 에러 - /delete-exam]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
-# 🛑 [핵심 수정] 대기열 (Pending) 삭제 방어 로직 강화
 @api_bp.route('/delete-pending-exam', methods=['POST'])
 def delete_pending_exam():
     try:
@@ -286,7 +286,7 @@ def delete_pending_exam():
         conn.close()
         return jsonify({"message": "대기열에서 삭제 완료"})
     except Exception as e:
-        logging.error(f"대기열 삭제 에러:\n{traceback.format_exc()}")
+        print(f"\n[🔥 대기열 삭제 에러 - /delete-pending-exam]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/upload-exam-coop', methods=['POST'])
@@ -307,6 +307,7 @@ def upload_exam_coop():
                     raw_text += page.get_text("text") + "\n\n"
                 pdf_document.close()
             except Exception as pdf_e:
+                print(f"\n[🔥 PDF 해독 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
                 return jsonify({"error": "PDF 파일 해독 중 오류가 발생했습니다."}), 500
         else:
             raw_text = file.read().decode('utf-8', errors='ignore')
@@ -338,24 +339,30 @@ def upload_exam_coop():
             
         return jsonify({"message": "대기열 DB 저장 완료"})
     except Exception as e:
+        print(f"\n[🔥 합동 검수 업로드 에러 - /upload-exam-coop]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/get-pending-exams', methods=['GET'])
 def get_pending_exams():
-    wallet_address = request.args.get('wallet_address')
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, filename, chunks_json FROM pending_exams WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
-    results = [{"id": r[0], "filename": r[1], "chunks": json.loads(r[2])} for r in cursor.fetchall()]
-    conn.close()
-    return jsonify(results)
+    try:
+        wallet_address = request.args.get('wallet_address')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, filename, chunks_json FROM pending_exams WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
+        results = [{"id": r[0], "filename": r[1], "chunks": json.loads(r[2])} for r in cursor.fetchall()]
+        conn.close()
+        return jsonify(results)
+    except Exception as e:
+        print(f"\n[🔥 펜딩 목록 조회 에러 - /get-pending-exams]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
-    data = request.json
-    chunk_text = data.get('chunk_text', '')
-    
-    prompt = f"""당신은 출제위원이자 국어 교열 전문가입니다.
+    try:
+        data = request.json
+        chunk_text = data.get('chunk_text', '')
+        
+        prompt = f"""당신은 출제위원이자 국어 교열 전문가입니다.
 아래 PDF 텍스트에서 1개의 객관식 문제, 4개의 보기, 정답, 해설을 명확히 분리하세요.
 표나 복잡한 형식이 깨져있다면 문맥을 파악해 알맞은 문장으로 복원하세요.
 
@@ -369,68 +376,80 @@ def analyze_chunk():
   "answer": "정답 번호 (숫자만)",
   "explanation": "해설"
 }}"""
-    try:
         response_text = generate_gemini_json(prompt, temperature=0.1)
         result_data = json.loads(response_text)
         return jsonify({"result": result_data})
     except Exception as e:
-        logging.error(f"제미나이 분석 에러:\n{traceback.format_exc()}")
+        print(f"\n[🔥 문단 분석 에러 - /analyze-chunk]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/save-golden-exam', methods=['POST'])
 def save_golden_exam():
-    data = request.json
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''INSERT INTO golden_exams 
-        (wallet_address, title, question, options_json, answer, explanation, category) 
-        VALUES (?, ?, ?, ?, ?, ?, ?)''',
-        (data.get('wallet_address'), data.get('title'), data.get('question'), 
-         json.dumps(data.get('options', []), ensure_ascii=False), 
-         data.get('answer'), data.get('explanation'), data.get('category', '기본분류')))
-    conn.commit()
-    conn.close()
-    return jsonify({"message": "골든 DB 저장 완료!"})
+    try:
+        data = request.json
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''INSERT INTO golden_exams 
+            (wallet_address, title, question, options_json, answer, explanation, category) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            (data.get('wallet_address'), data.get('title'), data.get('question'), 
+             json.dumps(data.get('options', []), ensure_ascii=False), 
+             data.get('answer'), data.get('explanation'), data.get('category', '기본분류')))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "골든 DB 저장 완료!"})
+    except Exception as e:
+        print(f"\n[🔥 골든 문제 저장 에러 - /save-golden-exam]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/get-golden-exams', methods=['GET'])
 def get_golden_exams():
-    wallet_address = request.args.get('wallet_address')
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title, question, options_json, answer, explanation FROM golden_exams WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
-    exams = [{"id": r[0], "title": r[1], "question": r[2], "options": json.loads(r[3] or "[]"), "answer": r[4], "explanation": r[5]} for r in cursor.fetchall()]
-    conn.close()
-    return jsonify({"exams": exams})
+    try:
+        wallet_address = request.args.get('wallet_address')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, title, question, options_json, answer, explanation FROM golden_exams WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
+        exams = [{"id": r[0], "title": r[1], "question": r[2], "options": json.loads(r[3] or "[]"), "answer": r[4], "explanation": r[5]} for r in cursor.fetchall()]
+        conn.close()
+        return jsonify({"exams": exams})
+    except Exception as e:
+        print(f"\n[🔥 골든 문제 조회 에러 - /get-golden-exams]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/get-cbt-session', methods=['GET'])
 def get_cbt_session():
-    wallet_address = request.args.get('wallet_address')
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title, question, options_json, answer, explanation FROM golden_exams WHERE wallet_address = ?", (wallet_address,))
-    rows = cursor.fetchall()
-    conn.close()
-    
-    if not rows:
-        return jsonify({"error": "골든 DB에 저장된 검수 완료 문제가 없습니다. 먼저 모의고사를 검수해주세요."}), 404
+    try:
+        wallet_address = request.args.get('wallet_address')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, title, question, options_json, answer, explanation FROM golden_exams WHERE wallet_address = ?", (wallet_address,))
+        rows = cursor.fetchall()
+        conn.close()
         
-    problems = []
-    for r in rows:
-        problems.append({
-            "id": r[0], "title": r[1], "question": r[2], 
-            "options": json.loads(r[3] or "[]"), "answer": str(r[4]), "explanation": r[5]
-        })
-        
-    selected = random.sample(problems, min(100, len(problems)))
-    return jsonify(selected)
+        if not rows:
+            return jsonify({"error": "골든 DB에 저장된 검수 완료 문제가 없습니다. 먼저 모의고사를 검수해주세요."}), 404
+            
+        problems = []
+        for r in rows:
+            problems.append({
+                "id": r[0], "title": r[1], "question": r[2], 
+                "options": json.loads(r[3] or "[]"), "answer": str(r[4]), "explanation": r[5]
+            })
+            
+        selected = random.sample(problems, min(100, len(problems)))
+        return jsonify(selected)
+    except Exception as e:
+        print(f"\n[🔥 CBT 세션 조회 에러 - /get-cbt-session]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/generate-styles', methods=['POST'])
 def generate_styles():
-    data = request.json
-    article_text = data.get('article_text', '')
-    if not article_text: return jsonify({"error": "법령 텍스트가 없습니다."}), 400
-        
-    prompt = f"""당신은 승진시험 최고 출제위원장입니다.
+    try:
+        data = request.json
+        article_text = data.get('article_text', '')
+        if not article_text: return jsonify({"error": "법령 텍스트가 없습니다."}), 400
+            
+        prompt = f"""당신은 승진시험 최고 출제위원장입니다.
 아래 [법령 조문]을 바탕으로 서로 다른 10가지 스타일의 4지 선다 문제를 창작하세요.
 [10가지 필수 출제 스타일]
 1.단순목록형 2.NCS상황형 3.계산기한형 4.박스조합형 5.단서예외형 6.주체오답형 7.OX판별형 8.괄호형 9.취지추론형 10.융합형
@@ -439,13 +458,12 @@ def generate_styles():
 [{{ "style": "스타일 이름", "question": "문제 내용", "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"], "answer": "숫자", "explanation": "해설" }}]
 
 [법령 조문]\n{article_text}\n"""
-    try:
         response_text = generate_gemini_json(prompt, temperature=0.5)
         result_data = json.loads(response_text)
         if isinstance(result_data, dict): result_data = result_data.get('problems', [result_data])
         return jsonify({"samples": result_data})
     except Exception as e:
-        logging.error(f"10대 유형 생성 에러:\n{traceback.format_exc()}")
+        print(f"\n[🔥 스타일 생성 에러 - /generate-styles]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/upload-pdf', methods=['POST'])
@@ -491,11 +509,13 @@ def upload_law():
                 conn.close()
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": "법령 아카이브 등록 성공"})
             except Exception as e:
+                print(f"\n[🔥 법령 파싱 스레드 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
                 TASK_STATUS[task_id].update({"status": "error", "message": f"분석 실패: {str(e)}"})
                 
         threading.Thread(target=process_law).start()
         return jsonify({"task_id": task_id, "message": "업로드 완료, 백그라운드 처리 시작"})
     except Exception as e: 
+        print(f"\n[🔥 법령 업로드 에러 - /upload-pdf]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "전송 실패"}), 500
 
 @api_bp.route('/recommend-blank', methods=['POST'])
@@ -527,11 +547,13 @@ def recommend_blank():
                 
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "result": result, "message": "AI 추천 완료!"})
             except Exception as e:
+                print(f"\n[🔥 빈칸 추천 스레드 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
                 TASK_STATUS[task_id].update({"status": "error", "message": f"AI 연산 실패: {str(e)}"})
                 
         threading.Thread(target=process_recommend).start()
         return jsonify({"task_id": task_id, "message": "AI 추천 작업 시작"})
     except Exception as e:
+        print(f"\n[🔥 빈칸 추천 라우터 에러 - /recommend-blank]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "요청 실패", "details": str(e)}), 500
 
 @api_bp.route('/get-categories')
@@ -545,6 +567,7 @@ def get_categories():
         conn.close()
         return jsonify({"categories": cats})
     except Exception as e:
+        print(f"\n[🔥 카테고리 조회 에러 - /get-categories]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "조회 실패"}), 500
 
 @api_bp.route('/save-card', methods=['POST'])
@@ -564,6 +587,7 @@ def save_card():
         conn.close()
         return jsonify({"message": "카드 제작 완료"}), 201
     except Exception as e:
+        print(f"\n[🔥 카드 저장 에러 - /save-card]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "저장 실패"}), 500
 
 @api_bp.route('/my-cards')
@@ -587,6 +611,7 @@ def get_my_cards():
         conn.close()
         return jsonify({"cards": cards})
     except Exception as e:
+        print(f"\n[🔥 카드 조회 에러 - /my-cards]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "조회 실패"}), 500
 
 @api_bp.route('/sync-batch', methods=['POST'])
@@ -604,7 +629,7 @@ def sync_batch():
         cursor = conn.cursor()
 
         for m in memos:
-            cursor.execute("UPDATE cards SET memo = ? WHERE id = ? AND wallet_address = ?", (m.get('memo', ''), m.get('id'), wallet_address))
+            cursor.execute("UPDATE SET memo = ? WHERE id = ? AND wallet_address = ?", (m.get('memo', ''), m.get('id'), wallet_address))
 
         for a in answers:
             card_id = a.get('card_id')
@@ -628,6 +653,7 @@ def sync_batch():
         conn.close()
         return jsonify({"message": f"일괄 동기화 성공 (메모:{len(memos)}건, 학습:{len(answers)}건)"}), 200
     except Exception as e:
+        print(f"\n[🔥 동기화 에러 - /sync-batch]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "배치 동기화 실패"}), 500
 
 @api_bp.route('/update-card-memo', methods=['POST'])
@@ -645,6 +671,7 @@ def update_card_memo():
         conn.close()
         return jsonify({"message": "메모 및 통계 업데이트 완료"}), 200
     except Exception as e:
+        print(f"\n[🔥 메모 업데이트 에러 - /update-card-memo]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "메모 업데이트 실패"}), 500
 
 @api_bp.route('/submit-answer', methods=['POST'])
@@ -677,6 +704,7 @@ def submit_answer():
         conn.close()
         return jsonify({"message": msg})
     except Exception as e:
+        print(f"\n[🔥 답안 제출 에러 - /submit-answer]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "제출 처리 실패"}), 500
 
 @api_bp.route('/delete-category', methods=['POST'])
@@ -689,6 +717,7 @@ def delete_category():
         conn.close()
         return jsonify({"message": "삭제되었습니다."})
     except Exception as e:
+        print(f"\n[🔥 카테고리 삭제 에러 - /delete-category]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "삭제 실패"}), 500
 
 @api_bp.route('/delete-card', methods=['POST'])
@@ -701,6 +730,7 @@ def delete_card():
         conn.close()
         return jsonify({"message": "삭제되었습니다."})
     except Exception as e:
+        print(f"\n[🔥 카드 삭제 에러 - /delete-card]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "삭제 실패"}), 500
 
 @api_bp.route('/delete-all', methods=['POST'])
@@ -714,6 +744,7 @@ def delete_all():
         conn.close()
         return jsonify({"message": "초기화 성공"})
     except Exception as e:
+        print(f"\n[🔥 전체 초기화 에러 - /delete-all]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "초기화 실패"}), 500
 
 @api_bp.route('/split-category', methods=['POST'])
@@ -737,6 +768,7 @@ def split_category():
         conn.close()
         return jsonify({"message": "본문 분할 완료"})
     except Exception as e:
+        print(f"\n[🔥 카테고리 분할 에러 - /split-category]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "분할 실패"}), 500
 
 @api_bp.route('/get-all-exams')
@@ -750,4 +782,5 @@ def get_all_exams():
         conn.close()
         return jsonify({"exams": exams})
     except Exception as e:
+        print(f"\n[🔥 전체 시험 조회 에러 - /get-all-exams]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "조회 실패"}), 500
