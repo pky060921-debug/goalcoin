@@ -9,18 +9,18 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [mode, setMode] = useState<'list' | 'coop' | 'cbt' | 'result'>('list');
   const [examFile, setExamFile] = useState<File | null>(null);
   const [answerFile, setAnswerFile] = useState<File | null>(null);
-  
-  // 💡 법령과 정관 파일 상태 분리
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [ruleFile, setRuleFile] = useState<File | null>(null);
   
   const [pendingExams, setPendingExams] = useState<Array<{id: number, filename: string, chunks: string[]}>>([]);
   const [goldenExams, setGoldenExams] = useState<any[]>([]); 
+  const [uploadedLaws, setUploadedLaws] = useState<string[]>([]);
   const [rawLawsData, setRawLawsData] = useState<any[]>([]); 
   const [expandedExamId, setExpandedExamId] = useState<number | null>(null);
   
-  // 💡 클릭 시 문서 내용을 보여줄 뷰어 상태
-  const [viewingContent, setViewingContent] = useState<{title: string, content: string} | null>(null);
+  // 💡 투 트랙 뷰어를 위한 2단계 상태 관리
+  const [viewingFile, setViewingFile] = useState<string | null>(null); // 어떤 파일을 보고 있는지
+  const [viewingArticle, setViewingArticle] = useState<{title: string, content: string, id: number} | null>(null); // 어떤 조항을 클릭했는지
 
   const lawInputRef = useRef<HTMLInputElement>(null);
   const ruleInputRef = useRef<HTMLInputElement>(null);
@@ -55,6 +55,9 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       
       if (catsRes.categories) {
         setRawLawsData(catsRes.categories);
+        // 백엔드에서 파일명은 folder_name에 저장되도록 수정했습니다.
+        const uniqueLawNames = Array.from(new Set(catsRes.categories.map((c: any) => c.folder_name)));
+        setUploadedLaws(uniqueLawNames as string[]);
       }
     } catch (err: any) {
       console.error("[데이터 로드 에러]", err);
@@ -65,7 +68,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     fetchData();
   }, [userAddress]);
 
-  // 1. 공통 근거자료 (법령/정관) 업로드 로직
   const handleRefUpload = async (file: File | null, typeLabel: string) => {
     if (!file || !userAddress) return alert(`${typeLabel} 파일을 선택해주세요.`);
     setIsRefUploading(true);
@@ -73,7 +75,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('wallet_address', userAddress);
-    formData.append('custom_folder', file.name);
+    formData.append('custom_folder', file.name); // 💡 여기서 파일명이 백엔드로 넘어갑니다
 
     try {
       const res = await fetch(`${BASE_URL}/upload-pdf`, { method: 'POST', body: formData });
@@ -111,7 +113,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     }
   };
 
-  // 2. 모의고사 첨부 - 업로드 로직
   const handleUploadForReview = async () => {
     if (!examFile || !userAddress) return alert("문제지 파일을 반드시 첨부해주세요.");
     setIsExamUploading(true);
@@ -481,7 +482,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       {mode === 'list' && (
         <div className="space-y-8">
           
-          {/* 💡 1. 근거 자료 (법령 및 정관) 분리 업로드 패널 */}
+          {/* 1. 근거 자료 (법령 및 정관) 분리 업로드 패널 */}
           <div className="flex flex-col gap-4 p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm">
             <h3 className="text-teal-400 font-bold text-lg mb-2">📥 1. 근거 자료 (법령 및 정관) 업로드</h3>
             
@@ -509,18 +510,18 @@ export const ExamTab = ({ walletAddress, address }: any) => {
               </div>
             </div>
 
-            {/* 💡 업로드된 법령/정관 뷰어 리스트 */}
-            {rawLawsData.length > 0 && (
+            {/* 💡 업로드된 법령/정관 리스트 뷰어 트리거 */}
+            {uploadedLaws.length > 0 && (
               <div className="mt-4 p-4 bg-black/30 border border-emerald-900/50 rounded-sm">
-                <div className="text-xs text-emerald-400 mb-3 font-bold">✅ 현재 참고 중인 근거 자료 (클릭하여 내용 확인):</div>
+                <div className="text-xs text-emerald-400 mb-3 font-bold">✅ 현재 참고 중인 근거 자료 (클릭하여 조항 확인):</div>
                 <div className="flex flex-wrap gap-2">
-                  {rawLawsData.map((law, idx) => (
+                  {uploadedLaws.map((name, idx) => (
                     <button 
                       key={idx} 
-                      onClick={() => setViewingContent(law)}
+                      onClick={() => setViewingFile(name)}
                       className="px-3 py-2 bg-emerald-950/50 border border-emerald-800 text-emerald-200 text-xs rounded hover:bg-emerald-800 transition-colors"
                     >
-                      📄 {law.title}
+                      📄 {name}
                     </button>
                   ))}
                 </div>
@@ -626,22 +627,56 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         </div>
       )}
 
-      {/* 💡 문서 내용 팝업 뷰어 (Modal) */}
-      {viewingContent && (
+      {/* 💡 2-Track 문서 뷰어 (Modal) */}
+      {viewingFile && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 animate-in fade-in">
-          <div className="bg-teal-950 border border-teal-500/50 rounded-sm w-full max-w-4xl h-[80vh] flex flex-col shadow-2xl">
-            <div className="flex justify-between items-center p-4 border-b border-teal-500/30 bg-teal-900/30">
-              <h3 className="text-teal-300 font-bold text-lg">📄 {viewingContent.title}</h3>
+          <div className="bg-teal-950 border border-teal-500/50 rounded-sm w-full max-w-5xl h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+            
+            <div className="flex justify-between items-center p-4 border-b border-teal-500/30 bg-teal-900/30 shrink-0">
+              <h3 className="text-teal-300 font-bold text-lg">📄 {viewingFile}</h3>
               <button 
-                onClick={() => setViewingContent(null)} 
+                onClick={() => { setViewingFile(null); setViewingArticle(null); }} 
                 className="text-white/50 hover:text-white text-2xl font-bold px-2"
               >
                 &times;
               </button>
             </div>
-            <div className="p-6 overflow-y-auto custom-scrollbar flex-1 text-white/80 text-sm leading-relaxed whitespace-pre-wrap bg-black/20">
-              {viewingContent.content}
+            
+            <div className="flex flex-1 overflow-hidden">
+              {/* 왼쪽: 조항 목록 리스트 */}
+              <div className="w-1/3 border-r border-teal-500/30 bg-black/40 overflow-y-auto custom-scrollbar p-2 space-y-1">
+                {rawLawsData.filter(l => l.folder_name === viewingFile).map((law, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setViewingArticle(law)}
+                    className={`w-full text-left px-3 py-3 text-sm rounded transition-colors ${
+                      viewingArticle?.id === law.id 
+                        ? 'bg-teal-600 text-white font-bold shadow-md' 
+                        : 'text-teal-400 hover:bg-teal-900/50'
+                    }`}
+                  >
+                    {law.title}
+                  </button>
+                ))}
+              </div>
+              
+              {/* 오른쪽: 조항 상세 내용 */}
+              <div className="w-2/3 p-6 overflow-y-auto custom-scrollbar bg-black/20 text-white/80 text-[15px] leading-loose whitespace-pre-wrap">
+                {viewingArticle ? (
+                  <div className="animate-in fade-in slide-in-from-right-2">
+                    <h4 className="text-teal-300 font-bold text-xl mb-4 border-b border-white/10 pb-4">
+                      {viewingArticle.title}
+                    </h4>
+                    {viewingArticle.content}
+                  </div>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-white/30 text-sm">
+                    좌측에서 열람할 조항을 선택해주세요.
+                  </div>
+                )}
+              </div>
             </div>
+
           </div>
         </div>
       )}
