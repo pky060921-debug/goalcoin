@@ -107,7 +107,7 @@ def task_status():
 @api_bp.route('/generate-rag-from-pending', methods=['POST'])
 def generate_rag_from_pending():
     try:
-        data = request.json
+        data = request.json or {}
         pending_id = data.get('id')
         wallet_address = data.get('wallet_address')
 
@@ -248,13 +248,17 @@ def upload_exam():
         logging.error(f"라우터 진입 에러:\n{error_trace}")
         return jsonify({"error": "요청 실패"}), 500
 
+# 🛑 [핵심 수정] 모의고사 (골든 DB) 삭제 방어 로직 강화
 @api_bp.route('/delete-exam', methods=['POST'])
 def delete_exam():
     try:
-        data = request.json
+        data = request.json or {}
         exam_id = data.get('id')
         wallet_address = data.get('wallet_address')
         
+        if not exam_id or not wallet_address:
+            return jsonify({"error": "삭제 권한이 없습니다. (지갑 주소 누락)"}), 400
+            
         conn = get_db_connection()
         conn.execute("DELETE FROM exams WHERE id = ? AND wallet_address = ?", (exam_id, wallet_address))
         conn.execute("DELETE FROM golden_exams WHERE id = ? AND wallet_address = ?", (exam_id, wallet_address))
@@ -263,7 +267,27 @@ def delete_exam():
         return jsonify({"message": "해당 문제가 삭제되었습니다."})
     except Exception as e:
         logging.error(f"모의고사 삭제 에러:\n{traceback.format_exc()}")
-        return jsonify({"error": "삭제 실패"}), 500
+        return jsonify({"error": str(e)}), 500
+
+# 🛑 [핵심 수정] 대기열 (Pending) 삭제 방어 로직 강화
+@api_bp.route('/delete-pending-exam', methods=['POST'])
+def delete_pending_exam():
+    try:
+        data = request.json or {}
+        pending_id = data.get('id')
+        wallet_address = data.get('wallet_address')
+        
+        if not pending_id or not wallet_address:
+            return jsonify({"error": "삭제 권한이 없습니다. (지갑 주소 누락)"}), 400
+
+        conn = get_db_connection()
+        conn.execute("DELETE FROM pending_exams WHERE id = ? AND wallet_address = ?", (pending_id, wallet_address))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "대기열에서 삭제 완료"})
+    except Exception as e:
+        logging.error(f"대기열 삭제 에러:\n{traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/upload-exam-coop', methods=['POST'])
 def upload_exam_coop():
@@ -325,15 +349,6 @@ def get_pending_exams():
     results = [{"id": r[0], "filename": r[1], "chunks": json.loads(r[2])} for r in cursor.fetchall()]
     conn.close()
     return jsonify(results)
-
-@api_bp.route('/delete-pending-exam', methods=['POST'])
-def delete_pending_exam():
-    data = request.json
-    conn = get_db_connection()
-    conn.execute("DELETE FROM pending_exams WHERE id = ? AND wallet_address = ?", (data['id'], data['wallet_address']))
-    conn.commit()
-    conn.close()
-    return jsonify({"message": "대기열에서 삭제 완료"})
 
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
