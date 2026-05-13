@@ -146,19 +146,18 @@ def generate_rag_from_pending():
         chunks = json.loads(row[1])
         raw_text = "\n\n".join(chunks)
 
-        cursor.execute("SELECT title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
+        # 💡 [핵심] folder_name(파일명)과 title(조항명)을 모두 가져와서 정확하게 매핑
+        cursor.execute("SELECT folder_name, title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
         laws = cursor.fetchall()
         conn.close()
 
-        law_context = "등록된 참고 법령이 없습니다."
+        law_context = "등록된 참고 자료가 없습니다."
         if laws:
-            law_context = "\n\n".join([f"[{r[0]}]\n{r[1]}" for r in laws])
+            law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
 
         print("\n=================================================", file=sys.stderr, flush=True)
         print(f"🔍 [RAG 시스템 가동] 모의고사 '{filename}' 해설 생성 시작!", file=sys.stderr, flush=True)
-        print(f"🔍 DB에서 불러온 참고 자료 개수: {len(laws)}개", file=sys.stderr, flush=True)
-        for idx, r in enumerate(laws):
-            print(f"   👉 [{idx+1}] {r[0]} (글자수: {len(r[1])}자)", file=sys.stderr, flush=True)
+        print(f"🔍 DB에서 불러온 참고 조항 개수: {len(laws)}개", file=sys.stderr, flush=True)
         print("=================================================\n", file=sys.stderr, flush=True)
 
         task_id = str(uuid.uuid4())
@@ -166,7 +165,7 @@ def generate_rag_from_pending():
 
         def process_rag_pending():
             try:
-                prompt = f'''당신은 국민건강보험공단 승진시험 최고 출제위원이자 완벽한 해설가입니다.
+                prompt = f'''당신은 승진시험 최고 출제위원이자 완벽한 해설가입니다.
                 아래 [참고 자료 DB(법령 및 정관)]를 숙지하고, 사용자의 [시험지 텍스트(문제+정답)]를 분석하세요.
                 정답의 근거가 되는 법령이나 정관을 찾고, 그 사고 과정(장기기억용)과 완벽한 해설을 분리하여 작성하세요.
 
@@ -181,8 +180,8 @@ def generate_rag_from_pending():
                     "question": "문제 내용 및 보기 전체", 
                     "answer": "정답", 
                     "explanation": "사용자에게 보여줄 최종 해설",
-                    "search_process": "이 정답을 도출하기 위해 어떤 근거의 몇 조 몇 항을 찾았고 어떻게 논리적으로 판단했는지 사고 과정을 기록하세요.",
-                    "referenced_laws": "참고한 문서명과 조항"
+                    "search_process": "이 정답을 도출하기 위해 어떤 문서의 몇 조 몇 항을 찾았고 어떻게 판단했는지 논리적 사고 과정을 상세히 기록하세요.",
+                    "referenced_laws": "참고한 문서명과 조항 (예: 정관.pdf - 제12조)"
                 }}]'''
 
                 response_text = generate_gemini_json(prompt)
@@ -237,15 +236,19 @@ def upload_exam():
             try:
                 conn = get_db_connection()
                 cursor = conn.cursor()
-                cursor.execute("SELECT title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
+                cursor.execute("SELECT folder_name, title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
                 laws = cursor.fetchall()
                 conn.close()
 
-                law_context = "등록된 참고 법령이 없습니다."
-                if laws: law_context = "\n\n".join([f"[{r[0]}]\n{r[1]}" for r in laws])
+                law_context = "등록된 참고 자료가 없습니다."
+                if laws: law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
 
+                print("\n=================================================", file=sys.stderr, flush=True)
+                print(f"🔍 [RAG 시스템 가동] 다이렉트 업로드 해설 생성 시작!", file=sys.stderr, flush=True)
+                print("=================================================\n", file=sys.stderr, flush=True)
+                
                 prompt = f'''당신은 승진시험 최고 출제위원이자 AI 해설가입니다.
-                아래 [시험지 텍스트(문제+정답)]를 분석하고, [참고 자료]를 대조하여 상세 해설과 당신의 사고 과정을 함께 기록하세요.
+                아래 [시험지 텍스트(문제+정답)]를 분석하고, [참고 자료 DB]를 대조하여 상세 해설과 당신의 사고 과정을 함께 기록하세요.
                 
                 [참고 자료 DB]
                 {law_context[:35000]}
@@ -259,7 +262,7 @@ def upload_exam():
                     "answer": "정답", 
                     "explanation": "근거에 기반한 사용자용 해설",
                     "search_process": "어떤 조항을 찾고 논리적으로 어떻게 도출했는지 AI의 사고과정 (장기기억)",
-                    "referenced_laws": "참고 근거명"
+                    "referenced_laws": "참고 근거명 (예: 정관.pdf - 제12조)"
                 }}]'''
                 
                 response_text = generate_gemini_json(prompt)
@@ -379,12 +382,12 @@ def analyze_chunk():
 
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
+        cursor.execute("SELECT folder_name, title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
         laws = cursor.fetchall()
         conn.close()
 
-        law_context = "등록된 참고 법령이 없습니다."
-        if laws: law_context = "\n\n".join([f"[{r[0]}]\n{r[1]}" for r in laws])
+        law_context = "등록된 참고 자료가 없습니다."
+        if laws: law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
 
         prompt = f"""당신은 출제위원이자 법령 해설 전문가입니다.
 아래 [시험지 원문]에서 1개의 객관식 문제, 보기, 정답, 해설을 명확히 분리하세요.
@@ -402,7 +405,7 @@ def analyze_chunk():
   "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
   "answer": "정답 번호",
   "explanation": "참고 근거에 기반한 상세 해설",
-  "search_process": "어떤 조항을 찾고 논리적으로 어떻게 도출했는지 AI의 사고과정 (장기기억)"
+  "search_process": "어떤 조항을 찾고 어떻게 도출했는지 AI의 사고과정 (장기기억)"
 }}"""
         response_text = generate_gemini_json(prompt, temperature=0.1)
         result_data = json.loads(response_text)
@@ -502,16 +505,18 @@ def generate_styles():
         print(f"\n[🔥 스타일 생성 에러 - /generate-styles]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
+# 💡 [핵심] 법령 업로드 시 파일명과 조항명을 명확히 분리 저장
 @api_bp.route('/upload-pdf', methods=['POST'])
 def upload_law():
     try:
         wallet_address = request.form.get('wallet_address')
-        custom_folder = request.form.get('custom_folder', '기본 폴더')
+        custom_folder = request.form.get('custom_folder') # 파일명이 넘어옴
         file = request.files.get('file')
         if not file: return jsonify({"error": "업로드된 파일이 없습니다."}), 400
         
         raw_bytes = file.read()
         filename = file.filename.lower()
+        display_name = custom_folder if custom_folder else filename
         
         task_id = str(uuid.uuid4())
         TASK_STATUS[task_id] = {"status": "running", "progress": 10, "message": "문헌 파싱 및 분석 중..."}
@@ -529,19 +534,22 @@ def upload_law():
 
                 normalized_text = normalize_text(clean_korean_law_text(text))
                 categories = []
+                # 조항을 기준으로 파싱
                 parts = re.split(r'(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)', normalized_text)
                 if parts and len(parts) > 1:
-                    if parts[0].strip(): categories.append({"title": filename, "content": parts[0].strip(), "folder_name": filename})
+                    if parts[0].strip(): categories.append({"title": "총칙 및 서론", "content": parts[0].strip(), "folder_name": display_name})
                     for i in range(1, len(parts), 2):
+                        # 💡 핵심: title에는 "제 1조..." 조항명이 들어가고, folder_name에는 "정관.pdf"가 들어갑니다.
+                        article_title = parts[i].strip()
                         content = parts[i+1].strip() if i+1 < len(parts) else ""
-                        categories.append({"title": filename, "content": content, "folder_name": filename})
-                else: categories = [{"title": filename, "content": normalized_text, "folder_name": filename}]
+                        categories.append({"title": article_title, "content": content, "folder_name": display_name})
+                else: categories = [{"title": "문서 전체", "content": normalized_text, "folder_name": display_name}]
                 
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 for cat in categories:
                     cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
-                                  (wallet_address, cat['title'], cat['content'], cat.get('folder_name', filename)))
+                                  (wallet_address, cat['title'], cat['content'], cat.get('folder_name', display_name)))
                 conn.commit()
                 conn.close()
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": "근거 아카이브 등록 성공"})
@@ -599,6 +607,7 @@ def get_categories():
         wallet_address = request.args.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
+        # folder_name도 꼭 함께 반환
         cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ?", (wallet_address,))
         cats = [{"id": r[0], "title": r[1], "content": r[2], "folder_name": r[3]} for r in cursor.fetchall()]
         conn.close()
