@@ -87,12 +87,33 @@ def init_golden_db():
             chunks_json TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''')
+        
+        # 💡 [핵심] AI 장기기억(사고과정 및 참고법령) 컬럼 안전 추가
+        try: conn.execute('ALTER TABLE golden_exams ADD COLUMN search_process TEXT DEFAULT ""')
+        except: pass
+        try: conn.execute('ALTER TABLE golden_exams ADD COLUMN referenced_laws TEXT DEFAULT ""')
+        except: pass
+
         conn.commit()
         conn.close()
     except Exception as e:
         print(f"\n[🔥 DB 초기화 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
 
 init_golden_db()
+
+# 💡 파일 텍스트 추출 헬퍼 함수
+def extract_text_from_file(file_obj):
+    if not file_obj: return ""
+    if file_obj.filename.lower().endswith('.pdf'):
+        try:
+            doc = fitz.open(stream=file_obj.read(), filetype="pdf")
+            text = "".join([page.get_text("text") for page in doc])
+            doc.close()
+            return text
+        except:
+            return ""
+    else:
+        return file_obj.read().decode('utf-8', errors='ignore')
 
 @api_bp.route('/health', methods=['GET', 'OPTIONS'])
 def health_check():
@@ -106,7 +127,7 @@ def task_status():
     return jsonify({"status": "not_found"}), 404
 
 # ==========================================
-# 💡 [신규] 대기열(Pending)에서 해설 자동생성 (RAG)
+# 💡 대기열(Pending)에서 해설 자동생성 (장기기억 RAG)
 # ==========================================
 @api_bp.route('/generate-rag-from-pending', methods=['POST'])
 def generate_rag_from_pending():
@@ -141,9 +162,8 @@ def generate_rag_from_pending():
         def process_rag_pending():
             try:
                 prompt = f'''당신은 국민건강보험공단 승진시험 최고 출제위원이자 완벽한 해설가입니다.
-                아래 [참고 법령]을 완벽하게 숙지하세요.
-                사용자가 업로드한 [시험지 텍스트]에는 '문제'와 '정답'이 포함되어 있습니다.
-                문제를 분석하고 정답을 확인한 뒤, 왜 그것이 정답인지 [참고 법령]의 구체적인 조항을 근거로 아주 상세하고 명확한 [해설]을 직접 작성해 주세요.
+                아래 [참고 법령 DB]를 숙지하고, 사용자의 [시험지 텍스트(문제+정답)]를 분석하세요.
+                정답의 근거가 되는 법령을 찾고, 그 사고 과정(장기기억용)과 완벽한 해설을 분리하여 작성하세요.
 
                 [참고 법령 DB]
                 {law_context[:35000]}
@@ -151,9 +171,14 @@ def generate_rag_from_pending():
                 [시험지 텍스트]
                 {raw_text[:10000]}
 
-                [출력 지시사항] 반드시 아래 JSON 배열 형식으로만 출력하세요.
-                [{{ "question": "문제 내용 및 보기", "answer": "정답(숫자 등)", "explanation": "법령 조문을 근거로 작성된 상세하고 논리적인 해설" }}]
-                '''
+                [출력 지시사항] 반드시 JSON 배열 형식으로만 출력하세요.
+                [{{ 
+                    "question": "문제 내용 및 보기 전체", 
+                    "answer": "정답", 
+                    "explanation": "사용자에게 보여줄 최종 해설",
+                    "search_process": "이 정답을 도출하기 위해 어떤 법령의 몇 조 몇 항을 찾았고 어떻게 논리적으로 판단했는지 사고 과정을 기록하세요.",
+                    "referenced_laws": "참고한 법령명과 조항"
+                }}]'''
 
                 response_text = generate_gemini_json(prompt)
                 exam_data = json.loads(response_text)
@@ -161,8 +186,11 @@ def generate_rag_from_pending():
                 conn2 = get_db_connection()
                 cursor2 = conn2.cursor()
                 for item in exam_data:
-                    cursor2.execute("INSERT INTO golden_exams (wallet_address, title, question, answer, explanation) VALUES (?, ?, ?, ?, ?)",
-                                   (wallet_address, filename, item.get('question', ''), item.get('answer', ''), item.get('explanation', '')))
+                    cursor2.execute('''INSERT INTO golden_exams 
+                        (wallet_address, title, question, answer, explanation, search_process, referenced_laws) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                        (wallet_address, filename, item.get('question', ''), item.get('answer', ''), item.get('explanation', ''), 
+                         item.get('search_process', ''), item.get('referenced_laws', '')))
                 
                 cursor2.execute("DELETE FROM pending_exams WHERE id = ? AND wallet_address = ?", (pending_id, wallet_address))
                 conn2.commit()
@@ -180,24 +208,23 @@ def generate_rag_from_pending():
         print(f"\n[🔥 라우터 진입 에러 - /generate-rag-from-pending]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
+# 💡 [핵심] 문제와 정답을 한 쌍으로 묶어서 직접 자동 생성
 @api_bp.route('/upload-exam', methods=['POST'])
 def upload_exam():
     try:
         wallet_address = request.form.get('wallet_address')
-        file = request.files.get('file')
-        if not file: return jsonify({"error": "파일이 없습니다."}), 400
+        exam_file = request.files.get('exam_file')
+        answer_file = request.files.get('answer_file') # 선택적 정답 파일
         
-        filename = file.filename.lower()
-        if filename.endswith('.pdf'):
-            pdf_document = fitz.open(stream=file.read(), filetype="pdf")
-            raw_text = ""
-            for page_num in range(len(pdf_document)):
-                raw_text += pdf_document.load_page(page_num).get_text("text") + "\n"
-            pdf_document.close()
-        else:
-            raw_text = file.read().decode('utf-8', errors='ignore')
-            
-        raw_text = normalize_text(clean_korean_law_text(raw_text))
+        if not exam_file: return jsonify({"error": "문제 파일이 없습니다."}), 400
+        
+        filename = exam_file.filename.lower()
+        exam_text = extract_text_from_file(exam_file)
+        answer_text = extract_text_from_file(answer_file)
+        
+        raw_text = normalize_text(clean_korean_law_text(exam_text))
+        if answer_text:
+            raw_text += "\n\n[정답 및 해설지 전문]\n" + normalize_text(clean_korean_law_text(answer_text))
         
         task_id = str(uuid.uuid4())
         TASK_STATUS[task_id] = {"status": "running", "progress": 20, "message": f"Gemini 엔진 분석 중..."}
@@ -211,13 +238,10 @@ def upload_exam():
                 conn.close()
 
                 law_context = "등록된 참고 법령이 없습니다."
-                if laws:
-                    law_context = "\n\n".join([f"[{r[0]}]\n{r[1]}" for r in laws])
+                if laws: law_context = "\n\n".join([f"[{r[0]}]\n{r[1]}" for r in laws])
                 
-                prompt = f'''당신은 국민건강보험공단 승진시험 최고 출제위원이자 완벽한 해설가입니다.
-                아래 [참고 법령]을 완벽하게 숙지하세요.
-                사용자가 업로드한 [시험지 텍스트]에는 '문제'와 '정답'이 포함되어 있습니다.
-                문제를 분석하고 정답을 확인한 뒤, 왜 그것이 정답인지 [참고 법령]의 구체적인 조항을 근거로 아주 상세하고 명확한 [해설]을 직접 작성해 주세요.
+                prompt = f'''당신은 승진시험 최고 출제위원이자 AI 해설가입니다.
+                아래 [시험지 텍스트(문제+정답)]를 분석하고, [참고 법령]을 대조하여 상세 해설과 당신의 사고 과정을 함께 기록하세요.
                 
                 [참고 법령 DB]
                 {law_context[:35000]}
@@ -225,9 +249,14 @@ def upload_exam():
                 [시험지 텍스트]
                 {raw_text[:10000]}
 
-                [출력 지시사항] 반드시 아래 JSON 배열 형식으로만 출력하세요.
-                [{{ "question": "문제 내용 및 보기", "answer": "정답(숫자 등)", "explanation": "법령 조문을 근거로 작성된 상세하고 논리적인 해설" }}]
-                '''
+                [출력 지시사항] 반드시 JSON 배열 형식으로만 출력하세요.
+                [{{ 
+                    "question": "문제 내용 및 보기 전체", 
+                    "answer": "정답", 
+                    "explanation": "법령에 기반한 사용자용 해설",
+                    "search_process": "어떤 조항을 찾고 논리적으로 어떻게 도출했는지 AI의 사고과정 (장기기억)",
+                    "referenced_laws": "참고 법령명"
+                }}]'''
                 
                 response_text = generate_gemini_json(prompt)
                 exam_data = json.loads(response_text)
@@ -235,8 +264,11 @@ def upload_exam():
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 for item in exam_data:
-                    cursor.execute("INSERT INTO exams (wallet_address, title, question, answer, explanation) VALUES (?, ?, ?, ?, ?)",
-                                   (wallet_address, filename, item.get('question', ''), item.get('answer', ''), item.get('explanation', '')))
+                    cursor.execute('''INSERT INTO golden_exams 
+                        (wallet_address, title, question, answer, explanation, search_process, referenced_laws) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                        (wallet_address, filename, item.get('question', ''), item.get('answer', ''), item.get('explanation', ''),
+                         item.get('search_process', ''), item.get('referenced_laws', '')))
                 conn.commit()
                 conn.close()
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"{len(exam_data)}개의 문항 저장됨."})
@@ -257,8 +289,7 @@ def delete_exam():
         exam_id = data.get('id')
         wallet_address = data.get('wallet_address')
         
-        if not exam_id or not wallet_address:
-            return jsonify({"error": "삭제 권한이 없습니다. (지갑 주소 누락)"}), 400
+        if not exam_id or not wallet_address: return jsonify({"error": "삭제 권한이 없습니다."}), 400
             
         conn = get_db_connection()
         conn.execute("DELETE FROM exams WHERE id = ? AND wallet_address = ?", (exam_id, wallet_address))
@@ -277,8 +308,7 @@ def delete_pending_exam():
         pending_id = data.get('id')
         wallet_address = data.get('wallet_address')
         
-        if not pending_id or not wallet_address:
-            return jsonify({"error": "삭제 권한이 없습니다. (지갑 주소 누락)"}), 400
+        if not pending_id or not wallet_address: return jsonify({"error": "권한 없음"}), 400
 
         conn = get_db_connection()
         conn.execute("DELETE FROM pending_exams WHERE id = ? AND wallet_address = ?", (pending_id, wallet_address))
@@ -289,43 +319,34 @@ def delete_pending_exam():
         print(f"\n[🔥 대기열 삭제 에러 - /delete-pending-exam]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
-# 🛑 [핵심 수정] 1. 2. 3. 문제 번호를 기준으로 덩어리(Chunk)를 자르도록 변경!
+# 💡 [핵심] 문제파일과 정답파일을 한 쌍으로 묶어서 펜딩 DB에 업로드
 @api_bp.route('/upload-exam-coop', methods=['POST'])
 def upload_exam_coop():
     try:
         wallet_address = request.form.get('wallet_address')
-        file = request.files.get('file')
-        if not file or not wallet_address: return jsonify({"error": "파일이나 인증 정보가 없습니다."}), 400
+        exam_file = request.files.get('exam_file')
+        answer_file = request.files.get('answer_file')
         
-        filename = file.filename.lower()
-        raw_text = ""
-
-        if filename.endswith('.pdf'):
-            try:
-                pdf_document = fitz.open(stream=file.read(), filetype="pdf")
-                for page_num in range(len(pdf_document)):
-                    page = pdf_document.load_page(page_num)
-                    raw_text += page.get_text("text") + "\n\n"
-                pdf_document.close()
-            except Exception as pdf_e:
-                print(f"\n[🔥 PDF 해독 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
-                return jsonify({"error": "PDF 파일 해독 중 오류가 발생했습니다."}), 500
-        else:
-            raw_text = file.read().decode('utf-8', errors='ignore')
+        if not exam_file or not wallet_address: return jsonify({"error": "문제 파일이나 인증 정보가 없습니다."}), 400
         
-        # 불필요한 기호 제거
-        raw_text = re.sub(r'-\s*\d+\s*-', '', raw_text)
+        filename = exam_file.filename.lower()
+        exam_text = extract_text_from_file(exam_file)
+        answer_text = extract_text_from_file(answer_file)
         
-        # 💡 [핵심] 줄바꿈 뒤에 숫자와 마침표(예: "1. ", "12. ")로 시작하는 부분을 기준으로 텍스트를 분할합니다.
-        # 이렇게 하면 모의고사가 문제 단위로 정확하게 쪼개집니다.
-        chunks = re.split(r'(?m)^(?=\s*\d+\.\s)', raw_text)
+        # 기호 제거 및 전처리
+        exam_text = re.sub(r'-\s*\d+\s*-', '', exam_text)
+        exam_text = re.sub(r'【[^】]+】', '', exam_text)
         
-        # 빈 문단이나 너무 짧은 문단은 제외
+        if answer_text:
+            exam_text += "\n\n[정답 및 해설지 참고]\n" + answer_text
+            
+        # 1. 2. 형태의 번호를 기준으로 문제 분할
+        chunks = re.split(r'(?m)^(?=\s*\d+\.\s)', exam_text)
         valid_chunks = [c.strip() for c in chunks if c.strip() and len(c.strip()) > 10]
 
         conn = get_db_connection()
         conn.execute("INSERT INTO pending_exams (wallet_address, filename, chunks_json) VALUES (?, ?, ?)",
-                     (wallet_address, file.filename, json.dumps(valid_chunks, ensure_ascii=False)))
+                     (wallet_address, exam_file.filename, json.dumps(valid_chunks, ensure_ascii=False)))
         conn.commit()
         conn.close()
             
@@ -348,13 +369,12 @@ def get_pending_exams():
         print(f"\n[🔥 펜딩 목록 조회 에러 - /get-pending-exams]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
-# 🛑 [핵심 수정] 협동 검수 모드에서도 업로드된 "법령"을 참고하여 해설을 작성하도록 RAG 연동!
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
     try:
         data = request.json
         chunk_text = data.get('chunk_text', '')
-        wallet_address = data.get('wallet_address') # 프론트에서 넘어온 지갑 주소
+        wallet_address = data.get('wallet_address')
 
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -363,12 +383,11 @@ def analyze_chunk():
         conn.close()
 
         law_context = "등록된 참고 법령이 없습니다."
-        if laws:
-            law_context = "\n\n".join([f"[{r[0]}]\n{r[1]}" for r in laws])
+        if laws: law_context = "\n\n".join([f"[{r[0]}]\n{r[1]}" for r in laws])
 
         prompt = f"""당신은 출제위원이자 법령 해설 전문가입니다.
 아래 [시험지 원문]에서 1개의 객관식 문제, 보기, 정답, 해설을 명확히 분리하세요.
-해설을 작성할 때는 반드시 [참고 법령 DB]를 대조하여 명확한 법적 근거를 포함하세요.
+해설을 작성할 때는 반드시 [참고 법령 DB]를 대조하여 명확한 법적 근거를 포함하고, 당신의 사고 과정도 기록하세요.
 
 [참고 법령 DB]
 {law_context[:30000]}
@@ -380,8 +399,9 @@ def analyze_chunk():
 {{
   "question": "교정된 문제 내용",
   "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
-  "answer": "정답 번호 (숫자만)",
-  "explanation": "참고 법령을 근거로 한 상세 해설"
+  "answer": "정답 번호",
+  "explanation": "참고 법령을 근거로 한 상세 해설",
+  "search_process": "어떤 조항을 찾고 논리적으로 어떻게 도출했는지 AI의 사고과정 (장기기억)"
 }}"""
         response_text = generate_gemini_json(prompt, temperature=0.1)
         result_data = json.loads(response_text)
@@ -397,11 +417,12 @@ def save_golden_exam():
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''INSERT INTO golden_exams 
-            (wallet_address, title, question, options_json, answer, explanation, category) 
-            VALUES (?, ?, ?, ?, ?, ?, ?)''',
+            (wallet_address, title, question, options_json, answer, explanation, category, search_process, referenced_laws) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
             (data.get('wallet_address'), data.get('title'), data.get('question'), 
              json.dumps(data.get('options', []), ensure_ascii=False), 
-             data.get('answer'), data.get('explanation'), data.get('category', '기본분류')))
+             data.get('answer'), data.get('explanation'), data.get('category', '기본분류'),
+             data.get('search_process', ''), data.get('referenced_laws', '')))
         conn.commit()
         conn.close()
         return jsonify({"message": "골든 DB 저장 완료!"})
@@ -415,8 +436,16 @@ def get_golden_exams():
         wallet_address = request.args.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title, question, options_json, answer, explanation FROM golden_exams WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
-        exams = [{"id": r[0], "title": r[1], "question": r[2], "options": json.loads(r[3] or "[]"), "answer": r[4], "explanation": r[5]} for r in cursor.fetchall()]
+        # 장기 기억 컬럼들(search_process, referenced_laws)도 함께 반환
+        cursor.execute("SELECT id, title, question, options_json, answer, explanation, search_process, referenced_laws FROM golden_exams WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
+        
+        exams = []
+        for r in cursor.fetchall():
+            exams.append({
+                "id": r[0], "title": r[1], "question": r[2], 
+                "options": json.loads(r[3] or "[]"), "answer": r[4], 
+                "explanation": r[5], "search_process": r[6], "referenced_laws": r[7]
+            })
         conn.close()
         return jsonify({"exams": exams})
     except Exception as e:
@@ -434,7 +463,7 @@ def get_cbt_session():
         conn.close()
         
         if not rows:
-            return jsonify({"error": "골든 DB에 저장된 검수 완료 문제가 없습니다. 먼저 모의고사를 검수해주세요."}), 404
+            return jsonify({"error": "골든 DB에 저장된 문제가 없습니다."}), 404
             
         problems = []
         for r in rows:
@@ -493,25 +522,24 @@ def upload_law():
                     categories = parse_html_3col_law(raw_bytes.decode('utf-8', errors='ignore'))
                     for cat in categories:
                         if not cat.get('folder_name') or cat['folder_name'] == '기본 폴더':
-                            cat['folder_name'] = custom_folder
+                            cat['folder_name'] = filename # 💡 법령 파일명을 폴더명(타이틀)으로 사용
                 else:
                     text = raw_bytes.decode('utf-8', errors='ignore')
                     normalized_text = normalize_text(clean_korean_law_text(text))
                     categories = []
                     parts = re.split(r'(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)', normalized_text)
                     if parts and len(parts) > 1:
-                        if parts[0].strip(): categories.append({"title": "총칙 및 서론", "content": parts[0].strip(), "folder_name": custom_folder})
+                        if parts[0].strip(): categories.append({"title": filename, "content": parts[0].strip(), "folder_name": filename})
                         for i in range(1, len(parts), 2):
-                            title = parts[i].strip()
                             content = parts[i+1].strip() if i+1 < len(parts) else ""
-                            categories.append({"title": title, "content": content, "folder_name": custom_folder})
-                    else: categories = [{"title": "문서 전체", "content": normalized_text, "folder_name": custom_folder}]
+                            categories.append({"title": filename, "content": content, "folder_name": filename})
+                    else: categories = [{"title": filename, "content": normalized_text, "folder_name": filename}]
                 
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 for cat in categories:
                     cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
-                                  (wallet_address, cat['title'], cat['content'], cat.get('folder_name', custom_folder)))
+                                  (wallet_address, cat['title'], cat['content'], cat.get('folder_name', filename)))
                 conn.commit()
                 conn.close()
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": "법령 아카이브 등록 성공"})
@@ -525,6 +553,21 @@ def upload_law():
         print(f"\n[🔥 법령 업로드 에러 - /upload-pdf]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "전송 실패"}), 500
 
+@api_bp.route('/get-categories')
+def get_categories():
+    try:
+        wallet_address = request.args.get('wallet_address')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ?", (wallet_address,))
+        cats = [{"id": r[0], "title": r[1], "content": r[2], "folder_name": r[3]} for r in cursor.fetchall()]
+        conn.close()
+        return jsonify({"categories": cats})
+    except Exception as e:
+        print(f"\n[🔥 카테고리 조회 에러 - /get-categories]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        return jsonify({"error": "조회 실패"}), 500
+
+# --- 기타 모든 원본 라우터 동일 적용 (save-card, recommend-blank 등 중략 없이 보존됨) ---
 @api_bp.route('/recommend-blank', methods=['POST'])
 def recommend_blank():
     try:
@@ -562,20 +605,6 @@ def recommend_blank():
     except Exception as e:
         print(f"\n[🔥 빈칸 추천 라우터 에러 - /recommend-blank]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "요청 실패", "details": str(e)}), 500
-
-@api_bp.route('/get-categories')
-def get_categories():
-    try:
-        wallet_address = request.args.get('wallet_address')
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ?", (wallet_address,))
-        cats = [{"id": r[0], "title": r[1], "content": r[2], "folder_name": r[3]} for r in cursor.fetchall()]
-        conn.close()
-        return jsonify({"categories": cats})
-    except Exception as e:
-        print(f"\n[🔥 카테고리 조회 에러 - /get-categories]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
-        return jsonify({"error": "조회 실패"}), 500
 
 @api_bp.route('/save-card', methods=['POST'])
 def save_card():
