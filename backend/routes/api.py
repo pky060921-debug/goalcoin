@@ -10,6 +10,7 @@ import sys
 import random
 import re
 import time
+import requests # 💡 로컬 AI 통신을 위해 추가
 from datetime import datetime
 
 from google import genai
@@ -28,6 +29,28 @@ api_bp = Blueprint('api', __name__)
 
 current_api_key_index = 0
 
+# ==========================================
+# 💡 [신규] API 요금 방어를 위한 로컬 AI (Ollama) 엔진
+# ==========================================
+def generate_ollama_json(prompt, model="qwen2.5-coder:14b"):
+    try:
+        url = "http://localhost:11434/api/generate"
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json" # 💡 반드시 JSON으로만 답하도록 강제
+        }
+        response = requests.post(url, json=payload, timeout=180)
+        response.raise_for_status()
+        return response.json().get("response", "{}")
+    except Exception as e:
+        print(f"\n[🔥 로컬 AI (Ollama) 통신 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        raise e
+
+# ==========================================
+# 💡 제미나이 무한 동력 (복잡한 논리/RAG 해설 전용)
+# ==========================================
 def generate_gemini_json(prompt, temperature=0.1):
     global current_api_key_index
     fallback_models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest']
@@ -121,31 +144,16 @@ def task_status():
         return jsonify(TASK_STATUS[task_id])
     return jsonify({"status": "not_found"}), 404
 
-@api_bp.route('/delete-law-file', methods=['POST'])
-def delete_law_file():
-    try:
-        data = request.json or {}
-        folder_name = data.get('folder_name')
-        wallet_address = data.get('wallet_address')
-        
-        if not folder_name or not wallet_address:
-            return jsonify({"error": "삭제 권한이 없습니다."}), 400
-
-        conn = get_db_connection()
-        conn.execute("DELETE FROM categories WHERE folder_name = ? AND wallet_address = ?", (folder_name, wallet_address))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "법령 파일 삭제 완료"})
-    except Exception as e:
-        print(f"\n[🔥 법령 파일 삭제 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
-        return jsonify({"error": str(e)}), 500
-
+# ==========================================
+# 💡 대기열(Pending)에서 해설 자동생성 (선택된 법령만 집중 RAG)
+# ==========================================
 @api_bp.route('/generate-rag-from-pending', methods=['POST'])
 def generate_rag_from_pending():
     try:
         data = request.json or {}
         pending_id = data.get('id')
         wallet_address = data.get('wallet_address')
+        selected_laws = data.get('selected_laws', []) # 💡 프론트에서 체크한 법령 목록
 
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -159,7 +167,14 @@ def generate_rag_from_pending():
         chunks = json.loads(row[1])
         raw_text = "\n\n".join(chunks)
 
-        cursor.execute("SELECT folder_name, title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
+        # 💡 [핵심] 사용자가 체크한 법령(폴더명)만 정확히 타겟팅하여 가져옴
+        if selected_laws:
+            placeholders = ','.join('?' for _ in selected_laws)
+            query = f"SELECT folder_name, title, content FROM categories WHERE wallet_address = ? AND folder_name IN ({placeholders})"
+            cursor.execute(query, [wallet_address] + selected_laws)
+        else:
+            cursor.execute("SELECT folder_name, title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
+        
         laws = cursor.fetchall()
         conn.close()
 
@@ -167,11 +182,17 @@ def generate_rag_from_pending():
         if laws:
             law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
 
+        print("\n=================================================", file=sys.stderr, flush=True)
+        print(f"🔍 [지능형 RAG 가동] 타겟 법령만 압축하여 해설 생성 시작!", file=sys.stderr, flush=True)
+        print(f"🔍 적용된 문서 개수: {len(selected_laws)}개, 추출된 세부 조항: {len(laws)}개", file=sys.stderr, flush=True)
+        print("=================================================\n", file=sys.stderr, flush=True)
+
         task_id = str(uuid.uuid4())
-        TASK_STATUS[task_id] = {"status": "running", "progress": 20, "message": "AI가 문제를 법령과 대조하여 분석 중..."}
+        TASK_STATUS[task_id] = {"status": "running", "progress": 20, "message": "AI가 타겟 법령을 대조하여 분석 중..."}
 
         def process_rag_pending():
             try:
+                # 해설 등 복잡한 논리는 Gemini에게 맡깁니다.
                 prompt = f'''당신은 승진시험 출제위원이자 사용자와 대화하는 보조 학습 AI입니다.
                 아래 [참고 자료 DB(법령 및 정관)]를 철저히 검색하여 사용자의 [시험지 텍스트]를 분석하세요.
 
@@ -222,81 +243,6 @@ def generate_rag_from_pending():
     except Exception as e:
         print(f"\n[🔥 라우터 진입 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
-
-@api_bp.route('/upload-exam', methods=['POST'])
-def upload_exam():
-    try:
-        wallet_address = request.form.get('wallet_address')
-        exam_file = request.files.get('exam_file')
-        answer_file = request.files.get('answer_file')
-        
-        if not exam_file: return jsonify({"error": "문제 파일이 없습니다."}), 400
-        
-        filename = exam_file.filename.lower()
-        exam_text = extract_text_from_file(exam_file)
-        answer_text = extract_text_from_file(answer_file)
-        
-        raw_text = normalize_text(clean_korean_law_text(exam_text))
-        if answer_text:
-            raw_text += "\n\n[정답 및 해설지 전문]\n" + normalize_text(clean_korean_law_text(answer_text))
-        
-        task_id = str(uuid.uuid4())
-        TASK_STATUS[task_id] = {"status": "running", "progress": 20, "message": f"Gemini 엔진 분석 중..."}
-        
-        def process_exam():
-            try:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute("SELECT folder_name, title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
-                laws = cursor.fetchall()
-                conn.close()
-
-                law_context = "등록된 참고 자료가 없습니다."
-                if laws: law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
-                
-                prompt = f'''당신은 승진시험 출제위원이자 사용자와 소통하는 AI입니다.
-                아래 [참고 자료 DB(법령 및 정관)]를 철저히 검색하여 사용자의 [시험지 텍스트]를 분석하세요.
-
-                [절대 규칙: 환각 금지 및 질문 유도]
-                1. 오직 제공된 [참고 자료 DB] 안의 텍스트만 근거로 삼으세요.
-                2. DB에서 내용을 찾을 수 없거나 애매할 때는 억지로 지어내지 말고, `explanation` 필드에 "이 부분은 현재 자료에서 찾을 수 없는데 어디를 참고해야 할까요?" 라고 정중히 사용자에게 물어보세요.
-
-                [참고 자료 DB]
-                {law_context[:35000]}
-
-                [시험지 텍스트]
-                {raw_text[:10000]}
-
-                [출력 지시사항] 반드시 JSON 배열 형식으로만 출력하세요.
-                [{{ 
-                    "question": "문제 내용 및 보기 전체", 
-                    "answer": "정답 번호 (모를 경우 '확인 필요')", 
-                    "explanation": "해석 내용 (모를 경우 사용자에게 질문 작성)",
-                    "search_process": "AI의 논리적 사고 과정",
-                    "referenced_laws": "참고 근거명"
-                }}]'''
-                
-                response_text = generate_gemini_json(prompt)
-                exam_data = json.loads(response_text)
-                
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                for item in exam_data:
-                    cursor.execute('''INSERT INTO golden_exams 
-                        (wallet_address, title, question, answer, explanation, search_process, referenced_laws) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                        (wallet_address, filename, item.get('question', ''), item.get('answer', ''), item.get('explanation', ''),
-                         item.get('search_process', ''), item.get('referenced_laws', '')))
-                conn.commit()
-                conn.close()
-                TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"{len(exam_data)}개의 문항 저장됨."})
-            except Exception as e:
-                TASK_STATUS[task_id].update({"status": "error", "message": f"파싱 실패: {str(e)}"})
-                
-        threading.Thread(target=process_exam).start()
-        return jsonify({"task_id": task_id, "message": "모의고사 처리 시작"})
-    except Exception as e:
-        return jsonify({"error": "요청 실패"}), 500
 
 @api_bp.route('/delete-exam', methods=['POST'])
 def delete_exam():
@@ -378,6 +324,7 @@ def get_pending_exams():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# 💡 [핵심 수정] API 비용 절감을 위해 문단 분석(파싱)은 로컬 AI(Ollama)가 처리합니다!
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
     try:
@@ -385,44 +332,55 @@ def analyze_chunk():
         chunk_text = data.get('chunk_text', '')
         wallet_address = data.get('wallet_address')
         user_feedback = data.get('user_feedback', '') 
+        selected_laws = data.get('selected_laws', []) # 💡 선택된 법령만 가져오기
 
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT folder_name, title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
+        if selected_laws:
+            placeholders = ','.join('?' for _ in selected_laws)
+            query = f"SELECT folder_name, title, content FROM categories WHERE wallet_address = ? AND folder_name IN ({placeholders})"
+            cursor.execute(query, [wallet_address] + selected_laws)
+        else:
+            cursor.execute("SELECT folder_name, title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
+            
         laws = cursor.fetchall()
         conn.close()
 
-        law_context = "등록된 참고 자료가 없습니다."
+        law_context = "선택된 법령이 없습니다."
         if laws: law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
         
-        feedback_str = f"\n[👨‍💻 사용자 피드백(대화/힌트)]\n{user_feedback}\n-> 위 사용자의 피드백을 적극 반영하여 다시 분석하고 해설과 장기기억을 완성하세요.\n" if user_feedback else ""
+        feedback_str = f"\n[👨‍💻 사용자 피드백(대화/힌트)]\n{user_feedback}\n-> 위 힌트를 바탕으로 정답과 해설을 완벽하게 수정하세요.\n" if user_feedback else ""
+
+        print(f"🤖 [Ollama 로컬 AI 가동] qwen2.5-coder:14b 엔진으로 문단을 분석합니다...", file=sys.stderr, flush=True)
 
         prompt = f"""당신은 출제위원이자 사용자와 소통하는 AI입니다.
         [절대 규칙: 대화형 파트너십 및 환각 금지]
         1. 오직 [참고 자료 DB]만 확인하세요. 
-        2. 자료가 부족하거나 내용이 애매할 경우, 억지로 정답을 만들지 마세요. 대신 "이 부분은 찾을 수 없는데 어디서 찾을까요?", "내용이 애매한데 어떻게 판단할까요?"라고 사용자에게 `explanation` 필드를 통해 질문하세요.
-        3. 사용자가 [사용자 피드백]을 주었다면, 그 힌트를 바탕으로 정답과 해설을 올바르게 수정하세요!
+        2. 자료가 부족하거나 내용이 애매할 경우, 억지로 정답을 만들지 마세요. 대신 "이 부분은 찾을 수 없는데 어디서 찾을까요?"라고 사용자에게 `explanation` 필드를 통해 질문하세요.
+        3. 사용자가 [사용자 피드백]을 주었다면, 그 힌트를 바탕으로 내용을 올바르게 수정하세요!
 
         [참고 자료 DB]
-        {law_context[:30000]}
+        {law_context[:8000]}
 
         [시험지 원문]
         {chunk_text}
         {feedback_str}
 
-        [출력형식] 반드시 JSON 형식으로만 반환하세요.
+        [출력형식] 반드시 JSON 형식으로만 반환하세요. 속성은 반드시 영문이어야 합니다.
         {{
           "question": "교정된 문제 내용",
           "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
           "answer": "정답 번호 (또는 '확인 필요')",
-          "explanation": "상세 해설 (모를 경우 사용자에게 질문을 작성, 피드백을 받았다면 '아하! 힌트 감사합니다' 등 대화형으로 시작)",
+          "explanation": "상세 해설 (또는 사용자에게 질문을 작성)",
           "search_process": "AI의 논리적 사고과정 (장기기억)"
         }}"""
-        response_text = generate_gemini_json(prompt, temperature=0.2)
+        
+        # 💡 [핵심] 이제 Gemini API 요금을 낭비하지 않고, 로컬의 Qwen2.5-Coder가 무료로 작업합니다!
+        response_text = generate_ollama_json(prompt)
         result_data = json.loads(response_text)
         return jsonify({"result": result_data})
     except Exception as e:
-        print(f"\n[🔥 문단 분석 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        print(f"\n[🔥 Ollama 로컬 AI 문단 분석 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/save-golden-exam', methods=['POST'])
@@ -489,127 +447,6 @@ def get_cbt_session():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@api_bp.route('/generate-styles', methods=['POST'])
-def generate_styles():
-    try:
-        data = request.json
-        article_text = data.get('article_text', '')
-        if not article_text: return jsonify({"error": "법령 텍스트가 없습니다."}), 400
-            
-        prompt = f"""당신은 승진시험 최고 출제위원장입니다.
-아래 [법령 조문]을 바탕으로 서로 다른 10가지 스타일의 4지 선다 문제를 창작하세요.
-[{{ "style": "스타일", "question": "문제 내용", "options": ["1. 보기"], "answer": "숫자", "explanation": "해설" }}]
-[법령 조문]\n{article_text}\n"""
-        response_text = generate_gemini_json(prompt, temperature=0.5)
-        result_data = json.loads(response_text)
-        if isinstance(result_data, dict): result_data = result_data.get('problems', [result_data])
-        return jsonify({"samples": result_data})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# 💡 [핵심 수정] 파편화된 조항 번호("제조 1", "제 조 12" 등) 완벽 분할 로직 탑재
-@api_bp.route('/upload-pdf', methods=['POST'])
-def upload_law():
-    try:
-        wallet_address = request.form.get('wallet_address')
-        custom_folder = request.form.get('custom_folder') 
-        file = request.files.get('file')
-        if not file: return jsonify({"error": "업로드된 파일이 없습니다."}), 400
-        
-        raw_bytes = file.read()
-        filename = file.filename.lower()
-        display_name = custom_folder if custom_folder else filename
-        
-        task_id = str(uuid.uuid4())
-        TASK_STATUS[task_id] = {"status": "running", "progress": 10, "message": "문헌 파싱 및 분석 중..."}
-        
-        def process_law():
-            try:
-                if filename.endswith('.pdf'):
-                    pdf_document = fitz.open(stream=raw_bytes, filetype="pdf")
-                    text = "".join([page.get_text("text") for page in pdf_document])
-                    pdf_document.close()
-                else:
-                    text = raw_bytes.decode('utf-8', errors='ignore')
-
-                normalized_text = normalize_text(clean_korean_law_text(text))
-                categories = []
-                
-                # 💡 "제 1 조", "제조 1", "제 조 12", "제 12 조의 2", "제조의 43 2" 모두 잡는 강력한 정규식
-                regex_pattern = r'((?:제\s*\d+\s*조|제\s*조\s*\d+|제조\s*\d+)(?:의\s*\d+)?\s*(?:\([^)]+\))?)'
-                parts = re.split(regex_pattern, normalized_text)
-                
-                if parts and len(parts) > 1:
-                    if parts[0].strip(): categories.append({"title": "총칙 및 서론", "content": parts[0].strip(), "folder_name": display_name})
-                    for i in range(1, len(parts), 2):
-                        # 파편화된 이름을 깔끔하게 정리 (예: "제조 1" -> "제1조")
-                        raw_title = parts[i].strip()
-                        nums = re.findall(r'\d+', raw_title)
-                        clean_title = raw_title
-                        if len(nums) == 1:
-                            clean_title = f"제{nums[0]}조"
-                        elif len(nums) >= 2:
-                            clean_title = f"제{nums[0]}조의{nums[1]}"
-                            
-                        content = parts[i+1].strip() if i+1 < len(parts) else ""
-                        categories.append({"title": clean_title, "content": content, "folder_name": display_name})
-                else: 
-                    categories = [{"title": "문서 전체", "content": normalized_text, "folder_name": display_name}]
-                
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                for cat in categories:
-                    cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
-                                  (wallet_address, cat['title'], cat['content'], cat.get('folder_name', display_name)))
-                conn.commit()
-                conn.close()
-                TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": "근거 아카이브 등록 성공"})
-            except Exception as e:
-                print(f"\n[🔥 법령 파싱 스레드 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
-                TASK_STATUS[task_id].update({"status": "error", "message": f"분석 실패: {str(e)}"})
-                
-        threading.Thread(target=process_law).start()
-        return jsonify({"task_id": task_id, "message": "업로드 완료, 백그라운드 처리 시작"})
-    except Exception as e: 
-        print(f"\n[🔥 법령 업로드 에러 - /upload-pdf]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
-        return jsonify({"error": "전송 실패"}), 500
-
-@api_bp.route('/recommend-blank', methods=['POST'])
-def recommend_blank():
-    try:
-        data = request.json
-        content = data.get('content')
-        wallet_address = data.get('wallet_address')
-        
-        task_id = str(uuid.uuid4())
-        TASK_STATUS[task_id] = {"status": "running", "progress": 15, "message": "DB에서 과거 기출문제 스캔 중..."}
-        
-        def process_recommend():
-            try:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute("SELECT question, answer FROM golden_exams WHERE wallet_address = ? ORDER BY id DESC LIMIT 10", (wallet_address,))
-                all_exams = "\n".join([f"Q:{r[0]} A:{r[1]}" for r in cursor.fetchall()])
-                conn.close()
-                
-                prompt = f'''당신은 대한민국 법령 출제위원입니다. 
-                아래 [기출 모의고사 DB]를 참고하여, 주어진 [법령 본문]에서 빈칸 문제로 내기 가장 좋은 핵심 단어(숫자, 기한, 명사 등) 딱 1개만 골라주세요.
-                형식: JSON만 출력
-                {{ "keyword": "추출한단어", "related_exam": "연관된 기출문제 내용 요약" }}
-                [기출 모의고사 DB]:\n{all_exams}\n[법령 본문]:\n{content}'''
-                
-                response_text = generate_gemini_json(prompt)
-                result = json.loads(response_text)
-                
-                TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "result": result, "message": "AI 추천 완료!"})
-            except Exception as e:
-                TASK_STATUS[task_id].update({"status": "error", "message": f"AI 연산 실패: {str(e)}"})
-                
-        threading.Thread(target=process_recommend).start()
-        return jsonify({"task_id": task_id, "message": "AI 추천 작업 시작"})
-    except Exception as e:
-        return jsonify({"error": "요청 실패", "details": str(e)}), 500
-
 @api_bp.route('/get-categories')
 def get_categories():
     try:
@@ -623,6 +460,7 @@ def get_categories():
     except Exception as e:
         return jsonify({"error": "조회 실패"}), 500
 
+# (이하 카드 학습, 통계, 삭제 관련 원본 라우터 동일 유지)
 @api_bp.route('/save-card', methods=['POST'])
 def save_card():
     try:
