@@ -106,7 +106,7 @@ def task_status():
     return jsonify({"status": "not_found"}), 404
 
 # ==========================================
-# 💡 대기열(Pending)에서 해설 자동생성 (RAG)
+# 💡 [신규] 대기열(Pending)에서 해설 자동생성 (RAG)
 # ==========================================
 @api_bp.route('/generate-rag-from-pending', methods=['POST'])
 def generate_rag_from_pending():
@@ -289,6 +289,7 @@ def delete_pending_exam():
         print(f"\n[🔥 대기열 삭제 에러 - /delete-pending-exam]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
+# 🛑 [핵심 수정] 1. 2. 3. 문제 번호를 기준으로 덩어리(Chunk)를 자르도록 변경!
 @api_bp.route('/upload-exam-coop', methods=['POST'])
 def upload_exam_coop():
     try:
@@ -312,28 +313,19 @@ def upload_exam_coop():
         else:
             raw_text = file.read().decode('utf-8', errors='ignore')
         
+        # 불필요한 기호 제거
         raw_text = re.sub(r'-\s*\d+\s*-', '', raw_text)
-        raw_text = re.sub(r'【[^】]+】', '', raw_text)
         
-        chunks = []
-        current_chunk = ""
-        paragraphs = re.split(r'\n\s*\n', raw_text)
+        # 💡 [핵심] 줄바꿈 뒤에 숫자와 마침표(예: "1. ", "12. ")로 시작하는 부분을 기준으로 텍스트를 분할합니다.
+        # 이렇게 하면 모의고사가 문제 단위로 정확하게 쪼개집니다.
+        chunks = re.split(r'(?m)^(?=\s*\d+\.\s)', raw_text)
         
-        for para in paragraphs:
-            para = para.strip()
-            if not para: continue
-            para = para.replace('\n', ' ') 
-            current_chunk += para + "\n\n"
-            if len(current_chunk) > 400:
-                chunks.append(current_chunk.strip())
-                current_chunk = ""
-                
-        if current_chunk.strip():
-            chunks.append(current_chunk.strip())
+        # 빈 문단이나 너무 짧은 문단은 제외
+        valid_chunks = [c.strip() for c in chunks if c.strip() and len(c.strip()) > 10]
 
         conn = get_db_connection()
         conn.execute("INSERT INTO pending_exams (wallet_address, filename, chunks_json) VALUES (?, ?, ?)",
-                     (wallet_address, file.filename, json.dumps(chunks, ensure_ascii=False)))
+                     (wallet_address, file.filename, json.dumps(valid_chunks, ensure_ascii=False)))
         conn.commit()
         conn.close()
             
@@ -356,17 +348,32 @@ def get_pending_exams():
         print(f"\n[🔥 펜딩 목록 조회 에러 - /get-pending-exams]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
+# 🛑 [핵심 수정] 협동 검수 모드에서도 업로드된 "법령"을 참고하여 해설을 작성하도록 RAG 연동!
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
     try:
         data = request.json
         chunk_text = data.get('chunk_text', '')
-        
-        prompt = f"""당신은 출제위원이자 국어 교열 전문가입니다.
-아래 PDF 텍스트에서 1개의 객관식 문제, 4개의 보기, 정답, 해설을 명확히 분리하세요.
-표나 복잡한 형식이 깨져있다면 문맥을 파악해 알맞은 문장으로 복원하세요.
+        wallet_address = data.get('wallet_address') # 프론트에서 넘어온 지갑 주소
 
-[원본 텍스트]
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
+        laws = cursor.fetchall()
+        conn.close()
+
+        law_context = "등록된 참고 법령이 없습니다."
+        if laws:
+            law_context = "\n\n".join([f"[{r[0]}]\n{r[1]}" for r in laws])
+
+        prompt = f"""당신은 출제위원이자 법령 해설 전문가입니다.
+아래 [시험지 원문]에서 1개의 객관식 문제, 보기, 정답, 해설을 명확히 분리하세요.
+해설을 작성할 때는 반드시 [참고 법령 DB]를 대조하여 명확한 법적 근거를 포함하세요.
+
+[참고 법령 DB]
+{law_context[:30000]}
+
+[시험지 원문]
 {chunk_text}
 
 [출력형식] 반드시 JSON 형식으로만 반환하세요.
@@ -374,7 +381,7 @@ def analyze_chunk():
   "question": "교정된 문제 내용",
   "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
   "answer": "정답 번호 (숫자만)",
-  "explanation": "해설"
+  "explanation": "참고 법령을 근거로 한 상세 해설"
 }}"""
         response_text = generate_gemini_json(prompt, temperature=0.1)
         result_data = json.loads(response_text)
@@ -629,7 +636,7 @@ def sync_batch():
         cursor = conn.cursor()
 
         for m in memos:
-            cursor.execute("UPDATE SET memo = ? WHERE id = ? AND wallet_address = ?", (m.get('memo', ''), m.get('id'), wallet_address))
+            cursor.execute("UPDATE cards SET memo = ? WHERE id = ? AND wallet_address = ?", (m.get('memo', ''), m.get('id'), wallet_address))
 
         for a in answers:
             card_id = a.get('card_id')
