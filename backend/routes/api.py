@@ -514,27 +514,38 @@ def upload_pdf():
     task_id = str(uuid.uuid4())
     TASK_STATUS[task_id] = "처리 중..."
     
-    # 💡 [UX 개선] PDF 파일의 이름을 추출해 폴더명으로 자동 지정합니다. (.pdf 확장자 제거)
     original_filename = file.filename if file else "일반 규정"
-    folder_name = re.sub(r'\.pdf$', '', original_filename, flags=re.IGNORECASE)
+    # .pdf 뿐만 아니라 .txt 확장자도 떼어내고 깔끔한 폴더명 생성
+    folder_name = re.sub(r'\.(pdf|txt)$', '', original_filename, flags=re.IGNORECASE)
 
     def process_file():
         try:
-            doc = fitz.open(stream=file.read(), filetype="pdf")
             raw_text = ""
-            for page in doc:
-                raw_text += page.get_text()
             
-            # 1. 먼저 3단 법령 전용 파서로 분석을 시도합니다.
+            # 💡 [핵심] 파일 확장자가 .txt인지 .pdf인지 검사하여 다르게 읽어들입니다!
+            if original_filename.lower().endswith('.txt'):
+                file_bytes = file.read()
+                try:
+                    # 일반적인 UTF-8 인코딩 시도
+                    raw_text = file_bytes.decode('utf-8')
+                except UnicodeDecodeError:
+                    # 윈도우 메모장에서 저장한 파일일 경우 CP949 인코딩으로 글자 깨짐 방어
+                    raw_text = file_bytes.decode('cp949', errors='ignore')
+            else:
+                # 기존 PDF 파싱
+                doc = fitz.open(stream=file.read(), filetype="pdf")
+                for page in doc:
+                    raw_text += page.get_text()
+            
+            # 1. 3단 법령 전용 파서로 먼저 시도
             cleaned_text = clean_korean_law_text(raw_text)
             blocks = parse_html_3col_law(cleaned_text)
             
-            # 💡 [핵심] 3단 법령 구조가 아니어서 블록 추출에 실패했다면, 일반 정관/규정 파서를 발동시킵니다!
+            # 2. 3단 법령이 아니라면 일반 규정/텍스트 파서 발동
             if not blocks or len(blocks) < 3:
-                logging.info(f"[{folder_name}] 3단 법령이 아님을 감지했습니다. 일반 규정 파서로 전환합니다.")
+                logging.info(f"[{folder_name}] 일반 문서 파서로 전환합니다.")
                 blocks = []
                 
-                # '제X조' 또는 '제X조의X' 패턴을 기준으로 문서를 영리하게 쪼갭니다.
                 pattern = r'(제\s*\d+\s*조(?:의\s*\d+)?)'
                 parts = re.split(pattern, raw_text)
                 
@@ -543,7 +554,6 @@ def upload_pdf():
                         article_num = parts[i].strip()
                         content_body = parts[i+1].strip() if i+1 < len(parts) else ""
                         
-                        # "제1조 (목적)" 처럼 본문 맨 앞의 괄호 제목을 찾아 조항 번호와 합칩니다.
                         match = re.match(r'^(\s*\(.*?\))', content_body)
                         if match:
                             article_title = match.group(1).strip()
@@ -551,7 +561,6 @@ def upload_pdf():
                         else:
                             full_title = article_num
                             
-                        # 본문의 불필요한 연속 줄바꿈을 압축하여 가독성을 높입니다.
                         clean_body = re.sub(r'\n{2,}', '\n', content_body).strip()
                         
                         blocks.append({
@@ -559,7 +568,7 @@ def upload_pdf():
                             "content": f"{full_title}\n{clean_body}"
                         })
                 else:
-                    # 만약 '제X조'조차 없는 단순 안내문 파일일 경우, 문단 길이 단위로 자릅니다.
+                    # '제X조'도 없는 순수 줄글 텍스트일 경우 문단 단위로 쪼개기
                     paragraphs = [p.strip() for p in raw_text.split('\n\n') if len(p.strip()) > 30]
                     for idx, p in enumerate(paragraphs):
                         blocks.append({
@@ -567,7 +576,7 @@ def upload_pdf():
                             "content": p
                         })
             
-            # 3. 추출된 데이터를 DB에 저장합니다. (폴더명 자동 적용)
+            # 3. DB에 저장
             conn = get_db_connection()
             cursor = conn.cursor()
             for block in blocks:
@@ -580,7 +589,7 @@ def upload_pdf():
             TASK_STATUS[task_id] = "완료"
             
         except Exception as e:
-            logging.error(f"PDF 업로드 에러: {traceback.format_exc()}")
+            logging.error(f"업로드 파일 분석 에러: {traceback.format_exc()}")
             TASK_STATUS[task_id] = f"에러: {str(e)}"
 
     threading.Thread(target=process_file).start()
