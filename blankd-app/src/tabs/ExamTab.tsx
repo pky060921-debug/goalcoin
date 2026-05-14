@@ -19,7 +19,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [viewingFile, setViewingFile] = useState<string | null>(null); 
   const [viewingArticle, setViewingArticle] = useState<{title: string, content: string, id: number} | null>(null); 
 
-  // 💡 [신규] 만들기 탭 연동! 사용자가 선택한 타겟 법령 리스트
   const [selectedLaws, setSelectedLaws] = useState<string[]>([]);
 
   const examInputRef = useRef<HTMLInputElement>(null);
@@ -56,7 +55,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         const uniqueLawNames = Array.from(new Set(catsRes.categories.map((c: any) => c.folder_name)));
         setUploadedLaws(uniqueLawNames as string[]);
         
-        // 처음 로딩 시 모든 자료를 체크된 상태로 기본 세팅
         if (selectedLaws.length === 0) {
             setSelectedLaws(uniqueLawNames as string[]);
         }
@@ -70,19 +68,45 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     fetchData();
   }, [userAddress]);
 
+  // 💡 [핵심 수정] 파일 삭제 시 팝업이 뜨지 않도록 이벤트 전파 차단
+  const handleDeleteLaw = async (e: React.MouseEvent, folderName: string) => {
+    e.stopPropagation();
+    if (!confirm(`[${folderName}] 파일을 삭제하시겠습니까?`)) return;
+    try {
+      const res = await fetch(`${BASE_URL}/delete-law-file`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_name: folderName, wallet_address: userAddress })
+      });
+      if (res.ok) {
+        alert("법령 파일이 삭제되었습니다.");
+        fetchData();
+        if (viewingFile === folderName) {
+            setViewingFile(null);
+            setViewingArticle(null);
+        }
+      } else {
+        const data = await res.json();
+        alert("삭제 실패: " + data.error);
+      }
+    } catch (err: any) {
+      alert("삭제 중 통신 오류가 발생했습니다.");
+    }
+  };
+
   const handleUploadForReview = async () => {
     if (!examFile || !userAddress) return alert("문제지 파일을 반드시 첨부해주세요.");
     setIsExamUploading(true);
     
-    const formData = new FormData();
-    formData.append('exam_file', examFile);
-    if (answerFile) formData.append('answer_file', answerFile);
-    formData.append('wallet_address', userAddress);
+    const fd = new FormData();
+    fd.append('exam_file', examFile);
+    if (answerFile) fd.append('answer_file', answerFile);
+    fd.append('wallet_address', userAddress);
 
     try {
       const res = await fetch(`${BASE_URL}/upload-exam-coop`, {
         method: 'POST',
-        body: formData
+        body: fd
       });
       const data = await res.json();
       
@@ -120,7 +144,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     }
   };
 
-  // 💡 [핵심] RAG 생성 시 선택된 법령(selectedLaws) 리스트를 함께 넘겨줍니다.
   const handleGenerateRAGFromPending = async (id: number) => {
     if (selectedLaws.length === 0) return alert("참고할 근거 자료를 상단에서 최소 1개 이상 체크해주세요!");
     if (!confirm(`선택된 ${selectedLaws.length}개의 근거 자료를 바탕으로 해설을 자동 생성하시겠습니까?`)) return;
@@ -198,7 +221,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setUserFeedback("");
   };
 
-  // 💡 [핵심] 수동 분석 시에도 선택된 법령만 로컬 AI(Ollama)에게 전달!
   const analyzeCurrentChunk = async (isRetry = false) => {
     setIsAnalyzing(true);
     try {
@@ -206,7 +228,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         chunk_text: chunks[chunkIndex],
         wallet_address: userAddress,
         user_feedback: isRetry ? userFeedback : "",
-        selected_laws: selectedLaws // 💡 체크된 파일만 넘김
+        selected_laws: selectedLaws 
       };
       
       const res = await fetch(`${BASE_URL}/analyze-chunk`, {
@@ -480,12 +502,11 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       {mode === 'list' && (
         <div className="space-y-8">
           
-          {/* 💡 [신규] 1. 만들기(Craft) 탭 연동! 근거 자료 다중 선택 (API 비용 절감) */}
           <div className="flex flex-col gap-4 p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm">
             <h3 className="text-teal-400 font-bold text-lg mb-2">🔍 1. 참고할 근거 자료 (DB) 선택</h3>
             <p className="text-white/50 text-xs mb-4">
               [만들기] 탭에서 업로드해둔 법령/정관 목록입니다. 이번 모의고사 해설에 참고할 자료만 체크해 주세요.<br/>
-              (불필요한 자료를 빼면 AI가 훨씬 빠르고 똑똑해지며 API 비용이 절약됩니다!)
+              (불필요한 자료를 빼면 AI가 훨씬 빠르고 똑똑해지며 에러를 방지합니다!)
             </p>
             
             {uploadedLaws.length === 0 ? (
@@ -510,16 +531,24 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                         <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                       </svg>
                     </div>
-                    <span className={`text-sm transition-colors ${selectedLaws.includes(law) ? 'text-teal-200 font-bold' : 'text-teal-500/60 group-hover:text-teal-400'}`}>
+                    <span 
+                        onClick={(e) => { e.preventDefault(); setViewingFile(law); }} 
+                        className={`text-sm transition-colors hover:underline ${selectedLaws.includes(law) ? 'text-teal-200 font-bold' : 'text-teal-500/60 group-hover:text-teal-400'}`}
+                    >
                       📄 {law}
                     </span>
+                    <button 
+                        onClick={(e) => handleDeleteLaw(e, law)}
+                        className="ml-auto px-2 text-red-500 hover:text-red-300 font-bold text-xs"
+                    >
+                        ✕
+                    </button>
                   </label>
                 ))}
               </div>
             )}
           </div>
 
-          {/* 2. 모의고사 첨부 패널 */}
           <div className="flex flex-col gap-4 p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm">
             <h3 className="text-teal-400 font-bold text-lg mb-2">📥 2. 모의고사 (문제와 정답 한 쌍) 업로드</h3>
             <p className="text-white/50 text-xs mb-4">문제지 파일과 정답지 파일을 각각 선택하여 하나의 세트로 묶어서 올립니다.</p>
@@ -541,7 +570,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
             </div>
           </div>
 
-          {/* 3. 합동 검수 대기소 */}
           <div className="p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm shadow-[0_0_15px_rgba(45,212,191,0.1)]">
             <h3 className="text-teal-400 font-bold mb-2 text-lg">📁 3. 합동 검수 목록 (클라우드 연동)</h3>
             <p className="text-white/50 text-xs mb-6">스마트폰이나 PC 어디서든 업로드한 파일이 동기화됩니다.</p>
@@ -616,6 +644,58 @@ export const ExamTab = ({ walletAddress, address }: any) => {
           )}
         </div>
       )}
+
+      {viewingFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 animate-in fade-in">
+          <div className="bg-teal-950 border border-teal-500/50 rounded-sm w-full max-w-5xl h-[85vh] flex flex-col shadow-2xl overflow-hidden">
+            
+            <div className="flex justify-between items-center p-4 border-b border-teal-500/30 bg-teal-900/30 shrink-0">
+              <h3 className="text-teal-300 font-bold text-lg">📄 {viewingFile}</h3>
+              <button 
+                onClick={() => { setViewingFile(null); setViewingArticle(null); }} 
+                className="text-white/50 hover:text-white text-2xl font-bold px-2"
+              >
+                &times;
+              </button>
+            </div>
+            
+            <div className="flex flex-1 overflow-hidden">
+              <div className="w-1/3 border-r border-teal-500/30 bg-black/40 overflow-y-auto custom-scrollbar p-2 space-y-1">
+                {rawLawsData.filter(l => l.folder_name === viewingFile).map((law, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setViewingArticle(law)}
+                    className={`w-full text-left px-3 py-3 text-sm rounded transition-colors ${
+                      viewingArticle?.id === law.id 
+                        ? 'bg-teal-600 text-white font-bold shadow-md' 
+                        : 'text-teal-400 hover:bg-teal-900/50'
+                    }`}
+                  >
+                    {law.title}
+                  </button>
+                ))}
+              </div>
+              
+              <div className="w-2/3 p-6 overflow-y-auto custom-scrollbar bg-black/20 text-white/80 text-[15px] leading-loose whitespace-pre-wrap">
+                {viewingArticle ? (
+                  <div className="animate-in fade-in slide-in-from-right-2">
+                    <h4 className="text-teal-300 font-bold text-xl mb-4 border-b border-white/10 pb-4">
+                      {viewingArticle.title}
+                    </h4>
+                    {viewingArticle.content}
+                  </div>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-white/30 text-sm">
+                    좌측에서 열람할 조항을 선택해주세요.
+                  </div>
+                )}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
