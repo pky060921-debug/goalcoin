@@ -504,82 +504,87 @@ def get_categories():
     except Exception as e:
         return jsonify({"error": "조회 실패"}), 500
 
-# 💡 [초강력 수리] PDF 파편화 텍스트 완벽 복원기
 @api_bp.route('/upload-pdf', methods=['POST'])
-def upload_law():
-    try:
-        wallet_address = request.form.get('wallet_address')
-        custom_folder = request.form.get('custom_folder') 
-        file = request.files.get('file')
-        if not file: return jsonify({"error": "업로드된 파일이 없습니다."}), 400
-        
-        raw_bytes = file.read()
-        filename = file.filename.lower()
-        display_name = custom_folder if custom_folder else filename
-        
-        task_id = str(uuid.uuid4())
-        TASK_STATUS[task_id] = {"status": "running", "progress": 10, "message": "문헌 파싱 및 복원 중..."}
-        
-        def process_law():
-            try:
-                categories = []
-                extracted_text = ""
+def upload_pdf():
+    file = request.files.get('file')
+    wallet_address = request.form.get('wallet_address')
+    if not file or not wallet_address:
+        return jsonify({"error": "파일 또는 지갑 주소 누락"}), 400
+
+    task_id = str(uuid.uuid4())
+    TASK_STATUS[task_id] = "처리 중..."
+    
+    # 💡 [UX 개선] PDF 파일의 이름을 추출해 폴더명으로 자동 지정합니다. (.pdf 확장자 제거)
+    original_filename = file.filename if file else "일반 규정"
+    folder_name = re.sub(r'\.pdf$', '', original_filename, flags=re.IGNORECASE)
+
+    def process_file():
+        try:
+            doc = fitz.open(stream=file.read(), filetype="pdf")
+            raw_text = ""
+            for page in doc:
+                raw_text += page.get_text()
+            
+            # 1. 먼저 3단 법령 전용 파서로 분석을 시도합니다.
+            cleaned_text = clean_korean_law_text(raw_text)
+            blocks = parse_html_3col_law(cleaned_text)
+            
+            # 💡 [핵심] 3단 법령 구조가 아니어서 블록 추출에 실패했다면, 일반 정관/규정 파서를 발동시킵니다!
+            if not blocks or len(blocks) < 3:
+                logging.info(f"[{folder_name}] 3단 법령이 아님을 감지했습니다. 일반 규정 파서로 전환합니다.")
+                blocks = []
                 
-                # 1. 물리적 블록 단위로 텍스트 추출 (표/다단 텍스트 섞임 방지)
-                if filename.endswith('.pdf'):
-                    doc = fitz.open(stream=raw_bytes, filetype="pdf")
-                    for page in doc:
-                        blocks = page.get_text("blocks")
-                        blocks.sort(key=lambda b: (b[1], b[0]))
-                        for b in blocks:
-                            text_block = b[4].strip()
-                            if text_block:
-                                extracted_text += text_block + "\n"
-                    doc.close()
-                else:
-                    extracted_text = raw_bytes.decode('utf-8', errors='ignore')
-
-                # 2. 강제 줄바꿈(엔터) 제거 및 문장 복원
-                extracted_text = re.sub(r'(?<![다요까기됨함임])\n(?!\s*제\s*\d+\s*조)', ' ', extracted_text)
-                extracted_text = re.sub(r'\s{2,}', ' ', extracted_text)
-
-                # 3. 조항(제O조) 기준으로 쪼개기 (파편화된 번호 방어)
-                regex_pattern = r'((?:제\s*\d+\s*조|제\s*조\s*\d+|제조\s*\d+)(?:의\s*\d+)?\s*(?:\([^)]+\))?)'
-                parts = re.split(regex_pattern, extracted_text)
-
-                if parts and len(parts) > 1:
-                    if parts[0].strip(): 
-                        categories.append({"title": "총칙 및 서론", "content": parts[0].strip(), "folder_name": display_name})
+                # '제X조' 또는 '제X조의X' 패턴을 기준으로 문서를 영리하게 쪼갭니다.
+                pattern = r'(제\s*\d+\s*조(?:의\s*\d+)?)'
+                parts = re.split(pattern, raw_text)
+                
+                if len(parts) >= 3:
                     for i in range(1, len(parts), 2):
-                        raw_title = parts[i].strip()
-                        nums = re.findall(r'\d+', raw_title)
-                        clean_title = f"제{nums[0]}조" if len(nums) == 1 else (f"제{nums[0]}조의{nums[1]}" if len(nums) >= 2 else raw_title)
-                        content = parts[i+1].strip() if i+1 < len(parts) else ""
-                        categories.append({"title": clean_title, "content": content, "folder_name": display_name})
-                else: 
-                    categories = [{"title": "문서 전체", "content": extracted_text, "folder_name": display_name}]
-                
-                # 너무 짧은 목차 찌꺼기는 무시하고 저장
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                saved_count = 0
-                for cat in categories:
-                    if len(cat['content'].strip()) > 5:
-                        cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
-                                      (wallet_address, cat['title'], cat['content'], cat.get('folder_name', display_name)))
-                        saved_count += 1
-                conn.commit()
-                conn.close()
-                TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"성공! 총 {saved_count}개 조항 저장됨"})
-            except Exception as e:
-                print(f"\n[🔥 법령 파싱 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
-                TASK_STATUS[task_id].update({"status": "error", "message": f"분석 실패: {str(e)}"})
-                
-        threading.Thread(target=process_law).start()
-        return jsonify({"task_id": task_id, "message": "업로드 완료, 백그라운드 파싱 시작"})
-    except Exception as e: 
-        print(f"\n[🔥 법령 업로드 라우터 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
-        return jsonify({"error": "전송 실패"}), 500
+                        article_num = parts[i].strip()
+                        content_body = parts[i+1].strip() if i+1 < len(parts) else ""
+                        
+                        # "제1조 (목적)" 처럼 본문 맨 앞의 괄호 제목을 찾아 조항 번호와 합칩니다.
+                        match = re.match(r'^(\s*\(.*?\))', content_body)
+                        if match:
+                            article_title = match.group(1).strip()
+                            full_title = f"{article_num} {article_title}"
+                        else:
+                            full_title = article_num
+                            
+                        # 본문의 불필요한 연속 줄바꿈을 압축하여 가독성을 높입니다.
+                        clean_body = re.sub(r'\n{2,}', '\n', content_body).strip()
+                        
+                        blocks.append({
+                            "title": full_title,
+                            "content": f"{full_title}\n{clean_body}"
+                        })
+                else:
+                    # 만약 '제X조'조차 없는 단순 안내문 파일일 경우, 문단 길이 단위로 자릅니다.
+                    paragraphs = [p.strip() for p in raw_text.split('\n\n') if len(p.strip()) > 30]
+                    for idx, p in enumerate(paragraphs):
+                        blocks.append({
+                            "title": f"문서 조각 {idx+1}",
+                            "content": p
+                        })
+            
+            # 3. 추출된 데이터를 DB에 저장합니다. (폴더명 자동 적용)
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            for block in blocks:
+                cursor.execute(
+                    "INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
+                    (wallet_address, block['title'], block['content'], folder_name)
+                )
+            conn.commit()
+            conn.close()
+            TASK_STATUS[task_id] = "완료"
+            
+        except Exception as e:
+            logging.error(f"PDF 업로드 에러: {traceback.format_exc()}")
+            TASK_STATUS[task_id] = f"에러: {str(e)}"
+
+    threading.Thread(target=process_file).start()
+    return jsonify({"message": f"{folder_name} 분석 시작", "task_id": task_id})
 
 @api_bp.route('/recommend-blank', methods=['POST'])
 def recommend_blank():
