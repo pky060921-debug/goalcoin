@@ -11,7 +11,6 @@ import random
 import re
 import time
 import requests
-import subprocess
 from datetime import datetime
 
 from google import genai
@@ -28,45 +27,9 @@ except ImportError:
 
 api_bp = Blueprint('api', __name__)
 
-# ==========================================
-# 💡 GOAL 코인 발행 (Sui Blockchain 연동)
-# ==========================================
-SUI_PACKAGE_ID = "YOUR_PACKAGE_ID_HERE"
-SUI_TREASURY_CAP_ID = "YOUR_TREASURY_CAP_ID_HERE"
-
-def mint_goal_coin_to_user(wallet_address, amount=10):
-    if SUI_PACKAGE_ID == "YOUR_PACKAGE_ID_HERE":
-        logging.warning("⚠️ 스마트 컨트랙트 ID 미설정: Goalcoin 지급이 생략됩니다.")
-        return False
-        
-    try:
-        raw_amount = str(amount * 1000000000) # Decimals 9
-        cmd = [
-            "sui", "client", "call", 
-            "--package", SUI_PACKAGE_ID,
-            "--module", "goal", 
-            "--function", "mint_reward",
-            "--args", SUI_TREASURY_CAP_ID, raw_amount, wallet_address,
-            "--gas-budget", "50000000",
-            "--json"
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
-            logging.info(f"🪙 {wallet_address} 에게 {amount} GOAL 지급 완료!")
-            return True
-        else:
-            logging.error(f"❌ GOAL 지급 실패: {result.stderr}")
-            return False
-    except Exception as e:
-        logging.error(f"❌ 코인 발행 에러: {str(e)}")
-        return False
-
-# ==========================================
-# 💡 로컬 AI (Ollama) 및 제미나이 무한 동력 엔진
-# ==========================================
 current_api_key_index = 0
 
-def generate_ollama_json(prompt, model="qwen2.5-coder:14b", temperature=0.1):
+def generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1):
     try:
         url = "http://localhost:11434/api/generate"
         payload = {
@@ -179,6 +142,19 @@ def init_golden_db():
 
 init_golden_db()
 
+def extract_text_from_file(file_obj):
+    if not file_obj: return ""
+    if file_obj.filename.lower().endswith('.pdf'):
+        try:
+            doc = fitz.open(stream=file_obj.read(), filetype="pdf")
+            text = "".join([page.get_text("text") for page in doc])
+            doc.close()
+            return text
+        except:
+            return ""
+    else:
+        return file_obj.read().decode('utf-8', errors='ignore')
+
 @api_bp.route('/health', methods=['GET', 'OPTIONS'])
 def health_check():
     return jsonify({"status": "alive"}), 200
@@ -190,16 +166,15 @@ def task_status():
         return jsonify(TASK_STATUS[task_id])
     return jsonify({"status": "not_found"}), 404
 
-# ==========================================
-# 💡 [통합] 폴더 및 파일 관리 라우터
-# ==========================================
 @api_bp.route('/delete-law-file', methods=['POST'])
 def delete_law_file():
     try:
         data = request.json or {}
         folder_name = data.get('folder_name')
         wallet_address = data.get('wallet_address')
-        if not folder_name or not wallet_address: return jsonify({"error": "삭제 권한이 없습니다."}), 400
+        
+        if not folder_name or not wallet_address:
+            return jsonify({"error": "삭제 권한이 없습니다."}), 400
 
         conn = get_db_connection()
         conn.execute("DELETE FROM categories WHERE folder_name = ? AND wallet_address = ?", (folder_name, wallet_address))
@@ -207,51 +182,9 @@ def delete_law_file():
         conn.close()
         return jsonify({"message": "법령 파일 삭제 완료"})
     except Exception as e:
+        print(f"\n[🔥 법령 파일 삭제 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
-@api_bp.route('/delete-folder', methods=['POST'])
-def delete_folder():
-    return delete_law_file()  # 호환성을 위해 연결해둡니다.
-
-@api_bp.route('/rename-folder', methods=['POST'])
-def rename_folder():
-    try:
-        data = request.json
-        wallet_address = data.get('wallet_address')
-        old_folder_name = data.get('old_folder_name')
-        new_folder_name = data.get('new_folder_name')
-        if not wallet_address or not old_folder_name: return jsonify({"error": "정보 누락"}), 400
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("UPDATE categories SET folder_name = ? WHERE wallet_address = ? AND folder_name = ?", (new_folder_name, wallet_address, old_folder_name))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "폴더명 변경 완료"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@api_bp.route('/update-category-folder', methods=['POST'])
-def update_category_folder():
-    try:
-        data = request.json
-        wallet_address = data.get('wallet_address')
-        cat_id = data.get('id')
-        new_folder_name = data.get('new_folder_name')
-        if not wallet_address or not cat_id: return jsonify({"error": "정보 누락"}), 400
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("UPDATE categories SET folder_name = ? WHERE id = ? AND wallet_address = ?", (new_folder_name, cat_id, wallet_address))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "폴더 이동 완료"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# ==========================================
-# 💡 RAG 시스템 및 모의고사 분석
-# ==========================================
 @api_bp.route('/generate-rag-from-pending', methods=['POST'])
 def generate_rag_from_pending():
     try:
@@ -286,13 +219,12 @@ def generate_rag_from_pending():
         if laws:
             law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
 
-        print(f"\n🔍 [RAG 시스템] '{filename}' 자동생성 시작! (참고 자료: {len(selected_laws)}개 문서, 총 {len(laws)}개 조항)\n", file=sys.stderr, flush=True)
-
         task_id = str(uuid.uuid4())
         TASK_STATUS[task_id] = {"status": "running", "progress": 20, "message": "AI가 문제를 법령과 대조하여 분석 중..."}
 
         def process_rag_pending():
             try:
+                # 💡 제미나이 전용 프롬프트 (대량 처리용)
                 prompt = f'''당신은 승진시험 출제위원이자 사용자와 대화하는 보조 학습 AI입니다.
                 아래 [참고 자료 DB]를 철저히 검색하여 사용자의 [시험지 텍스트]를 분석하세요.
 
@@ -301,8 +233,13 @@ def generate_rag_from_pending():
                 2. DB에서 내용이 부족하다면 억지로 지어내지 마세요.
                 3. 모르는 부분은 "이 부분은 찾을 수 없는데 어디서 찾을까요?", "내용이 조금 애매한데 어떻게 판단해야 될까요?" 라고 `explanation` 필드에 질문하세요.
 
+                [사고 과정(search_process) 작성 3단계 규칙]
+                1단계: 지문에서 언급된 타겟 조항명(예: 정관 제12조) 추출
+                2단계: [참고 자료 DB]에서 해당 조항명 검색 및 내용 확인 (없으면 없다고 명시)
+                3단계: DB 내용과 지문을 대조하여 논리적 일치 여부 판단
+
                 [참고 자료 DB]
-                {law_context[:35000]}
+                {law_context[:40000]}
 
                 [시험지 텍스트]
                 {raw_text[:10000]}
@@ -312,7 +249,7 @@ def generate_rag_from_pending():
                     "question": "문제 내용 및 보기 전체", 
                     "answer": "정답 번호 (모를 경우 '확인 필요')", 
                     "explanation": "해석 내용 (모를 경우 사용자에게 친근하게 질문 작성)",
-                    "search_process": "AI의 논리적 사고 과정",
+                    "search_process": "1단계:...\n2단계:...\n3단계:...",
                     "referenced_laws": "참고한 문서명과 조항"
                 }}]'''
 
@@ -383,19 +320,6 @@ def delete_pending_exam():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-def extract_text_from_file(file_obj):
-    if not file_obj: return ""
-    if file_obj.filename.lower().endswith('.pdf'):
-        try:
-            doc = fitz.open(stream=file_obj.read(), filetype="pdf")
-            text = "".join([page.get_text("text") for page in doc])
-            doc.close()
-            return text
-        except:
-            return ""
-    else:
-        return file_obj.read().decode('utf-8', errors='ignore')
-
 @api_bp.route('/upload-exam-coop', methods=['POST'])
 def upload_exam_coop():
     try:
@@ -441,6 +365,7 @@ def get_pending_exams():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# 💡 [핵심] 수동 1:1 대화형 분석 라우터 (로컬 AI 맞춤형 프롬프트 & 4만자 해제)
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
     try:
@@ -465,16 +390,21 @@ def analyze_chunk():
         law_context = "선택된 참고 자료가 없습니다."
         if laws: law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
         
-        feedback_str = f"\n[👨‍💻 사용자 피드백(대화/힌트)]\n{user_feedback}\n-> 위 사용자의 피드백을 적극 반영하여 다시 분석하고 해설과 장기기억을 완성하세요.\n" if user_feedback else ""
+        feedback_str = f"\n[👨‍💻 사용자 피드백(대화/힌트)]\n{user_feedback}\n-> 위 사용자의 피드백을 우선적으로 반영하여 정답과 해설을 올바르게 수정하세요.\n" if user_feedback else ""
 
         prompt = f"""당신은 출제위원이자 사용자와 소통하는 AI입니다.
         [절대 규칙: 대화형 파트너십 및 환각 금지]
         1. 오직 [참고 자료 DB]만 확인하세요. 
-        2. 자료가 부족하거나 애매할 경우, "이 부분은 찾을 수 없는데 어디서 찾을까요?"라고 `explanation` 필드에 질문하세요.
-        3. 사용자가 [사용자 피드백]을 주었다면, 그 힌트를 바탕으로 내용을 올바르게 수정하세요!
+        2. 자료가 부족하거나 애매할 경우 억지로 지어내지 마세요. 대신 `explanation` 필드에 "이 부분은 찾을 수 없는데 어디서 찾을까요?"라고 사용자에게 질문하세요.
+        3. 사용자가 [사용자 피드백]을 주었다면, 기존 생각을 버리고 그 힌트를 100% 반영하여 수정하세요!
+
+        [사고 과정(search_process) 작성 3단계 규칙]
+        1단계: 지문에서 언급된 타겟 조항명(예: 제1조) 추출
+        2단계: [참고 자료 DB]에서 해당 조항 내용 확인 (없으면 없다고 명시)
+        3단계: DB 내용과 지문을 대조하여 일치 여부 판단
 
         [참고 자료 DB]
-        {law_context[:8000]}
+        {law_context[:40000]}
 
         [시험지 원문]
         {chunk_text}
@@ -485,18 +415,18 @@ def analyze_chunk():
           "question": "교정된 문제 내용",
           "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
           "answer": "정답 번호 (또는 '확인 필요')",
-          "explanation": "상세 해설 (또는 사용자에게 질문을 작성)",
-          "search_process": "AI의 논리적 사고과정 (장기기억)"
+          "explanation": "상세 해설 (모를 경우 사용자에게 질문을 작성)",
+          "search_process": "1단계:...\n2단계:...\n3단계:..."
         }}"""
         
-        print(f"🤖 [로컬 AI 가동] 문단을 분석합니다...", file=sys.stderr, flush=True)
+        print(f"🤖 [로컬 AI 가동] 문단 분석 및 사고 시작...", file=sys.stderr, flush=True)
         
         try:
-            response_text = generate_ollama_json(prompt, temperature=0.2)
+            response_text = generate_ollama_json(prompt, temperature=0.1)
             result_data = clean_and_parse_json(response_text)
         except Exception as ollama_e:
             print(f"⚠️ 로컬 AI 분석 실패, Gemini로 우회합니다: {ollama_e}", file=sys.stderr, flush=True)
-            response_text = generate_gemini_json(prompt, temperature=0.2)
+            response_text = generate_gemini_json(prompt, temperature=0.1)
             result_data = clean_and_parse_json(response_text)
             
         if isinstance(result_data, list) and len(result_data) > 0:
@@ -571,129 +501,135 @@ def get_cbt_session():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ==========================================
-# 💡 [핵심] 법령(PDF/TXT) 업로드 및 파싱 (클렌징 듀얼파싱)
-# ==========================================
-@api_bp.route('/upload-pdf', methods=['POST'])
-def upload_pdf():
-    file = request.files.get('file')
-    wallet_address = request.form.get('wallet_address')
-    if not file or not wallet_address:
-        return jsonify({"error": "파일 또는 지갑 주소 누락"}), 400
-
-    task_id = str(uuid.uuid4())
-    TASK_STATUS[task_id] = "처리 중..."
-    
-    original_filename = file.filename if file else "일반 규정"
-    folder_name = re.sub(r'\.(pdf|txt)$', '', original_filename, flags=re.IGNORECASE)
-
-    def process_file():
-        try:
-            raw_text = ""
-            if original_filename.lower().endswith('.txt'):
-                file_bytes = file.read()
-                try: raw_text = file_bytes.decode('utf-8')
-                except UnicodeDecodeError: raw_text = file_bytes.decode('cp949', errors='ignore')
-            else:
-                doc = fitz.open(stream=file.read(), filetype="pdf")
-                for page in doc: raw_text += page.get_text()
-            
-            # 💡 [핵심 정제] 연혁 쓰레기 태그 싹둑!
-            raw_text = re.sub(r'<(?:신설|개정|삭제|단서신설|전문개정|본조신설)[^>]*>', '', raw_text)
-            raw_text = re.sub(r'\[(?:전문개정|본조신설|제목개정|종전제\d+조는|제\d+조에서 이동)[^\]]*\]', '', raw_text)
-            
-            cleaned_text = clean_korean_law_text(raw_text)
-            blocks = parse_html_3col_law(cleaned_text)
-            
-            if not blocks or len(blocks) < 3:
-                logging.info(f"[{folder_name}] 일반 문서 파서로 정밀 분석을 시작합니다.")
-                blocks = []
-                
-                # 조항이 새 줄의 시작에 있을 때만 자르도록!
-                pattern = r'(?m)^ *(제\s*\d+\s*조(?:의\s*\d+)?)'
-                parts = re.split(pattern, raw_text)
-                
-                if len(parts) >= 3:
-                    for i in range(1, len(parts), 2):
-                        article_num = parts[i].strip()
-                        content_body = parts[i+1].strip() if i+1 < len(parts) else ""
-                        
-                        match = re.match(r'^(\s*\(.*?\))', content_body)
-                        full_title = f"{article_num} {match.group(1).strip()}" if match else article_num
-                        clean_body = re.sub(r'\n{2,}', '\n', content_body).strip()
-                        
-                        blocks.append({"title": full_title, "content": f"{full_title}\n{clean_body}"})
-                else:
-                    paragraphs = [p.strip() for p in raw_text.split('\n\n') if len(p.strip()) > 30]
-                    for idx, p in enumerate(paragraphs):
-                        blocks.append({"title": f"문서 조각 {idx+1}", "content": p})
-            
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            for block in blocks:
-                cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", (wallet_address, block['title'], block['content'], folder_name))
-            conn.commit()
-            conn.close()
-            TASK_STATUS[task_id] = "완료"
-        except Exception as e:
-            logging.error(f"분석 에러: {traceback.format_exc()}")
-            TASK_STATUS[task_id] = f"에러: {str(e)}"
-
-    threading.Thread(target=process_file).start()
-    return jsonify({"message": f"{folder_name} 분석 시작", "task_id": task_id})
-
 @api_bp.route('/get-categories')
 def get_categories():
     try:
         wallet_address = request.args.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ? ORDER BY id ASC", (wallet_address,))
+        cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ?", (wallet_address,))
         cats = [{"id": r[0], "title": r[1], "content": r[2], "folder_name": r[3]} for r in cursor.fetchall()]
         conn.close()
         return jsonify({"categories": cats})
     except Exception as e:
         return jsonify({"error": "조회 실패"}), 500
 
-@api_bp.route('/split-category', methods=['POST'])
-def split_category():
+@api_bp.route('/upload-pdf', methods=['POST'])
+def upload_law():
+    try:
+        wallet_address = request.form.get('wallet_address')
+        custom_folder = request.form.get('custom_folder') 
+        file = request.files.get('file')
+        if not file: return jsonify({"error": "업로드된 파일이 없습니다."}), 400
+        
+        raw_bytes = file.read()
+        filename = file.filename.lower()
+        display_name = custom_folder if custom_folder else filename
+        
+        task_id = str(uuid.uuid4())
+        TASK_STATUS[task_id] = {"status": "running", "progress": 10, "message": "문헌 파싱 및 복원 중..."}
+        
+        def process_law():
+            try:
+                categories = []
+                extracted_text = ""
+                
+                if filename.endswith('.pdf'):
+                    doc = fitz.open(stream=raw_bytes, filetype="pdf")
+                    for page in doc:
+                        blocks = page.get_text("blocks")
+                        blocks.sort(key=lambda b: (b[1], b[0]))
+                        for b in blocks:
+                            text_block = b[4].strip()
+                            if text_block:
+                                extracted_text += text_block + "\n"
+                    doc.close()
+                else:
+                    extracted_text = raw_bytes.decode('utf-8', errors='ignore')
+
+                extracted_text = re.sub(r'(?<![다요까기됨함임])\n(?!\s*제\s*\d+\s*조)', ' ', extracted_text)
+                extracted_text = re.sub(r'\s{2,}', ' ', extracted_text)
+
+                regex_pattern = r'((?:제\s*\d+\s*조|제\s*조\s*\d+|제조\s*\d+)(?:의\s*\d+)?\s*(?:\([^)]+\))?)'
+                parts = re.split(regex_pattern, extracted_text)
+
+                if parts and len(parts) > 1:
+                    if parts[0].strip(): 
+                        categories.append({"title": "총칙 및 서론", "content": parts[0].strip(), "folder_name": display_name})
+                    for i in range(1, len(parts), 2):
+                        raw_title = parts[i].strip()
+                        nums = re.findall(r'\d+', raw_title)
+                        clean_title = f"제{nums[0]}조" if len(nums) == 1 else (f"제{nums[0]}조의{nums[1]}" if len(nums) >= 2 else raw_title)
+                        content = parts[i+1].strip() if i+1 < len(parts) else ""
+                        categories.append({"title": clean_title, "content": content, "folder_name": display_name})
+                else: 
+                    categories = [{"title": "문서 전체", "content": extracted_text, "folder_name": display_name}]
+                
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                saved_count = 0
+                for cat in categories:
+                    if len(cat['content'].strip()) > 5:
+                        cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
+                                      (wallet_address, cat['title'], cat['content'], cat.get('folder_name', display_name)))
+                        saved_count += 1
+                conn.commit()
+                conn.close()
+                TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"성공! 총 {saved_count}개 조항 저장됨"})
+            except Exception as e:
+                print(f"\n[🔥 법령 파싱 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+                TASK_STATUS[task_id].update({"status": "error", "message": f"분석 실패: {str(e)}"})
+                
+        threading.Thread(target=process_law).start()
+        return jsonify({"task_id": task_id, "message": "업로드 완료, 백그라운드 파싱 시작"})
+    except Exception as e: 
+        print(f"\n[🔥 법령 업로드 라우터 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        return jsonify({"error": "전송 실패"}), 500
+
+# (이하 카드 관련 라우터 원본 유지)
+@api_bp.route('/recommend-blank', methods=['POST'])
+def recommend_blank():
     try:
         data = request.json
+        content = data.get('content')
         wallet_address = data.get('wallet_address')
-        cat_id = data.get('id')
-        text1, text2 = data.get('text1'), data.get('text2')
-        title1, title2 = data.get('title1'), data.get('title2')
-        folder_name = data.get('folder_name') or '기본 폴더'
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM categories WHERE id = ? AND wallet_address = ?", (cat_id, wallet_address))
-        cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", (wallet_address, title1, text1, folder_name))
-        cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", (wallet_address, title2, text2, folder_name))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "본문 분할 완료"})
+        task_id = str(uuid.uuid4())
+        TASK_STATUS[task_id] = {"status": "running", "progress": 15, "message": "DB에서 과거 기출문제 스캔 중..."}
+        
+        def process_recommend():
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT question, answer FROM golden_exams WHERE wallet_address = ? ORDER BY id DESC LIMIT 10", (wallet_address,))
+                all_exams = "\n".join([f"Q:{r[0]} A:{r[1]}" for r in cursor.fetchall()])
+                conn.close()
+                
+                prompt = f'''당신은 대한민국 법령 출제위원입니다. 
+                아래 [기출 모의고사 DB]를 참고하여, 주어진 [법령 본문]에서 빈칸 문제로 내기 가장 좋은 핵심 단어 딱 1개만 골라주세요.
+                형식: JSON만 출력
+                {{ "keyword": "추출한단어", "related_exam": "연관된 기출문제 내용 요약" }}
+                [기출 모의고사 DB]:\n{all_exams}\n[법령 본문]:\n{content}'''
+                
+                response_text = generate_gemini_json(prompt)
+                result = clean_and_parse_json(response_text)
+                TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "result": result, "message": "AI 추천 완료!"})
+            except Exception as e:
+                TASK_STATUS[task_id].update({"status": "error", "message": f"AI 연산 실패: {str(e)}"})
+                
+        threading.Thread(target=process_recommend).start()
+        return jsonify({"task_id": task_id, "message": "AI 추천 작업 시작"})
     except Exception as e:
-        return jsonify({"error": "분할 실패"}), 500
+        return jsonify({"error": "요청 실패"}), 500
 
 @api_bp.route('/save-card', methods=['POST'])
 def save_card():
     try:
         data = request.json
-        wallet_address = data.get('wallet_address')
-        card_content = data.get('card_content')
-        answer_text = data.get('answer_text')
-        folder_name = data.get('folder_name', '기본 폴더')
-        memo = data.get('memo', '')
-        
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo) 
-                          VALUES (?, ?, ?, ?, ?, 0, ?, 'OWNED', NULL, ?, ?)''', 
-                          (wallet_address, 0, card_content, answer_text, '[]', get_next_review_time(0), folder_name, memo))
+        conn.execute('''INSERT INTO cards (wallet_address, card_content, answer_text, options_json, next_review_time, folder_name, memo) VALUES (?, ?, ?, '[]', ?, ?, ?)''', (data.get('wallet_address'), data.get('card_content'), data.get('answer_text'), get_next_review_time(0), data.get('folder_name', '기본 폴더'), data.get('memo', '')))
         conn.commit()
         conn.close()
-        return jsonify({"message": "카드 저장 완료"}), 200
+        return jsonify({"message": "카드 제작 완료"}), 201
     except Exception as e:
         return jsonify({"error": "저장 실패"}), 500
 
@@ -703,83 +639,36 @@ def get_my_cards():
         wallet_address = request.args.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
+        cursor.execute("SELECT id, next_review_time, status FROM cards WHERE wallet_address = ?", (wallet_address,))
+        now = datetime.utcnow()
+        for row in cursor.fetchall():
+            card_id, next_review_str, current_status = row
+            if next_review_str and current_status != 'BURNED':
+                next_review = datetime.strptime(next_review_str.split('.')[0], '%Y-%m-%d %H:%M:%S')
+                if now > next_review: cursor.execute("UPDATE cards SET status = 'BURNED', level = 0 WHERE id = ?", (card_id,))
+                elif (next_review - now).total_seconds() < 7200: cursor.execute("UPDATE cards SET status = 'AT_RISK' WHERE id = ?", (card_id,))
+        conn.commit()
+        
         cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo FROM cards WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
-        cards = [{"id": r[0], "content": r[1], "answer": r[2], "options": json.loads(r[3]), "level": r[4], "next_review_time": r[5], "status": r[6], "best_time": r[7], "folder_name": r[8], "memo": r[9] or ""} for r in cursor.fetchall()]
+        cards = [{"id": r[0], "content": r[1], "answer": r[2], "options": json.loads(r[3]), "level": r[4], "next_review": r[5], "status": r[6], "best_time": r[7], "folder_name": r[8], "memo": r[9] or ""} for r in cursor.fetchall()]
         conn.close()
         return jsonify({"cards": cards})
     except Exception as e:
         return jsonify({"error": "조회 실패"}), 500
 
-@api_bp.route('/delete-category', methods=['POST'])
-def delete_category():
-    try:
-        data = request.json
-        wallet_address = data.get('wallet_address')
-        cat_id = data.get('id')
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM categories WHERE id = ? AND wallet_address = ?", (cat_id, wallet_address))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "삭제 완료"})
-    except Exception as e:
-        return jsonify({"error": "삭제 실패"}), 500
-
-@api_bp.route('/delete-card', methods=['POST'])
-def delete_card():
-    try:
-        data = request.json
-        wallet_address = data.get('wallet_address')
-        card_id = data.get('id')
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "삭제 완료"})
-    except Exception as e:
-        return jsonify({"error": "삭제 실패"}), 500
-
-@api_bp.route('/delete-all', methods=['POST'])
-def delete_all():
-    try:
-        wallet_address = request.json.get('wallet_address')
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        for table in ['categories', 'cards', 'exams', 'pending_exams', 'golden_exams']:
-            cursor.execute(f"DELETE FROM {table} WHERE wallet_address = ?", (wallet_address,))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "초기화 성공"})
-    except Exception as e:
-        return jsonify({"error": "초기화 실패"}), 500
-
-# ==========================================
-# 💡 학습 진행 및 코인 지급 로직
-# ==========================================
 @api_bp.route('/sync-batch', methods=['POST'])
 def sync_batch():
     try:
         data = request.json
         wallet_address = data.get('wallet_address')
-        memos = data.get('memos', [])
-        answers = data.get('answers', [])
-        
-        if not wallet_address: return jsonify({"error": "인증 정보 없음"}), 400
-
         conn = get_db_connection()
         cursor = conn.cursor()
-
-        for m in memos:
+        for m in data.get('memos', []):
             cursor.execute("UPDATE cards SET memo = ? WHERE id = ? AND wallet_address = ?", (m.get('memo', ''), m.get('id'), wallet_address))
-
-        reward_coins = 0 
-
-        for a in answers:
+        for a in data.get('answers', []):
             card_id = a.get('card_id')
             is_correct = a.get('is_correct')
             clear_time = float(a.get('clear_time', 999.0))
-
             cursor.execute("SELECT level, best_time FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
             row = cursor.fetchone()
             if row:
@@ -790,73 +679,117 @@ def sync_batch():
                     except: best_time_float = float('inf')
                     new_best = clear_time if best_time_float == float('inf') else min(best_time_float, clear_time)
                     cursor.execute("UPDATE cards SET level = ?, next_review_time = ?, status = 'OWNED', best_time = ? WHERE id = ?", (new_lv, get_next_review_time(new_lv), new_best, card_id))
-                    
-                    # 💡 정답 시 10 코인 누적
-                    reward_coins += 10 
                 else:
                     cursor.execute("UPDATE cards SET level = 0, next_review_time = ?, status = 'AT_RISK' WHERE id = ?", (get_next_review_time(0), card_id))
-
         conn.commit()
         conn.close()
-
-        # 💡 학습 완료 시 수이 블록체인에서 Goal 코인 즉시 발행 (비동기)
-        if reward_coins > 0:
-            threading.Thread(target=mint_goal_coin_to_user, args=(wallet_address, reward_coins)).start()
-
-        return jsonify({"message": f"동기화 완료 (지급예정 GOAL: {reward_coins})"}), 200
+        return jsonify({"message": "일괄 동기화 성공"}), 200
     except Exception as e:
         return jsonify({"error": "배치 동기화 실패"}), 500
+
+@api_bp.route('/update-card-memo', methods=['POST'])
+def update_card_memo():
+    try:
+        data = request.json
+        conn = get_db_connection()
+        conn.execute("UPDATE cards SET memo = ? WHERE id = ? AND wallet_address = ?", (data.get('memo', ''), data.get('id'), data.get('wallet_address')))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "메모 업데이트 완료"}), 200
+    except Exception as e:
+        return jsonify({"error": "메모 업데이트 실패"}), 500
 
 @api_bp.route('/submit-answer', methods=['POST'])
 def submit_answer():
     try:
         data = request.json
-        wallet_address = data.get('wallet_address')
         card_id = data.get('card_id')
         is_correct = data.get('is_correct')
         try: clear_time = float(data.get('clear_time', 999.0))
         except: clear_time = 999.0
-
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT level, best_time FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
+        cursor.execute("SELECT level, best_time FROM cards WHERE id = ?", (card_id,))
         row = cursor.fetchone()
         if not row: return jsonify({"error": "카드가 없습니다."}), 404
         current_lv, best_time = row[0], row[1]
-        
-        msg = ""
         if is_correct:
             new_lv = min(int(current_lv) + 1, 50)
             try: best_time_float = float(best_time) if best_time is not None else float('inf')
             except: best_time_float = float('inf')
             new_best = clear_time if best_time_float == float('inf') else min(best_time_float, clear_time)
             cursor.execute("UPDATE cards SET level = ?, next_review_time = ?, status = 'OWNED', best_time = ? WHERE id = ?", (new_lv, get_next_review_time(new_lv), new_best, card_id))
-            msg = f"방어 성공! 레벨이 {new_lv}로 올랐습니다. (10 GOAL 지급 완료)"
-            # 단일 제출에서도 Goal 코인 지급
-            threading.Thread(target=mint_goal_coin_to_user, args=(wallet_address, 10)).start()
+            msg = f"방어 성공! 레벨이 {new_lv}로 올랐습니다."
         else:
             cursor.execute("UPDATE cards SET level = 0, next_review_time = ?, status = 'AT_RISK' WHERE id = ?", (get_next_review_time(0), card_id))
             msg = "방어 실패! 레벨이 0으로 초기화되었습니다."
-            
         conn.commit()
         conn.close()
         return jsonify({"message": msg})
     except Exception as e:
         return jsonify({"error": "제출 처리 실패"}), 500
 
-@api_bp.route('/update-card-memo', methods=['POST'])
-def update_card_memo():
+@api_bp.route('/delete-category', methods=['POST'])
+def delete_category():
+    try:
+        data = request.json
+        conn = get_db_connection()
+        conn.execute("DELETE FROM categories WHERE wallet_address = ? AND id = ?", (data.get('wallet_address'), data.get('id')))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "삭제되었습니다."})
+    except Exception as e:
+        return jsonify({"error": "삭제 실패"}), 500
+
+@api_bp.route('/delete-card', methods=['POST'])
+def delete_card():
+    try:
+        data = request.json
+        conn = get_db_connection()
+        conn.execute("DELETE FROM cards WHERE wallet_address = ? AND id = ?", (data.get('wallet_address'), data.get('id')))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "삭제되었습니다."})
+    except Exception as e:
+        return jsonify({"error": "삭제 실패"}), 500
+
+@api_bp.route('/delete-all', methods=['POST'])
+def delete_all():
+    try:
+        wallet_address = request.json.get('wallet_address')
+        conn = get_db_connection()
+        for table in ['categories', 'cards', 'exams', 'ai_analysis', 'pending_exams', 'golden_exams']:
+            conn.execute(f"DELETE FROM {table} WHERE wallet_address = ?", (wallet_address,))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "초기화 성공"})
+    except Exception as e:
+        return jsonify({"error": "초기화 실패"}), 500
+
+@api_bp.route('/split-category', methods=['POST'])
+def split_category():
     try:
         data = request.json
         wallet_address = data.get('wallet_address')
-        card_id = data.get('id')
-        memo = data.get('memo', '')
-        
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("UPDATE cards SET memo = ? WHERE id = ? AND wallet_address = ?", (memo, card_id, wallet_address))
+        conn.execute("DELETE FROM categories WHERE id = ? AND wallet_address = ?", (data.get('id'), wallet_address))
+        conn.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", (wallet_address, data.get('title1'), data.get('text1'), data.get('folder_name') or '기본 폴더'))
+        conn.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", (wallet_address, data.get('title2'), data.get('text2'), data.get('folder_name') or '기본 폴더'))
         conn.commit()
         conn.close()
-        return jsonify({"message": "메모 및 통계 업데이트 완료"}), 200
+        return jsonify({"message": "본문 분할 완료"})
     except Exception as e:
-        return jsonify({"error": "메모 업데이트 실패"}), 500
+        return jsonify({"error": "분할 실패"}), 500
+
+@api_bp.route('/get-all-exams')
+def get_all_exams():
+    try:
+        wallet_address = request.args.get('wallet_address')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, title, question, answer, explanation FROM exams WHERE wallet_address = ?", (wallet_address,))
+        exams = [{"id": r[0], "title": r[1], "question": r[2], "answer": r[3], "explanation": r[4]} for r in cursor.fetchall()]
+        conn.close()
+        return jsonify({"exams": exams})
+    except Exception as e:
+        return jsonify({"error": "조회 실패"}), 500
