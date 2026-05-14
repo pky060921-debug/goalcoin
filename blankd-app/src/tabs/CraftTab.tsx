@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { formatCardText, getStrictTitleOnly, SPLIT_REGEX } from '../utils/constants';
-// 💡 [필수 추가] 폴더 삭제 API를 호출하기 위해 api 객체를 임포트합니다.
 import { api } from '../services/api';
 
 const getGridClass = (cols: number) => {
@@ -23,7 +22,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   const [pageBreaks, setPageBreaks] = useState<Set<number>>(new Set());
   const [memoInput, setMemoInput] = useState(""); 
 
-  // 💡 지우개 모드 상태 관리
   const [isEraserMode, setIsEraserMode] = useState(false);
 
   useEffect(() => {
@@ -40,7 +38,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   };
 
   const handleWordClick = (idx: number) => {
-    // 💡 지우개 모드가 켜져 있다면 글자 자체를 삭제합니다.
     if (isEraserMode) {
       const newArray = [...wordArray];
       newArray.splice(idx, 1); 
@@ -59,7 +56,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         else if (i > idx) newPageBreaks.add(i - 1);
       });
       setPageBreaks(newPageBreaks);
-      
       return; 
     }
 
@@ -99,15 +95,35 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       </div>
 
       <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-4 sm:mb-6">
-        {/* 💡 [신규] 폴더 삭제 기능이 결합된 폴더 버튼 UI */}
         {craftFolders.map((f: string) => (
-          <div key={f} className="relative group">
+          <div key={f} className="relative group flex items-center">
             <button 
               onClick={() => setOpenFolders(p => ({...p, [f]: !p[f]}))} 
-              className={`pl-2.5 pr-8 py-1.5 sm:py-2 text-[10px] sm:text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' : 'bg-indigo-900/40 text-indigo-300 border-indigo-500/30'}`}
+              className={`pl-2.5 pr-14 py-1.5 sm:py-2 text-[10px] sm:text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' : 'bg-indigo-900/40 text-indigo-300 border-indigo-500/30'}`}
             >
               📁 {f}
             </button>
+            
+            {/* 💡 [신규] 폴더명 통째로 변경 버튼 */}
+            <button 
+              onClick={async (e) => {
+                e.stopPropagation();
+                const newName = prompt(`'${f}' 폴더의 새로운 이름을 입력하세요:`, f);
+                if(newName && newName.trim() !== "" && newName !== f) {
+                  try {
+                    await api.renameFolder(safeAddress, f, newName.trim());
+                    addLog(`✏️ 폴더 이름이 '${newName}'(으)로 변경되었습니다.`);
+                    window.location.reload();
+                  } catch (err) { alert("이름 변경에 실패했습니다."); }
+                }
+              }}
+              className="absolute right-6 top-1/2 -translate-y-1/2 text-white/30 hover:text-blue-400 px-1.5 py-1 text-[10px] transition-colors"
+              title="폴더명 변경"
+            >
+              ✏️
+            </button>
+
+            {/* 💡 폴더 삭제 버튼 */}
             <button 
               onClick={async (e) => {
                 e.stopPropagation();
@@ -116,12 +132,11 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                     await api.deleteFolder(safeAddress, f);
                     addLog(`🗑️ ${f} 폴더 삭제 완료`);
                     window.location.reload(); 
-                  } catch (err) {
-                    alert("폴더 삭제에 실패했습니다.");
-                  }
+                  } catch (err) { alert("폴더 삭제에 실패했습니다."); }
                 }
               }}
-              className="absolute right-1 top-1/2 -translate-y-1/2 text-white/30 hover:text-red-400 px-2 py-1 text-[10px] transition-colors"
+              className="absolute right-1 top-1/2 -translate-y-1/2 text-white/30 hover:text-red-400 px-1.5 py-1 text-[10px] transition-colors"
+              title="폴더 삭제"
             >
               ✕
             </button>
@@ -171,8 +186,28 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                       </button>
                     ) : (
                       <div className="w-full p-4 sm:p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-3 shadow-xl z-20 relative animate-in zoom-in-95">
-                        <div className="flex justify-between items-center mb-1">
-                          <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{cleanTitle}</span>
+                        <div className="flex justify-between items-center mb-1 flex-wrap gap-2">
+                          
+                          {/* 💡 [신규] 특정 조항(Category)만 다른 폴더로 이사시키는 버튼 */}
+                          <div className="flex items-center gap-2">
+                            <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{cleanTitle}</span>
+                            <button 
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                const newFolder = prompt("이 조항을 이동시킬 새로운 폴더 이름을 입력하세요:", cat.folder_name);
+                                if (newFolder && newFolder.trim() !== "" && newFolder !== cat.folder_name) {
+                                  try {
+                                    await api.updateCategoryFolder(safeAddress, cat.id, newFolder.trim());
+                                    addLog(`📁 항목이 '${newFolder}' 폴더로 이동되었습니다.`);
+                                    window.location.reload(); 
+                                  } catch (err) { alert("폴더 이동에 실패했습니다."); }
+                                }
+                              }}
+                              className="px-2 py-0.5 bg-white/5 border border-white/20 rounded-sm text-[9px] text-white/50 hover:bg-white/10 hover:text-white transition-colors whitespace-nowrap"
+                            >
+                              📂 폴더 이동
+                            </button>
+                          </div>
                           
                           <button 
                             onClick={() => setIsEraserMode(!isEraserMode)}
