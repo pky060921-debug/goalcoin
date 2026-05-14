@@ -1,15 +1,6 @@
 const BASE_URL = "https://api.blankd.top/api";
 
 export const api = {
-  async deleteFolder(address: string, folderName: string) {
-    const res = await fetch(`${BASE_URL}/delete-folder`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ wallet_address: address, folder_name: folderName })
-    });
-    if (!res.ok) throw new Error("폴더 삭제에 실패했습니다.");
-    return res.json();
-  },
   async getCategories(address: string) {
     const res = await fetch(`${BASE_URL}/get-categories?wallet_address=${address}`);
     return res.json();
@@ -38,15 +29,13 @@ export const api = {
     if (!res.ok) throw new Error("스타일 샘플 생성 실패");
     return res.json();
   },
-  
-  // 💡 [에러 감지 강화] 합동 검수용 API
   async uploadExamCoop(file: File, address: string) {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('wallet_address', address);
-    const res = await fetch(`${BASE_URL}/upload-exam-coop`, { method: 'POST', body: formData });
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("wallet_address", address);
+    const res = await fetch(`${BASE_URL}/upload-exam-coop`, { method: "POST", body: fd });
     const data = await res.json();
-    if (!res.ok || data.error) throw new Error(data.error || "파일 업로드에 실패했습니다.");
+    if (!res.ok || data.error) throw new Error(data.error || "모의고사 업로드 실패");
     return data;
   },
   async getPendingExams(address: string) {
@@ -75,7 +64,6 @@ export const api = {
     });
     return res.json();
   },
-
   async getGoldenExams(address: string) {
     const res = await fetch(`${BASE_URL}/get-golden-exams?wallet_address=${address}`);
     return res.json();
@@ -86,6 +74,55 @@ export const api = {
       const err = await res.json();
       throw new Error(err.error || "CBT 데이터를 불러오지 못했습니다.");
     }
+    return res.json();
+  },
+  async getGoalCoinBalance(address: string) {
+    try {
+      const res = await fetch('https://fullnode.testnet.sui.io/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "suix_getCoins",
+          params: [address, "0x2::sui::SUI"] 
+        })
+      });
+      const data = await res.json();
+      if (data.result && data.result.data) {
+        const total = data.result.data.reduce((acc: number, coin: any) => acc + Number(coin.balance), 0);
+        return total / 1000000000;
+      }
+      return 0;
+    } catch (e) {
+      console.error("잔고 조회 실패", e);
+      return 0;
+    }
+  },
+  
+  // 💡 [신규 추가] 폴더 및 카테고리 관리 API
+  async deleteFolder(address: string, folderName: string) {
+    const res = await fetch(`${BASE_URL}/delete-folder`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wallet_address: address, folder_name: folderName })
+    });
+    if (!res.ok) throw new Error("폴더 삭제에 실패했습니다.");
+    return res.json();
+  },
+  async renameFolder(address: string, oldFolderName: string, newFolderName: string) {
+    const res = await fetch(`${BASE_URL}/rename-folder`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wallet_address: address, old_folder_name: oldFolderName, new_folder_name: newFolderName })
+    });
+    if (!res.ok) throw new Error("폴더명 변경 실패");
+    return res.json();
+  },
+  async updateCategoryFolder(address: string, id: number, newFolderName: string) {
+    const res = await fetch(`${BASE_URL}/update-category-folder`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet_address: address, id, new_folder_name: newFolderName })
+    });
+    if (!res.ok) throw new Error("항목 이동 실패");
     return res.json();
   }
 };
