@@ -29,7 +29,6 @@ api_bp = Blueprint('api', __name__)
 
 current_api_key_index = 0
 
-# 💡 [핵심 수정] temperature 파라미터를 정상적으로 받도록 수정
 def generate_ollama_json(prompt, model="qwen2.5-coder:14b", temperature=0.1):
     try:
         url = "http://localhost:11434/api/generate"
@@ -87,7 +86,6 @@ def generate_gemini_json(prompt_or_contents, temperature=0.1):
                 
     raise Exception("🚨 구글 서버 불안정 또는 모든 API 키 한도 초과입니다.")
 
-# 💡 [핵심 방어] 마크다운 찌꺼기 및 파싱 에러를 완벽히 차단하는 강력한 JSON 추출기
 def clean_and_parse_json(response_text):
     try:
         text = response_text.strip()
@@ -143,19 +141,6 @@ def init_golden_db():
         print(f"\n[🔥 DB 초기화 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
 
 init_golden_db()
-
-def extract_text_from_file(file_obj):
-    if not file_obj: return ""
-    if file_obj.filename.lower().endswith('.pdf'):
-        try:
-            doc = fitz.open(stream=file_obj.read(), filetype="pdf")
-            text = "".join([page.get_text("text") for page in doc])
-            doc.close()
-            return text
-        except:
-            return ""
-    else:
-        return file_obj.read().decode('utf-8', errors='ignore')
 
 @api_bp.route('/health', methods=['GET', 'OPTIONS'])
 def health_check():
@@ -318,6 +303,19 @@ def delete_pending_exam():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+def extract_text_from_file(file_obj):
+    if not file_obj: return ""
+    if file_obj.filename.lower().endswith('.pdf'):
+        try:
+            doc = fitz.open(stream=file_obj.read(), filetype="pdf")
+            text = "".join([page.get_text("text") for page in doc])
+            doc.close()
+            return text
+        except:
+            return ""
+    else:
+        return file_obj.read().decode('utf-8', errors='ignore')
+
 @api_bp.route('/upload-exam-coop', methods=['POST'])
 def upload_exam_coop():
     try:
@@ -363,7 +361,6 @@ def get_pending_exams():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 💡 [핵심 수정] 로컬 AI 호출 시 2중 방어벽 구축 및 Gemini 자동 우회 탑재
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
     try:
@@ -393,7 +390,7 @@ def analyze_chunk():
         prompt = f"""당신은 출제위원이자 사용자와 소통하는 AI입니다.
         [절대 규칙: 대화형 파트너십 및 환각 금지]
         1. 오직 [참고 자료 DB]만 확인하세요. 
-        2. 자료가 부족하거나 내용이 애매할 경우, 억지로 정답을 만들지 마세요. 대신 "이 부분은 찾을 수 없는데 어디서 찾을까요?"라고 사용자에게 `explanation` 필드를 통해 질문하세요.
+        2. 자료가 부족하거나 애매할 경우, "이 부분은 찾을 수 없는데 어디서 찾을까요?"라고 `explanation` 필드에 질문하세요.
         3. 사용자가 [사용자 피드백]을 주었다면, 그 힌트를 바탕으로 내용을 올바르게 수정하세요!
 
         [참고 자료 DB]
@@ -403,7 +400,7 @@ def analyze_chunk():
         {chunk_text}
         {feedback_str}
 
-        [출력형식] 반드시 JSON 단일 객체 형식으로만 반환하세요. 속성은 반드시 영문이어야 합니다.
+        [출력형식] 반드시 JSON 단일 객체 형식으로만 반환하세요.
         {{
           "question": "교정된 문제 내용",
           "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
@@ -414,16 +411,14 @@ def analyze_chunk():
         
         print(f"🤖 [로컬 AI 가동] 문단을 분석합니다...", file=sys.stderr, flush=True)
         
-        # 💡 Ollama 실패 시 Gemini로 안전하게 우회
         try:
             response_text = generate_ollama_json(prompt, temperature=0.2)
             result_data = clean_and_parse_json(response_text)
         except Exception as ollama_e:
-            print(f"⚠️ 로컬 AI 분석 실패, Gemini 2.5로 신속히 우회합니다: {ollama_e}", file=sys.stderr, flush=True)
+            print(f"⚠️ 로컬 AI 분석 실패, Gemini로 우회합니다: {ollama_e}", file=sys.stderr, flush=True)
             response_text = generate_gemini_json(prompt, temperature=0.2)
             result_data = clean_and_parse_json(response_text)
             
-        # 만약 배열로 응답했다면 첫 번째 객체를 뽑아서 보냅니다.
         if isinstance(result_data, list) and len(result_data) > 0:
             result_data = result_data[0]
             
@@ -509,6 +504,119 @@ def get_categories():
     except Exception as e:
         return jsonify({"error": "조회 실패"}), 500
 
+# 💡 [초강력 수리] PDF 파편화 텍스트 완벽 복원기
+@api_bp.route('/upload-pdf', methods=['POST'])
+def upload_law():
+    try:
+        wallet_address = request.form.get('wallet_address')
+        custom_folder = request.form.get('custom_folder') 
+        file = request.files.get('file')
+        if not file: return jsonify({"error": "업로드된 파일이 없습니다."}), 400
+        
+        raw_bytes = file.read()
+        filename = file.filename.lower()
+        display_name = custom_folder if custom_folder else filename
+        
+        task_id = str(uuid.uuid4())
+        TASK_STATUS[task_id] = {"status": "running", "progress": 10, "message": "문헌 파싱 및 복원 중..."}
+        
+        def process_law():
+            try:
+                categories = []
+                extracted_text = ""
+                
+                # 1. 물리적 블록 단위로 텍스트 추출 (표/다단 텍스트 섞임 방지)
+                if filename.endswith('.pdf'):
+                    doc = fitz.open(stream=raw_bytes, filetype="pdf")
+                    for page in doc:
+                        blocks = page.get_text("blocks")
+                        blocks.sort(key=lambda b: (b[1], b[0]))
+                        for b in blocks:
+                            text_block = b[4].strip()
+                            if text_block:
+                                extracted_text += text_block + "\n"
+                    doc.close()
+                else:
+                    extracted_text = raw_bytes.decode('utf-8', errors='ignore')
+
+                # 2. 강제 줄바꿈(엔터) 제거 및 문장 복원
+                extracted_text = re.sub(r'(?<![다요까기됨함임])\n(?!\s*제\s*\d+\s*조)', ' ', extracted_text)
+                extracted_text = re.sub(r'\s{2,}', ' ', extracted_text)
+
+                # 3. 조항(제O조) 기준으로 쪼개기 (파편화된 번호 방어)
+                regex_pattern = r'((?:제\s*\d+\s*조|제\s*조\s*\d+|제조\s*\d+)(?:의\s*\d+)?\s*(?:\([^)]+\))?)'
+                parts = re.split(regex_pattern, extracted_text)
+
+                if parts and len(parts) > 1:
+                    if parts[0].strip(): 
+                        categories.append({"title": "총칙 및 서론", "content": parts[0].strip(), "folder_name": display_name})
+                    for i in range(1, len(parts), 2):
+                        raw_title = parts[i].strip()
+                        nums = re.findall(r'\d+', raw_title)
+                        clean_title = f"제{nums[0]}조" if len(nums) == 1 else (f"제{nums[0]}조의{nums[1]}" if len(nums) >= 2 else raw_title)
+                        content = parts[i+1].strip() if i+1 < len(parts) else ""
+                        categories.append({"title": clean_title, "content": content, "folder_name": display_name})
+                else: 
+                    categories = [{"title": "문서 전체", "content": extracted_text, "folder_name": display_name}]
+                
+                # 너무 짧은 목차 찌꺼기는 무시하고 저장
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                saved_count = 0
+                for cat in categories:
+                    if len(cat['content'].strip()) > 5:
+                        cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
+                                      (wallet_address, cat['title'], cat['content'], cat.get('folder_name', display_name)))
+                        saved_count += 1
+                conn.commit()
+                conn.close()
+                TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"성공! 총 {saved_count}개 조항 저장됨"})
+            except Exception as e:
+                print(f"\n[🔥 법령 파싱 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+                TASK_STATUS[task_id].update({"status": "error", "message": f"분석 실패: {str(e)}"})
+                
+        threading.Thread(target=process_law).start()
+        return jsonify({"task_id": task_id, "message": "업로드 완료, 백그라운드 파싱 시작"})
+    except Exception as e: 
+        print(f"\n[🔥 법령 업로드 라우터 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        return jsonify({"error": "전송 실패"}), 500
+
+@api_bp.route('/recommend-blank', methods=['POST'])
+def recommend_blank():
+    try:
+        data = request.json
+        content = data.get('content')
+        wallet_address = data.get('wallet_address')
+        
+        task_id = str(uuid.uuid4())
+        TASK_STATUS[task_id] = {"status": "running", "progress": 15, "message": "DB에서 과거 기출문제 스캔 중..."}
+        
+        def process_recommend():
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT question, answer FROM golden_exams WHERE wallet_address = ? ORDER BY id DESC LIMIT 10", (wallet_address,))
+                all_exams = "\n".join([f"Q:{r[0]} A:{r[1]}" for r in cursor.fetchall()])
+                conn.close()
+                
+                prompt = f'''당신은 대한민국 법령 출제위원입니다. 
+                아래 [기출 모의고사 DB]를 참고하여, 주어진 [법령 본문]에서 빈칸 문제로 내기 가장 좋은 핵심 단어 딱 1개만 골라주세요.
+                형식: JSON만 출력
+                {{ "keyword": "추출한단어", "related_exam": "연관된 기출문제 내용 요약" }}
+                [기출 모의고사 DB]:\n{all_exams}\n[법령 본문]:\n{content}'''
+                
+                response_text = generate_gemini_json(prompt)
+                result = clean_and_parse_json(response_text)
+                
+                TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "result": result, "message": "AI 추천 완료!"})
+            except Exception as e:
+                TASK_STATUS[task_id].update({"status": "error", "message": f"AI 연산 실패: {str(e)}"})
+                
+        threading.Thread(target=process_recommend).start()
+        return jsonify({"task_id": task_id, "message": "AI 추천 작업 시작"})
+    except Exception as e:
+        return jsonify({"error": "요청 실패"}), 500
+
 @api_bp.route('/save-card', methods=['POST'])
 def save_card():
     try:
@@ -559,8 +667,7 @@ def sync_batch():
         memos = data.get('memos', [])
         answers = data.get('answers', [])
         
-        if not wallet_address:
-            return jsonify({"error": "인증 정보 없음"}), 400
+        if not wallet_address: return jsonify({"error": "인증 정보 없음"}), 400
 
         conn = get_db_connection()
         cursor = conn.cursor()
