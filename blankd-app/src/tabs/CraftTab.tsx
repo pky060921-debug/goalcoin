@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { formatCardText, getStrictTitleOnly, SPLIT_REGEX } from '../utils/constants';
+// 💡 [필수 추가] 폴더 삭제 API를 호출하기 위해 api 객체를 임포트합니다.
+import { api } from '../services/api';
 
 const getGridClass = (cols: number) => {
   if(cols === 1) return "md:grid-cols-1";
@@ -21,7 +23,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   const [pageBreaks, setPageBreaks] = useState<Set<number>>(new Set());
   const [memoInput, setMemoInput] = useState(""); 
 
-  // 💡 [복구됨] 지우개 모드 상태 관리
+  // 💡 지우개 모드 상태 관리
   const [isEraserMode, setIsEraserMode] = useState(false);
 
   useEffect(() => {
@@ -38,13 +40,12 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   };
 
   const handleWordClick = (idx: number) => {
-    // 💡 [복구됨] 지우개 모드가 켜져 있다면 글자 자체를 삭제합니다.
+    // 💡 지우개 모드가 켜져 있다면 글자 자체를 삭제합니다.
     if (isEraserMode) {
       const newArray = [...wordArray];
-      newArray.splice(idx, 1); // 배열에서 해당 글자 영구 삭제
+      newArray.splice(idx, 1); 
       setWordArray(newArray);
       
-      // 글자가 하나 줄었으므로, 뒤에 있는 빈칸이나 페이지 나눔 기호의 위치도 앞으로 한 칸씩 땡겨줍니다.
       const newSelected = new Set<number>();
       selectedWords.forEach(i => {
         if (i < idx) newSelected.add(i);
@@ -59,10 +60,9 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       });
       setPageBreaks(newPageBreaks);
       
-      return; // 삭제 로직 끝, 함수 종료
+      return; 
     }
 
-    // 지우개 모드가 꺼져있다면 기존의 '빈칸 만들기' 모드로 정상 작동합니다.
     const s = new Set(selectedWords);
     if(s.has(idx)) s.delete(idx); else s.add(idx);
     setSelectedWords(s);
@@ -70,7 +70,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
 
   const handleWordSplit = (idx: number, e: any) => {
     e.preventDefault(); 
-    if (isEraserMode) return; // 지우개 모드일 때는 오작동 방지
+    if (isEraserMode) return; 
     const p = new Set(pageBreaks);
     if (p.has(idx)) p.delete(idx);
     else if (window.confirm("이 위치에서 페이지를 나누시겠습니까?")) p.add(idx);
@@ -78,7 +78,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   };
 
   const handleWordMerge = (idx: number) => {
-    if (isEraserMode) return; // 지우개 모드일 때는 오작동 방지
+    if (isEraserMode) return; 
     if (idx >= wordArray.length - 1) return;
     const newArray = [...wordArray];
     newArray[idx] = newArray[idx] + newArray[idx + 1];
@@ -99,7 +99,34 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       </div>
 
       <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-4 sm:mb-6">
-        {craftFolders.map((f: string) => <button key={f} onClick={() => setOpenFolders(p => ({...p, [f]: !p[f]}))} className={`px-2.5 sm:px-4 py-1.5 sm:py-2 text-[10px] sm:text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' : 'bg-indigo-900/40 text-indigo-300 border-indigo-500/30'}`}>📁 {f}</button>)}
+        {/* 💡 [신규] 폴더 삭제 기능이 결합된 폴더 버튼 UI */}
+        {craftFolders.map((f: string) => (
+          <div key={f} className="relative group">
+            <button 
+              onClick={() => setOpenFolders(p => ({...p, [f]: !p[f]}))} 
+              className={`pl-2.5 pr-8 py-1.5 sm:py-2 text-[10px] sm:text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' : 'bg-indigo-900/40 text-indigo-300 border-indigo-500/30'}`}
+            >
+              📁 {f}
+            </button>
+            <button 
+              onClick={async (e) => {
+                e.stopPropagation();
+                if(confirm(`'${f}' 폴더와 내부 데이터를 모두 삭제하시겠습니까?`)) {
+                  try {
+                    await api.deleteFolder(safeAddress, f);
+                    addLog(`🗑️ ${f} 폴더 삭제 완료`);
+                    window.location.reload(); 
+                  } catch (err) {
+                    alert("폴더 삭제에 실패했습니다.");
+                  }
+                }
+              }}
+              className="absolute right-1 top-1/2 -translate-y-1/2 text-white/30 hover:text-red-400 px-2 py-1 text-[10px] transition-colors"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
       </div>
       
       {craftFolders.map((folder: string) => openFolders[folder] && (
@@ -134,7 +161,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                       <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} 
                         onClick={() => { 
                           setExpandedId(cat.id); setSelectedWords(new Set()); setPageBreaks(new Set()); setMemoInput(cat.memo || "");
-                          // 창을 처음 열 때 지우개 모드는 항상 꺼진 상태로 안전하게 초기화
                           setIsEraserMode(false);
                           const { body } = formatCardText(contentToUse);
                           setWordArray(body.split(SPLIT_REGEX).filter(w => w !== ""));
@@ -148,7 +174,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                         <div className="flex justify-between items-center mb-1">
                           <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{cleanTitle}</span>
                           
-                          {/* 💡 [복구됨] 지우개 On/Off 토글 버튼 */}
                           <button 
                             onClick={() => setIsEraserMode(!isEraserMode)}
                             className={`px-3 py-1 text-[11px] font-bold rounded-sm border transition-all ${isEraserMode ? 'bg-red-600 border-red-500 text-white animate-pulse' : 'bg-white/5 border-white/20 text-white/50 hover:bg-white/10'}`}
@@ -167,7 +192,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                                 onClick={() => handleWordClick(idx)} 
                                 onContextMenu={(e) => handleWordSplit(idx, e)} 
                                 onDoubleClick={() => handleWordMerge(idx)} 
-                                // 지우개 모드일 때는 마우스를 올리거나 누를 때 빨간색 경고 표시
                                 className={`cursor-pointer px-[1px] rounded transition-colors ${selectedWords.has(idx) ? 'bg-amber-500 text-black font-bold' : isEraserMode ? 'hover:bg-red-500/50 hover:text-white text-red-100' : 'hover:bg-white/10'}`}
                               >
                                 {word}
