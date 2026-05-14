@@ -1,6 +1,15 @@
 const BASE_URL = "https://api.blankd.top/api";
 
 export const api = {
+  async deleteFolder(address: string, folderName: string) {
+    const res = await fetch(`${BASE_URL}/delete-folder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wallet_address: address, folder_name: folderName })
+    });
+    if (!res.ok) throw new Error("폴더 삭제에 실패했습니다.");
+    return res.json();
+  },
   async getCategories(address: string) {
     const res = await fetch(`${BASE_URL}/get-categories?wallet_address=${address}`);
     return res.json();
