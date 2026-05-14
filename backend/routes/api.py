@@ -29,7 +29,7 @@ api_bp = Blueprint('api', __name__)
 
 current_api_key_index = 0
 
-def generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1):
+def generate_ollama_json(prompt, model="qwen2.5-coder:14b", temperature=0.1):
     try:
         url = "http://localhost:11434/api/generate"
         payload = {
@@ -217,25 +217,33 @@ def generate_rag_from_pending():
 
         law_context = "등록된 참고 자료가 없습니다."
         if laws:
-            law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
+            # 💡 [핵심] AI가 파일명과 조항을 확실히 구분하도록 포맷 변경
+            law_context = "\n\n".join([f"📖 [문서명: {r[0]} | 조항명: {r[1]}]\n{r[2]}" for r in laws])
+
+        print(f"\n🔍 [RAG 시스템] '{filename}' 자동생성 시작! (참고 자료: {len(selected_laws)}개 문서, 총 {len(laws)}개 조항)\n", file=sys.stderr, flush=True)
 
         task_id = str(uuid.uuid4())
         TASK_STATUS[task_id] = {"status": "running", "progress": 20, "message": "AI가 문제를 법령과 대조하여 분석 중..."}
 
         def process_rag_pending():
             try:
-                # 💡 제미나이 전용 프롬프트 (대량 처리용)
+                # 💡 [핵심 프롬프트] AI에게 "법" = 법령파일, "정관" = 정관파일임을 강력하게 주입!
                 prompt = f'''당신은 승진시험 출제위원이자 사용자와 대화하는 보조 학습 AI입니다.
                 아래 [참고 자료 DB]를 철저히 검색하여 사용자의 [시험지 텍스트]를 분석하세요.
 
+                [검색 및 매칭 꿀팁 💡]
+                1. 지문에서 말하는 '법 제O조'는 업로드된 법률 파일(예: 국민건강보험법)의 '제O조'를 의미합니다.
+                2. 지문에서 말하는 '정관 제O조'는 업로드된 정관 파일의 '제O조'를 의미합니다.
+                3. 이름이 100% 똑같지 않더라도, [문서명 | 조항명] 타이틀을 보고 유연하게 찾아서 매칭하세요! 절대 "DB에 없습니다"라고 쉽게 포기하지 마세요.
+
                 [절대 규칙: 대화형 파트너십 및 환각 금지]
                 1. 오직 제공된 [참고 자료 DB] 안의 텍스트만 근거로 삼으세요.
-                2. DB에서 내용이 부족하다면 억지로 지어내지 마세요.
-                3. 모르는 부분은 "이 부분은 찾을 수 없는데 어디서 찾을까요?", "내용이 조금 애매한데 어떻게 판단해야 될까요?" 라고 `explanation` 필드에 질문하세요.
+                2. 아무리 검색해도 조항의 실제 내용이 비어있거나 찾을 수 없다면 억지로 지어내지 마세요.
+                3. 모르는 부분은 "이 부분은 찾을 수 없는데 어디서 찾을까요?" 라고 `explanation` 필드에 질문하세요.
 
                 [사고 과정(search_process) 작성 3단계 규칙]
                 1단계: 지문에서 언급된 타겟 조항명(예: 정관 제12조) 추출
-                2단계: [참고 자료 DB]에서 해당 조항명 검색 및 내용 확인 (없으면 없다고 명시)
+                2단계: [참고 자료 DB]에서 해당 조항 내용 확인 (유연하게 검색)
                 3단계: DB 내용과 지문을 대조하여 논리적 일치 여부 판단
 
                 [참고 자료 DB]
@@ -365,7 +373,6 @@ def get_pending_exams():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 💡 [핵심] 수동 1:1 대화형 분석 라우터 (로컬 AI 맞춤형 프롬프트 & 4만자 해제)
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
     try:
@@ -388,23 +395,21 @@ def analyze_chunk():
         conn.close()
 
         law_context = "선택된 참고 자료가 없습니다."
-        if laws: law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
+        if laws: law_context = "\n\n".join([f"📖 [문서명: {r[0]} | 조항명: {r[1]}]\n{r[2]}" for r in laws])
         
-        feedback_str = f"\n[👨‍💻 사용자 피드백(대화/힌트)]\n{user_feedback}\n-> 위 사용자의 피드백을 우선적으로 반영하여 정답과 해설을 올바르게 수정하세요.\n" if user_feedback else ""
+        feedback_str = f"\n[👨‍💻 사용자 피드백(대화/힌트)]\n{user_feedback}\n-> 위 사용자의 피드백을 적극 반영하여 다시 분석하고 해설과 장기기억을 완성하세요.\n" if user_feedback else ""
 
+        # 💡 로컬 AI 맞춤형 강력 프롬프트 (유연성 강화)
         prompt = f"""당신은 출제위원이자 사용자와 소통하는 AI입니다.
+        [검색 꿀팁 💡] 지문의 '법'은 건강보험법을 뜻하고, '정관'은 정관 파일을 뜻합니다. 이름이 100% 똑같지 않아도 문맥으로 찾으세요!
+
         [절대 규칙: 대화형 파트너십 및 환각 금지]
         1. 오직 [참고 자료 DB]만 확인하세요. 
-        2. 자료가 부족하거나 애매할 경우 억지로 지어내지 마세요. 대신 `explanation` 필드에 "이 부분은 찾을 수 없는데 어디서 찾을까요?"라고 사용자에게 질문하세요.
-        3. 사용자가 [사용자 피드백]을 주었다면, 기존 생각을 버리고 그 힌트를 100% 반영하여 수정하세요!
-
-        [사고 과정(search_process) 작성 3단계 규칙]
-        1단계: 지문에서 언급된 타겟 조항명(예: 제1조) 추출
-        2단계: [참고 자료 DB]에서 해당 조항 내용 확인 (없으면 없다고 명시)
-        3단계: DB 내용과 지문을 대조하여 일치 여부 판단
+        2. 자료가 부족하거나 애매할 경우, 억지로 정답을 만들지 마세요. 대신 "이 부분은 찾을 수 없는데 어디서 찾을까요?"라고 사용자에게 `explanation` 필드를 통해 질문하세요.
+        3. 사용자가 [사용자 피드백]을 주었다면, 그 힌트를 바탕으로 내용을 올바르게 수정하세요!
 
         [참고 자료 DB]
-        {law_context[:40000]}
+        {law_context[:8000]}
 
         [시험지 원문]
         {chunk_text}
@@ -415,8 +420,8 @@ def analyze_chunk():
           "question": "교정된 문제 내용",
           "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
           "answer": "정답 번호 (또는 '확인 필요')",
-          "explanation": "상세 해설 (모를 경우 사용자에게 질문을 작성)",
-          "search_process": "1단계:...\n2단계:...\n3단계:..."
+          "explanation": "상세 해설 (또는 사용자에게 질문을 작성)",
+          "search_process": "1단계: 조항추출, 2단계: DB검색, 3단계: 판단"
         }}"""
         
         print(f"🤖 [로컬 AI 가동] 문단 분석 및 사고 시작...", file=sys.stderr, flush=True)
@@ -586,13 +591,13 @@ def upload_law():
         print(f"\n[🔥 법령 업로드 라우터 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "전송 실패"}), 500
 
-# (이하 카드 관련 라우터 원본 유지)
 @api_bp.route('/recommend-blank', methods=['POST'])
 def recommend_blank():
     try:
         data = request.json
         content = data.get('content')
         wallet_address = data.get('wallet_address')
+        
         task_id = str(uuid.uuid4())
         TASK_STATUS[task_id] = {"status": "running", "progress": 15, "message": "DB에서 과거 기출문제 스캔 중..."}
         
@@ -612,6 +617,7 @@ def recommend_blank():
                 
                 response_text = generate_gemini_json(prompt)
                 result = clean_and_parse_json(response_text)
+                
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "result": result, "message": "AI 추천 완료!"})
             except Exception as e:
                 TASK_STATUS[task_id].update({"status": "error", "message": f"AI 연산 실패: {str(e)}"})
