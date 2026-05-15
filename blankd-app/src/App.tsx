@@ -46,7 +46,6 @@ function MainApp() {
   const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
   const isLoggedIn = safeAddress.length > 0;
   
-  // 💡 [개선 1] 로컬 스토리지를 이용해 새로고침해도 마지막 탭을 기억합니다.
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('blankd_active_tab') || 'progress';
   });
@@ -80,6 +79,9 @@ function MainApp() {
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
+
+  // 💡 [신규] 음성 인식 상태 관리
+  const [isListening, setIsListening] = useState(false);
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
@@ -129,7 +131,6 @@ function MainApp() {
       if (res.ok) {
         localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
         addLog(`🔄 백그라운드 동기화 완료 (M:${q.memos.length}, A:${q.answers.length})`);
-        // 동기화 시 코인 잔액 즉시 업데이트
         const newBalance = await api.getGoalCoinBalance(safeAddress);
         setGoalBalance(newBalance);
       }
@@ -217,8 +218,9 @@ function MainApp() {
       });
       setBlanks(foundBlanks); setCurrentBlankIdx(0); setAnswerInput(""); setInputStatus('idle');
       setTotalTimeLimit(5.0 * foundBlanks.length); setStartTime(Date.now()); setElapsed(0);
-      
+      setIsListening(false); // 카드 열 때 음성인식 초기화
       setIsMemoOpen(false); 
+      
       const stats = parseCardStats(activeCard.memo);
       let cleanText = stats.text;
       if (cleanText) {
@@ -267,6 +269,7 @@ function MainApp() {
     }
   }, [activeCard, currentBlankIdx, blanks.length, startTime, totalTimeLimit]);
 
+  // 키보드 입력을 감지하는 로직
   useEffect(() => {
     if (inputStatus === 'idle' && blanks[currentBlankIdx] && answerInput) {
       const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
@@ -315,6 +318,59 @@ function MainApp() {
     }, 1000); 
   };
 
+  // 💡 [신규] Web Speech API를 활용한 음성 인식 엔진 함수
+  const startVoiceRecognition = () => {
+    // 크롬 및 주요 브라우저의 음성 인식 객체 가져오기
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
+    if (!SpeechRecognition) {
+      alert("현재 사용 중인 브라우저에서는 음성 인식을 지원하지 않습니다. (크롬 브라우저를 권장합니다)");
+      return;
+    }
+    
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'ko-KR'; // 한국어 모드
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      addLog("🎙️ 음성 인식 시작: 정답을 말씀해 주세요.");
+    };
+    
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      
+      // 음성으로 들어온 텍스트에서 띄어쓰기, 마침표, 물음표 등 불순물 제거
+      const cleanText = transcript.replace(/\s+/g, '').replace(/[.,!?]/g, '');
+      
+      // 인식된 텍스트를 인풋 창에 살짝 보여줌
+      setAnswerInput(cleanText);
+      addLog(`🗣️ 인식된 음성: "${transcript}"`);
+      
+      // 0.3초 뒤에 자동으로 정답 체크 함수로 넘김 (사용자가 인식된 글자를 찰나에 볼 수 있게)
+      setTimeout(() => {
+        handleSequentialInput(cleanText);
+      }, 300);
+    };
+
+    recognition.onerror = (err: any) => {
+      if (err.error === 'not-allowed') {
+        alert("마이크 사용 권한이 차단되어 있습니다. 브라우저 설정에서 마이크를 허용해 주세요.");
+      } else {
+        addLog(`❌ 음성 인식 오류: ${err.error}`);
+      }
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    // 음성 인식 시작 (브라우저 마이크 권한 요청 트리거)
+    recognition.start();
+  };
+
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
       <header className="max-w-6xl mx-auto border-b border-white/10 pb-4 sm:pb-6 mb-8 sm:mb-12 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -351,7 +407,6 @@ function MainApp() {
         <main className="max-w-6xl mx-auto w-full">
           <ErrorBoundary fallbackLog={addLog}>
             
-            {/* 💡 [개선 2] CSS 숨김 처리를 통한 컴포넌트 생존 보장 (display:none) */}
             <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
               <DashboardTab categories={categories} savedCards={savedCards} />
             </div>
@@ -466,10 +521,23 @@ function MainApp() {
                 
                 <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
                 
-                <div className="flex justify-between items-center w-full mb-2">
+                {/* 💡 [신규] UI 하단 음성 입력 및 기능 제어 버튼 바 */}
+                <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
                   <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
                     {isMemoOpen ? '닫기 ✕' : '📝 메모 열기'}
                   </button>
+                  
+                  <button 
+                    onClick={startVoiceRecognition} 
+                    className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${
+                      isListening 
+                        ? 'bg-red-600/50 text-white border-red-500 animate-pulse' 
+                        : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'
+                    }`}
+                  >
+                    {isListening ? '🎙️ 듣는 중... 말씀하세요' : '🎤 음성으로 입력'}
+                  </button>
+
                   <button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
                     정답 보기 (오답 처리)
                   </button>
