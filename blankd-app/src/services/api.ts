@@ -50,10 +50,10 @@ export const api = {
       body: JSON.stringify({ wallet_address: address, id })
     });
   },
-  async analyzeChunk(chunkText: string) {
+  async analyzeChunk(chunkText: string, address: string, feedback: string = "", selectedLaws: string[] = []) {
     const res = await fetch(`${BASE_URL}/analyze-chunk`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chunk_text: chunkText })
+      body: JSON.stringify({ chunk_text: chunkText, wallet_address: address, user_feedback: feedback, selected_laws: selectedLaws })
     });
     return res.json();
   },
@@ -76,6 +76,10 @@ export const api = {
     }
     return res.json();
   },
+
+  // =====================================
+  // 💡 [결정적 원인] Goalcoin & 폴더 관리 API 추가
+  // =====================================
   async getGoalCoinBalance(address: string) {
     try {
       const res = await fetch('https://fullnode.testnet.sui.io/', {
@@ -99,8 +103,6 @@ export const api = {
       return 0;
     }
   },
-  
-  // 💡 [신규 추가] 폴더 및 카테고리 관리 API
   async deleteFolder(address: string, folderName: string) {
     const res = await fetch(`${BASE_URL}/delete-folder`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
