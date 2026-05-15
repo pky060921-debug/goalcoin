@@ -46,7 +46,15 @@ function MainApp() {
   const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
   const isLoggedIn = safeAddress.length > 0;
   
-  const [activeTab, setActiveTab] = useState('progress');
+  // 💡 [개선 1] 로컬 스토리지를 이용해 새로고침해도 마지막 탭을 기억합니다.
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('blankd_active_tab') || 'progress';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('blankd_active_tab', activeTab);
+  }, [activeTab]);
+
   const [categories, setCategories] = useState<any[]>([]);
   const [savedCards, setSavedCards] = useState<any[]>([]);
   const [exams, setExams] = useState<any[]>([]);
@@ -71,6 +79,8 @@ function MainApp() {
   const [elapsed, setElapsed] = useState<number>(0);
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
+  const [goalBalance, setGoalBalance] = useState<number>(0);
+
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
 
@@ -90,14 +100,16 @@ function MainApp() {
 
   const loadAllData = async () => {
     try {
-      const [catRes, cardRes, examRes] = await Promise.all([
+      const [catRes, cardRes, examRes, balance] = await Promise.all([
         fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r=>r.json()),
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`).then(r=>r.json()),
-        fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`).then(r=>r.json())
+        fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`).then(r=>r.json()),
+        api.getGoalCoinBalance(safeAddress)
       ]);
       setCategories(catRes.categories || []); 
       setSavedCards(cardRes.cards || []); 
       setExams(examRes.exams || []);
+      setGoalBalance(balance);
       addLog("🟢 모든 학습 데이터 실시간 동기화 완료");
     } catch (e: any) { addLog(`❌ 데이터 동기화 실패: ${e.message}`); }
   };
@@ -117,6 +129,9 @@ function MainApp() {
       if (res.ok) {
         localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
         addLog(`🔄 백그라운드 동기화 완료 (M:${q.memos.length}, A:${q.answers.length})`);
+        // 동기화 시 코인 잔액 즉시 업데이트
+        const newBalance = await api.getGoalCoinBalance(safeAddress);
+        setGoalBalance(newBalance);
       }
     } catch (e) { addLog("⚠️ 오프라인 감지: 데이터는 로컬에 안전하게 보관 중입니다."); }
   };
@@ -302,14 +317,27 @@ function MainApp() {
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
-      <header className="max-w-6xl mx-auto border-b border-white/10 pb-4 sm:pb-6 mb-8 sm:mb-12 flex items-center justify-between gap-4">
-        <h1 className="text-xl sm:text-2xl font-bold tracking-widest text-white shrink-0">BlankD</h1>
+      <header className="max-w-6xl mx-auto border-b border-white/10 pb-4 sm:pb-6 mb-8 sm:mb-12 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center justify-between w-full sm:w-auto">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-widest text-white shrink-0">BlankD</h1>
+          {isLoggedIn && (
+            <div className="sm:hidden flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-full">
+              <span className="text-[12px] font-bold text-amber-400">{goalBalance.toFixed(2)} GOAL</span>
+            </div>
+          )}
+        </div>
+        
         {isLoggedIn && (
-          <nav className="flex gap-2 sm:gap-6 overflow-x-auto w-full scrollbar-hide justify-end sm:justify-start">
-            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '강화' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`text-[11px] sm:text-sm font-bold tracking-widest whitespace-nowrap px-2 py-1 transition-all ${activeTab === tab.id ? 'text-white border-b-2 border-white' : 'text-white/40 hover:text-white'}`}>{tab.label}</button>
-            ))}
-          </nav>
+          <div className="flex items-center w-full sm:w-auto justify-between gap-4">
+            <nav className="flex gap-2 sm:gap-6 overflow-x-auto scrollbar-hide">
+              {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '강화' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`text-[11px] sm:text-sm font-bold tracking-widest whitespace-nowrap px-2 py-1 transition-all ${activeTab === tab.id ? 'text-white border-b-2 border-white' : 'text-white/40 hover:text-white'}`}>{tab.label}</button>
+              ))}
+            </nav>
+            <div className="hidden sm:flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 px-4 py-1.5 rounded-full shadow-[0_0_10px_rgba(245,158,11,0.1)]">
+              <span className="text-sm font-bold text-amber-400">{goalBalance.toFixed(2)} GOAL</span>
+            </div>
+          </div>
         )}
       </header>
 
@@ -322,16 +350,28 @@ function MainApp() {
       ) : (
         <main className="max-w-6xl mx-auto w-full">
           <ErrorBoundary fallbackLog={addLog}>
-            {activeTab === 'progress' && <DashboardTab categories={categories} savedCards={savedCards} />}
-            {activeTab === 'create' && <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} handleDeleteCategory={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />}
             
-            {/* 💡 [수정] 지갑 주소 명확히 전달! */}
-            {activeTab === 'enhance' && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} walletAddress={safeAddress} handleDeleteCard={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});setActiveCard(null);loadAllData();}}} />}
+            {/* 💡 [개선 2] CSS 숨김 처리를 통한 컴포넌트 생존 보장 (display:none) */}
+            <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
+              <DashboardTab categories={categories} savedCards={savedCards} />
+            </div>
             
-            {/* 💡 [수정] 지갑 주소 명확히 전달! */}
-            {activeTab === 'exam' && <ExamTab exams={exams} examFile={examFile} setExamFile={setExamFile} uploadExam={uploadExam} walletAddress={safeAddress} />}
+            <div className={activeTab === 'create' ? 'block' : 'hidden'}>
+              <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} handleDeleteCategory={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />
+            </div>
             
-            {activeTab === 'settings' && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화하시겠습니까?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />}
+            <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
+              <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleDeleteCard={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});setActiveCard(null);loadAllData();}}} />
+            </div>
+            
+            <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
+              <ExamTab walletAddress={safeAddress} address={safeAddress} />
+            </div>
+            
+            <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
+              <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화하시겠습니까?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />
+            </div>
+
           </ErrorBoundary>
         </main>
       )}
@@ -351,12 +391,15 @@ function MainApp() {
         <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>{isTerminalOpen ? 'Close Terminal' : 'Open Terminal'}</button>
       </div>
 
-      {/* 💡 카드 모달 렌더링 영역 */}
       {activeCard && (
         <CardModal 
           activeCard={activeCard} 
           totalTimeLimit={totalTimeLimit} 
           elapsed={elapsed} 
+          answerInput={answerInput}
+          setAnswerInput={setAnswerInput}
+          inputStatus={inputStatus}
+          handleSequentialInput={handleSequentialInput}
           renderContent={() => {
             const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
             const { body } = formatCardText(cleanContent);
