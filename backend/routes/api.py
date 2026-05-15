@@ -811,6 +811,7 @@ def sync_batch():
                     new_best = clear_time if best_time_float == float('inf') else min(best_time_float, clear_time)
                     cursor.execute("UPDATE cards SET level = ?, next_review_time = ?, status = 'OWNED', best_time = ? WHERE id = ?", (new_lv, get_next_review_time(new_lv), new_best, card_id))
                     
+                    # 💡 정답 시 10 코인 누적
                     reward_coins += 10 
                 else:
                     cursor.execute("UPDATE cards SET level = 0, next_review_time = ?, status = 'AT_RISK' WHERE id = ?", (get_next_review_time(0), card_id))
@@ -818,6 +819,7 @@ def sync_batch():
         conn.commit()
         conn.close()
 
+        # 💡 학습 완료 시 수이 블록체인에서 Goal 코인 즉시 발행 (비동기)
         if reward_coins > 0:
             threading.Thread(target=mint_goal_coin_to_user, args=(wallet_address, reward_coins)).start()
 
@@ -877,3 +879,4 @@ def update_card_memo():
         return jsonify({"message": "메모 및 통계 업데이트 완료"}), 200
     except Exception as e:
         return jsonify({"error": "메모 업데이트 실패"}), 500
+
