@@ -104,7 +104,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
               📁 {f}
             </button>
             
-            {/* 💡 [신규] 폴더명 통째로 변경 버튼 */}
             <button 
               onClick={async (e) => {
                 e.stopPropagation();
@@ -123,7 +122,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
               ✏️
             </button>
 
-            {/* 💡 폴더 삭제 버튼 */}
             <button 
               onClick={async (e) => {
                 e.stopPropagation();
@@ -188,7 +186,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                       <div className="w-full p-4 sm:p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-3 shadow-xl z-20 relative animate-in zoom-in-95">
                         <div className="flex justify-between items-center mb-1 flex-wrap gap-2">
                           
-                          {/* 💡 [신규] 특정 조항(Category)만 다른 폴더로 이사시키는 버튼 */}
                           <div className="flex items-center gap-2">
                             <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{cleanTitle}</span>
                             <button 
@@ -219,20 +216,38 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                         <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-2 text-xs text-teal-200 outline-none rounded-sm" />
                         
                         <div className={`font-serif text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative transition-all ${isEraserMode ? 'border-red-500/50 ring-1 ring-red-500/30' : 'border-white/10'}`}>
-                          {wordArray.map((word, idx) => (
-                            <React.Fragment key={idx}>
-                              {pageBreaks.has(idx) && <div className="w-full border-t border-red-500/50 my-2 relative"><span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black px-1 text-[8px] text-red-400 font-bold uppercase tracking-tighter">Page Break</span></div>}
-                              
-                              <span 
-                                onClick={() => handleWordClick(idx)} 
-                                onContextMenu={(e) => handleWordSplit(idx, e)} 
-                                onDoubleClick={() => handleWordMerge(idx)} 
-                                className={`cursor-pointer px-[1px] rounded transition-colors ${selectedWords.has(idx) ? 'bg-amber-500 text-black font-bold' : isEraserMode ? 'hover:bg-red-500/50 hover:text-white text-red-100' : 'hover:bg-white/10'}`}
-                              >
-                                {word}
-                              </span>
-                            </React.Fragment>
-                          ))}
+                          {wordArray.map((word, idx) => {
+                            // 💡 [핵심] 한글, 영문, 숫자가 단 하나도 없는 '순수 기호/부호'인지 판별
+                            const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(word) && word.trim() !== "";
+
+                            return (
+                              <React.Fragment key={idx}>
+                                {pageBreaks.has(idx) && <div className="w-full border-t border-red-500/50 my-2 relative"><span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black px-1 text-[8px] text-red-400 font-bold uppercase tracking-tighter">Page Break</span></div>}
+                                
+                                <span 
+                                  onClick={() => {
+                                    // 지우개 모드일 때는 기호도 삭제 가능, 일반 모드일 때는 기호 클릭 무시
+                                    if (isEraserMode) {
+                                      handleWordClick(idx);
+                                    } else if (!isSymbolOnly) {
+                                      handleWordClick(idx);
+                                    }
+                                  }} 
+                                  onContextMenu={(e) => handleWordSplit(idx, e)} 
+                                  onDoubleClick={() => {
+                                    if (!isSymbolOnly && !isEraserMode) handleWordMerge(idx);
+                                  }} 
+                                  className={`px-[1px] rounded transition-colors ${
+                                    selectedWords.has(idx) ? 'bg-amber-500 text-black font-bold cursor-pointer' : 
+                                    isEraserMode ? 'hover:bg-red-500/50 hover:text-white text-red-100 cursor-pointer' : 
+                                    isSymbolOnly ? 'text-white/30 cursor-default' : 'hover:bg-white/10 cursor-pointer'
+                                  }`}
+                                >
+                                  {word}
+                                </span>
+                              </React.Fragment>
+                            );
+                          })}
                         </div>
                         
                         <button onClick={() => handleMakeBlankCard(cat, wordArray, selectedWords, pageBreaks, memoInput, () => setExpandedId(null))} className="w-full py-2.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs sm:text-sm font-bold rounded-sm mt-2 hover:bg-amber-500/30 transition-all">지식 추출 저장</button>
