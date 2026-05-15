@@ -11,13 +11,19 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
+// 💡 [핵심 진화] 문자열 대신 객체 배열로 관리하여 '합친 내역'을 기억하게 만듭니다.
+type WordItem = {
+  text: string;
+  subWords: string[]; // 합쳐지기 전의 원래 조각들을 기억하는 공간
+};
+
 export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
   const [expandedId, setExpandedId] = useState<number | null>(null);
   
-  const [wordArray, setWordArray] = useState<string[]>([]);
+  const [wordArray, setWordArray] = useState<WordItem[]>([]);
   const [selectedWords, setSelectedWords] = useState<Set<number>>(new Set());
   const [pageBreaks, setPageBreaks] = useState<Set<number>>(new Set());
   const [memoInput, setMemoInput] = useState(""); 
@@ -75,14 +81,69 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
 
   const handleWordMerge = (idx: number) => {
     if (isEraserMode) return; 
+    
+    const current = wordArray[idx];
+
+    // 💡 1. [되돌리기 기능] 이미 합쳐진 단어라면 두 번 터치 시 원래대로 쪼갭니다!
+    if (current.subWords.length > 1) {
+      const newArray = [...wordArray];
+      // 원래 조각들로 다시 되돌리기
+      const splitItems = current.subWords.map(w => ({ text: w, subWords: [w] }));
+      newArray.splice(idx, 1, ...splitItems);
+      setWordArray(newArray);
+
+      const shiftAmount = splitItems.length - 1;
+      
+      // 인덱스가 밀려나므로 선택 및 페이지 나눔 상태 업데이트
+      const newSelected = new Set<number>();
+      selectedWords.forEach(i => {
+          if (i < idx) newSelected.add(i);
+          // 합쳐진 걸 풀면 일단 빈칸 선택을 해제하여 안전하게 초기화합니다.
+          else if (i > idx) newSelected.add(i + shiftAmount);
+      });
+      setSelectedWords(newSelected);
+
+      const newPageBreaks = new Set<number>();
+      pageBreaks.forEach(i => {
+          if (i < idx) newPageBreaks.add(i);
+          else if (i > idx) newPageBreaks.add(i + shiftAmount);
+      });
+      setPageBreaks(newPageBreaks);
+      return;
+    }
+
+    // 💡 2. [합치기 기능] 단일 단어라면 다음 단어와 합칩니다.
     if (idx >= wordArray.length - 1) return;
+    const next = wordArray[idx + 1];
+
+    // ⛔ [특수기호 차단] 합치려는 대상 중 하나라도 순수 기호라면 합치기를 거부합니다.
+    const isSymbol1 = !/[a-zA-Z0-9가-힣]/.test(current.text) && current.text.trim() !== "";
+    const isSymbol2 = !/[a-zA-Z0-9가-힣]/.test(next.text) && next.text.trim() !== "";
+    if (isSymbol1 || isSymbol2) {
+        return; // 합치기 무시
+    }
+
     const newArray = [...wordArray];
-    newArray[idx] = newArray[idx] + newArray[idx + 1];
+    newArray[idx] = {
+        text: current.text + next.text,
+        subWords: [...current.subWords, ...next.subWords] // 합친 내역 기억하기
+    };
     newArray.splice(idx + 1, 1);
     setWordArray(newArray);
-    const newSet = new Set<number>();
-    selectedWords.forEach(i => { if (i < idx) newSet.add(i); else if (i > idx) newSet.add(i - 1); });
-    setSelectedWords(newSet);
+
+    const newSelected = new Set<number>();
+    selectedWords.forEach(i => {
+        if (i < idx) newSelected.add(i);
+        else if (i > idx) newSelected.add(i - 1);
+    });
+    setSelectedWords(newSelected);
+
+    const newPageBreaks = new Set<number>();
+    pageBreaks.forEach(i => {
+        if (i < idx) newPageBreaks.add(i);
+        else if (i > idx) newPageBreaks.add(i - 1);
+    });
+    setPageBreaks(newPageBreaks);
   };
 
   return (
@@ -176,7 +237,9 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                           setExpandedId(cat.id); setSelectedWords(new Set()); setPageBreaks(new Set()); setMemoInput(cat.memo || "");
                           setIsEraserMode(false);
                           const { body } = formatCardText(contentToUse);
-                          setWordArray(body.split(SPLIT_REGEX).filter(w => w !== ""));
+                          // 💡 텍스트를 객체 형태로 초기화
+                          const initialWords = body.split(SPLIT_REGEX).filter(w => w !== "");
+                          setWordArray(initialWords.map(w => ({ text: w, subWords: [w] })));
                         }} 
                         className="w-full min-h-[60px] p-3 sm:p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-1.5 sm:gap-2 text-left">
                         <span className={`${titleColor} font-bold text-[11px] sm:text-[13px] leading-snug break-keep`}>{cleanTitle}</span>
@@ -216,9 +279,12 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                         <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-2 text-xs text-teal-200 outline-none rounded-sm" />
                         
                         <div className={`font-serif text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative transition-all ${isEraserMode ? 'border-red-500/50 ring-1 ring-red-500/30' : 'border-white/10'}`}>
-                          {wordArray.map((word, idx) => {
-                            // 💡 [핵심] 한글, 영문, 숫자가 단 하나도 없는 '순수 기호/부호'인지 판별
+                          {wordArray.map((wordObj, idx) => {
+                            const word = wordObj.text;
+                            // 💡 한글, 영문, 숫자가 없는 순수 기호 판별
                             const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(word) && word.trim() !== "";
+                            // 이미 합쳐진 이력이 있는 단어인지 판별
+                            const isMerged = wordObj.subWords.length > 1;
 
                             return (
                               <React.Fragment key={idx}>
@@ -226,22 +292,30 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                                 
                                 <span 
                                   onClick={() => {
-                                    // 지우개 모드일 때는 기호도 삭제 가능, 일반 모드일 때는 기호 클릭 무시
+                                    // 지우개 모드일 때는 기호도 무자비하게 삭제 가능
                                     if (isEraserMode) {
                                       handleWordClick(idx);
-                                    } else if (!isSymbolOnly) {
+                                    } 
+                                    // 일반 모드일 때는 특수기호 빈칸 선택 방어
+                                    else if (!isSymbolOnly) {
                                       handleWordClick(idx);
                                     }
                                   }} 
                                   onContextMenu={(e) => handleWordSplit(idx, e)} 
                                   onDoubleClick={() => {
-                                    if (!isSymbolOnly && !isEraserMode) handleWordMerge(idx);
+                                    // 특수기호가 아니거나, 혹은 이미 합쳐진 단어(되돌리기용)일 때만 더블클릭 허용
+                                    if (!isSymbolOnly || isMerged) {
+                                      handleWordMerge(idx);
+                                    }
                                   }} 
                                   className={`px-[1px] rounded transition-colors ${
                                     selectedWords.has(idx) ? 'bg-amber-500 text-black font-bold cursor-pointer' : 
                                     isEraserMode ? 'hover:bg-red-500/50 hover:text-white text-red-100 cursor-pointer' : 
-                                    isSymbolOnly ? 'text-white/30 cursor-default' : 'hover:bg-white/10 cursor-pointer'
+                                    isSymbolOnly ? 'text-white/30 cursor-default' : 
+                                    isMerged ? 'bg-indigo-900/30 border-b border-indigo-500/50 hover:bg-indigo-800/40 cursor-pointer' : 
+                                    'hover:bg-white/10 cursor-pointer'
                                   }`}
+                                  title={isMerged ? "두 번 터치하여 다시 나누기" : ""}
                                 >
                                   {word}
                                 </span>
@@ -250,7 +324,13 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                           })}
                         </div>
                         
-                        <button onClick={() => handleMakeBlankCard(cat, wordArray, selectedWords, pageBreaks, memoInput, () => setExpandedId(null))} className="w-full py-2.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs sm:text-sm font-bold rounded-sm mt-2 hover:bg-amber-500/30 transition-all">지식 추출 저장</button>
+                        <button 
+                          // 💡 저장할 때 순수 텍스트 배열로 치환하여 백엔드로 전송
+                          onClick={() => handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, () => setExpandedId(null))} 
+                          className="w-full py-2.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs sm:text-sm font-bold rounded-sm mt-2 hover:bg-amber-500/30 transition-all"
+                        >
+                          지식 추출 저장
+                        </button>
                       </div>
                     )}
                   </div>
