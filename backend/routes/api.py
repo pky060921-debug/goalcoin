@@ -62,7 +62,7 @@ def mint_goal_coin_to_user(wallet_address, amount=10):
         return False
 
 # ==========================================
-# 💡 로컬 AI (Ollama) 고도화 엔진 (MTP 튜닝)
+# 💡 로컬 AI (Ollama) 고도화 엔진 (JSON 파손 방지 튜닝)
 # ==========================================
 current_api_key_index = 0
 
@@ -73,17 +73,16 @@ def generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1):
             "model": model,
             "prompt": prompt,
             "stream": False,
+            # 💡 [핵심] JSON 포맷 강제 옵션을 사용하여 모델이 헛소리를 덧붙이는 것을 차단합니다.
             "format": "json",
             "options": {
                 "temperature": temperature,
-                "num_ctx": 32768,      # blankd.db 전체를 읽어들이기 위한 32K 컨텍스트 창 확보
-                "num_predict": 4096,   # MTP 출력을 위한 최대 생성 토큰 수 대폭 확장
-                "top_k": 40,           # 너무 튀는 답변 방지
-                "top_p": 0.9,
-                "tfs_z": 1.2           # Tail Free Sampling으로 국소적 함정(오답) 회피
+                "num_ctx": 32768,      
+                "num_predict": 2048,   # 토큰이 너무 길면 꼬일 수 있으므로 적정선으로 타협
+                "top_k": 40,           
+                "top_p": 0.9
             }
         }
-        # 대규모 DB 스캔을 위해 타임아웃 10분 연장
         response = requests.post(url, json=payload, timeout=600)
         response.raise_for_status()
         return response.json().get("response", "{}")
@@ -135,6 +134,7 @@ def generate_gemini_json(prompt_or_contents, temperature=0.1):
                 
     raise Exception("🚨 구글 서버 불안정 또는 모든 API 키 한도 초과입니다.")
 
+# 💡 [핵심] JSON 파손 시 복원력 강화
 def clean_and_parse_json(response_text):
     try:
         text = response_text.strip()
@@ -153,6 +153,9 @@ def clean_and_parse_json(response_text):
         else:
             clean_text = text
             
+        # JSON 규격 위반(따옴표 내 줄바꿈 등) 오류 방지
+        clean_text = clean_text.replace('\n', '\\n').replace('\r', '')
+        
         return json.loads(clean_text)
     except Exception as e:
         print(f"JSON Parsing Error. Raw Text: {response_text}", file=sys.stderr)
@@ -262,7 +265,7 @@ def update_category_folder():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# 💡 RAG 시스템 및 모의고사 분석 (MoE 기반)
+# 💡 RAG 시스템 및 모의고사 분석 (MoE 기반 JSON 안정화)
 # ==========================================
 @api_bp.route('/generate-rag-from-pending', methods=['POST'])
 def generate_rag_from_pending():
@@ -306,13 +309,15 @@ def generate_rag_from_pending():
 
         def process_rag_pending():
             try:
+                # 💡 [JSON 안정성 튜닝] 백틱(```json) 없이 순수 배열만 요구합니다.
                 prompt = f'''당신은 승진시험 출제위원이자 사용자와 대화하는 보조 학습 AI입니다.
                 아래 [참고 자료 DB]를 철저히 검색하여 사용자의 [시험지 텍스트]를 분석하세요.
 
-                [절대 규칙: 대화형 파트너십 및 환각 금지]
+                [절대 규칙]
                 1. 오직 제공된 [참고 자료 DB] 안의 텍스트만 근거로 삼으세요.
                 2. DB에서 내용이 부족하다면 억지로 지어내지 마세요.
-                3. 모르는 부분은 "이 부분은 찾을 수 없는데 어디서 찾을까요?" 라고 `explanation` 필드에 질문하세요.
+                3. 반드시 아래 JSON 규격에 맞게 배열(Array) 형식으로 1번부터 차례대로 출력해야 합니다.
+                4. 따옴표나 괄호를 빼먹지 마세요!
 
                 [참고 자료 DB]
                 {law_context}
@@ -320,14 +325,16 @@ def generate_rag_from_pending():
                 [시험지 텍스트]
                 {raw_text[:10000]}
 
-                [출력 지시사항] 반드시 JSON 배열 형식으로만 출력하세요.
-                [{{ 
-                    "question": "문제 내용 및 보기 전체", 
-                    "answer": "정답 번호 (모를 경우 '확인 필요')", 
-                    "explanation": "해석 내용 (모를 경우 사용자에게 친근하게 질문 작성)",
-                    "search_process": "AI의 논리적 사고 과정",
-                    "referenced_laws": "참고한 문서명과 조항"
-                }}]'''
+                [출력 JSON 규격]
+                [
+                  {{ 
+                      "question": "문제 1 내용", 
+                      "answer": "정답 1 번호", 
+                      "explanation": "해설 1 내용",
+                      "search_process": "논리적 과정 1",
+                      "referenced_laws": "참고 조항 1"
+                  }}
+                ]'''
 
                 response_text = generate_gemini_json(prompt)
                 exam_data = clean_and_parse_json(response_text)
@@ -481,34 +488,30 @@ def analyze_chunk():
             full_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
             law_context = full_context[:25000]
         
-        feedback_str = f"\n[👨‍💻 사용자 피드백(대화/힌트)]\n{user_feedback}\n-> 위 사용자의 피드백을 적극 반영하여 다시 분석하고 해설과 장기기억을 완성하세요.\n" if user_feedback else ""
+        feedback_str = f"\n[👨‍💻 사용자 추가 피드백]\n{user_feedback}\n" if user_feedback else ""
 
-        prompt = f"""당신은 단일 AI가 아니라, 3개의 전문 가상 자아로 구성된 'Mixture of Experts (MoE)' 시스템입니다.
-        아래의 3가지 전문가 페르소나를 동원하여 [시험지 원문]을 [참고 자료 DB]와 교차 검증하세요.
+        # 💡 [JSON 안정성 튜닝] MoE 구조를 유지하되 JSON 형식을 절대 파괴하지 못하게 명령
+        prompt = f"""당신은 3개의 전문 가상 자아로 구성된 'Mixture of Experts (MoE)' 시스템입니다.
 
-        1. 🧑‍⚖️ [법률 해석 전문가]: DB에 기재된 규정의 예외 단서나 조건을 엄격하게 파악합니다.
-        2. 🧑‍🏫 [출제 의도 분석가]: 시험지의 함정(예: '할 수 있다' vs '하여야 한다')을 찾아냅니다.
-        3. 🕵️‍♂️ [논리 검증가]: 위 두 전문가의 의견을 종합하여 최종 정답을 확정하고 상세한 해설을 작성합니다.
+        1. 🧑‍⚖️ [법률 해석 전문가]
+        2. 🧑‍🏫 [출제 의도 분석가]
+        3. 🕵️‍♂️ [논리 검증가]
 
-        [MTP (Multi-Token Prediction) 지시사항]
-        - 이 과정을 내부적으로 빠르게 처리(MTP)하고, 최종 결과물만 아래 JSON 규격으로 단번에 출력하세요.
-        - 환각(Hallucination)을 엄격히 금지합니다. DB에 없는 내용은 억지로 지어내지 마세요.
-
-        [참고 자료 DB (blankd.db 추출본)]
+        [참고 자료 DB]
         {law_context}
 
         [시험지 원문]
         {chunk_text}
         {feedback_str}
 
-        [출력형식] 반드시 JSON 단일 객체 형식으로만 반환하세요.
+        [출력형식] 오직 JSON 객체만 반환하세요. 어떤 마크다운(```)이나 부연 설명도 넣지 마세요.
         {{
           "question": "교정된 문제 내용",
-          "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
-          "answer": "정답 번호 (또는 'DB 확인 필요')",
-          "explanation": "세 명의 전문가가 합의한 상세 해설 (오답 보기가 왜 틀렸는지까지 명시)",
-          "search_process": "[법률가]: ~, [출제자]: ~, [검증가]: ~ 형태의 MoE 사고 과정",
-          "referenced_laws": "참고한 DB 문서명 및 조항"
+          "options": ["1. 보기", "2. 보기"],
+          "answer": "정답 번호",
+          "explanation": "해설",
+          "search_process": "전문가들의 의견 교환",
+          "referenced_laws": "참고 조항"
         }}"""
         
         print(f"🤖 [MoE 로컬 AI 가동] 문단을 분석합니다...", file=sys.stderr, flush=True)
@@ -791,7 +794,7 @@ def sync_batch():
         cursor = conn.cursor()
 
         for m in memos:
-            cursor.execute("UPDATE cards SET memo = ? WHERE id = ? AND wallet_address = ?", (m.get('memo', ''), m.get('id'), wallet_address))
+            cursor.execute("UPDATE SET memo = ? WHERE id = ? AND wallet_address = ?", (m.get('memo', ''), m.get('id'), wallet_address))
 
         reward_coins = 0 
 
@@ -879,4 +882,3 @@ def update_card_memo():
         return jsonify({"message": "메모 및 통계 업데이트 완료"}), 200
     except Exception as e:
         return jsonify({"error": "메모 업데이트 실패"}), 500
-
