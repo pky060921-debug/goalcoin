@@ -249,7 +249,7 @@ def generate_rag_from_pending():
                 3단계: 찾아낸 본문 내용과 지문을 대조하여 논리적 일치 여부 판단
 
                 [참고 자료 DB]
-                {law_context[:40000]}
+                {law_context[:60000]}
 
                 [시험지 텍스트]
                 {raw_text[:10000]}
@@ -281,12 +281,14 @@ def generate_rag_from_pending():
 
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"{len(exam_data)}개의 문항 분석 완료."})
             except Exception as e:
+                print(f"\n[🔥 지능형 해설 스레드 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
                 TASK_STATUS[task_id].update({"status": "error", "message": "JSON 파싱 에러"})
 
         threading.Thread(target=process_rag_pending).start()
         return jsonify({"task_id": task_id, "message": "분석 시작"})
 
     except Exception as e:
+        print(f"\n[🔥 라우터 진입 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/delete-exam', methods=['POST'])
@@ -308,8 +310,13 @@ def delete_exam():
 def delete_pending_exam():
     try:
         data = request.json or {}
+        pending_id = data.get('id')
+        wallet_address = data.get('wallet_address')
+        
+        if not pending_id or not wallet_address: return jsonify({"error": "권한 없음"}), 400
+
         conn = get_db_connection()
-        conn.execute("DELETE FROM pending_exams WHERE id = ? AND wallet_address = ?", (data.get('id'), data.get('wallet_address')))
+        conn.execute("DELETE FROM pending_exams WHERE id = ? AND wallet_address = ?", (pending_id, wallet_address))
         conn.commit()
         conn.close()
         return jsonify({"message": "대기열에서 삭제 완료"})
@@ -322,6 +329,8 @@ def upload_exam_coop():
         wallet_address = request.form.get('wallet_address')
         exam_file = request.files.get('exam_file')
         answer_file = request.files.get('answer_file')
+        
+        if not exam_file or not wallet_address: return jsonify({"error": "문제 파일이나 인증 정보가 없습니다."}), 400
         
         filename = exam_file.filename.lower()
         exam_text = extract_text_from_file(exam_file)
@@ -359,7 +368,7 @@ def get_pending_exams():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 💡 [핵심 대수술] 실시간 대화형 (채팅 기록 유지 + chat_message 강제 응답)
+# 💡 [초강력 개편] 6만 자 컨텍스트 확장 및 대화 완전 동기화 프롬프트
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
     try:
@@ -367,7 +376,7 @@ def analyze_chunk():
         chunk_text = data.get('chunk_text', '')
         wallet_address = data.get('wallet_address')
         user_feedback = data.get('user_feedback', '') 
-        chat_history = data.get('chat_history', []) # 💡 1. 채팅 내역 수신
+        chat_history = data.get('chat_history', []) 
         selected_laws = data.get('selected_laws', [])
 
         conn = get_db_connection()
@@ -385,55 +394,47 @@ def analyze_chunk():
         law_context = "선택된 참고 자료가 없습니다."
         if laws: law_context = "\n\n".join([f"📖 [문서명: {r[0]} | 조항명: {r[1]}]\n{r[2]}" for r in laws])
         
-        # 💡 2. 채팅 내역을 프롬프트용 텍스트로 가공
         history_str = ""
         for msg in chat_history:
             sender_name = "사용자(대표님)" if msg['sender'] == 'user' else "AI"
             history_str += f"\n[{sender_name}]: {msg['text']}"
             
-        feedback_str = f"\n[👨‍💻 사용자 피드백(명령)]\n{user_feedback}\n-> 위 사용자의 피드백을 최우선으로 반영하여 정답과 해설을 완벽하게 수정하세요.\n" if user_feedback else ""
+        feedback_str = f"\n[👨‍💻 최신 사용자 피드백(명령)]\n{user_feedback}\n" if user_feedback else ""
 
-        # 💡 3. AI에게 chat_message를 강제로 반환하라고 지시!
+        # 💡 피드백 수용률 200% 보장형 시스템 설계
         prompt = f"""당신은 출제위원이자 사용자와 실시간으로 소통하며 티키타카를 주고받는 보조 학습 AI입니다.
 
-        [대화형 파트너십 규칙 💡]
-        1. 오직 제공된 [참고 자료 DB]의 실제 본문을 확인하여 문제를 풉니다.
-        2. [이전 대화 내역]과 [사용자 피드백]을 꼼꼼히 읽으세요! 사용자가 "주어는 이 법인이야"라고 정정해 주면, 고집부리지 말고 "아하! 대표님 말씀이 맞습니다!" 라며 기존의 오답과 해설을 수정하세요.
-        3. `chat_message` 필드에는 요약된 사고 과정 브리핑이나 피드백에 대한 친근한 답변을 작성하여 사용자가 채팅창에서 볼 수 있게 하세요.
-
-        [사고 과정(search_process) 작성 3단계 규칙]
-        1단계: 지문의 핵심 키워드 파악
-        2단계: [참고 자료 DB]의 '본문' 풀스캔 (제목이 달라도 내용이 맞으면 인정)
-        3단계: 일치 여부 판단
+        [최우선 절대 규칙 🚨]
+        1. 대표님이 "법 1장에 제1조가 있어" 혹은 "주어는 이 법인이야"라고 지적했다면, 당신의 기존 오판을 깨끗이 인정하고 아래 [참고 자료 DB] 전체 내용을 완전히 풀스캔하여 해설과 정답을 완벽하게 뜯어고쳐야 합니다.
+        2. 다른 필드는 해설지 저장용이지만, `chat_message` 필드는 실시간 대화창에 직접 노출되는 응답 메시지입니다. 앵무새처럼 동일한 대답을 반복하지 말고, 반드시 대표님의 최신 피드백에 맞추어 주체적이고 친근한 답변을 명확하게 새로 작성하세요! (예: "앗, 대표님 말씀이 맞습니다! 제가 놓쳤던 법 제1조 내용을 다시 확인하여 반영했습니다.")
 
         [참고 자료 DB]
-        {law_context[:10000]}
+        {law_context[:60000]}
 
         [시험지 원문 (현재 분석 대상)]
         {chunk_text}
         
-        [이전 대화 내역]
-        {history_str}
+        [이전 대화 내역]{history_str}
         {feedback_str}
 
-        [출력형식] 반드시 JSON 단일 객체 형식으로만 반환하세요. 속성은 영문이어야 합니다.
+        [출력형식] 반드시 JSON 단일 객체 형식으로만 반환하세요. 키값 속성명은 대소문자와 언더바를 엄격히 준수하세요.
         {{
           "question": "문제 원문과 추출된 문제를 합친 최종 문제 텍스트",
           "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
           "answer": "최종 확정된 정답 번호",
-          "chat_message": "사용자에게 건넬 친근한 브리핑 또는 피드백 대답 (이 부분을 반드시 작성하세요!)",
+          "chat_message": "대표님의 피드백에 대해 정중하고 친근하게 답변하는 내용 (절대 빈칸이나 generic 문구로 채우지 마세요)",
           "explanation": "최종 확정된 공식 상세 해설 (DB 저장용)",
           "search_process": "1단계:...\n2단계:...\n3단계:..."
         }}"""
         
-        print(f"🤖 [대화형 AI 가동] 분석 및 응답 생성 시작...", file=sys.stderr, flush=True)
+        print(f"🤖 [대화형 AI 가동] 튜닝된 딥 컨텍스트 프롬프트 연산 시작...", file=sys.stderr, flush=True)
         
         try:
-            response_text = generate_ollama_json(prompt, temperature=0.2)
+            response_text = generate_ollama_json(prompt, temperature=0.1)
             result_data = clean_and_parse_json(response_text)
         except Exception as ollama_e:
             print(f"⚠️ 로컬 AI 분석 실패, Gemini로 우회합니다: {ollama_e}", file=sys.stderr, flush=True)
-            response_text = generate_gemini_json(prompt, temperature=0.2)
+            response_text = generate_gemini_json(prompt, temperature=0.1)
             result_data = clean_and_parse_json(response_text)
             
         if isinstance(result_data, list) and len(result_data) > 0:
@@ -587,8 +588,9 @@ def upload_law():
                 TASK_STATUS[task_id].update({"status": "error", "message": f"분석 실패: {str(e)}"})
                 
         threading.Thread(target=process_law).start()
-        return jsonify({"task_id": task_id, "message": "업로드 완료, 백그라운드 파싱 시작"})
+        return jsonify({"task_id": task_id, "message": "업로드 완료, 백그라운 파싱 시작"})
     except Exception as e: 
+        print(f"\n[🔥 법령 업로드 라우터 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": "전송 실패"}), 500
 
 @api_bp.route('/recommend-blank', methods=['POST'])
@@ -597,8 +599,10 @@ def recommend_blank():
         data = request.json
         content = data.get('content')
         wallet_address = data.get('wallet_address')
+        
         task_id = str(uuid.uuid4())
         TASK_STATUS[task_id] = {"status": "running", "progress": 15, "message": "DB에서 과거 기출문제 스캔 중..."}
+        
         def process_recommend():
             try:
                 conn = get_db_connection()
@@ -606,16 +610,20 @@ def recommend_blank():
                 cursor.execute("SELECT question, answer FROM golden_exams WHERE wallet_address = ? ORDER BY id DESC LIMIT 10", (wallet_address,))
                 all_exams = "\n".join([f"Q:{r[0]} A:{r[1]}" for r in cursor.fetchall()])
                 conn.close()
+                
                 prompt = f'''당신은 대한민국 법령 출제위원입니다. 
                 아래 [기출 모의고사 DB]를 참고하여, 주어진 [법령 본문]에서 빈칸 문제로 내기 가장 좋은 핵심 단어 딱 1개만 골라주세요.
                 형식: JSON만 출력
                 {{ "keyword": "추출한단어", "related_exam": "연관된 기출문제 내용 요약" }}
                 [기출 모의고사 DB]:\n{all_exams}\n[법령 본문]:\n{content}'''
+                
                 response_text = generate_gemini_json(prompt)
                 result = clean_and_parse_json(response_text)
+                
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "result": result, "message": "AI 추천 완료!"})
             except Exception as e:
                 TASK_STATUS[task_id].update({"status": "error", "message": f"AI 연산 실패: {str(e)}"})
+                
         threading.Thread(target=process_recommend).start()
         return jsonify({"task_id": task_id, "message": "AI 추천 작업 시작"})
     except Exception as e:
@@ -627,6 +635,7 @@ def generate_styles():
         data = request.json
         article_text = data.get('article_text', '')
         if not article_text: return jsonify({"error": "법령 텍스트가 없습니다."}), 400
+            
         prompt = f"""당신은 승진시험 최고 출제위원장입니다.
 아래 [법령 조문]을 바탕으로 서로 다른 10가지 스타일의 4지 선다 문제를 창작하세요.
 [{{ "style": "스타일", "question": "문제 내용", "options": ["1. 보기"], "answer": "숫자", "explanation": "해설" }}]
