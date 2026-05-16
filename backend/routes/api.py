@@ -29,7 +29,7 @@ api_bp = Blueprint('api', __name__)
 
 current_api_key_index = 0
 
-def generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1):
+def generate_ollama_json(prompt, model="gemma4:26b", temperature=0.2):
     try:
         url = "http://localhost:11434/api/generate"
         payload = {
@@ -39,17 +39,17 @@ def generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1):
             "format": "json",
             "options": {
                 "temperature": temperature,
-                "num_ctx": 32768  # 3만 자 이상의 DB를 100% 읽어오도록 뇌 용량 16배 확장 유지
+                "num_ctx": 16384  # 대화형은 연산이 가벼우므로 메모리 폭발을 막기 위해 16K로 안전하게 세팅
             }
         }
-        response = requests.post(url, json=payload, timeout=600)
+        response = requests.post(url, json=payload, timeout=300)
         response.raise_for_status()
         return response.json().get("response", "{}")
     except Exception as e:
-        print(f"\n[🔥 로컬 AI (Ollama) 통신 에러]\n{e}\n", file=sys.stderr, flush=True)
+        print(f"\n[🔥 로컬 AI (Ollama) 통신 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         raise e
 
-def generate_gemini_json(prompt_or_contents, temperature=0.1):
+def generate_gemini_json(prompt_or_contents, temperature=0.2):
     global current_api_key_index
     fallback_models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest']
     max_retries = len(GEMINI_API_KEYS) * len(fallback_models)
@@ -237,10 +237,10 @@ def generate_rag_from_pending():
                 [출력 지시사항] 반드시 JSON 배열 형식으로만 출력하세요.
                 [{{ 
                     "question": "문제 내용 및 보기 전체", 
-                    "answer": "정답 번호 (모를 경우 '확인 필요')", 
+                    "answer": "정답 번호", 
                     "explanation": "해석 내용",
-                    "search_process": "1단계:...\n2단계:...\n3단계:...",
-                    "referenced_laws": "참고한 문서명과 조항"
+                    "search_process": "1단계:...",
+                    "referenced_laws": "참고 문서"
                 }}]'''
 
                 response_text = generate_gemini_json(prompt)
@@ -268,10 +268,6 @@ def generate_rag_from_pending():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-@api_bp.route('/upload-exam', methods=['POST'])
-def upload_exam():
-    return jsonify({"error": "더 이상 사용되지 않습니다."}), 400
 
 @api_bp.route('/delete-exam', methods=['POST'])
 def delete_exam():
@@ -341,8 +337,9 @@ def get_pending_exams():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
 # =========================================================================
-# 💡 [핵심 대수술] 대표님의 "3단어 1:1 대조 알고리즘" 전면 이식!
+# 💡 [초강력 개편] 단계별 대화형(Copilot) AI 분석 라우터
 # =========================================================================
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
@@ -353,6 +350,7 @@ def analyze_chunk():
         user_feedback = data.get('user_feedback', '') 
         chat_history = data.get('chat_history', []) 
         selected_laws = data.get('selected_laws', [])
+        current_explanation = data.get('current_explanation', '') # 💡 프론트에서 기존 해설 상태를 받아옵니다.
 
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -372,48 +370,54 @@ def analyze_chunk():
             law_context = "선택된 참고 자료가 없습니다."
         
         history_str = ""
-        for msg in chat_history:
-            sender_name = "사용자" if msg['sender'] == 'user' else "AI"
+        for msg in chat_history[-6:]:  # 너무 길면 헷갈리므로 최근 6개 대화만 기억
+            sender_name = "사용자(대표님)" if msg['sender'] == 'user' else "AI"
             history_str += f"\n[{sender_name}]: {msg['text']}"
             
-        feedback_str = f"\n[👨‍💻 최신 사용자 명령/힌트]\n{user_feedback}\n-> 사용자의 힌트를 100% 최우선으로 수용하여 해설을 고치세요.\n" if user_feedback else ""
+        feedback_str = f"\n[👨‍💻 최신 사용자 명령]\n{user_feedback}\n" if user_feedback else ""
 
-        # 💡 [핵심 프롬프트] 3단어 추출 및 1:1 대조 강제
-        prompt = f"""당신은 출제위원이자 사용자와 소통하는 보조 학습 AI입니다.
+        # 💡 [핵심 프롬프트] 한 번에 다 풀지 마! 시키는 것만 해!
+        prompt = f"""당신은 사용자와 함께 한 걸음씩 문제를 풀어가는 '대화형 출제 보조 AI'입니다.
+        [절대 규칙 🚨] 한 번에 전체 문제를 다 풀고 정답을 내리려고 오지랖을 부리지 마세요! 오직 사용자의 마지막 명령/질문에만 철저히 대답하세요.
 
-        [최우선 절대 규칙: 3단어 정밀 검색 알고리즘 🚨]
-        AI 특유의 대충 읽기(Skimming)를 방지하기 위해 반드시 아래 절차대로만 분석하세요!
-        1단계 (3단어 추출): 지문이나 각 보기(가,나,다,라 또는 ㉠,㉡...)의 문장에서 '핵심이 되는 첫 3단어'를 무조건 추출하세요.
-        2단계 (DB 본문 검색): 조항 이름(제1조 등)이 안 보이더라도 포기하지 마세요! 추출한 3단어 또는 핵심 내용을 [참고 자료 DB]의 "전체 본문"에서 풀스캔하여 똑같은 문장이 있는지 기계적으로 찾아내세요.
-        3단계 (1:1 정밀 대조): 찾아낸 DB 원문과 지문의 문장을 한 글자씩 1:1로 비교하여, 주어가 바뀌었는지, 단어가 추가/삭제되었는지 판별하여 틀린 부분을 찾아내세요.
+        [대화형 진행 가이드]
+        1. 사용자가 "ㅇㅇ법 ㅇ조를 검색해서 말해줘"라고 명령하면:
+           - [참고 자료 DB]에서 해당 조항을 찾아 원문을 `chat_message` 필드에 그대로 출력하세요.
+           - 그리고 끝에 "지문의 내용과 일치하나요?"라고 물어보세요. (이 단계에선 정답을 내리지 마세요)
+        2. 사용자가 "일치해, 다음으로 넘어가" 또는 "틀렸어, 정관 1조의 주어는 공단이 아니라 법인이야"라고 피드백을 주면:
+           - `chat_message`에는 "알겠습니다! 정관 제1조의 주어는 '이 법인은'으로 정정하여 해설에 반영했습니다."라고 친근하게 대답하세요.
+           - 그리고 해당 내용을 `explanation` (해설) 필드에 차곡차곡 누적해서 추가하세요.
 
         [참고 자료 DB]
-        {law_context[:60000]}
+        {law_context[:30000]}
 
-        [시험지 원문 (현재 분석 대상)]
+        [현재 문제 상태 (에디터 원문)]
         {chunk_text}
         
-        [이전 대화 내역]{history_str}
+        [이전 대화 내역]
+        {history_str}
         {feedback_str}
 
-        [출력형식] 반드시 JSON 단일 객체 형식으로만 반환하세요.
+        [현재 작성 중인 해설 내역 (여기에 내용을 계속 덧붙이세요)]
+        {current_explanation}
+
+        [출력형식] 반드시 JSON 단일 객체 형식으로 반환하세요.
         {{
-          "question": "문제 원문과 추출된 문제를 합친 최종 문제 텍스트",
+          "question": "현재 문제 텍스트 유지 (변경 지시가 없으면 원문 그대로 반환)",
           "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
-          "answer": "최종 확정된 정답 번호",
-          "chat_message": "사용자에게 전하는 대화형 메시지 (예: '대표님 말씀대로 각 보기의 3단어를 추출하여 DB 원문과 1:1로 대조한 결과, ㉣의 주어가 다름을 확인했습니다!')",
-          "explanation": "최종 확정된 공식 상세 해설",
-          "search_process": "1단계(3단어 추출):...\\n2단계(DB 본문 스캔):...\\n3단계(1:1 대조 및 판별):..."
+          "answer": "확인 필요",
+          "chat_message": "사용자의 최근 명령에 대한 직접적인 대답 (검색한 원문 출력 또는 피드백 수용 답변)",
+          "explanation": "지금까지 작성 중인 해설 + 방금 사용자가 지시한 내용을 누적해서 업데이트",
+          "search_process": "현재 무엇을 검토 중인지 메모"
         }}"""
         
-        print(f"🤖 [대화형 AI 가동] 3단어 알고리즘 연산 시작...", file=sys.stderr, flush=True)
+        print(f"🤖 [대화형 Copilot AI 가동] 사용자의 명령에만 응답합니다...", file=sys.stderr, flush=True)
         
         try:
-            response_text = generate_ollama_json(prompt, temperature=0.1)
+            response_text = generate_ollama_json(prompt, temperature=0.2)
             result_data = clean_and_parse_json(response_text)
         except Exception as ollama_e:
-            print(f"⚠️ 로컬 AI 분석 실패, Gemini로 우회합니다: {ollama_e}", file=sys.stderr, flush=True)
-            response_text = generate_gemini_json(prompt, temperature=0.1)
+            response_text = generate_gemini_json(prompt, temperature=0.2)
             result_data = clean_and_parse_json(response_text)
             
         if isinstance(result_data, list) and len(result_data) > 0:
@@ -422,9 +426,9 @@ def analyze_chunk():
         if isinstance(result_data, dict):
             if "chat_message" not in result_data or not result_data["chat_message"].strip():
                 if user_feedback:
-                    result_data["chat_message"] = f"대표님의 피드백('{user_feedback}')을 반영하여 3단어 1:1 대조 방식으로 다시 분석했습니다!"
+                    result_data["chat_message"] = f"대표님의 지시('{user_feedback}')에 따라 처리를 완료했습니다!"
                 else:
-                    result_data["chat_message"] = "3단어 정밀 스캔 알고리즘으로 분석을 완료했습니다. 우측의 사고 과정을 확인해주세요!"
+                    result_data["chat_message"] = "안녕하세요! 문제를 한 단계씩 같이 풀어보겠습니다. 먼저 어떤 조항을 검색해 드릴까요?"
             
         return jsonify({"result": result_data})
     except Exception as e:
