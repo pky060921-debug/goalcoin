@@ -29,7 +29,7 @@ api_bp = Blueprint('api', __name__)
 
 current_api_key_index = 0
 
-def generate_ollama_json(prompt, model="gemma4:26b", temperature=0.2):
+def generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1):
     try:
         url = "http://localhost:11434/api/generate"
         payload = {
@@ -39,17 +39,17 @@ def generate_ollama_json(prompt, model="gemma4:26b", temperature=0.2):
             "format": "json",
             "options": {
                 "temperature": temperature,
-                "num_ctx": 16384  # 대화형은 연산이 가벼우므로 메모리 폭발을 막기 위해 16K로 안전하게 세팅
+                "num_ctx": 32768  # 3만 자 이상의 DB를 100% 읽어오도록 뇌 용량 유지
             }
         }
-        response = requests.post(url, json=payload, timeout=300)
+        response = requests.post(url, json=payload, timeout=600)
         response.raise_for_status()
         return response.json().get("response", "{}")
     except Exception as e:
-        print(f"\n[🔥 로컬 AI (Ollama) 통신 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        print(f"\n[🔥 로컬 AI (Ollama) 통신 에러]\n{e}\n", file=sys.stderr, flush=True)
         raise e
 
-def generate_gemini_json(prompt_or_contents, temperature=0.2):
+def generate_gemini_json(prompt_or_contents, temperature=0.1):
     global current_api_key_index
     fallback_models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest']
     max_retries = len(GEMINI_API_KEYS) * len(fallback_models)
@@ -150,6 +150,7 @@ def init_golden_db():
 
 init_golden_db()
 
+# 💡 [핵심] 일반 텍스트 추출용 함수
 def extract_text_from_file(file_obj):
     if not file_obj: return ""
     if file_obj.filename.lower().endswith('.pdf'):
@@ -159,6 +160,40 @@ def extract_text_from_file(file_obj):
             doc.close()
             return text
         except:
+            return ""
+    else:
+        return file_obj.read().decode('utf-8', errors='ignore')
+
+# 💡 [슈퍼 기능] 정답지의 '빨간색 글씨'를 감지하여 추출하는 특수 함수!
+def extract_exam_text_with_color(file_obj, is_answer=False):
+    if not file_obj: return ""
+    if file_obj.filename.lower().endswith('.pdf'):
+        try:
+            doc = fitz.open(stream=file_obj.read(), filetype="pdf")
+            full_text = ""
+            for page in doc:
+                if is_answer:
+                    dict_data = page.get_text("dict")
+                    for block in dict_data.get("blocks", []):
+                        if "lines" in block:
+                            for line in block["lines"]:
+                                for span in line["spans"]:
+                                    text = span.get("text", "")
+                                    color = span.get("color", 0)
+                                    # 색상 코드(RGB) 분석: 빨간색 계열인지 확인
+                                    r = (color >> 16) & 0xFF
+                                    g = (color >> 8) & 0xFF
+                                    b = color & 0xFF
+                                    if r > 130 and r > g * 1.5 and r > b * 1.5:
+                                        full_text += f" [🔴정답: {text}] "
+                                    else:
+                                        full_text += text
+                                full_text += "\n"
+                else:
+                    full_text += page.get_text("text") + "\n"
+            doc.close()
+            return full_text
+        except Exception as e:
             return ""
     else:
         return file_obj.read().decode('utf-8', errors='ignore')
@@ -237,10 +272,10 @@ def generate_rag_from_pending():
                 [출력 지시사항] 반드시 JSON 배열 형식으로만 출력하세요.
                 [{{ 
                     "question": "문제 내용 및 보기 전체", 
-                    "answer": "정답 번호", 
+                    "answer": "정답 번호 (모를 경우 '확인 필요')", 
                     "explanation": "해석 내용",
-                    "search_process": "1단계:...",
-                    "referenced_laws": "참고 문서"
+                    "search_process": "1단계:...\n2단계:...\n3단계:...",
+                    "referenced_laws": "참고한 문서명과 조항"
                 }}]'''
 
                 response_text = generate_gemini_json(prompt)
@@ -269,6 +304,10 @@ def generate_rag_from_pending():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@api_bp.route('/upload-exam', methods=['POST'])
+def upload_exam():
+    return jsonify({"error": "더 이상 사용되지 않습니다."}), 400
+
 @api_bp.route('/delete-exam', methods=['POST'])
 def delete_exam():
     try:
@@ -294,6 +333,7 @@ def delete_pending_exam():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# 💡 [핵심] 업로드 시 빨간색 글씨 감지 모듈 적용!
 @api_bp.route('/upload-exam-coop', methods=['POST'])
 def upload_exam_coop():
     try:
@@ -301,15 +341,17 @@ def upload_exam_coop():
         exam_file = request.files.get('exam_file')
         answer_file = request.files.get('answer_file')
         
+        if not exam_file or not wallet_address: return jsonify({"error": "문제 파일이나 인증 정보가 없습니다."}), 400
+        
         filename = exam_file.filename.lower()
-        exam_text = extract_text_from_file(exam_file)
-        answer_text = extract_text_from_file(answer_file)
+        exam_text = extract_exam_text_with_color(exam_file, is_answer=False)
+        answer_text = extract_exam_text_with_color(answer_file, is_answer=True) # 빨간 글씨 추적 켜기!
         
         exam_text = re.sub(r'-\s*\d+\s*-', '', exam_text)
         exam_text = re.sub(r'【[^】]+】', '', exam_text)
         
         if answer_text:
-            exam_text += "\n\n[정답 및 해설지 참고]\n" + answer_text
+            exam_text += "\n\n[정답 및 해설지 참고 (빨간색 텍스트는 🔴정답으로 표시됨)]\n" + answer_text
             
         chunks = re.split(r'(?m)^(?=\s*\d+\.\s)', exam_text)
         valid_chunks = [c.strip() for c in chunks if c.strip() and len(c.strip()) > 10]
@@ -337,9 +379,8 @@ def get_pending_exams():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 # =========================================================================
-# 💡 [초강력 개편] 단계별 대화형(Copilot) AI 분석 라우터
+# 💡 [프롬프트 대개혁] 완벽한 티키타카 & 빨간 글씨 정답 인식
 # =========================================================================
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
@@ -350,7 +391,7 @@ def analyze_chunk():
         user_feedback = data.get('user_feedback', '') 
         chat_history = data.get('chat_history', []) 
         selected_laws = data.get('selected_laws', [])
-        current_explanation = data.get('current_explanation', '') # 💡 프론트에서 기존 해설 상태를 받아옵니다.
+        current_explanation = data.get('current_explanation', '') 
 
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -370,48 +411,43 @@ def analyze_chunk():
             law_context = "선택된 참고 자료가 없습니다."
         
         history_str = ""
-        for msg in chat_history[-6:]:  # 너무 길면 헷갈리므로 최근 6개 대화만 기억
+        for msg in chat_history[-8:]:  
             sender_name = "사용자(대표님)" if msg['sender'] == 'user' else "AI"
             history_str += f"\n[{sender_name}]: {msg['text']}"
             
-        feedback_str = f"\n[👨‍💻 최신 사용자 명령]\n{user_feedback}\n" if user_feedback else ""
+        feedback_str = f"\n[👨‍💻 최신 사용자 명령/질문]\n{user_feedback}\n" if user_feedback else ""
 
-        # 💡 [핵심 프롬프트] 한 번에 다 풀지 마! 시키는 것만 해!
-        prompt = f"""당신은 사용자와 함께 한 걸음씩 문제를 풀어가는 '대화형 출제 보조 AI'입니다.
-        [절대 규칙 🚨] 한 번에 전체 문제를 다 풀고 정답을 내리려고 오지랖을 부리지 마세요! 오직 사용자의 마지막 명령/질문에만 철저히 대답하세요.
+        # 💡 [프롬프트] 한 번에 다 풀지 말고, 묻는 말에만 채팅으로 대답하도록 강제
+        prompt = f"""당신은 출제위원이자 사용자와 티키타카로 소통하는 '대화형 튜터 AI'입니다.
 
-        [대화형 진행 가이드]
-        1. 사용자가 "ㅇㅇ법 ㅇ조를 검색해서 말해줘"라고 명령하면:
-           - [참고 자료 DB]에서 해당 조항을 찾아 원문을 `chat_message` 필드에 그대로 출력하세요.
-           - 그리고 끝에 "지문의 내용과 일치하나요?"라고 물어보세요. (이 단계에선 정답을 내리지 마세요)
-        2. 사용자가 "일치해, 다음으로 넘어가" 또는 "틀렸어, 정관 1조의 주어는 공단이 아니라 법인이야"라고 피드백을 주면:
-           - `chat_message`에는 "알겠습니다! 정관 제1조의 주어는 '이 법인은'으로 정정하여 해설에 반영했습니다."라고 친근하게 대답하세요.
-           - 그리고 해당 내용을 `explanation` (해설) 필드에 차곡차곡 누적해서 추가하세요.
+        [대화형 튜터 절대 규칙 🚨]
+        1. 오지랖 금지: 사용자가 "법 제1조 검색해서 말해줘"라고 하면, [참고 자료 DB]에서 내용만 쏙 빼서 `chat_message`에 알려주고 "일치하나요?"라고 묻기만 하세요! 한 번에 문제 전체를 다 풀지 마세요.
+        2. 지문에 `[🔴정답: OOO]` 태그가 있다면, 그것이 사용자가 표시해 둔 '진짜 정답'입니다! 이를 바탕으로 `answer` 필드를 확실하게 설정하세요.
+        3. 피드백 수용: 사용자가 "틀렸어, 정관 1조 주어는 법인이야" 라고 정정해주면, `chat_message`로 "아하! 알겠습니다!" 라고 친근하게 대답하고 `explanation`에 그 내용을 차곡차곡 업데이트하세요.
 
         [참고 자료 DB]
-        {law_context[:30000]}
+        {law_context[:60000]}
 
-        [현재 문제 상태 (에디터 원문)]
+        [현재 시험지 원문 (빨간 정답 표시 포함)]
         {chunk_text}
         
-        [이전 대화 내역]
-        {history_str}
+        [이전 대화 내역]{history_str}
         {feedback_str}
 
-        [현재 작성 중인 해설 내역 (여기에 내용을 계속 덧붙이세요)]
+        [현재까지 누적된 해설]
         {current_explanation}
 
-        [출력형식] 반드시 JSON 단일 객체 형식으로 반환하세요.
+        [출력형식] 반드시 JSON 단일 객체로만 반환하세요.
         {{
-          "question": "현재 문제 텍스트 유지 (변경 지시가 없으면 원문 그대로 반환)",
+          "question": "시험지 원문 텍스트 유지",
           "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
-          "answer": "확인 필요",
-          "chat_message": "사용자의 최근 명령에 대한 직접적인 대답 (검색한 원문 출력 또는 피드백 수용 답변)",
-          "explanation": "지금까지 작성 중인 해설 + 방금 사용자가 지시한 내용을 누적해서 업데이트",
-          "search_process": "현재 무엇을 검토 중인지 메모"
+          "answer": "정답 번호 (태그를 보고 추출, 모르면 '확인 필요')",
+          "chat_message": "사용자의 명령에 대한 1:1 대답! (예: '법 제1조를 검색해 보았습니다: ... 내용 ... 일치하나요?')",
+          "explanation": "지금까지 누적된 해설 내용 (수정 지시가 있으면 추가 반영)",
+          "search_process": "현재 검색하거나 대조 중인 내용 메모"
         }}"""
         
-        print(f"🤖 [대화형 Copilot AI 가동] 사용자의 명령에만 응답합니다...", file=sys.stderr, flush=True)
+        print(f"🤖 [순수 대화형 AI 가동] 응답 생성 중...", file=sys.stderr, flush=True)
         
         try:
             response_text = generate_ollama_json(prompt, temperature=0.2)
@@ -426,9 +462,9 @@ def analyze_chunk():
         if isinstance(result_data, dict):
             if "chat_message" not in result_data or not result_data["chat_message"].strip():
                 if user_feedback:
-                    result_data["chat_message"] = f"대표님의 지시('{user_feedback}')에 따라 처리를 완료했습니다!"
+                    result_data["chat_message"] = f"대표님의 지시('{user_feedback}')에 따라 조치했습니다!"
                 else:
-                    result_data["chat_message"] = "안녕하세요! 문제를 한 단계씩 같이 풀어보겠습니다. 먼저 어떤 조항을 검색해 드릴까요?"
+                    result_data["chat_message"] = "무엇을 먼저 도와드릴까요?"
             
         return jsonify({"result": result_data})
     except Exception as e:
