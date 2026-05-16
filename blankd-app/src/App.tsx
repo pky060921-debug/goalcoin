@@ -46,6 +46,7 @@ function MainApp() {
   const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
   const isLoggedIn = safeAddress.length > 0;
   
+  // 💡 [기능 보존] 탭 상태를 로컬 스토리지에 영구 저장
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('blankd_active_tab') || 'progress';
   });
@@ -79,6 +80,8 @@ function MainApp() {
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
+
+  // 💡 [기능 보존] 음성 인식 상태
   const [isListening, setIsListening] = useState(false);
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
@@ -191,10 +194,10 @@ function MainApp() {
     });
     if (res.ok) {
       await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
-      addLog("✅ 지식 추출 완료: 탭을 유지하며 다음 조항으로 이동합니다.");
+      // 💡 [기능 보존] 강제 탭 이동 금지. 현재 탭(만들기 탭)에 그대로 남아있게 함.
+      addLog("✅ 지식 추출 완료: 다음 조항을 바로 오픈합니다.");
       await loadAllData(); 
       onComplete(); 
-      // 💡 [핵심] 강화탭으로 튕기지 않고 만들기 탭에 그대로 머물도록 setActiveTab('enhance') 삭제!
     }
   };
 
@@ -229,7 +232,7 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // 💡 [핵심] 강화탭 빈칸 풀이 종료 시 다음 카드로 자동 이동 로직
+  // 💡 [기능 보존] 빈칸 풀이가 완료되면 닫지 않고 바로 다음 카드를 열어주는 연속 학습(Auto-Advance)
   const finishCard = () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true; 
@@ -240,19 +243,17 @@ function MainApp() {
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     const isCorrect = wrongArr.length === 0;
 
-    // 1. 현재 폴더에 있는 카드들을 아이디 오름차순(공부 순서)으로 정렬
+    // 현재 폴더 안에서 다음 순서(ID 오름차순)의 카드를 탐색
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => a.id - b.id);
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
-    // 2. 바로 다음 카드를 찾아냄 (없으면 null로 닫힘)
     const nextCard = folderCards[currentIdx + 1] || null;
 
-    // 3. 팝업을 닫지 않고 바로 다음 카드로 교체 (연속 학습)
-    setActiveCard(nextCard); 
+    setActiveCard(nextCard); // 다음 카드가 있으면 교체, 없으면 null(팝업 닫힘)
 
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime });
-    addLog(`✅ 학습 완료 기록 (ID:${currentId})`);
+    addLog(`✅ 학습 완료 (ID:${currentId})`);
     flushQueue();
   };
 
@@ -272,7 +273,7 @@ function MainApp() {
     if (activeCard && currentBlankIdx < blanks.length) {
       const interval = setInterval(() => {
         const diff = (Date.now() - startTime) / 1000; setElapsed(diff);
-        if (diff >= totalTimeLimit) { clearInterval(interval); alert("집중 시간 초과! 현재까지의 기록을 저장합니다."); finishCard(); }
+        if (diff >= totalTimeLimit) { clearInterval(interval); alert("집중 시간 초과! 현재 기록을 저장합니다."); finishCard(); }
       }, 100);
       return () => clearInterval(interval);
     }
@@ -326,6 +327,7 @@ function MainApp() {
     }, 1000); 
   };
 
+  // 💡 [기능 보존] 음성 인식(Web Speech API) 핸즈프리 모드
   const startVoiceRecognition = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다."); return; }
