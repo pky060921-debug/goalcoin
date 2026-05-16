@@ -39,10 +39,10 @@ def generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1):
             "format": "json",
             "options": {
                 "temperature": temperature,
-                "num_ctx": 32768  # 💡 [핵심 해결] Ollama의 숨겨진 기억 제한(2048)을 해제하고 3만 자 이상을 100% 읽어들이도록 뇌 용량 폭증!
+                "num_ctx": 32768  # 3만 자 이상의 DB를 100% 읽어오도록 뇌 용량 16배 확장 유지
             }
         }
-        response = requests.post(url, json=payload, timeout=300)
+        response = requests.post(url, json=payload, timeout=600)
         response.raise_for_status()
         return response.json().get("response", "{}")
     except Exception as e:
@@ -341,7 +341,9 @@ def get_pending_exams():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 💡 [핵심] 대화형 AI 분석 라우터 (로컬 AI의 기억력 해제 반영)
+# =========================================================================
+# 💡 [핵심 대수술] 대표님의 "3단어 1:1 대조 알고리즘" 전면 이식!
+# =========================================================================
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
     try:
@@ -374,15 +376,18 @@ def analyze_chunk():
             sender_name = "사용자" if msg['sender'] == 'user' else "AI"
             history_str += f"\n[{sender_name}]: {msg['text']}"
             
-        feedback_str = f"\n[👨‍💻 최신 사용자 힌트]\n{user_feedback}\n" if user_feedback else ""
+        feedback_str = f"\n[👨‍💻 최신 사용자 명령/힌트]\n{user_feedback}\n-> 사용자의 힌트를 100% 최우선으로 수용하여 해설을 고치세요.\n" if user_feedback else ""
 
-        prompt = f"""당신은 출제위원이자 사용자와 실시간으로 소통하며 티키타카를 주고받는 보조 학습 AI입니다.
+        # 💡 [핵심 프롬프트] 3단어 추출 및 1:1 대조 강제
+        prompt = f"""당신은 출제위원이자 사용자와 소통하는 보조 학습 AI입니다.
 
-        [최우선 절대 규칙 🚨]
-        1. 대표님이 "㉠~㉩ 중에 고르는 문제야", "개수를 세는 문제야" 라고 힌트를 주면, 기존의 분석을 버리고 반드시 ㉠, ㉡, ㉢... 각각의 세부 키워드가 DB 원문과 1:1로 일치하는지 판별하여 갯수를 다시 세어야 합니다!
-        2. 다른 필드는 해설지 저장용이지만, `chat_message` 필드는 실시간 대화창에 노출되는 응답 메시지입니다. 대화형으로 친근하게 답변을 무조건 작성하세요. 
+        [최우선 절대 규칙: 3단어 정밀 검색 알고리즘 🚨]
+        AI 특유의 대충 읽기(Skimming)를 방지하기 위해 반드시 아래 절차대로만 분석하세요!
+        1단계 (3단어 추출): 지문이나 각 보기(가,나,다,라 또는 ㉠,㉡...)의 문장에서 '핵심이 되는 첫 3단어'를 무조건 추출하세요.
+        2단계 (DB 본문 검색): 조항 이름(제1조 등)이 안 보이더라도 포기하지 마세요! 추출한 3단어 또는 핵심 내용을 [참고 자료 DB]의 "전체 본문"에서 풀스캔하여 똑같은 문장이 있는지 기계적으로 찾아내세요.
+        3단계 (1:1 정밀 대조): 찾아낸 DB 원문과 지문의 문장을 한 글자씩 1:1로 비교하여, 주어가 바뀌었는지, 단어가 추가/삭제되었는지 판별하여 틀린 부분을 찾아내세요.
 
-        [참고 자료 DB] (이 내용을 100% 꼼꼼히 확인하세요)
+        [참고 자료 DB]
         {law_context[:60000]}
 
         [시험지 원문 (현재 분석 대상)]
@@ -396,12 +401,12 @@ def analyze_chunk():
           "question": "문제 원문과 추출된 문제를 합친 최종 문제 텍스트",
           "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
           "answer": "최종 확정된 정답 번호",
-          "chat_message": "사용자에게 전하는 브리핑 및 힌트에 대한 리액션 (필수 작성)",
+          "chat_message": "사용자에게 전하는 대화형 메시지 (예: '대표님 말씀대로 각 보기의 3단어를 추출하여 DB 원문과 1:1로 대조한 결과, ㉣의 주어가 다름을 확인했습니다!')",
           "explanation": "최종 확정된 공식 상세 해설",
-          "search_process": "1단계:...\n2단계:...\n3단계:..."
+          "search_process": "1단계(3단어 추출):...\\n2단계(DB 본문 스캔):...\\n3단계(1:1 대조 및 판별):..."
         }}"""
         
-        print(f"🤖 [대화형 AI 가동] 프롬프트 연산 시작 (총 {len(law_context)}자)...", file=sys.stderr, flush=True)
+        print(f"🤖 [대화형 AI 가동] 3단어 알고리즘 연산 시작...", file=sys.stderr, flush=True)
         
         try:
             response_text = generate_ollama_json(prompt, temperature=0.1)
@@ -417,9 +422,9 @@ def analyze_chunk():
         if isinstance(result_data, dict):
             if "chat_message" not in result_data or not result_data["chat_message"].strip():
                 if user_feedback:
-                    result_data["chat_message"] = f"대표님의 피드백('{user_feedback}')을 반영하여 해설과 사고 과정을 새롭게 업데이트했습니다!"
+                    result_data["chat_message"] = f"대표님의 피드백('{user_feedback}')을 반영하여 3단어 1:1 대조 방식으로 다시 분석했습니다!"
                 else:
-                    result_data["chat_message"] = "법령을 스캔하여 1차 분석을 완료했습니다. 우측의 해설을 검수해주세요!"
+                    result_data["chat_message"] = "3단어 정밀 스캔 알고리즘으로 분석을 완료했습니다. 우측의 사고 과정을 확인해주세요!"
             
         return jsonify({"result": result_data})
     except Exception as e:
