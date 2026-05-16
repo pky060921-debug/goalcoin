@@ -74,7 +74,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
+  }, [chatMessages, parsedResult]);
 
   const handleDeleteLaw = async (e: React.MouseEvent, folderName: string) => {
     e.stopPropagation();
@@ -190,6 +190,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     } catch (err: any) {}
   };
 
+  // 💡 [핵심] 대화형 Copilot 시작 시 기본 뼈대 자동 생성 (채팅 바로 활성화)
   const startCoopReview = (exam: {id: number, filename: string, chunks: string[]}) => {
     if (selectedLaws.length === 0) {
       alert("상단에서 참고할 근거 자료를 먼저 체크해주세요!");
@@ -200,19 +201,30 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setFilename(exam.filename);
     setChunkIndex(0);
     setMode('coop');
-    setParsedResult(null);
-    setChatMessages([]); 
+    
+    // 자동 스캔 대신, 사용자가 직접 지시할 수 있도록 기본 상태로 세팅
+    setParsedResult({
+        question: exam.chunks[0],
+        options: ["① 1개", "② 2개", "③ 3개", "④ 4개"], // 템플릿 보기
+        answer: "확인 필요",
+        explanation: "",
+        search_process: "대기 중..."
+    });
+    
+    setChatMessages([
+        { sender: 'ai', text: "안녕하세요 대표님! 문제를 같이 풀어보겠습니다. 먼저 어떤 조항을 찾아드릴까요? (예: 법 제1조 검색해줘)" }
+    ]); 
     setUserFeedback("");
   };
 
-  const analyzeCurrentChunk = async (isFeedback = false) => {
+  const analyzeCurrentChunk = async (isFeedback = true) => {
     if (isAnalyzing) return;
     setIsAnalyzing(true);
 
     const currentFeedback = userFeedback.trim();
     let updatedHistory = [...chatMessages];
 
-    if (isFeedback && currentFeedback) {
+    if (currentFeedback) {
         updatedHistory.push({ sender: 'user', text: currentFeedback });
         setChatMessages(updatedHistory);
         setUserFeedback("");
@@ -222,9 +234,10 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       const payload = {
         chunk_text: chunks[chunkIndex],
         wallet_address: userAddress,
-        user_feedback: isFeedback ? currentFeedback : "",
+        user_feedback: currentFeedback,
         chat_history: updatedHistory, 
-        selected_laws: selectedLaws 
+        selected_laws: selectedLaws,
+        current_explanation: parsedResult?.explanation || "" // 💡 기존에 작성된 해설을 백엔드로 넘겨서 누적시킵니다!
       };
       
       const res = await fetch(`${BASE_URL}/analyze-chunk`, {
@@ -237,13 +250,13 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       if (res.ok && data.result) {
         setParsedResult(data.result);
         
-        const aiResponseText = data.result.chat_message || data.result.chatMessage || "분석이 성공적으로 완료되었습니다! 꼼꼼히 해설을 검수해주세요.";
+        const aiResponseText = data.result.chat_message || data.result.chatMessage || "알겠습니다. 다음은 무엇을 확인할까요?";
         setChatMessages(prev => [...prev, { sender: 'ai', text: aiResponseText }]);
       } else {
-        alert("AI 분석 실패: " + data.error);
+        alert("AI 통신 실패: " + data.error);
       }
     } catch (err: any) {
-      alert("AI 분석 중 통신 에러가 발생했습니다.");
+      alert("AI 통신 에러가 발생했습니다.");
     }
     setIsAnalyzing(false);
   };
@@ -277,8 +290,16 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
       if (chunkIndex + 1 < chunks.length) {
         setChunkIndex(chunkIndex + 1);
-        setParsedResult(null);
-        setChatMessages([]); 
+        
+        // 다음 문제로 넘어가면 초기 상태로 리셋
+        setParsedResult({
+            question: chunks[chunkIndex + 1],
+            options: ["① 1개", "② 2개", "③ 3개", "④ 4개"],
+            answer: "확인 필요",
+            explanation: "",
+            search_process: "대기 중..."
+        });
+        setChatMessages([{ sender: 'ai', text: `[${chunkIndex + 2}번 문제]입니다! 어떤 조항을 찾아드릴까요?` }]); 
         setUserFeedback("");
       } else {
         if (currentExamId && userAddress) {
@@ -325,7 +346,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     return (
       <div className="flex flex-col h-[85vh] space-y-4 animate-in fade-in pb-10">
         <div className="flex justify-between items-center pb-4 border-b border-white/10">
-          <h2 className="text-xl text-teal-400 font-serif">🤝 대화형 AI 튜터 시스템 [{filename}]</h2>
+          <h2 className="text-xl text-teal-400 font-serif">🤝 대화형 AI 튜터 (Copilot) [{filename}]</h2>
           <div className="flex gap-4 items-center">
             <span className="text-white/40 text-sm font-bold bg-teal-950/50 px-3 py-1 rounded-sm border border-teal-900/50">
               진행도: {chunkIndex + 1} / {chunks.length}
@@ -338,20 +359,10 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
         <div className="flex flex-1 gap-6 overflow-hidden">
           
-          {/* [좌측 패널] 통합 문제 에디터 & 정답 선택 UI */}
           <div className="w-1/2 flex flex-col gap-4 border border-white/10 rounded-sm bg-black/20 p-5 overflow-y-auto custom-scrollbar">
             
             <div className="flex justify-between items-center">
               <div className="text-teal-300 font-bold text-sm">📝 1. 문제 영역 (클릭하여 직접 수정 가능)</div>
-              {!parsedResult && (
-                <button 
-                  onClick={() => analyzeCurrentChunk(false)} 
-                  disabled={isAnalyzing}
-                  className="py-2 px-4 bg-teal-600 text-white text-xs font-bold rounded-sm shadow-md hover:bg-teal-500 transition-all"
-                >
-                  {isAnalyzing ? "AI가 지문을 스캔 중입니다..." : "🚀 AI 분석 시작"}
-                </button>
-              )}
             </div>
 
             <textarea 
@@ -395,58 +406,48 @@ export const ExamTab = ({ walletAddress, address }: any) => {
             )}
           </div>
 
-          {/* 💡 [우측 패널 대개혁] 대화창 스크롤과 해설 편집 워크스페이스를 완벽 분리 고정 */}
           <div className="w-1/2 flex flex-col border border-emerald-900/40 rounded-sm bg-emerald-950/10 p-5 overflow-hidden relative">
             
             <div className="text-emerald-300 font-bold text-sm mb-3 shrink-0">💬 3. AI 대화 및 사고 과정 (티키타카)</div>
             
-            {/* 상단 뷰: 순수 채팅 로그 스크롤 영역 (미니멈 높이 확보) */}
             <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4 pr-2 pb-2 min-h-[150px]">
-              {chatMessages.length === 0 && !isAnalyzing ? (
-                <div className="h-full flex items-center justify-center text-white/30 text-sm space-y-4 flex-col">
-                  <div className="text-4xl">🤖</div>
-                  <p>좌측에서 [AI 분석 시작]을 누르면 저와 대화가 시작됩니다!</p>
-                </div>
-              ) : (
-                chatMessages.map((msg, idx) => (
-                  <div key={idx} className={`flex flex-col max-w-[85%] animate-in fade-in slide-in-from-bottom-2 ${msg.sender === 'user' ? 'self-end items-end' : 'self-start items-start'}`}>
-                    <span className="text-[10px] text-white/40 mb-1 px-1">{msg.sender === 'user' ? '대표님' : '아키 (AI 튜터)'}</span>
-                    <div className={`p-3 text-[14px] leading-relaxed rounded-2xl shadow-md whitespace-pre-wrap ${msg.sender === 'user' ? 'bg-indigo-600 text-white rounded-tr-sm' : 'bg-emerald-800/80 text-emerald-50 rounded-tl-sm border border-emerald-600'}`}>
-                      {msg.text}
-                    </div>
+              {chatMessages.map((msg, idx) => (
+                <div key={idx} className={`flex flex-col max-w-[85%] animate-in fade-in slide-in-from-bottom-2 ${msg.sender === 'user' ? 'self-end items-end' : 'self-start items-start'}`}>
+                  <span className="text-[10px] text-white/40 mb-1 px-1">{msg.sender === 'user' ? '대표님' : '아키 (AI 튜터)'}</span>
+                  <div className={`p-3 text-[14px] leading-relaxed rounded-2xl shadow-md whitespace-pre-wrap ${msg.sender === 'user' ? 'bg-indigo-600 text-white rounded-tr-sm' : 'bg-emerald-800/80 text-emerald-50 rounded-tl-sm border border-emerald-600'}`}>
+                    {msg.text}
                   </div>
-                ))
-              )}
+                </div>
+              ))}
               {isAnalyzing && (
                 <div className="self-start flex flex-col max-w-[85%] items-start animate-pulse">
                   <span className="text-[10px] text-white/40 mb-1 px-1">아키 (AI 튜터)</span>
                   <div className="p-3 text-[14px] bg-emerald-900/50 text-emerald-200/50 rounded-2xl rounded-tl-sm border border-emerald-800/50">
-                    열심히 고민 중입니다... 🤔
+                    말씀하신 내용을 바탕으로 찾아보는 중입니다... 🤔
                   </div>
                 </div>
               )}
               <div ref={chatEndRef} />
             </div>
 
-            {/* 하단 뷰: 해설 검수 워크스페이스 고정 영역 (채팅창 스크롤에 무관하게 무조건 노출됨) */}
             {parsedResult && (
               <div className="shrink-0 pt-3 border-t border-emerald-900/40 bg-emerald-950/5 space-y-3 mt-2">
                 <div className="grid grid-cols-1 gap-3">
                   <div className="flex flex-col">
-                    <label className="text-[11px] font-bold text-indigo-400 block mb-1">🧠 AI 사고 과정 (장기 기억)</label>
+                    <label className="text-[11px] font-bold text-indigo-400 block mb-1">🧠 현재 진행 상태</label>
                     <textarea 
                       value={parsedResult.search_process || ''} 
                       onChange={e => handleEdit('search_process', e.target.value)} 
-                      className="w-full h-20 bg-indigo-950/30 border border-indigo-500/30 text-indigo-200/90 p-2.5 text-xs leading-relaxed rounded-sm resize-none focus:border-indigo-400 outline-none custom-scrollbar" 
+                      className="w-full h-10 bg-indigo-950/30 border border-indigo-500/30 text-indigo-200/90 p-2.5 text-xs leading-relaxed rounded-sm resize-none focus:border-indigo-400 outline-none custom-scrollbar" 
                     />
                   </div>
 
                   <div className="flex flex-col">
-                    <label className="text-[11px] font-bold text-emerald-400 block mb-1">💡 공식 상세 해설 (DB 저장용 수정 가능)</label>
+                    <label className="text-[11px] font-bold text-emerald-400 block mb-1">💡 작성 중인 해설 (자동 누적)</label>
                     <textarea 
                       value={parsedResult.explanation || ''} 
                       onChange={e => handleEdit('explanation', e.target.value)} 
-                      className={`w-full h-24 bg-emerald-950/30 border border-emerald-500/30 text-emerald-100/90 p-3 text-sm leading-relaxed rounded-sm resize-none outline-none custom-scrollbar ${parsedResult.answer === '확인 필요' ? 'border-red-500 text-red-100' : 'focus:border-emerald-400'}`} 
+                      className={`w-full h-32 bg-emerald-950/30 border border-emerald-500/30 text-emerald-100/90 p-3 text-sm leading-relaxed rounded-sm resize-none outline-none custom-scrollbar ${parsedResult.answer === '확인 필요' ? 'border-red-500 text-red-100' : 'focus:border-emerald-400'}`} 
                     />
                   </div>
                 </div>
@@ -456,7 +457,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                     type="text" 
                     value={userFeedback} 
                     onChange={e => setUserFeedback(e.target.value)} 
-                    placeholder="예: 틀렸어, 주어는 공단이 아니라 '이 법인'이야 다시 고쳐!"
+                    placeholder="예: 법 제1조 찾아줘, 또는 주어가 공단이 아니라 법인이야"
                     className="flex-1 bg-black/40 border border-indigo-500/50 text-white p-2.5 text-sm rounded-full outline-none focus:border-indigo-400 px-5 shadow-inner"
                     onKeyDown={e => e.key === 'Enter' && analyzeCurrentChunk(true)}
                   />
@@ -473,7 +474,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                   onClick={approveAndNext} 
                   className="w-full py-3 bg-emerald-600 text-white font-bold rounded-sm hover:scale-[1.01] hover:bg-emerald-500 transition-all shadow-lg flex justify-center items-center gap-2 text-sm"
                 >
-                  <span>✨ 내용 확인 완료 (현재 문제 저장 및 다음으로)</span>
+                  <span>✨ 문제 해설 완성! (저장 후 다음으로 넘어가기)</span>
                 </button>
               </div>
             )}
@@ -640,7 +641,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                         대화형 검수 시작 🚀
                       </button>
                       <button onClick={() => handleGenerateRAGFromPending(exam.id)} className="px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-sm shadow-lg hover:bg-emerald-500 transition-all">
-                        해설 자동생성
+                        해설 자동생성 (Gemini)
                       </button>
                       <button onClick={() => handleDeletePendingExam(exam.id)} className="px-3 py-2 bg-red-950/40 border border-red-500/30 text-red-400 font-bold text-xs rounded-sm hover:bg-red-900/50 transition-all">
                         🗑️ 삭제
