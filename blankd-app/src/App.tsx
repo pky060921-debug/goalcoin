@@ -79,8 +79,6 @@ function MainApp() {
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
-
-  // 💡 [신규] 음성 인식 상태 관리
   const [isListening, setIsListening] = useState(false);
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
@@ -112,7 +110,6 @@ function MainApp() {
       setSavedCards(cardRes.cards || []); 
       setExams(examRes.exams || []);
       setGoalBalance(balance);
-      addLog("🟢 모든 학습 데이터 실시간 동기화 완료");
     } catch (e: any) { addLog(`❌ 데이터 동기화 실패: ${e.message}`); }
   };
 
@@ -167,7 +164,7 @@ function MainApp() {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ wallet_address: safeAddress, id: cat.id, text1, text2, title1, title2, folder_name: cat.folder_name })
         });
-        if (res.ok) { addLog(`✂️ [${title1}] 분할 로직 수행 완료`); await loadAllData(); }
+        if (res.ok) { addLog(`✂️ [${title1}] 분할 완료`); await loadAllData(); }
     } catch (e: any) { addLog(`❌ 분할 처리 통신 에러`); }
   };
 
@@ -194,8 +191,10 @@ function MainApp() {
     });
     if (res.ok) {
       await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
-      addLog("✅ 지식 추출 완료: 원본 배열 유지");
-      await loadAllData(); onComplete(); setActiveTab('enhance');
+      addLog("✅ 지식 추출 완료: 탭을 유지하며 다음 조항으로 이동합니다.");
+      await loadAllData(); 
+      onComplete(); 
+      // 💡 [핵심] 강화탭으로 튕기지 않고 만들기 탭에 그대로 머물도록 setActiveTab('enhance') 삭제!
     }
   };
 
@@ -218,7 +217,7 @@ function MainApp() {
       });
       setBlanks(foundBlanks); setCurrentBlankIdx(0); setAnswerInput(""); setInputStatus('idle');
       setTotalTimeLimit(5.0 * foundBlanks.length); setStartTime(Date.now()); setElapsed(0);
-      setIsListening(false); // 카드 열 때 음성인식 초기화
+      setIsListening(false); 
       setIsMemoOpen(false); 
       
       const stats = parseCardStats(activeCard.memo);
@@ -230,16 +229,26 @@ function MainApp() {
     }
   }, [activeCard]);
 
+  // 💡 [핵심] 강화탭 빈칸 풀이 종료 시 다음 카드로 자동 이동 로직
   const finishCard = () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true; 
     const currentId = activeCard.id;
+    const currentFolder = activeCard.folder_name;
     const finalTime = elapsed;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     const isCorrect = wrongArr.length === 0;
 
-    setActiveCard(null); 
+    // 1. 현재 폴더에 있는 카드들을 아이디 오름차순(공부 순서)으로 정렬
+    const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => a.id - b.id);
+    const currentIdx = folderCards.findIndex(c => c.id === currentId);
+    // 2. 바로 다음 카드를 찾아냄 (없으면 null로 닫힘)
+    const nextCard = folderCards[currentIdx + 1] || null;
+
+    // 3. 팝업을 닫지 않고 바로 다음 카드로 교체 (연속 학습)
+    setActiveCard(nextCard); 
+
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime });
@@ -269,7 +278,6 @@ function MainApp() {
     }
   }, [activeCard, currentBlankIdx, blanks.length, startTime, totalTimeLimit]);
 
-  // 키보드 입력을 감지하는 로직
   useEffect(() => {
     if (inputStatus === 'idle' && blanks[currentBlankIdx] && answerInput) {
       const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
@@ -318,56 +326,25 @@ function MainApp() {
     }, 1000); 
   };
 
-  // 💡 [신규] Web Speech API를 활용한 음성 인식 엔진 함수
   const startVoiceRecognition = () => {
-    // 크롬 및 주요 브라우저의 음성 인식 객체 가져오기
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    
-    if (!SpeechRecognition) {
-      alert("현재 사용 중인 브라우저에서는 음성 인식을 지원하지 않습니다. (크롬 브라우저를 권장합니다)");
-      return;
-    }
+    if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다."); return; }
     
     const recognition = new SpeechRecognition();
-    recognition.lang = 'ko-KR'; // 한국어 모드
+    recognition.lang = 'ko-KR'; 
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
 
-    recognition.onstart = () => {
-      setIsListening(true);
-      addLog("🎙️ 음성 인식 시작: 정답을 말씀해 주세요.");
-    };
-    
+    recognition.onstart = () => { setIsListening(true); addLog("🎙️ 음성 인식 대기 중..."); };
     recognition.onresult = (event: any) => {
       const transcript = event.results[0][0].transcript;
-      
-      // 음성으로 들어온 텍스트에서 띄어쓰기, 마침표, 물음표 등 불순물 제거
       const cleanText = transcript.replace(/\s+/g, '').replace(/[.,!?]/g, '');
-      
-      // 인식된 텍스트를 인풋 창에 살짝 보여줌
       setAnswerInput(cleanText);
-      addLog(`🗣️ 인식된 음성: "${transcript}"`);
-      
-      // 0.3초 뒤에 자동으로 정답 체크 함수로 넘김 (사용자가 인식된 글자를 찰나에 볼 수 있게)
-      setTimeout(() => {
-        handleSequentialInput(cleanText);
-      }, 300);
+      addLog(`🗣️ 인식: "${transcript}"`);
+      setTimeout(() => handleSequentialInput(cleanText), 300);
     };
-
-    recognition.onerror = (err: any) => {
-      if (err.error === 'not-allowed') {
-        alert("마이크 사용 권한이 차단되어 있습니다. 브라우저 설정에서 마이크를 허용해 주세요.");
-      } else {
-        addLog(`❌ 음성 인식 오류: ${err.error}`);
-      }
-      setIsListening(false);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-    };
-
-    // 음성 인식 시작 (브라우저 마이크 권한 요청 트리거)
+    recognition.onerror = (err: any) => { setIsListening(false); };
+    recognition.onend = () => { setIsListening(false); };
     recognition.start();
   };
 
@@ -521,7 +498,6 @@ function MainApp() {
                 
                 <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
                 
-                {/* 💡 [신규] UI 하단 음성 입력 및 기능 제어 버튼 바 */}
                 <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
                   <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
                     {isMemoOpen ? '닫기 ✕' : '📝 메모 열기'}
