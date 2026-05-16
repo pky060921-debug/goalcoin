@@ -235,7 +235,7 @@ def generate_rag_from_pending():
                 [출력 지시사항] 반드시 JSON 배열 형식으로만 출력하세요.
                 [{{ 
                     "question": "문제 내용 및 보기 전체", 
-                    "answer": "정답 번호 (모를 경우 '확인 필요')", 
+                    "answer": "정답 번호", 
                     "explanation": "해석 내용",
                     "search_process": "1단계:...\n2단계:...\n3단계:...",
                     "referenced_laws": "참고한 문서명과 조항"
@@ -339,7 +339,7 @@ def get_pending_exams():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 💡 [핵심] 대화형 AI 분석 라우터 (기호 분석 특별 규칙 주입)
+# 💡 [핵심 최후 방어] 로컬 AI 대화형 엔진
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
     try:
@@ -367,17 +367,16 @@ def analyze_chunk():
         
         history_str = ""
         for msg in chat_history:
-            sender_name = "사용자(대표님)" if msg['sender'] == 'user' else "AI"
+            sender_name = "사용자" if msg['sender'] == 'user' else "AI"
             history_str += f"\n[{sender_name}]: {msg['text']}"
             
-        feedback_str = f"\n[👨‍💻 최신 사용자 피드백(명령)]\n{user_feedback}\n" if user_feedback else ""
+        feedback_str = f"\n[👨‍💻 최신 사용자 힌트]\n{user_feedback}\n" if user_feedback else ""
 
-        # 💡 [기호 개수 세기 특별 규칙] 
         prompt = f"""당신은 출제위원이자 사용자와 실시간으로 소통하며 티키타카를 주고받는 보조 학습 AI입니다.
 
         [최우선 절대 규칙 🚨]
-        1. 대표님이 "㉠~㉩ 중에 고르는 문제야", "개수를 세는 문제야" 라고 힌트를 주면, 기존의 잘못된 '가,나,다,라' 덩어리 분석을 버리고 반드시 ㉠, ㉡, ㉢... 각각의 세부 키워드가 DB 원문과 일치하는지 1:1로 쪼개서 O/X를 판별하여 갯수를 다시 세어야 합니다!
-        2. 다른 필드는 해설지 저장용이지만, `chat_message` 필드는 실시간 대화창에 직접 노출되는 응답 메시지입니다. 절대 빈칸으로 두지 말고, 대표님의 힌트를 반영하여 "아하! 보기 4개가 아니라 ㉠~㉩을 개별적으로 봐야 하는군요! 다시 확인했습니다." 처럼 대화형으로 친근하게 답변을 무조건 작성하세요.
+        1. 대표님이 "㉠~㉩ 중에 고르는 문제야", "개수를 세는 문제야" 라고 힌트를 주면, 기존의 '가,나,다,라' 덩어리 분석을 버리고 반드시 ㉠, ㉡, ㉢... 각각의 세부 키워드가 DB 원문과 일치하는지 1:1로 쪼개서 O/X를 판별하여 갯수를 다시 세어야 합니다!
+        2. 다른 필드는 해설지 저장용이지만, `chat_message` 필드는 실시간 대화창에 노출되는 응답 메시지입니다. 대화형으로 답변을 무조건 작성하세요. (예: "아하! 대표님 말씀대로 다시 분석했습니다!")
 
         [참고 자료 DB]
         {law_context[:60000]}
@@ -393,12 +392,12 @@ def analyze_chunk():
           "question": "문제 원문과 추출된 문제를 합친 최종 문제 텍스트",
           "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
           "answer": "최종 확정된 정답 번호",
-          "chat_message": "대표님의 피드백에 대한 친근한 답변 및 사고 과정 요약 (이 부분을 절대 누락하지 마세요!)",
-          "explanation": "최종 확정된 공식 상세 해설 (DB 저장용)",
+          "chat_message": "사용자에게 전하는 브리핑 및 피드백 대답 (필수 작성)",
+          "explanation": "최종 확정된 공식 상세 해설",
           "search_process": "1단계:...\n2단계:...\n3단계:..."
         }}"""
         
-        print(f"🤖 [대화형 AI 가동] 튜닝된 딥 컨텍스트 프롬프트 연산 시작...", file=sys.stderr, flush=True)
+        print(f"🤖 [대화형 AI 가동] 프롬프트 연산 시작...", file=sys.stderr, flush=True)
         
         try:
             response_text = generate_ollama_json(prompt, temperature=0.1)
@@ -410,6 +409,14 @@ def analyze_chunk():
             
         if isinstance(result_data, list) and len(result_data) > 0:
             result_data = result_data[0]
+            
+        # 💡 [백엔드 최후의 3중 방어막] AI가 chat_message를 누락해도 무조건 생성해줌
+        if isinstance(result_data, dict):
+            if "chat_message" not in result_data or not result_data["chat_message"].strip():
+                if user_feedback:
+                    result_data["chat_message"] = f"대표님의 피드백('{user_feedback}')을 반영하여 내용을 수정했습니다! 확인해주세요."
+                else:
+                    result_data["chat_message"] = "법령을 스캔하여 1차 분석을 완료했습니다. 우측의 해설을 검수해주세요!"
             
         return jsonify({"result": result_data})
     except Exception as e:
@@ -563,6 +570,7 @@ def upload_law():
     except Exception as e: 
         return jsonify({"error": "전송 실패"}), 500
 
+# (이하 카드 관련 라우터 원본 동일 유지)
 @api_bp.route('/recommend-blank', methods=['POST'])
 def recommend_blank():
     try:
