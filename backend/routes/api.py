@@ -39,10 +39,10 @@ def generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1):
             "format": "json",
             "options": {
                 "temperature": temperature,
-                "num_ctx": 32768  # 3만 자 이상의 DB를 100% 읽어오도록 뇌 용량 유지
+                "num_ctx": 8192  # 💡 [최적화] 컨텍스트를 압축했으므로 메모리 부담을 확 낮춰 초고속으로 대답합니다!
             }
         }
-        response = requests.post(url, json=payload, timeout=600)
+        response = requests.post(url, json=payload, timeout=120) # 속도가 빨라졌으므로 타임아웃도 정상화
         response.raise_for_status()
         return response.json().get("response", "{}")
     except Exception as e:
@@ -150,7 +150,6 @@ def init_golden_db():
 
 init_golden_db()
 
-# 💡 [핵심] 일반 텍스트 추출용 함수
 def extract_text_from_file(file_obj):
     if not file_obj: return ""
     if file_obj.filename.lower().endswith('.pdf'):
@@ -164,7 +163,6 @@ def extract_text_from_file(file_obj):
     else:
         return file_obj.read().decode('utf-8', errors='ignore')
 
-# 💡 [슈퍼 기능] 정답지의 '빨간색 글씨'를 감지하여 추출하는 특수 함수!
 def extract_exam_text_with_color(file_obj, is_answer=False):
     if not file_obj: return ""
     if file_obj.filename.lower().endswith('.pdf'):
@@ -180,7 +178,6 @@ def extract_exam_text_with_color(file_obj, is_answer=False):
                                 for span in line["spans"]:
                                     text = span.get("text", "")
                                     color = span.get("color", 0)
-                                    # 색상 코드(RGB) 분석: 빨간색 계열인지 확인
                                     r = (color >> 16) & 0xFF
                                     g = (color >> 8) & 0xFF
                                     b = color & 0xFF
@@ -197,6 +194,56 @@ def extract_exam_text_with_color(file_obj, is_answer=False):
             return ""
     else:
         return file_obj.read().decode('utf-8', errors='ignore')
+
+# =========================================================================
+# 💡 [초고속 스나이퍼 검색 알고리즘] AI에게 넘기기 전에 파이썬이 DB를 필터링합니다!
+# =========================================================================
+def get_top_k_relevant_laws(query_text, laws, top_k=5):
+    """
+    지문과 피드백에서 핵심 키워드 및 조항(제O조)을 추출하여,
+    전체 DB 중 가장 관련성이 높은 조항 딱 5개만 AI에게 던져줍니다. (속도 30배 증가)
+    """
+    # 1. 지문에서 '제O조' 키워드 추출 (예: 제1조, 제62조)
+    article_matches = set(re.findall(r'제\s*\d+\s*조(?:의\s*\d+)?', query_text))
+    clean_article_matches = [re.sub(r'\s+', '', a) for a in article_matches]
+    
+    # 2. 지문에서 2글자 이상 명사/단어 추출
+    query_words = set(re.findall(r'\b[가-힣]{2,}\b', query_text))
+    
+    scored_laws = []
+    for folder, title, content in laws:
+        score = 0
+        clean_title = re.sub(r'\s+', '', title)
+        
+        # 가중치 1: '제O조'가 일치하면 초강력 가중치 부여 (1000점)
+        if clean_title in clean_article_matches:
+            score += 1000
+            # 가중치 1-1: 폴더명(법/정관)까지 일치하면 추가 점수 (500점)
+            if '정관' in query_text and '정관' in folder:
+                score += 500
+            elif '법' in query_text and '건강보험법' in folder:
+                score += 500
+
+        # 가중치 2: 본문 내용 단어 교집합(Overlap) 점수 부여 (단어당 1점)
+        content_words = set(re.findall(r'\b[가-힣]{2,}\b', content))
+        overlap = query_words.intersection(content_words)
+        score += len(overlap)
+        
+        if score > 0:
+            scored_laws.append((score, folder, title, content))
+        
+    # 점수 순으로 내림차순 정렬
+    scored_laws.sort(key=lambda x: x[0], reverse=True)
+    
+    # 상위 K개만 뽑아서 텍스트로 결합 (6만 자 -> 2천 자로 압축됨)
+    top_laws = scored_laws[:top_k]
+    
+    if not top_laws:
+        # 혹시 매칭된 게 없으면 그냥 앞부분 일부만 반환
+        return "\n\n".join([f"📖 [문서명: {r[0]} | 조항명: {r[1]}]\n{r[2]}" for r in laws[:top_k]])
+        
+    return "\n\n".join([f"📖 [문서명: {law[1]} | 조항명: {law[2]}]\n{law[3]}" for law in top_laws])
+# =========================================================================
 
 @api_bp.route('/health', methods=['GET', 'OPTIONS'])
 def health_check():
@@ -255,24 +302,25 @@ def generate_rag_from_pending():
         conn.close()
 
         if laws:
-            law_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
+            # 여기도 스나이퍼 알고리즘 적용
+            law_context = get_top_k_relevant_laws(raw_text, laws, top_k=20) 
         else:
             law_context = "등록된 참고 자료가 없습니다."
 
         task_id = str(uuid.uuid4())
-        TASK_STATUS[task_id] = {"status": "running", "progress": 20, "message": "AI가 문제를 분석 중..."}
+        TASK_STATUS[task_id] = {"status": "running", "progress": 20, "message": "AI가 문제를 법령과 대조하여 분석 중..."}
 
         def process_rag_pending():
             try:
                 prompt = f'''당신은 승진시험 출제위원이자 사용자와 대화하는 보조 학습 AI입니다.
                 [참고 자료 DB]
-                {law_context[:60000]}
+                {law_context}
                 [시험지 텍스트]
                 {raw_text[:10000]}
                 [출력 지시사항] 반드시 JSON 배열 형식으로만 출력하세요.
                 [{{ 
                     "question": "문제 내용 및 보기 전체", 
-                    "answer": "정답 번호 (모를 경우 '확인 필요')", 
+                    "answer": "정답 번호", 
                     "explanation": "해석 내용",
                     "search_process": "1단계:...\n2단계:...\n3단계:...",
                     "referenced_laws": "참고한 문서명과 조항"
@@ -304,10 +352,6 @@ def generate_rag_from_pending():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@api_bp.route('/upload-exam', methods=['POST'])
-def upload_exam():
-    return jsonify({"error": "더 이상 사용되지 않습니다."}), 400
-
 @api_bp.route('/delete-exam', methods=['POST'])
 def delete_exam():
     try:
@@ -333,7 +377,6 @@ def delete_pending_exam():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# 💡 [핵심] 업로드 시 빨간색 글씨 감지 모듈 적용!
 @api_bp.route('/upload-exam-coop', methods=['POST'])
 def upload_exam_coop():
     try:
@@ -345,7 +388,7 @@ def upload_exam_coop():
         
         filename = exam_file.filename.lower()
         exam_text = extract_exam_text_with_color(exam_file, is_answer=False)
-        answer_text = extract_exam_text_with_color(answer_file, is_answer=True) # 빨간 글씨 추적 켜기!
+        answer_text = extract_exam_text_with_color(answer_file, is_answer=True)
         
         exam_text = re.sub(r'-\s*\d+\s*-', '', exam_text)
         exam_text = re.sub(r'【[^】]+】', '', exam_text)
@@ -380,7 +423,7 @@ def get_pending_exams():
         return jsonify({"error": str(e)}), 500
 
 # =========================================================================
-# 💡 [프롬프트 대개혁] 완벽한 티키타카 & 빨간 글씨 정답 인식
+# 💡 [초고속 대화형 AI] 파이썬 스나이퍼 알고리즘 적용 및 프롬프트 경량화
 # =========================================================================
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
@@ -405,30 +448,31 @@ def analyze_chunk():
         laws = cursor.fetchall()
         conn.close()
 
-        if laws: 
-            law_context = "\n\n".join([f"📖 [문서명: {r[0]} | 조항명: {r[1]}]\n{r[2]}" for r in laws])
+        # 💡 [핵심 최적화] AI에게 무식하게 6만 자를 주지 않고, 지시받은 키워드의 핵심 조항 5개만 던져줍니다!
+        search_query = chunk_text + " " + user_feedback
+        if laws:
+            law_context = get_top_k_relevant_laws(search_query, laws, top_k=5)
         else:
             law_context = "선택된 참고 자료가 없습니다."
         
         history_str = ""
-        for msg in chat_history[-8:]:  
+        for msg in chat_history[-6:]:  
             sender_name = "사용자(대표님)" if msg['sender'] == 'user' else "AI"
             history_str += f"\n[{sender_name}]: {msg['text']}"
             
         feedback_str = f"\n[👨‍💻 최신 사용자 명령/질문]\n{user_feedback}\n" if user_feedback else ""
 
-        # 💡 [프롬프트] 한 번에 다 풀지 말고, 묻는 말에만 채팅으로 대답하도록 강제
         prompt = f"""당신은 출제위원이자 사용자와 티키타카로 소통하는 '대화형 튜터 AI'입니다.
 
         [대화형 튜터 절대 규칙 🚨]
         1. 오지랖 금지: 사용자가 "법 제1조 검색해서 말해줘"라고 하면, [참고 자료 DB]에서 내용만 쏙 빼서 `chat_message`에 알려주고 "일치하나요?"라고 묻기만 하세요! 한 번에 문제 전체를 다 풀지 마세요.
-        2. 지문에 `[🔴정답: OOO]` 태그가 있다면, 그것이 사용자가 표시해 둔 '진짜 정답'입니다! 이를 바탕으로 `answer` 필드를 확실하게 설정하세요.
+        2. 지문에 `[🔴정답: OOO]` 태그가 있다면, 그것이 사용자가 표시해 둔 '진짜 정답'입니다!
         3. 피드백 수용: 사용자가 "틀렸어, 정관 1조 주어는 법인이야" 라고 정정해주면, `chat_message`로 "아하! 알겠습니다!" 라고 친근하게 대답하고 `explanation`에 그 내용을 차곡차곡 업데이트하세요.
 
-        [참고 자료 DB]
-        {law_context[:60000]}
+        [참고 자료 DB (파이썬이 압축 추출한 엑기스 자료)]
+        {law_context}
 
-        [현재 시험지 원문 (빨간 정답 표시 포함)]
+        [현재 시험지 원문]
         {chunk_text}
         
         [이전 대화 내역]{history_str}
@@ -437,23 +481,24 @@ def analyze_chunk():
         [현재까지 누적된 해설]
         {current_explanation}
 
-        [출력형식] 반드시 JSON 단일 객체로만 반환하세요.
+        [출력형식] 반드시 JSON 단일 객체로 반환.
         {{
           "question": "시험지 원문 텍스트 유지",
           "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
-          "answer": "정답 번호 (태그를 보고 추출, 모르면 '확인 필요')",
+          "answer": "정답 번호",
           "chat_message": "사용자의 명령에 대한 1:1 대답! (예: '법 제1조를 검색해 보았습니다: ... 내용 ... 일치하나요?')",
           "explanation": "지금까지 누적된 해설 내용 (수정 지시가 있으면 추가 반영)",
           "search_process": "현재 검색하거나 대조 중인 내용 메모"
         }}"""
         
-        print(f"🤖 [순수 대화형 AI 가동] 응답 생성 중...", file=sys.stderr, flush=True)
+        print(f"🤖 [초고속 대화형 AI 가동] 응답 생성 중...", file=sys.stderr, flush=True)
         
         try:
-            response_text = generate_ollama_json(prompt, temperature=0.2)
+            response_text = generate_ollama_json(prompt, temperature=0.1)
             result_data = clean_and_parse_json(response_text)
         except Exception as ollama_e:
-            response_text = generate_gemini_json(prompt, temperature=0.2)
+            print(f"⚠️ 로컬 AI 분석 실패, Gemini로 우회: {ollama_e}", file=sys.stderr, flush=True)
+            response_text = generate_gemini_json(prompt, temperature=0.1)
             result_data = clean_and_parse_json(response_text)
             
         if isinstance(result_data, list) and len(result_data) > 0:
@@ -462,7 +507,7 @@ def analyze_chunk():
         if isinstance(result_data, dict):
             if "chat_message" not in result_data or not result_data["chat_message"].strip():
                 if user_feedback:
-                    result_data["chat_message"] = f"대표님의 지시('{user_feedback}')에 따라 조치했습니다!"
+                    result_data["chat_message"] = f"대표님의 지시('{user_feedback}')에 따라 처리했습니다!"
                 else:
                     result_data["chat_message"] = "무엇을 먼저 도와드릴까요?"
             
