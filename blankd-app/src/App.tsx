@@ -46,7 +46,6 @@ function MainApp() {
   const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
   const isLoggedIn = safeAddress.length > 0;
   
-  // 💡 [기능 보존] 탭 상태를 로컬 스토리지에 영구 저장
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('blankd_active_tab') || 'progress';
   });
@@ -80,8 +79,6 @@ function MainApp() {
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
-
-  // 💡 [기능 보존] 음성 인식 상태
   const [isListening, setIsListening] = useState(false);
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
@@ -194,10 +191,10 @@ function MainApp() {
     });
     if (res.ok) {
       await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
-      // 💡 [기능 보존] 강제 탭 이동 금지. 현재 탭(만들기 탭)에 그대로 남아있게 함.
       addLog("✅ 지식 추출 완료: 다음 조항을 바로 오픈합니다.");
       await loadAllData(); 
       onComplete(); 
+      // 💡 setActiveTab('enhance'); 제거하여 만들기 탭에 그대로 남아있음.
     }
   };
 
@@ -232,7 +229,7 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // 💡 [기능 보존] 빈칸 풀이가 완료되면 닫지 않고 바로 다음 카드를 열어주는 연속 학습(Auto-Advance)
+  // 💡 [핵심 보존] 강화 탭에서 학습 완료 시 원본 순서(ORIG_ID)대로 다음 카드 바로 띄우기
   const finishCard = () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true; 
@@ -243,8 +240,13 @@ function MainApp() {
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     const isCorrect = wrongArr.length === 0;
 
-    // 현재 폴더 안에서 다음 순서(ID 오름차순)의 카드를 탐색
-    const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => a.id - b.id);
+    // 아키님의 UI 코드처럼 원본 ID 기반으로 정렬하여 다음 카드를 정확히 찾아냅니다.
+    const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
+        const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
+        const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
+        return origIdA - origIdB;
+    });
+    
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
     const nextCard = folderCards[currentIdx + 1] || null;
 
@@ -327,7 +329,6 @@ function MainApp() {
     }, 1000); 
   };
 
-  // 💡 [기능 보존] 음성 인식(Web Speech API) 핸즈프리 모드
   const startVoiceRecognition = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다."); return; }
