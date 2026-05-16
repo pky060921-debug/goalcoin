@@ -74,7 +74,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages, parsedResult]);
+  }, [chatMessages]);
 
   const handleDeleteLaw = async (e: React.MouseEvent, folderName: string) => {
     e.stopPropagation();
@@ -120,7 +120,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       if (res.ok) {
         setExamFile(null);
         setAnswerFile(null);
-        alert("문제와 정답이 한 쌍으로 대기소에 안전하게 저장되었습니다!");
+        alert("문제와 정답이 한 쌍으로 대기소에 안전하게 저장되었습니다!\n(정답지의 빨간색 텍스트가 정답으로 인식됩니다.)");
         fetchData();
       } else {
         alert("업로드 실패: " + data.error);
@@ -190,10 +190,10 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     } catch (err: any) {}
   };
 
-  // 💡 [핵심] 대화형 Copilot 시작 시 기본 뼈대 자동 생성 (채팅 바로 활성화)
+  // 💡 [개편] 대화형 튜터링 시작 화면 기본 설정
   const startCoopReview = (exam: {id: number, filename: string, chunks: string[]}) => {
     if (selectedLaws.length === 0) {
-      alert("상단에서 참고할 근거 자료를 먼저 체크해주세요!");
+      alert("상단에서 참고할 근거 자료(법령/정관)를 먼저 체크해주세요!");
       return;
     }
     setCurrentExamId(exam.id);
@@ -202,17 +202,18 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setChunkIndex(0);
     setMode('coop');
     
-    // 자동 스캔 대신, 사용자가 직접 지시할 수 있도록 기본 상태로 세팅
+    // 왼쪽 패널 기본 뼈대
     setParsedResult({
         question: exam.chunks[0],
-        options: ["① 1개", "② 2개", "③ 3개", "④ 4개"], // 템플릿 보기
+        options: ["① 1개", "② 2개", "③ 3개", "④ 4개", "⑤ 5개"],
         answer: "확인 필요",
         explanation: "",
-        search_process: "대기 중..."
+        search_process: ""
     });
     
+    // 오른쪽 패널 순수 채팅창
     setChatMessages([
-        { sender: 'ai', text: "안녕하세요 대표님! 문제를 같이 풀어보겠습니다. 먼저 어떤 조항을 찾아드릴까요? (예: 법 제1조 검색해줘)" }
+        { sender: 'ai', text: "안녕하세요 대표님! 문제를 하나씩 검수해 보겠습니다.\n먼저 어떤 조항을 검색해서 대조해 드릴까요?\n(예: '가' 보기를 위해 법 제1조 검색해서 일치하는지 말해줘)" }
     ]); 
     setUserFeedback("");
   };
@@ -232,12 +233,12 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
     try {
       const payload = {
-        chunk_text: chunks[chunkIndex],
+        chunk_text: parsedResult ? parsedResult.question : chunks[chunkIndex],
         wallet_address: userAddress,
         user_feedback: currentFeedback,
         chat_history: updatedHistory, 
         selected_laws: selectedLaws,
-        current_explanation: parsedResult?.explanation || "" // 💡 기존에 작성된 해설을 백엔드로 넘겨서 누적시킵니다!
+        current_explanation: parsedResult?.explanation || ""
       };
       
       const res = await fetch(`${BASE_URL}/analyze-chunk`, {
@@ -249,11 +250,10 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       
       if (res.ok && data.result) {
         setParsedResult(data.result);
-        
-        const aiResponseText = data.result.chat_message || data.result.chatMessage || "알겠습니다. 다음은 무엇을 확인할까요?";
+        const aiResponseText = data.result.chat_message || data.result.chatMessage || "알겠습니다. 다음 지시를 내려주세요!";
         setChatMessages(prev => [...prev, { sender: 'ai', text: aiResponseText }]);
       } else {
-        alert("AI 통신 실패: " + data.error);
+        alert("AI 분석 실패: " + data.error);
       }
     } catch (err: any) {
       alert("AI 통신 에러가 발생했습니다.");
@@ -290,14 +290,12 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
       if (chunkIndex + 1 < chunks.length) {
         setChunkIndex(chunkIndex + 1);
-        
-        // 다음 문제로 넘어가면 초기 상태로 리셋
         setParsedResult({
             question: chunks[chunkIndex + 1],
-            options: ["① 1개", "② 2개", "③ 3개", "④ 4개"],
+            options: ["① 1개", "② 2개", "③ 3개", "④ 4개", "⑤ 5개"],
             answer: "확인 필요",
             explanation: "",
-            search_process: "대기 중..."
+            search_process: ""
         });
         setChatMessages([{ sender: 'ai', text: `[${chunkIndex + 2}번 문제]입니다! 어떤 조항을 찾아드릴까요?` }]); 
         setUserFeedback("");
@@ -346,7 +344,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     return (
       <div className="flex flex-col h-[85vh] space-y-4 animate-in fade-in pb-10">
         <div className="flex justify-between items-center pb-4 border-b border-white/10">
-          <h2 className="text-xl text-teal-400 font-serif">🤝 대화형 AI 튜터 (Copilot) [{filename}]</h2>
+          <h2 className="text-xl text-teal-400 font-serif">🤝 대화형 AI 튜터 시스템 [{filename}]</h2>
           <div className="flex gap-4 items-center">
             <span className="text-white/40 text-sm font-bold bg-teal-950/50 px-3 py-1 rounded-sm border border-teal-900/50">
               진행도: {chunkIndex + 1} / {chunks.length}
@@ -359,125 +357,110 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
         <div className="flex flex-1 gap-6 overflow-hidden">
           
-          <div className="w-1/2 flex flex-col gap-4 border border-white/10 rounded-sm bg-black/20 p-5 overflow-y-auto custom-scrollbar">
+          {/* 💡 [좌측 패널] 완벽하게 분리된 문제, 정답(빨간색), 해설 저장 영역 */}
+          <div className="w-[55%] flex flex-col gap-5 border border-white/10 rounded-sm bg-black/20 p-5 overflow-y-auto custom-scrollbar shadow-inner">
             
-            <div className="flex justify-between items-center">
-              <div className="text-teal-300 font-bold text-sm">📝 1. 문제 영역 (클릭하여 직접 수정 가능)</div>
+            <div className="flex flex-col gap-2">
+              <label className="text-teal-300 font-bold text-sm">📝 1. 추출된 원문 (수정 가능)</label>
+              <textarea 
+                value={parsedResult ? parsedResult.question : chunks[chunkIndex]} 
+                onChange={(e) => handleEdit('question', e.target.value)}
+                className="w-full min-h-[220px] bg-black/40 border border-white/10 text-white/90 p-4 text-[15px] leading-loose outline-none resize-none rounded-sm focus:border-teal-500/50"
+              />
             </div>
 
-            <textarea 
-              value={parsedResult ? parsedResult.question : chunks[chunkIndex]} 
-              onChange={(e) => {
-                if (parsedResult) handleEdit('question', e.target.value);
-                else {
-                    const newChunks = [...chunks];
-                    newChunks[chunkIndex] = e.target.value;
-                    setChunks(newChunks);
-                }
-              }}
-              className="w-full flex-1 min-h-[200px] bg-black/40 border border-white/10 text-white/80 p-4 text-[15px] leading-loose outline-none resize-none rounded-sm focus:border-teal-500/50"
-              placeholder="문제 내용을 입력하세요..."
-            />
-
             {parsedResult && (
-              <div className="space-y-3 mt-4 animate-in fade-in">
-                <label className="text-sm font-bold text-teal-400 block mb-1">📋 2. 보기 및 정답 선택</label>
-                <div className="text-xs text-white/40 mb-3">빨간색 원을 클릭하여 진짜 정답을 지정해주세요.</div>
-                {(parsedResult.options || ['', '', '', '']).map((opt: string, i: number) => {
-                  const isCorrect = String(i + 1) === String(parsedResult.answer);
-                  return (
-                    <div key={i} className={`flex gap-3 items-center p-2 rounded-sm border transition-all ${isCorrect ? 'bg-red-950/20 border-red-500/50' : 'border-transparent hover:bg-white/5'}`}>
-                      <button 
-                        onClick={() => handleEdit('answer', String(i + 1))}
-                        className={`shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${isCorrect ? 'border-red-500 bg-red-500 text-white' : 'border-white/30 text-transparent'}`}
-                      >
-                        ✓
-                      </button>
-                      <input 
-                        value={opt} 
-                        onChange={e => handleOptionEdit(i, e.target.value)} 
-                        className={`w-full bg-transparent outline-none text-sm ${isCorrect ? 'text-red-400 font-bold' : 'text-white/80'}`} 
-                        placeholder={`보기 ${i + 1} 내용`}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
+              <>
+                <div className="space-y-3 pt-3 border-t border-white/10">
+                  <label className="text-sm font-bold text-teal-400 block mb-1">📋 2. 보기 및 정답 체크</label>
+                  <div className="text-[11px] text-white/40 mb-2">버튼을 눌러 최종 정답을 빨간색으로 지정하세요. (AI가 정답지를 보고 자동 지정하기도 합니다)</div>
+                  {(parsedResult.options || ['', '', '', '']).map((opt: string, i: number) => {
+                    const isCorrect = String(i + 1) === String(parsedResult.answer);
+                    return (
+                      <div key={i} className={`flex gap-3 items-center p-2 rounded-sm border transition-all ${isCorrect ? 'bg-red-950/20 border-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 'border-white/5 hover:bg-white/5'}`}>
+                        <button 
+                          onClick={() => handleEdit('answer', String(i + 1))}
+                          className={`shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${isCorrect ? 'border-red-500 bg-red-500 text-white font-bold' : 'border-white/30 text-transparent'}`}
+                        >
+                          ✓
+                        </button>
+                        <input 
+                          value={opt} 
+                          onChange={e => handleOptionEdit(i, e.target.value)} 
+                          className={`w-full bg-transparent outline-none text-sm transition-colors ${isCorrect ? 'text-red-400 font-bold' : 'text-white/80'}`} 
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="flex flex-col gap-2 pt-3 border-t border-white/10">
+                    <label className="text-[12px] font-bold text-indigo-400 block">🧠 3. AI 사고 과정 기록 (장기 기억용)</label>
+                    <textarea 
+                      value={parsedResult.search_process || ''} 
+                      onChange={e => handleEdit('search_process', e.target.value)} 
+                      className="w-full h-16 bg-indigo-950/20 border border-indigo-500/20 text-indigo-200/70 p-3 text-xs leading-relaxed rounded-sm resize-none focus:border-indigo-400 outline-none" 
+                    />
+                </div>
+
+                <div className="flex flex-col gap-2">
+                    <label className="text-[13px] font-bold text-emerald-400 block">💡 4. 최종 공식 상세 해설 (대화하며 자동 업데이트)</label>
+                    <textarea 
+                      value={parsedResult.explanation || ''} 
+                      onChange={e => handleEdit('explanation', e.target.value)} 
+                      className="w-full min-h-[140px] bg-emerald-950/20 border border-emerald-500/30 text-emerald-100/90 p-4 text-[14px] leading-loose rounded-sm resize-none outline-none focus:border-emerald-400" 
+                    />
+                </div>
+              </>
             )}
           </div>
 
-          <div className="w-1/2 flex flex-col border border-emerald-900/40 rounded-sm bg-emerald-950/10 p-5 overflow-hidden relative">
+          {/* 💡 [우측 패널] 100% 순수한 대화 전용 카카오톡 UI */}
+          <div className="w-[45%] flex flex-col border border-emerald-900/40 rounded-sm bg-[#0a192f] overflow-hidden relative shadow-lg">
             
-            <div className="text-emerald-300 font-bold text-sm mb-3 shrink-0">💬 3. AI 대화 및 사고 과정 (티키타카)</div>
+            <div className="bg-emerald-950/60 p-4 border-b border-emerald-900/40 shrink-0 flex items-center justify-between">
+                <span className="text-emerald-300 font-bold text-sm">💬 AI 튜터 채팅창</span>
+                {isAnalyzing && <span className="text-xs text-emerald-400 animate-pulse">상대방이 타이핑 중...</span>}
+            </div>
             
-            <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4 pr-2 pb-2 min-h-[150px]">
+            <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4 p-5 bg-[#0a192f]">
               {chatMessages.map((msg, idx) => (
-                <div key={idx} className={`flex flex-col max-w-[85%] animate-in fade-in slide-in-from-bottom-2 ${msg.sender === 'user' ? 'self-end items-end' : 'self-start items-start'}`}>
-                  <span className="text-[10px] text-white/40 mb-1 px-1">{msg.sender === 'user' ? '대표님' : '아키 (AI 튜터)'}</span>
-                  <div className={`p-3 text-[14px] leading-relaxed rounded-2xl shadow-md whitespace-pre-wrap ${msg.sender === 'user' ? 'bg-indigo-600 text-white rounded-tr-sm' : 'bg-emerald-800/80 text-emerald-50 rounded-tl-sm border border-emerald-600'}`}>
+                <div key={idx} className={`flex flex-col max-w-[90%] animate-in fade-in slide-in-from-bottom-2 ${msg.sender === 'user' ? 'self-end items-end' : 'self-start items-start'}`}>
+                  <span className="text-[11px] text-white/30 mb-1 px-1">{msg.sender === 'user' ? '대표님' : 'AI 아키'}</span>
+                  <div className={`p-3.5 text-[14.5px] leading-relaxed rounded-2xl shadow-md whitespace-pre-wrap ${msg.sender === 'user' ? 'bg-[#2563eb] text-white rounded-tr-sm' : 'bg-[#1e293b] text-emerald-50 rounded-tl-sm border border-emerald-500/20'}`}>
                     {msg.text}
                   </div>
                 </div>
               ))}
-              {isAnalyzing && (
-                <div className="self-start flex flex-col max-w-[85%] items-start animate-pulse">
-                  <span className="text-[10px] text-white/40 mb-1 px-1">아키 (AI 튜터)</span>
-                  <div className="p-3 text-[14px] bg-emerald-900/50 text-emerald-200/50 rounded-2xl rounded-tl-sm border border-emerald-800/50">
-                    말씀하신 내용을 바탕으로 찾아보는 중입니다... 🤔
-                  </div>
-                </div>
-              )}
               <div ref={chatEndRef} />
             </div>
 
-            {parsedResult && (
-              <div className="shrink-0 pt-3 border-t border-emerald-900/40 bg-emerald-950/5 space-y-3 mt-2">
-                <div className="grid grid-cols-1 gap-3">
-                  <div className="flex flex-col">
-                    <label className="text-[11px] font-bold text-indigo-400 block mb-1">🧠 현재 진행 상태</label>
-                    <textarea 
-                      value={parsedResult.search_process || ''} 
-                      onChange={e => handleEdit('search_process', e.target.value)} 
-                      className="w-full h-10 bg-indigo-950/30 border border-indigo-500/30 text-indigo-200/90 p-2.5 text-xs leading-relaxed rounded-sm resize-none focus:border-indigo-400 outline-none custom-scrollbar" 
-                    />
-                  </div>
-
-                  <div className="flex flex-col">
-                    <label className="text-[11px] font-bold text-emerald-400 block mb-1">💡 작성 중인 해설 (자동 누적)</label>
-                    <textarea 
-                      value={parsedResult.explanation || ''} 
-                      onChange={e => handleEdit('explanation', e.target.value)} 
-                      className={`w-full h-32 bg-emerald-950/30 border border-emerald-500/30 text-emerald-100/90 p-3 text-sm leading-relaxed rounded-sm resize-none outline-none custom-scrollbar ${parsedResult.answer === '확인 필요' ? 'border-red-500 text-red-100' : 'focus:border-emerald-400'}`} 
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-2 pt-1">
+            <div className="shrink-0 p-4 bg-[#0f172a] border-t border-white/5">
+                <div className="flex gap-2 mb-3">
                   <input 
                     type="text" 
                     value={userFeedback} 
                     onChange={e => setUserFeedback(e.target.value)} 
-                    placeholder="예: 법 제1조 찾아줘, 또는 주어가 공단이 아니라 법인이야"
-                    className="flex-1 bg-black/40 border border-indigo-500/50 text-white p-2.5 text-sm rounded-full outline-none focus:border-indigo-400 px-5 shadow-inner"
+                    placeholder="지시를 내려주세요. (예: 법 제1조 찾아서 대조해줘)"
+                    className="flex-1 bg-black/50 border border-indigo-500/40 text-white p-3 text-[14px] rounded-full outline-none focus:border-indigo-400 px-5 transition-all"
                     onKeyDown={e => e.key === 'Enter' && analyzeCurrentChunk(true)}
                   />
                   <button 
                     onClick={() => analyzeCurrentChunk(true)} 
                     disabled={isAnalyzing || !userFeedback.trim()}
-                    className="px-5 py-2 bg-indigo-600 text-white font-bold text-xs rounded-full hover:bg-indigo-500 transition-all shadow-md disabled:opacity-50 shrink-0"
+                    className="px-6 py-2 bg-indigo-600 text-white font-bold text-sm rounded-full hover:bg-indigo-500 transition-all shadow-md disabled:opacity-50 shrink-0"
                   >
-                    전송 🚀
+                    전송
                   </button>
                 </div>
                 
                 <button 
                   onClick={approveAndNext} 
-                  className="w-full py-3 bg-emerald-600 text-white font-bold rounded-sm hover:scale-[1.01] hover:bg-emerald-500 transition-all shadow-lg flex justify-center items-center gap-2 text-sm"
+                  className="w-full py-3.5 bg-teal-600/80 hover:bg-teal-500 text-white font-bold rounded-full transition-all shadow-[0_0_15px_rgba(20,184,166,0.3)] hover:shadow-[0_0_20px_rgba(20,184,166,0.5)] flex justify-center items-center text-sm"
                 >
-                  <span>✨ 문제 해설 완성! (저장 후 다음으로 넘어가기)</span>
+                  ✨ 현재 해설 저장 및 다음 문제로 이동
                 </button>
-              </div>
-            )}
+            </div>
             
           </div>
         </div>
@@ -641,7 +624,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                         대화형 검수 시작 🚀
                       </button>
                       <button onClick={() => handleGenerateRAGFromPending(exam.id)} className="px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-sm shadow-lg hover:bg-emerald-500 transition-all">
-                        해설 자동생성 (Gemini)
+                        해설 자동생성
                       </button>
                       <button onClick={() => handleDeletePendingExam(exam.id)} className="px-3 py-2 bg-red-950/40 border border-red-500/30 text-red-400 font-bold text-xs rounded-sm hover:bg-red-900/50 transition-all">
                         🗑️ 삭제
