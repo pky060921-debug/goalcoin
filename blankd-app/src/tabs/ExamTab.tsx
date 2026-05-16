@@ -74,7 +74,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages, parsedResult]); // 💡 렌더링 시 스크롤 동기화 강화
+  }, [chatMessages]);
 
   const handleDeleteLaw = async (e: React.MouseEvent, folderName: string) => {
     e.stopPropagation();
@@ -395,14 +395,15 @@ export const ExamTab = ({ walletAddress, address }: any) => {
             )}
           </div>
 
-          {/* 💡 [우측 패널] 대화창 + 사고과정 & 해설 텍스트 박스 부활! */}
+          {/* 💡 [우측 패널 대개혁] 대화창 스크롤과 해설 편집 워크스페이스를 완벽 분리 고정 */}
           <div className="w-1/2 flex flex-col border border-emerald-900/40 rounded-sm bg-emerald-950/10 p-5 overflow-hidden relative">
             
-            <div className="text-emerald-300 font-bold text-sm mb-4 shrink-0">💬 3. AI 대화 및 사고 과정 (티키타카)</div>
+            <div className="text-emerald-300 font-bold text-sm mb-3 shrink-0">💬 3. AI 대화 및 사고 과정 (티키타카)</div>
             
-            <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4 pr-2 pb-4">
+            {/* 상단 뷰: 순수 채팅 로그 스크롤 영역 (미니멈 높이 확보) */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4 pr-2 pb-2 min-h-[150px]">
               {chatMessages.length === 0 && !isAnalyzing ? (
-                <div className="h-full flex flex-col items-center justify-center text-white/30 text-sm space-y-4">
+                <div className="h-full flex items-center justify-center text-white/30 text-sm space-y-4 flex-col">
                   <div className="text-4xl">🤖</div>
                   <p>좌측에서 [AI 분석 시작]을 누르면 저와 대화가 시작됩니다!</p>
                 </div>
@@ -424,16 +425,19 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                   </div>
                 </div>
               )}
-              
-              {/* 💡 삭제되었던 '사고 과정'과 '해설' 박스를 여기에 넣었습니다! */}
-              {parsedResult && !isAnalyzing && (
-                <div className="mt-4 pt-4 border-t border-emerald-900/40 space-y-4">
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* 하단 뷰: 해설 검수 워크스페이스 고정 영역 (채팅창 스크롤에 무관하게 무조건 노출됨) */}
+            {parsedResult && (
+              <div className="shrink-0 pt-3 border-t border-emerald-900/40 bg-emerald-950/5 space-y-3 mt-2">
+                <div className="grid grid-cols-1 gap-3">
                   <div className="flex flex-col">
                     <label className="text-[11px] font-bold text-indigo-400 block mb-1">🧠 AI 사고 과정 (장기 기억)</label>
                     <textarea 
                       value={parsedResult.search_process || ''} 
                       onChange={e => handleEdit('search_process', e.target.value)} 
-                      className="w-full h-24 bg-indigo-950/20 border border-indigo-500/30 text-indigo-200/80 p-3 text-xs leading-relaxed rounded-sm resize-none focus:border-indigo-400 outline-none" 
+                      className="w-full h-20 bg-indigo-950/30 border border-indigo-500/30 text-indigo-200/90 p-2.5 text-xs leading-relaxed rounded-sm resize-none focus:border-indigo-400 outline-none custom-scrollbar" 
                     />
                   </div>
 
@@ -442,29 +446,24 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                     <textarea 
                       value={parsedResult.explanation || ''} 
                       onChange={e => handleEdit('explanation', e.target.value)} 
-                      className={`w-full h-32 bg-emerald-950/20 border border-emerald-500/30 text-emerald-100/90 p-4 text-[14px] leading-loose rounded-sm resize-none outline-none ${parsedResult.answer === '확인 필요' ? 'border-red-500 text-red-100' : 'focus:border-emerald-400'}`} 
+                      className={`w-full h-24 bg-emerald-950/30 border border-emerald-500/30 text-emerald-100/90 p-3 text-sm leading-relaxed rounded-sm resize-none outline-none custom-scrollbar ${parsedResult.answer === '확인 필요' ? 'border-red-500 text-red-100' : 'focus:border-emerald-400'}`} 
                     />
                   </div>
                 </div>
-              )}
-              <div ref={chatEndRef} />
-            </div>
 
-            {parsedResult && (
-              <div className="shrink-0 pt-4 border-t border-emerald-900/50 mt-2 bg-emerald-950/10">
-                <div className="flex gap-2 mb-4">
+                <div className="flex gap-2 pt-1">
                   <input 
                     type="text" 
                     value={userFeedback} 
                     onChange={e => setUserFeedback(e.target.value)} 
                     placeholder="예: 틀렸어, 주어는 공단이 아니라 '이 법인'이야 다시 고쳐!"
-                    className="flex-1 bg-black/40 border border-indigo-500/50 text-white p-3 text-sm rounded-full outline-none focus:border-indigo-400 px-5 shadow-inner"
+                    className="flex-1 bg-black/40 border border-indigo-500/50 text-white p-2.5 text-sm rounded-full outline-none focus:border-indigo-400 px-5 shadow-inner"
                     onKeyDown={e => e.key === 'Enter' && analyzeCurrentChunk(true)}
                   />
                   <button 
                     onClick={() => analyzeCurrentChunk(true)} 
                     disabled={isAnalyzing || !userFeedback.trim()}
-                    className="px-6 py-2 bg-indigo-600 text-white font-bold text-sm rounded-full hover:bg-indigo-500 transition-all shadow-md disabled:opacity-50"
+                    className="px-5 py-2 bg-indigo-600 text-white font-bold text-xs rounded-full hover:bg-indigo-500 transition-all shadow-md disabled:opacity-50 shrink-0"
                   >
                     전송 🚀
                   </button>
@@ -472,7 +471,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                 
                 <button 
                   onClick={approveAndNext} 
-                  className="w-full py-4 bg-emerald-600 text-white font-bold rounded-sm hover:scale-[1.01] hover:bg-emerald-500 transition-all shadow-lg flex justify-center items-center gap-2"
+                  className="w-full py-3 bg-emerald-600 text-white font-bold rounded-sm hover:scale-[1.01] hover:bg-emerald-500 transition-all shadow-lg flex justify-center items-center gap-2 text-sm"
                 >
                   <span>✨ 내용 확인 완료 (현재 문제 저장 및 다음으로)</span>
                 </button>
@@ -485,7 +484,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     );
   }
 
-  // ... (이하 코드 동일)
   if (mode === 'cbt') {
     const q = cbtQuestions[cbtCurrentIndex];
     if (!q) return null;
@@ -642,7 +640,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                         대화형 검수 시작 🚀
                       </button>
                       <button onClick={() => handleGenerateRAGFromPending(exam.id)} className="px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-sm shadow-lg hover:bg-emerald-500 transition-all">
-                        해설 자동생성 (Gemini)
+                        해설 자동생성
                       </button>
                       <button onClick={() => handleDeletePendingExam(exam.id)} className="px-3 py-2 bg-red-950/40 border border-red-500/30 text-red-400 font-bold text-xs rounded-sm hover:bg-red-900/50 transition-all">
                         🗑️ 삭제
