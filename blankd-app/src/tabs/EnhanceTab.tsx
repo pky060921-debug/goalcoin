@@ -11,9 +11,10 @@ const getGridClass = (cols: number) => {
 };
 
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleDeleteCard }: any) => {
-  const enhanceFolders = Array.from(new Set(savedCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
+  const safeCards = Array.isArray(savedCards) ? savedCards : [];
+  const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
-  // 💡 [핵심] 강화탭 폴더 토글 상태 로컬 스토리지 연동
+  // 💡 [기능 보존] 강화 탭 폴더 상태 로컬 스토리지 연동
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>(() => {
     try { const saved = localStorage.getItem('blankd_enhance_folders'); return saved ? JSON.parse(saved) : {}; } 
     catch(e) { return {}; }
@@ -64,7 +65,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
-            {savedCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
+            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
                 let colClass = "";
                 let titleColor = "text-teal-400";
                 const checkText = `${card.content || ''}`;
