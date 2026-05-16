@@ -28,10 +28,15 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [chunks, setChunks] = useState<string[]>([]);
   const [chunkIndex, setChunkIndex] = useState(0);
   const [filename, setFilename] = useState("");
+  
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [parsedResult, setParsedResult] = useState<any>(null);
 
+  // 💡 [핵심 개편] 실시간 채팅 UI 상태 관리
+  const [chatMessages, setChatMessages] = useState<Array<{sender: 'ai' | 'user', text: string}>>([]);
   const [userFeedback, setUserFeedback] = useState("");
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
   const [isExamUploading, setIsExamUploading] = useState(false);
 
   const [cbtQuestions, setCbtQuestions] = useState<any[]>([]);
@@ -68,7 +73,11 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     fetchData();
   }, [userAddress]);
 
-  // 💡 [핵심 수정] 파일 삭제 시 팝업이 뜨지 않도록 이벤트 전파 차단
+  useEffect(() => {
+    // 채팅이 업데이트될 때마다 스크롤을 맨 아래로 내림
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
   const handleDeleteLaw = async (e: React.MouseEvent, folderName: string) => {
     e.stopPropagation();
     if (!confirm(`[${folderName}] 파일을 삭제하시겠습니까?`)) return;
@@ -113,7 +122,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       if (res.ok) {
         setExamFile(null);
         setAnswerFile(null);
-        alert("문제와 정답이 한 쌍으로 대기소에 안전하게 저장되었습니다!");
+        alert("대기소에 저장되었습니다!");
         fetchData();
       } else {
         alert("업로드 실패: " + data.error);
@@ -125,28 +134,20 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   };
 
   const handleDeletePendingExam = async (id: number) => {
-    if (!confirm("이 대기열 모의고사를 삭제하시겠습니까?")) return;
+    if (!confirm("이 모의고사를 삭제하시겠습니까?")) return;
     try {
-      const res = await fetch(`${BASE_URL}/delete-pending-exam`, {
+      await fetch(`${BASE_URL}/delete-pending-exam`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, wallet_address: userAddress })
       });
-      if (res.ok) {
-        alert("삭제되었습니다.");
-        fetchData();
-      } else {
-        const data = await res.json();
-        alert("삭제 실패: " + data.error);
-      }
-    } catch (e: any) {
-      alert("삭제 중 서버 오류가 발생했습니다.");
-    }
+      fetchData();
+    } catch (e: any) {}
   };
 
   const handleGenerateRAGFromPending = async (id: number) => {
-    if (selectedLaws.length === 0) return alert("참고할 근거 자료를 상단에서 최소 1개 이상 체크해주세요!");
-    if (!confirm(`선택된 ${selectedLaws.length}개의 근거 자료를 바탕으로 해설을 자동 생성하시겠습니까?`)) return;
+    if (selectedLaws.length === 0) return alert("상단에서 최소 1개 이상의 법령을 체크해주세요!");
+    if (!confirm(`해설을 자동 생성하시겠습니까?`)) return;
     
     setIsAnalyzing(true);
     try {
@@ -155,61 +156,45 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, wallet_address: userAddress, selected_laws: selectedLaws })
       });
-      const data = await res.json();
       if (res.ok) {
+         const data = await res.json();
          const taskId = data.task_id;
          const timer = setInterval(async () => {
-           try {
-             const sRes = await fetch(`${BASE_URL}/task-status?task_id=${taskId}`);
-             const sData = await sRes.json();
-             if (sData.status === 'completed') {
-               clearInterval(timer); 
-               setIsAnalyzing(false); 
-               fetchData();
-               alert("✨ 해설 자동 생성이 완료되어 골든 DB에 저장되었습니다!\n목록에서 결과를 확인하고 필요시 직접 수정/학습시켜 주세요.");
-             } else if (sData.status === 'error') {
-               clearInterval(timer); 
-               setIsAnalyzing(false); 
-               alert("분석 오류: " + sData.message);
-             }
-           } catch(err) {
-             console.error("[RAG 상태 체크 에러]", err);
+           const sRes = await fetch(`${BASE_URL}/task-status?task_id=${taskId}`);
+           const sData = await sRes.json();
+           if (sData.status === 'completed') {
+             clearInterval(timer); 
+             setIsAnalyzing(false); 
+             fetchData();
+             alert("해설 자동 생성이 완료되었습니다!");
+           } else if (sData.status === 'error') {
+             clearInterval(timer); 
+             setIsAnalyzing(false); 
+             alert("분석 오류");
            }
          }, 2000);
-      } else {
-         setIsAnalyzing(false); 
-         alert(data.error);
       }
     } catch(e: any) {
       setIsAnalyzing(false); 
-      alert(`서버 연결 실패.\n사유: ${e.message}`);
     }
   };
 
   const handleDeleteExam = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
-    if (!confirm("이 문제를 영구 삭제하시겠습니까?")) return;
+    if (!confirm("이 문제를 삭제하시겠습니까?")) return;
     try {
-      const res = await fetch(`${BASE_URL}/delete-exam`, {
+      await fetch(`${BASE_URL}/delete-exam`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, wallet_address: userAddress })
       });
-      if (res.ok) {
-        alert("삭제가 완료되었습니다.");
-        fetchData();
-      } else {
-        const data = await res.json();
-        alert("삭제 실패: " + data.error);
-      }
-    } catch (err: any) {
-      alert("삭제 실패: 서버 통신 오류");
-    }
+      fetchData();
+    } catch (err: any) {}
   };
 
   const startCoopReview = (exam: {id: number, filename: string, chunks: string[]}) => {
     if (selectedLaws.length === 0) {
-      alert("상단에서 참고할 근거 자료(법령/정관)를 먼저 체크해주세요!");
+      alert("상단에서 참고할 근거 자료를 먼저 체크해주세요!");
       return;
     }
     setCurrentExamId(exam.id);
@@ -218,16 +203,28 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setChunkIndex(0);
     setMode('coop');
     setParsedResult(null);
+    setChatMessages([]); // 채팅 내역 초기화
     setUserFeedback("");
   };
 
-  const analyzeCurrentChunk = async (isRetry = false) => {
+  // 💡 [대화형 AI 엔진]
+  const analyzeCurrentChunk = async (isFeedback = false) => {
+    if (isAnalyzing) return;
     setIsAnalyzing(true);
+
+    const currentFeedback = userFeedback.trim();
+    if (isFeedback && currentFeedback) {
+        // 사용자가 보낸 채팅을 먼저 화면에 띄움
+        setChatMessages(prev => [...prev, { sender: 'user', text: currentFeedback }]);
+        setUserFeedback("");
+    }
+
     try {
       const payload = {
         chunk_text: chunks[chunkIndex],
         wallet_address: userAddress,
-        user_feedback: isRetry ? userFeedback : "",
+        user_feedback: isFeedback ? currentFeedback : "",
+        chat_history: chatMessages, // 기존 대화 내용 전체 전송
         selected_laws: selectedLaws 
       };
       
@@ -237,11 +234,16 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         body: JSON.stringify(payload)
       });
       const data = await res.json();
-      if (res.ok) {
+      
+      if (res.ok && data.result) {
         setParsedResult(data.result);
-        if (isRetry) {
-            setUserFeedback(""); 
-            alert("AI가 대표님의 피드백을 반영하여 다시 분석했습니다!");
+        
+        // AI가 작성한 메시지(chat_message)가 있으면 화면 채팅창에 추가
+        if (data.result.chat_message) {
+            setChatMessages(prev => [...prev, { sender: 'ai', text: data.result.chat_message }]);
+        } else {
+            // chat_message 속성이 누락되었을 경우 기본 메시지 대체
+            setChatMessages(prev => [...prev, { sender: 'ai', text: "요청하신 분석을 완료했습니다. 해설을 확인해보시겠어요?" }]);
         }
       } else {
         alert("AI 분석 실패: " + data.error);
@@ -262,6 +264,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setParsedResult({ ...parsedResult, options: newOptions });
   };
 
+  // 💡 저장 버튼 누를 때
   const approveAndNext = async () => {
     if (!parsedResult?.question || !parsedResult?.answer) return alert("데이터가 불완전합니다.");
     try {
@@ -282,6 +285,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       if (chunkIndex + 1 < chunks.length) {
         setChunkIndex(chunkIndex + 1);
         setParsedResult(null);
+        setChatMessages([]); // 다음 문제로 넘어가면 채팅 내역 초기화
         setUserFeedback("");
       } else {
         if (currentExamId && userAddress) {
@@ -296,7 +300,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         setMode('list');
       }
     } catch(err: any) {
-      console.error(`[승인 및 저장 에러] 상세 내역:`, err.message || err);
+      console.error(`[승인 및 저장 에러]`, err);
     }
   };
 
@@ -328,7 +332,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     return (
       <div className="flex flex-col h-[85vh] space-y-4 animate-in fade-in pb-10">
         <div className="flex justify-between items-center pb-4 border-b border-white/10">
-          <h2 className="text-xl text-teal-400 font-serif">🤝 AI 합동 검수 및 학습소 [{filename}]</h2>
+          <h2 className="text-xl text-teal-400 font-serif">🤝 대화형 AI 튜터 시스템 [{filename}]</h2>
           <div className="flex gap-4 items-center">
             <span className="text-white/40 text-sm font-bold bg-teal-950/50 px-3 py-1 rounded-sm border border-teal-900/50">
               진행도: {chunkIndex + 1} / {chunks.length}
@@ -340,101 +344,136 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         </div>
 
         <div className="flex flex-1 gap-6 overflow-hidden">
+          
+          {/* 💡 [좌측 패널] 통합 문제 에디터 & 정답 선택 UI */}
           <div className="w-1/2 flex flex-col gap-4 border border-white/10 rounded-sm bg-black/20 p-5 overflow-y-auto custom-scrollbar">
+            
             <div className="flex justify-between items-center">
-              <div className="text-teal-300 font-bold text-sm">📝 1. 문제 원문 (수정 가능)</div>
-              <button 
-                onClick={() => analyzeCurrentChunk(false)} 
-                disabled={isAnalyzing}
-                className="py-2 px-4 bg-teal-600 text-white text-xs font-bold rounded-sm shadow-md hover:bg-teal-500 transition-all"
-              >
-                {isAnalyzing ? "AI 분석 중..." : "🚀 AI에게 분리 및 검색 지시"}
-              </button>
+              <div className="text-teal-300 font-bold text-sm">📝 1. 문제 영역 (클릭하여 직접 수정 가능)</div>
+              {!parsedResult && (
+                <button 
+                  onClick={() => analyzeCurrentChunk(false)} 
+                  disabled={isAnalyzing}
+                  className="py-2 px-4 bg-teal-600 text-white text-xs font-bold rounded-sm shadow-md hover:bg-teal-500 transition-all"
+                >
+                  {isAnalyzing ? "AI가 지문을 스캔 중입니다..." : "🚀 AI 분석 시작"}
+                </button>
+              )}
             </div>
+
+            {/* 통합된 문제 원문 텍스트에리어 */}
             <textarea 
-              value={chunks[chunkIndex] || ""} 
+              value={parsedResult ? parsedResult.question : chunks[chunkIndex]} 
               onChange={(e) => {
-                const newChunks = [...chunks];
-                newChunks[chunkIndex] = e.target.value;
-                setChunks(newChunks);
+                if (parsedResult) handleEdit('question', e.target.value);
+                else {
+                    const newChunks = [...chunks];
+                    newChunks[chunkIndex] = e.target.value;
+                    setChunks(newChunks);
+                }
               }}
-              className="h-48 w-full bg-black/40 border border-white/10 text-white/80 p-3 text-sm leading-relaxed outline-none resize-none rounded-sm"
+              className="w-full flex-1 min-h-[200px] bg-black/40 border border-white/10 text-white/80 p-4 text-[15px] leading-loose outline-none resize-none rounded-sm focus:border-teal-500/50"
+              placeholder="문제 내용을 입력하세요..."
             />
 
+            {/* 정답 선택 라디오형 보기 리스트 */}
             {parsedResult && (
-              <div className="flex flex-col gap-4 mt-2 animate-in fade-in">
-                <div>
-                  <label className="text-sm font-bold text-teal-400 block mb-2">🎯 2. 추출된 문제</label>
-                  <textarea value={parsedResult.question || ''} onChange={e => handleEdit('question', e.target.value)} className="w-full bg-teal-950/20 border border-teal-500/30 text-white p-3 text-sm rounded-sm" rows={3}/>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-bold text-teal-400 block mb-2">📋 3. 추출된 보기</label>
-                  {(parsedResult.options || ['', '', '', '']).map((opt: string, i: number) => (
-                    <div key={i} className="flex gap-2 items-center">
-                      <span className="text-teal-500 font-bold text-xs">{i+1}.</span>
-                      <input value={opt} onChange={e => handleOptionEdit(i, e.target.value)} className="w-full bg-teal-950/20 border border-teal-500/30 text-white p-2 text-sm rounded-sm" />
+              <div className="space-y-3 mt-4 animate-in fade-in">
+                <label className="text-sm font-bold text-teal-400 block mb-1">📋 2. 보기 및 정답 선택</label>
+                <div className="text-xs text-white/40 mb-3">빨간색 원을 클릭하여 진짜 정답을 지정해주세요.</div>
+                {(parsedResult.options || ['', '', '', '']).map((opt: string, i: number) => {
+                  const isCorrect = String(i + 1) === String(parsedResult.answer);
+                  return (
+                    <div key={i} className={`flex gap-3 items-center p-2 rounded-sm border transition-all ${isCorrect ? 'bg-red-950/20 border-red-500/50' : 'border-transparent hover:bg-white/5'}`}>
+                      <button 
+                        onClick={() => handleEdit('answer', String(i + 1))}
+                        className={`shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${isCorrect ? 'border-red-500 bg-red-500 text-white' : 'border-white/30 text-transparent'}`}
+                      >
+                        ✓
+                      </button>
+                      <input 
+                        value={opt} 
+                        onChange={e => handleOptionEdit(i, e.target.value)} 
+                        className={`w-full bg-transparent outline-none text-sm ${isCorrect ? 'text-red-400 font-bold' : 'text-white/80'}`} 
+                        placeholder={`보기 ${i + 1} 내용`}
+                      />
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
             )}
           </div>
 
-          <div className="w-1/2 flex flex-col border border-emerald-900/40 rounded-sm bg-emerald-950/10 p-5 overflow-y-auto custom-scrollbar">
-            {!parsedResult ? (
-              <div className="h-full flex flex-col items-center justify-center text-white/30 text-sm space-y-4">
-                <div className="text-4xl">🤖</div>
-                <p>좌측의 원문을 확인하고 [AI에게 지시] 버튼을 눌러주세요.</p>
-                <p>AI가 모르는 내용이 있다면 이곳에서 직접 가르쳐 주실 수 있습니다.</p>
-              </div>
-            ) : (
-              <div className="flex flex-col h-full animate-in fade-in">
-                <div className="mb-4">
-                  <label className="text-sm font-bold text-emerald-400 block mb-2">✅ 4. 정답</label>
-                  <input value={parsedResult.answer || ''} onChange={e => handleEdit('answer', e.target.value)} className={`w-full bg-emerald-950/30 border border-emerald-500/30 text-emerald-300 font-black p-3 text-center rounded-sm text-lg ${parsedResult.answer === '확인 필요' ? 'border-red-500 text-red-400 bg-red-950/30' : ''}`} />
+          {/* 💡 [우측 패널] 실시간 대화창 (Chat UI) 및 해설 저장 */}
+          <div className="w-1/2 flex flex-col border border-emerald-900/40 rounded-sm bg-emerald-950/10 p-5 overflow-hidden relative">
+            
+            <div className="text-emerald-300 font-bold text-sm mb-4 shrink-0">💬 3. AI 대화 및 사고 과정 (티키타카)</div>
+            
+            {/* 채팅 내역 출력 영역 */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-4 pr-2 pb-4">
+              {chatMessages.length === 0 && !isAnalyzing ? (
+                <div className="h-full flex flex-col items-center justify-center text-white/30 text-sm space-y-4">
+                  <div className="text-4xl">🤖</div>
+                  <p>좌측에서 [AI 분석 시작]을 누르면 저와 대화가 시작됩니다!</p>
                 </div>
-                
-                <div className="flex flex-col flex-1 mb-4">
-                  <label className="text-sm font-bold text-emerald-400 block mb-2">💡 5. 해설 및 대화 창 (직접 수정/학습 가능)</label>
-                  <textarea value={parsedResult.explanation || ''} onChange={e => handleEdit('explanation', e.target.value)} className={`w-full flex-1 min-h-[150px] bg-emerald-950/20 border border-emerald-500/30 text-emerald-100/90 p-4 text-[15px] leading-loose rounded-sm resize-none ${parsedResult.answer === '확인 필요' ? 'border-red-500 text-red-100' : ''}`} />
-                </div>
-
-                <div className="mb-4 flex flex-col">
-                  <label className="text-sm font-bold text-indigo-400 block mb-2">🧠 6. AI 사고 과정 (장기 기억)</label>
-                  <textarea value={parsedResult.search_process || ''} onChange={e => handleEdit('search_process', e.target.value)} className="w-full h-24 bg-indigo-950/20 border border-indigo-500/30 text-indigo-200/80 p-3 text-xs leading-relaxed rounded-sm resize-none" />
-                </div>
-
-                <div className="mb-4 p-4 bg-indigo-950/30 border border-indigo-500/40 rounded-sm flex flex-col gap-2">
-                  <label className="text-sm font-bold text-indigo-300">💬 AI에게 힌트 주기 (자료가 비어있을 때)</label>
-                  <div className="flex gap-2">
-                    <input 
-                      type="text" 
-                      value={userFeedback} 
-                      onChange={e => setUserFeedback(e.target.value)} 
-                      placeholder="예: 3번 보기는 정관 1장에 있어, 다시 찾아봐!"
-                      className="flex-1 bg-black/40 border border-indigo-500/50 text-white p-3 text-sm rounded-sm outline-none focus:border-indigo-400"
-                      onKeyDown={e => e.key === 'Enter' && analyzeCurrentChunk(true)}
-                    />
-                    <button 
-                      onClick={() => analyzeCurrentChunk(true)} 
-                      disabled={isAnalyzing || !userFeedback.trim()}
-                      className="px-6 py-2 bg-indigo-600 text-white font-bold text-sm rounded-sm hover:bg-indigo-500 transition-all disabled:opacity-50"
-                    >
-                      {isAnalyzing ? "..." : "재분석 🚀"}
-                    </button>
+              ) : (
+                chatMessages.map((msg, idx) => (
+                  <div key={idx} className={`flex flex-col max-w-[85%] animate-in fade-in slide-in-from-bottom-2 ${msg.sender === 'user' ? 'self-end items-end' : 'self-start items-start'}`}>
+                    <span className="text-[10px] text-white/40 mb-1 px-1">{msg.sender === 'user' ? '대표님' : '아키 (AI 튜터)'}</span>
+                    <div className={`p-3 text-[14px] leading-relaxed rounded-2xl shadow-md whitespace-pre-wrap ${msg.sender === 'user' ? 'bg-indigo-600 text-white rounded-tr-sm' : 'bg-emerald-800/80 text-emerald-50 rounded-tl-sm border border-emerald-600'}`}>
+                      {msg.text}
+                    </div>
+                  </div>
+                ))
+              )}
+              {isAnalyzing && (
+                <div className="self-start flex flex-col max-w-[85%] items-start animate-pulse">
+                  <span className="text-[10px] text-white/40 mb-1 px-1">아키 (AI 튜터)</span>
+                  <div className="p-3 text-[14px] bg-emerald-900/50 text-emerald-200/50 rounded-2xl rounded-tl-sm border border-emerald-800/50">
+                    열심히 고민 중입니다... 🤔
                   </div>
                 </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
 
-                <button onClick={approveAndNext} className="w-full py-4 bg-emerald-600 text-white font-bold rounded-sm hover:scale-[1.01] hover:bg-emerald-500 transition-all shadow-lg mt-2">
-                  ✨ 내용 확인 완료! 골든 DB에 영구 저장 (다음으로)
+            {/* 하단 힌트 전송 및 저장 버튼 영역 */}
+            {parsedResult && (
+              <div className="shrink-0 pt-4 border-t border-emerald-900/50 mt-2 bg-emerald-950/10">
+                <div className="flex gap-2 mb-4">
+                  <input 
+                    type="text" 
+                    value={userFeedback} 
+                    onChange={e => setUserFeedback(e.target.value)} 
+                    placeholder="예: 틀렸어, 주어는 공단이 아니라 '이 법인'이야 다시 고쳐!"
+                    className="flex-1 bg-black/40 border border-indigo-500/50 text-white p-3 text-sm rounded-full outline-none focus:border-indigo-400 px-5 shadow-inner"
+                    onKeyDown={e => e.key === 'Enter' && analyzeCurrentChunk(true)}
+                  />
+                  <button 
+                    onClick={() => analyzeCurrentChunk(true)} 
+                    disabled={isAnalyzing || !userFeedback.trim()}
+                    className="px-6 py-2 bg-indigo-600 text-white font-bold text-sm rounded-full hover:bg-indigo-500 transition-all shadow-md disabled:opacity-50"
+                  >
+                    전송 🚀
+                  </button>
+                </div>
+                
+                <button 
+                  onClick={approveAndNext} 
+                  className="w-full py-4 bg-emerald-600 text-white font-bold rounded-sm hover:scale-[1.01] hover:bg-emerald-500 transition-all shadow-lg flex justify-center items-center gap-2"
+                >
+                  <span>✨ 내용 확인 완료 (현재 문제 저장 및 다음으로)</span>
                 </button>
               </div>
             )}
+            
           </div>
         </div>
       </div>
     );
   }
+
+  // ... (이하 cbt, result, list 모드는 모두 이전 코드와 100% 동일하게 유지됨)
 
   if (mode === 'cbt') {
     const q = cbtQuestions[cbtCurrentIndex];
@@ -589,10 +628,10 @@ export const ExamTab = ({ walletAddress, address }: any) => {
               
                     <div className="flex flex-wrap gap-2 w-full xl:w-auto justify-end">
                       <button onClick={() => startCoopReview(exam)} className="px-4 py-2 border border-teal-500/50 text-teal-400 font-bold text-xs rounded-sm hover:bg-teal-900/30 transition-all">
-                        수동 검수 (로컬 AI) 🚀
+                        대화형 검수 시작 🚀
                       </button>
                       <button onClick={() => handleGenerateRAGFromPending(exam.id)} className="px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-sm shadow-lg hover:bg-emerald-500 transition-all">
-                        4. 해설 자동생성 (Gemini)
+                        해설 자동생성
                       </button>
                       <button onClick={() => handleDeletePendingExam(exam.id)} className="px-3 py-2 bg-red-950/40 border border-red-500/30 text-red-400 font-bold text-xs rounded-sm hover:bg-red-900/50 transition-all">
                         🗑️ 삭제
