@@ -11,13 +11,14 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
+// 💡 [기능 보존] 단어 합치기 내역 기억
 type WordItem = { text: string; subWords: string[]; };
 
 export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
-  // 💡 [핵심] 폴더 토글 상태를 브라우저 로컬 스토리지에 영구 보존
+  // 💡 [기능 보존] 만들기 폴더 상태 로컬 스토리지 유지
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>(() => {
     try { const saved = localStorage.getItem('blankd_craft_folders'); return saved ? JSON.parse(saved) : {}; } 
     catch(e) { return {}; }
@@ -30,7 +31,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   const [memoInput, setMemoInput] = useState(""); 
   const [isEraserMode, setIsEraserMode] = useState(false);
 
-  // 새로 업로드된 폴더만 활성화하고 기존 설정은 그대로 유지
   useEffect(() => {
     setOpenFolders(prev => {
       const next = { ...prev };
@@ -58,7 +58,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
   };
 
-  // 💡 [핵심] 조항(Category)을 열 때 초기화하는 공통 함수
+  // 💡 [기능 보존] 연속 작업(오토 스크롤링)을 위한 초기화 함수
   const openCategory = (targetCat: any) => {
     setExpandedId(targetCat.id);
     setSelectedWords(new Set());
@@ -96,10 +96,12 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     setPageBreaks(p);
   };
 
+  // 💡 [기능 보존] 특수기호 방어 및 되돌리기 (Unmerge) 로직
   const handleWordMerge = (idx: number) => {
     if (isEraserMode) return; 
     const current = wordArray[idx];
 
+    // 더블클릭 시 되돌리기
     if (current.subWords.length > 1) {
       const newArray = [...wordArray];
       const splitItems = current.subWords.map(w => ({ text: w, subWords: [w] }));
@@ -120,7 +122,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
 
     const isSymbol1 = !/[a-zA-Z0-9가-힣]/.test(current.text) && current.text.trim() !== "";
     const isSymbol2 = !/[a-zA-Z0-9가-힣]/.test(next.text) && next.text.trim() !== "";
-    if (isSymbol1 || isSymbol2) return; 
+    if (isSymbol1 || isSymbol2) return; // 기호 합치기 차단
 
     const newArray = [...wordArray];
     newArray[idx] = { text: current.text + next.text, subWords: [...current.subWords, ...next.subWords] };
@@ -249,20 +251,19 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                         
                         <button 
                           onClick={() => {
-                            // 💡 [핵심] 현재 폴더 내에서 아이디 오름차순으로 바로 다음 조항을 탐색
+                            // 💡 [기능 보존] 현재 폴더에서 다음 조항을 탐색 후 바로 열어주는 오토메이션 로직
                             const folderCats = safeCategories.filter((c:any) => c.folder_name === cat.folder_name).sort((a:any, b:any) => a.id - b.id);
                             const currentIdx = folderCats.findIndex(c => c.id === cat.id);
                             const nextCat = folderCats[currentIdx + 1];
                             
                             handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, () => {
-                                // 💡 [핵심] 팝업이 닫히지 않고 다음 조항이 즉시 펼쳐짐
                                 if (nextCat) openCategory(nextCat);
                                 else setExpandedId(null);
                             });
                           }} 
                           className="w-full py-2.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs sm:text-sm font-bold rounded-sm mt-2 hover:bg-amber-500/30 transition-all"
                         >
-                          지식 추출 및 다음 조항 열기
+                          지식 추출 저장 및 다음 조항 열기
                         </button>
                       </div>
                     )}
