@@ -76,10 +76,6 @@ export const api = {
     }
     return res.json();
   },
-
-  // =====================================
-  // 💡 [결정적 원인] Goalcoin & 폴더 관리 API 추가
-  // =====================================
   async getGoalCoinBalance(address: string) {
     try {
       const res = await fetch('https://fullnode.testnet.sui.io/', {
@@ -125,6 +121,19 @@ export const api = {
         body: JSON.stringify({ wallet_address: address, id, new_folder_name: newFolderName })
     });
     if (!res.ok) throw new Error("항목 이동 실패");
+    return res.json();
+  },
+  
+  // 💡 [신규] 예외 단어 서버 DB 동기화 함수
+  async getStopwords(address: string) {
+    const res = await fetch(`${BASE_URL}/get-stopwords?wallet_address=${address}`);
+    return res.json();
+  },
+  async updateStopwords(address: string, stopwords: string[]) {
+    const res = await fetch(`${BASE_URL}/update-stopwords`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wallet_address: address, stopwords })
+    });
     return res.json();
   }
 };
