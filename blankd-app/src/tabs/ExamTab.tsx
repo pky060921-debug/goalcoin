@@ -32,7 +32,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [parsedResult, setParsedResult] = useState<any>(null);
 
-  // 💡 [대화형 UI] 채팅 내역 상태
   const [chatMessages, setChatMessages] = useState<Array<{sender: 'ai' | 'user', text: string}>>([]);
   const [userFeedback, setUserFeedback] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -65,7 +64,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         }
       }
     } catch (err: any) {
-      console.error("[데이터 로드 에러]", err);
+      console.error("[데이터 로드 에러 진단]", err);
     }
   };
 
@@ -165,7 +164,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     } catch (err: any) {}
   };
 
-  // 💡 [핵심] 대화형 시작 시 뼈대 세팅 및 터미널 초기화 신호 전송
   const startCoopReview = (exam: {id: number, filename: string, chunks: string[]}) => {
     if (selectedLaws.length === 0) return alert("상단에서 근거 자료를 먼저 체크해주세요!");
     setCurrentExamId(exam.id); setChunks(exam.chunks); setFilename(exam.filename); setChunkIndex(0); setMode('coop');
@@ -182,7 +180,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     ]); 
     setUserFeedback("");
 
-    // 전역 시스템 콘솔에 로그 쏘기
     try {
         const initLog = `> [SYSTEM] Initializing AI Copilot for [${exam.filename}]...`;
         console.log(initLog);
@@ -190,7 +187,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     } catch(e) {}
   };
 
-  // 💡 [초핵심 연동] AI 분석 시 시스템 콘솔(Diagnostic Terminal)에 사고과정 쏘기!
   const analyzeCurrentChunk = async (isFeedback = true) => {
     if (isAnalyzing) return;
     setIsAnalyzing(true);
@@ -203,7 +199,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         setChatMessages(updatedHistory);
         setUserFeedback("");
 
-        // 대표님 명령을 터미널로 쏨
         try {
             const userLog = `> [USER] ${currentFeedback}`;
             console.log(userLog);
@@ -231,11 +226,9 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       if (res.ok && data.result) {
         setParsedResult(data.result);
         
-        // 채팅창 업데이트
         const aiResponseText = data.result.chat_message || data.result.chatMessage || "알겠습니다. 다음 지시를 내려주세요!";
         setChatMessages(prev => [...prev, { sender: 'ai', text: aiResponseText }]);
 
-        // 💡 [터미널 통합] AI의 1,2,3단계 사고 과정을 전역 Diagnostic Terminal로 쏩니다!
         if (data.result.search_process) {
             try {
                 const processLog = `\n[🧠 AI N-Gram SEARCH & REASONING LOG]\n${data.result.search_process}\n`;
@@ -300,10 +293,9 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         alert("해당 모의고사의 모든 검수 및 AI 학습이 완료되었습니다!");
         fetchData(); setMode('list');
       }
-    } catch(err: any) { console.error(`[승인 에러]`, err); }
+    } catch(err: any) { console.error(`[승인 에러 진단]`, err); }
   };
 
-  // ... (CBT 및 Result 모드 이하 동일)
   const startCBT = async () => {
     if (!userAddress) return alert("로그인이 필요합니다.");
     try {
@@ -331,7 +323,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
         <div className="flex flex-1 gap-6 overflow-hidden">
           
-          {/* [좌측 패널] 문제, 정답, 해설 저장 영역 (사고과정은 시스템 콘솔로 보냈으므로 삭제) */}
           <div className="w-[55%] flex flex-col gap-5 border border-white/10 rounded-sm bg-black/20 p-5 overflow-y-auto custom-scrollbar shadow-inner">
             <div className="flex flex-col gap-2">
               <label className="text-teal-300 font-bold text-sm">📝 1. 추출된 원문 (수정 가능)</label>
@@ -372,7 +363,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
             )}
           </div>
 
-          {/* [우측 패널] 100% 순수한 대화 전용 카카오톡 UI */}
           <div className="w-[45%] flex flex-col border border-emerald-900/40 rounded-sm bg-[#0a192f] overflow-hidden relative shadow-lg">
             
             <div className="bg-emerald-950/60 p-4 border-b border-emerald-900/40 shrink-0 flex items-center justify-between">
@@ -425,7 +415,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     );
   }
 
-  // ... (이하 CBT, Result 모드와 리스트 모드 기존 코드 완전 동일 유지)
   if (mode === 'cbt') {
     const q = cbtQuestions[cbtCurrentIndex];
     if (!q) return null;
@@ -609,13 +598,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                       <div className="mt-4 pt-4 border-t border-teal-900/50 animate-in fade-in slide-in-from-top-2">
                         <div className="text-teal-400 font-bold text-sm mb-4">정답: {exam.answer}</div>
                         
-                        {exam.search_process && (
-                          <div className="mb-4 p-4 bg-black/40 border-l-2 border-indigo-500 rounded-sm">
-                            <div className="text-indigo-400 font-bold text-xs mb-2">🧠 AI 장기기억 (사고 과정)</div>
-                            <div className="text-white/60 text-xs leading-relaxed whitespace-pre-wrap">{exam.search_process}</div>
-                          </div>
-                        )}
-
                         <div className="explanation-box mt-3 text-white/80">
                           {exam.explanation}
                         </div>
