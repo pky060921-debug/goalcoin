@@ -123,13 +123,11 @@ export const api = {
     if (!res.ok) throw new Error("항목 이동 실패");
     return res.json();
   },
-  
-  // 💡 [신규] 예외 단어 서버 DB 동기화 함수
   async getStopwords(address: string) {
     const res = await fetch(`${BASE_URL}/get-stopwords?wallet_address=${address}`);
     return res.json();
   },
-  async updateStopwords(address: string, stopwords: string[]) {
+  async updateStopwords(address: string, stopwords: any) {
     const res = await fetch(`${BASE_URL}/update-stopwords`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ wallet_address: address, stopwords })
