@@ -29,6 +29,31 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   const [memoInput, setMemoInput] = useState(""); 
   const [isEraserMode, setIsEraserMode] = useState(false);
 
+  // 💡 [신규] 실시간 커스텀 제외 단어(Stopwords) 상태 관리
+  const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
+  const [customStopWords, setCustomStopWords] = useState<string[]>(() => {
+    try { const saved = localStorage.getItem('blankd_custom_stopwords'); return saved ? JSON.parse(saved) : []; }
+    catch(e) { return []; }
+  });
+  const [newStopWord, setNewStopWord] = useState("");
+
+  useEffect(() => {
+    localStorage.setItem('blankd_custom_stopwords', JSON.stringify(customStopWords));
+  }, [customStopWords]);
+
+  const handleAddStopWord = () => {
+    if (!newStopWord.trim()) return;
+    // 쉼표로 구분하여 여러 개 동시 추가 가능
+    const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
+    setCustomStopWords(prev => Array.from(new Set([...prev, ...words])));
+    setNewStopWord("");
+    addLog(`⚙️ 제외 단어 업데이트 됨`);
+  };
+
+  const handleRemoveStopWord = (wordToRemove: string) => {
+    setCustomStopWords(prev => prev.filter(w => w !== wordToRemove));
+  };
+
   useEffect(() => {
     setOpenFolders(prev => {
       const next = { ...prev };
@@ -66,21 +91,23 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     const initialWords = body.split(SPLIT_REGEX).filter(w => w !== "");
     setWordArray(initialWords.map(w => ({ text: w, subWords: [w] })));
 
-    // 💡 [핵심 진화] 조항을 열 때 기본적으로 "모든 단어"를 빈칸(선택)으로 만듭니다.
     const initialSelected = new Set<number>();
+    
+    // 💡 열 때 최신 상태의 커스텀 제외 단어를 가져와 반영합니다.
+    const currentCustomStopWords = JSON.parse(localStorage.getItem('blankd_custom_stopwords') || '[]');
+
     initialWords.forEach((word, idx) => {
       const trimmed = word.trim();
-      // 제외 조건 1: 특수기호
       const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(trimmed) && trimmed !== "";
-      // 제외 조건 2: 법 제1조, 제1항, 제2호, ① 등 목차 및 조항명
       const isArticleOrNum = /^(?:법\s*)?제\s*\d+\s*(?:조|장|절|관)(?:의\s*\d+)?/.test(trimmed) || 
                              /^\(?\d+(?:항|호|목)?\)?$/.test(trimmed) || 
                              /^\(?(?:①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)\)?$/.test(trimmed);
-      // 제외 조건 3: 흔히 쓰이는 조사, 의존명사, 접속사 등
       const isStopWord = /^(및|등|또는|과|와|수|할|이하|이상|초과|미만|부터|까지|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여)$/.test(trimmed);
       
-      // 위 3가지 예외 조건에 해당하지 않는 '의미 있는 핵심 단어'는 전부 기본 빈칸으로 자동 지정!
-      if (!isSymbolOnly && !isArticleOrNum && !isStopWord && trimmed.length > 0) {
+      // 💡 [신규] 사용자가 실시간으로 등록한 제외 단어 필터링 적용
+      const isCustomStopWord = currentCustomStopWords.includes(trimmed);
+      
+      if (!isSymbolOnly && !isArticleOrNum && !isStopWord && !isCustomStopWord && trimmed.length > 0) {
         initialSelected.add(idx);
       }
     });
@@ -101,7 +128,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       return; 
     }
     
-    // 💡 이제 터치 시 "추가"가 아니라 "제외(해제)"하는 용도로 더 많이 쓰입니다.
     const s = new Set(selectedWords);
     if(s.has(idx)) s.delete(idx); else s.add(idx);
     setSelectedWords(s);
@@ -119,7 +145,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     if (isEraserMode) return; 
     const current = wordArray[idx];
 
-    // 💡 되돌리기 로직 (합쳐졌던 단어 쪼개기)
     if (current.subWords.length > 1) {
       const newArray = [...wordArray];
       const splitItems = current.subWords.map(w => ({ text: w, subWords: [w] }));
@@ -132,7 +157,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         if (i < idx) newSelected.add(i); 
         else if (i > idx) newSelected.add(i + shiftAmount); 
       });
-      // 합쳐져 있던 블록이 빈칸이었다면, 쪼개진 조각들도 모두 빈칸으로 유지합니다.
       if (selectedWords.has(idx)) {
         for(let k = 0; k <= shiftAmount; k++) newSelected.add(idx + k);
       }
@@ -161,7 +185,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       if (i < idx) newSelected.add(i); 
       else if (i > idx) newSelected.add(i - 1); 
     });
-    // 💡 합치려는 대상 중 하나라도 빈칸이었다면, 합쳐진 거대한 블록도 빈칸으로 지정
     if (selectedWords.has(idx) || selectedWords.has(idx + 1)) {
       newSelected.add(idx);
     }
@@ -174,12 +197,47 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in w-full">
+      
+      {/* 💡 [신규] 상단 UI: 파일 업로드 및 예외 단어 설정 토글 */}
       <div className="flex gap-2 mb-2 sm:mb-4">
         <label className="flex-1 border border-white/20 p-2 sm:p-2.5 text-center text-[10px] sm:text-xs hover:bg-white/10 cursor-pointer text-white/80 rounded-sm transition-colors">
           <input type="file" accept=".pdf,.txt,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 학습자료 업로드'}
         </label>
         <button onClick={uploadLaw} className="px-3 sm:px-4 border border-white/20 text-[10px] sm:text-xs hover:bg-white/10 transition-colors rounded-sm">전송</button>
+        <button 
+          onClick={() => setShowStopWordsSettings(!showStopWordsSettings)} 
+          className={`px-3 sm:px-4 border rounded-sm text-[10px] sm:text-xs transition-colors ${showStopWordsSettings ? 'bg-amber-600/30 border-amber-500/50 text-amber-300' : 'border-white/20 text-white/50 hover:bg-white/10'}`}
+        >
+          ⚙️ 예외 단어
+        </button>
       </div>
+
+      {/* 💡 [신규] 실시간 제외 단어 설정 패널 */}
+      {showStopWordsSettings && (
+        <div className="p-4 sm:p-5 bg-[#0a0a0c] border border-amber-500/30 rounded-sm mb-6 animate-in slide-in-from-top-2">
+          <div className="text-xs sm:text-sm text-amber-400 font-bold mb-3">자동 빈칸 제외 단어 설정</div>
+          <div className="flex gap-2 mb-3">
+            <input 
+              type="text" 
+              value={newStopWord} 
+              onChange={(e) => setNewStopWord(e.target.value)} 
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAddStopWord(); }}
+              placeholder="예: 그러하지, 아니하다 (쉼표로 여러개 추가 가능)" 
+              className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-amber-400/50"
+            />
+            <button onClick={handleAddStopWord} className="px-4 bg-amber-600/20 text-amber-400 border border-amber-500/30 text-xs font-bold rounded-sm hover:bg-amber-600/40 transition-colors">추가</button>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {customStopWords.length === 0 && <span className="text-[10px] text-white/30">등록된 커스텀 예외 단어가 없습니다.</span>}
+            {customStopWords.map(word => (
+              <span key={word} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] sm:text-[11px] text-white/70 flex items-center gap-1.5">
+                {word}
+                <button onClick={() => handleRemoveStopWord(word)} className="text-white/30 hover:text-red-400">✕</button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-4 sm:mb-6">
         {craftFolders.map((f: string) => (
