@@ -30,30 +30,42 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   const [isEraserMode, setIsEraserMode] = useState(false);
 
   const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
-  const [customStopWords, setCustomStopWords] = useState<string[]>(() => {
-    try { const saved = localStorage.getItem('blankd_custom_stopwords'); return saved ? JSON.parse(saved) : []; }
-    catch(e) { return []; }
-  });
+  
+  const [customStopWords, setCustomStopWords] = useState<string[]>([]);
   const [newStopWord, setNewStopWord] = useState("");
 
-  // 💡 [신규 상태] 일괄 선택 모드 및 체크된 카드 ID 관리
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
   useEffect(() => {
-    localStorage.setItem('blankd_custom_stopwords', JSON.stringify(customStopWords));
-  }, [customStopWords]);
+    if (safeAddress) {
+      api.getStopwords(safeAddress).then(data => {
+        if (data && data.stopwords) setCustomStopWords(data.stopwords);
+      }).catch(err => addLog("⚠️ 예외 단어 DB 동기화 실패"));
+    }
+  }, [safeAddress]);
 
-  const handleAddStopWord = () => {
+  const handleAddStopWord = async () => {
     if (!newStopWord.trim()) return;
     const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
-    setCustomStopWords(prev => Array.from(new Set([...prev, ...words])));
+    const nextList = Array.from(new Set([...customStopWords, ...words]));
+    
+    setCustomStopWords(nextList);
     setNewStopWord("");
-    addLog(`⚙️ 예외 구문/단어 업데이트 됨`);
+    addLog(`⚙️ 예외 단어 DB 저장 중...`);
+    
+    try {
+      await api.updateStopwords(safeAddress, nextList);
+      addLog(`✅ 예외 단어 DB 저장 완료`);
+    } catch(e) { alert("DB 저장 실패"); }
   };
 
-  const handleRemoveStopWord = (wordToRemove: string) => {
-    setCustomStopWords(prev => prev.filter(w => w !== wordToRemove));
+  const handleRemoveStopWord = async (wordToRemove: string) => {
+    const nextList = customStopWords.filter(w => w !== wordToRemove);
+    setCustomStopWords(nextList);
+    try {
+      await api.updateStopwords(safeAddress, nextList);
+    } catch(e) { alert("DB 삭제 실패"); }
   };
 
   useEffect(() => {
@@ -76,7 +88,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     });
   };
 
-  // 💡 롱프레스 핸들러: 길게 누르면 일괄 선택 모드 진입 및 해당 카드 자동 체크
   const createLongPressHandlers = (catId: number) => {
     let timer: any;
     const start = () => {
@@ -84,7 +95,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         if (!isSelectMode) {
           setIsSelectMode(true);
           setCheckedIds(new Set([catId]));
-          addLog("📦 일괄 선택 모드가 활성화되었습니다. 길게 누르거나 터치하여 선택하세요.");
+          addLog("📦 일괄 선택 모드가 활성화되었습니다.");
         }
       }, 700);
     };
@@ -96,21 +107,13 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     };
   };
 
-  // 💡 체크박스 토글 함수
   const handleToggleCheck = (catId: number) => {
     const next = new Set(checkedIds);
-    if (next.has(catId)) {
-      next.delete(catId);
-    } else {
-      next.add(catId);
-    }
+    if (next.has(catId)) next.delete(catId); else next.add(catId);
     setCheckedIds(next);
-    if (next.size === 0) {
-      setIsSelectMode(false);
-    }
+    if (next.size === 0) setIsSelectMode(false);
   };
 
-  // 💡 일괄 삭제 처리 함수
   const handleBatchDelete = async () => {
     if (checkedIds.size === 0) return;
     if (window.confirm(`선택한 ${checkedIds.size}개의 조항을 일괄 삭제하시겠습니까?`)) {
@@ -118,8 +121,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       try {
         const deletePromises = Array.from(checkedIds).map(id =>
           fetch("https://api.blankd.top/api/delete-category", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
+            method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ wallet_address: safeAddress, id })
           })
         );
@@ -129,17 +131,12 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         setCheckedIds(new Set());
         if (loadAllData) await loadAllData();
         else window.location.reload();
-      } catch (e) {
-        alert("일괄 삭제 중 오류가 발생했습니다.");
-      }
+      } catch (e) { alert("일괄 삭제 중 오류가 발생했습니다."); }
     }
   };
 
   const openCategory = (targetCat: any) => {
-    if (isSelectMode) {
-      handleToggleCheck(targetCat.id);
-      return;
-    }
+    if (isSelectMode) { handleToggleCheck(targetCat.id); return; }
     setExpandedId(targetCat.id);
     setPageBreaks(new Set());
     setMemoInput(targetCat.memo || "");
@@ -150,7 +147,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     setWordArray(initialWords.map(w => ({ text: w, subWords: [w] })));
 
     const initialSelected = new Set<number>();
-    const currentCustomStopWords: string[] = JSON.parse(localStorage.getItem('blankd_custom_stopwords') || '[]');
+    const currentCustomStopWords = customStopWords;
 
     const wordRanges: {start: number, end: number, wordIdx: number}[] = [];
     let currentPos = 0;
@@ -176,8 +173,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
 
     const fullText = initialWords.join("");
     const patternsToExclude: RegExp[] = [
-      /(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g,
-      /다음\s*각\s*호의\s*어느\s*하나에(?:\s*해당하는(?:\s*경우)?)?/g
+      /(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g
     ];
 
     currentCustomStopWords.forEach(cw => {
@@ -297,10 +293,9 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
           onClick={() => setShowStopWordsSettings(!showStopWordsSettings)} 
           className={`px-3 sm:px-4 border rounded-sm text-[10px] sm:text-xs transition-colors ${showStopWordsSettings ? 'bg-amber-600/30 border-amber-500/50 text-amber-300' : 'border-white/20 text-white/50 hover:bg-white/10'}`}
         >
-          ⚙️ 예외 단어
+          ⚙️ 예외 단어 (DB)
         </button>
         
-        {/* 💡 [신규 UI] 일괄 선택 모드일 때 활성화되는 일괄삭제 및 취소 버튼 컨트롤 바 */}
         {isSelectMode && (
           <div className="flex gap-1 animate-in fade-in zoom-in-95">
             <button onClick={handleBatchDelete} className="px-3 sm:px-4 bg-red-600/20 border border-red-500 text-red-400 text-[10px] sm:text-xs font-bold rounded-sm hover:bg-red-600/40 transition-colors">
@@ -315,20 +310,23 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
 
       {showStopWordsSettings && (
         <div className="p-4 sm:p-5 bg-[#0a0a0c] border border-amber-500/30 rounded-sm mb-6 animate-in slide-in-from-top-2">
-          <div className="text-xs sm:text-sm text-amber-400 font-bold mb-3">자동 빈칸 제외 구문/단어 설정</div>
+          <div className="flex justify-between items-center mb-3">
+            <div className="text-xs sm:text-sm text-amber-400 font-bold">자동 빈칸 제외 구문/단어 설정 (클라우드 동기화)</div>
+          </div>
+          
           <div className="flex gap-2 mb-3">
             <input 
               type="text" 
               value={newStopWord} 
               onChange={(e) => setNewStopWord(e.target.value)} 
               onKeyDown={(e) => { if (e.key === 'Enter') handleAddStopWord(); }}
-              placeholder="예: 다음 각 호의, 대통령령으로 정하는 바에 따라 (쉼표로 복수 추가)" 
+              placeholder="예: 각 호의 외의 부분, 대통령령으로 (쉼표로 복수 추가)" 
               className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-amber-400/50"
             />
-            <button onClick={handleAddStopWord} className="px-4 bg-amber-600/20 text-amber-400 border border-amber-500/30 text-xs font-bold rounded-sm hover:bg-amber-600/40 transition-colors">추가</button>
+            <button onClick={handleAddStopWord} className="px-4 bg-amber-600/20 text-amber-400 border border-amber-500/30 text-xs font-bold rounded-sm hover:bg-amber-600/40 transition-colors">DB에 추가</button>
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {customStopWords.length === 0 && <span className="text-[10px] text-white/30">등록된 커스텀 예외 단어가 없습니다.</span>}
+            {customStopWords.length === 0 && <span className="text-[10px] text-white/30">등록된 DB 예외 단어가 없습니다.</span>}
             {customStopWords.map(word => (
               <span key={word} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] sm:text-[11px] text-white/70 flex items-center gap-1.5">
                 {word}
@@ -394,8 +392,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                   <div key={cat.id} className={`relative transition-all w-full ${colClass}`}>
                     {!isExpanded ? (
                       <div className="relative group/card w-full flex items-center gap-2">
-                        
-                        {/* 💡 [신규 UI] 일괄 선택 모드 활성화 시 카드 왼쪽에 출력되는 체크박스 */}
                         {isSelectMode && (
                           <input 
                             type="checkbox" 
@@ -413,11 +409,10 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                           <span className={`${titleColor} font-bold text-[11px] sm:text-[13px] leading-snug break-keep`}>{cleanTitle}</span>
                           {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
                           
-                          {/* 💡 [신규 UI] 카드의 호버 또는 모바일 대응을 위해 카드 내 우측 상단에 장착된 개별 즉시 삭제 X 버튼 */}
                           {!isSelectMode && (
                             <span
                               onClick={async (e) => {
-                                e.stopPropagation(); // 카드 확장 이벤트 전파 방지
+                                e.stopPropagation();
                                 if (confirm(`'${cleanTitle}' 조항을 대기열에서 즉시 삭제하시겠습니까?`)) {
                                   await handleDeleteCategory(cat.id);
                                 }
