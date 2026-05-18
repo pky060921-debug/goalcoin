@@ -29,7 +29,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   const [memoInput, setMemoInput] = useState(""); 
   const [isEraserMode, setIsEraserMode] = useState(false);
 
-  // 💡 [신규] 실시간 커스텀 제외 단어(Stopwords) 상태 관리
   const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
   const [customStopWords, setCustomStopWords] = useState<string[]>(() => {
     try { const saved = localStorage.getItem('blankd_custom_stopwords'); return saved ? JSON.parse(saved) : []; }
@@ -43,11 +42,10 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
 
   const handleAddStopWord = () => {
     if (!newStopWord.trim()) return;
-    // 쉼표로 구분하여 여러 개 동시 추가 가능
     const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
     setCustomStopWords(prev => Array.from(new Set([...prev, ...words])));
     setNewStopWord("");
-    addLog(`⚙️ 제외 단어 업데이트 됨`);
+    addLog(`⚙️ 예외 구문/단어 업데이트 됨`);
   };
 
   const handleRemoveStopWord = (wordToRemove: string) => {
@@ -92,25 +90,70 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     setWordArray(initialWords.map(w => ({ text: w, subWords: [w] })));
 
     const initialSelected = new Set<number>();
-    
-    // 💡 열 때 최신 상태의 커스텀 제외 단어를 가져와 반영합니다.
-    const currentCustomStopWords = JSON.parse(localStorage.getItem('blankd_custom_stopwords') || '[]');
+    const currentCustomStopWords: string[] = JSON.parse(localStorage.getItem('blankd_custom_stopwords') || '[]');
 
+    // 💡 [핵심 알고리즘] 글자수 기반 공간 좌표(Index) 맵핑 배열 생성
+    const wordRanges: {start: number, end: number, wordIdx: number}[] = [];
+    let currentPos = 0;
+    initialWords.forEach((w, idx) => {
+       wordRanges.push({ start: currentPos, end: currentPos + w.length, wordIdx: idx });
+       currentPos += w.length;
+    });
+
+    // 1단계: 단일 단어 및 기본 특수기호 필터링
     initialWords.forEach((word, idx) => {
       const trimmed = word.trim();
       const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(trimmed) && trimmed !== "";
-      const isArticleOrNum = /^(?:법\s*)?제\s*\d+\s*(?:조|장|절|관)(?:의\s*\d+)?/.test(trimmed) || 
+      
+      // 단일 조항 번호 (예: 제1조, 제2항)
+      const isArticleOrNum = /^(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조)(?:의\s*\d+)?/.test(trimmed) || 
                              /^\(?\d+(?:항|호|목)?\)?$/.test(trimmed) || 
                              /^\(?(?:①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)\)?$/.test(trimmed);
+                             
       const isStopWord = /^(및|등|또는|과|와|수|할|이하|이상|초과|미만|부터|까지|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여)$/.test(trimmed);
       
-      // 💡 [신규] 사용자가 실시간으로 등록한 제외 단어 필터링 적용
-      const isCustomStopWord = currentCustomStopWords.includes(trimmed);
+      // 스페이스바가 없는 단일 커스텀 단어 매칭
+      const isCustomSingleStopWord = !trimmed.includes(" ") && currentCustomStopWords.includes(trimmed);
       
-      if (!isSymbolOnly && !isArticleOrNum && !isStopWord && !isCustomStopWord && trimmed.length > 0) {
-        initialSelected.add(idx);
+      if (!isSymbolOnly && !isArticleOrNum && !isStopWord && !isCustomSingleStopWord && trimmed.length > 0) {
+        initialSelected.add(idx); // 우선 전부 빈칸으로 칠함
       }
     });
+
+    // 2단계: 문장 단위 복합 정규식 및 다중 단어(구문) 필터링
+    const fullText = initialWords.join("");
+    const patternsToExclude: RegExp[] = [
+      // 💡 "제1항 제2조 제3호" 처럼 조항 번호가 연속으로 나오는 포맷 자동 차단
+      /(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g,
+      // 💡 "다음 각 호의 어느 하나에 해당하는" 같은 잦은 기출 문장 하드코딩 차단
+      /다음\s*각\s*호의\s*어느\s*하나에(?:\s*해당하는(?:\s*경우)?)?/g
+    ];
+
+    // 사용자가 커스텀으로 추가한 구문(띄어쓰기 포함)을 유연한 정규식으로 변환하여 추가
+    currentCustomStopWords.forEach(cw => {
+       if (cw.includes(" ")) {
+           // 예: "다음 각 호의" -> /다음\s+각\s+호의/g (사용자가 띄어쓰기를 다르게 해도 무조건 잡아냄)
+           const regexStr = cw.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+           patternsToExclude.push(new RegExp(regexStr, 'g'));
+       }
+    });
+
+    // 만들어진 정규식 패턴들로 전체 문장을 스캔하여, 걸려드는 좌표의 빈칸들을 강제로 폭파
+    patternsToExclude.forEach(regex => {
+       let match;
+       while ((match = regex.exec(fullText)) !== null) {
+          const matchStart = match.index;
+          const matchEnd = matchStart + match[0].length;
+          
+          wordRanges.forEach(wr => {
+             // 단어의 위치가 매칭된 패턴 구간(예: 제1항 제2조)에 걸치면 빈칸 선택에서 삭제
+             if (wr.start < matchEnd && wr.end > matchStart) {
+                initialSelected.delete(wr.wordIdx);
+             }
+          });
+       }
+    });
+
     setSelectedWords(initialSelected);
   };
 
@@ -198,7 +241,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in w-full">
       
-      {/* 💡 [신규] 상단 UI: 파일 업로드 및 예외 단어 설정 토글 */}
       <div className="flex gap-2 mb-2 sm:mb-4">
         <label className="flex-1 border border-white/20 p-2 sm:p-2.5 text-center text-[10px] sm:text-xs hover:bg-white/10 cursor-pointer text-white/80 rounded-sm transition-colors">
           <input type="file" accept=".pdf,.txt,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 학습자료 업로드'}
@@ -212,17 +254,16 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         </button>
       </div>
 
-      {/* 💡 [신규] 실시간 제외 단어 설정 패널 */}
       {showStopWordsSettings && (
         <div className="p-4 sm:p-5 bg-[#0a0a0c] border border-amber-500/30 rounded-sm mb-6 animate-in slide-in-from-top-2">
-          <div className="text-xs sm:text-sm text-amber-400 font-bold mb-3">자동 빈칸 제외 단어 설정</div>
+          <div className="text-xs sm:text-sm text-amber-400 font-bold mb-3">자동 빈칸 제외 구문/단어 설정</div>
           <div className="flex gap-2 mb-3">
             <input 
               type="text" 
               value={newStopWord} 
               onChange={(e) => setNewStopWord(e.target.value)} 
               onKeyDown={(e) => { if (e.key === 'Enter') handleAddStopWord(); }}
-              placeholder="예: 그러하지, 아니하다 (쉼표로 여러개 추가 가능)" 
+              placeholder="예: 다음 각 호의, 대통령령으로 정하는 바에 따라 (쉼표로 복수 추가)" 
               className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-amber-400/50"
             />
             <button onClick={handleAddStopWord} className="px-4 bg-amber-600/20 text-amber-400 border border-amber-500/30 text-xs font-bold rounded-sm hover:bg-amber-600/40 transition-colors">추가</button>
