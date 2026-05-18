@@ -92,7 +92,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     const initialSelected = new Set<number>();
     const currentCustomStopWords: string[] = JSON.parse(localStorage.getItem('blankd_custom_stopwords') || '[]');
 
-    // 💡 [핵심 알고리즘] 글자수 기반 공간 좌표(Index) 맵핑 배열 생성
     const wordRanges: {start: number, end: number, wordIdx: number}[] = [];
     let currentPos = 0;
     initialWords.forEach((w, idx) => {
@@ -105,40 +104,34 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       const trimmed = word.trim();
       const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(trimmed) && trimmed !== "";
       
-      // 단일 조항 번호 (예: 제1조, 제2항)
       const isArticleOrNum = /^(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조)(?:의\s*\d+)?/.test(trimmed) || 
                              /^\(?\d+(?:항|호|목)?\)?$/.test(trimmed) || 
                              /^\(?(?:①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)\)?$/.test(trimmed);
                              
-      const isStopWord = /^(및|등|또는|과|와|수|할|이하|이상|초과|미만|부터|까지|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여)$/.test(trimmed);
+      // 💡 [핵심 강화] 은, 는, 이, 가, 을, 를, 의, 에 등 기본 조사 및 의존명사 완벽 차단!
+      const isStopWord = /^(은|는|이|가|을|를|의|에|에게|에서|로|으로|과|와|도|만|부터|까지|조차|마저|치고|및|등|또는|수|할|이하|이상|초과|미만|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여|바|것|자|경우|때|중)$/.test(trimmed);
       
-      // 스페이스바가 없는 단일 커스텀 단어 매칭
       const isCustomSingleStopWord = !trimmed.includes(" ") && currentCustomStopWords.includes(trimmed);
       
       if (!isSymbolOnly && !isArticleOrNum && !isStopWord && !isCustomSingleStopWord && trimmed.length > 0) {
-        initialSelected.add(idx); // 우선 전부 빈칸으로 칠함
+        initialSelected.add(idx); // 핵심 단어만 빈칸으로 칠함
       }
     });
 
     // 2단계: 문장 단위 복합 정규식 및 다중 단어(구문) 필터링
     const fullText = initialWords.join("");
     const patternsToExclude: RegExp[] = [
-      // 💡 "제1항 제2조 제3호" 처럼 조항 번호가 연속으로 나오는 포맷 자동 차단
       /(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g,
-      // 💡 "다음 각 호의 어느 하나에 해당하는" 같은 잦은 기출 문장 하드코딩 차단
       /다음\s*각\s*호의\s*어느\s*하나에(?:\s*해당하는(?:\s*경우)?)?/g
     ];
 
-    // 사용자가 커스텀으로 추가한 구문(띄어쓰기 포함)을 유연한 정규식으로 변환하여 추가
     currentCustomStopWords.forEach(cw => {
        if (cw.includes(" ")) {
-           // 예: "다음 각 호의" -> /다음\s+각\s+호의/g (사용자가 띄어쓰기를 다르게 해도 무조건 잡아냄)
            const regexStr = cw.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
            patternsToExclude.push(new RegExp(regexStr, 'g'));
        }
     });
 
-    // 만들어진 정규식 패턴들로 전체 문장을 스캔하여, 걸려드는 좌표의 빈칸들을 강제로 폭파
     patternsToExclude.forEach(regex => {
        let match;
        while ((match = regex.exec(fullText)) !== null) {
@@ -146,7 +139,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
           const matchEnd = matchStart + match[0].length;
           
           wordRanges.forEach(wr => {
-             // 단어의 위치가 매칭된 패턴 구간(예: 제1항 제2조)에 걸치면 빈칸 선택에서 삭제
              if (wr.start < matchEnd && wr.end > matchStart) {
                 initialSelected.delete(wr.wordIdx);
              }
