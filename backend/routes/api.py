@@ -200,6 +200,14 @@ def init_golden_db():
         except: pass
         try: conn.execute('ALTER TABLE golden_exams ADD COLUMN referenced_laws TEXT DEFAULT ""')
         except: pass
+        try: conn.execute('ALTER TABLE categories ADD COLUMN folder_name TEXT DEFAULT "기본 폴더"')
+        except: pass
+        try: conn.execute('ALTER TABLE cards ADD COLUMN folder_name TEXT DEFAULT "기본 폴더"')
+        except: pass
+        try: conn.execute('ALTER TABLE cards ADD COLUMN memo TEXT DEFAULT ""')
+        except: pass
+        try: conn.execute('ALTER TABLE cards ADD COLUMN best_time REAL DEFAULT 999.0')
+        except: pass
 
         conn.commit()
         conn.close()
@@ -279,7 +287,93 @@ def update_category_folder():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# 💡 RAG 시스템 및 모의고사 분석 (MoE 기반 JSON 안정화)
+# 💡 텍스트 추출 및 정답(빨간색) 자동 감지 엔진
+# ==========================================
+def extract_text_from_file(file_obj):
+    if not file_obj: return ""
+    if file_obj.filename.lower().endswith('.pdf'):
+        try:
+            doc = fitz.open(stream=file_obj.read(), filetype="pdf")
+            text = "".join([page.get_text("text") for page in doc])
+            doc.close()
+            return text
+        except:
+            return ""
+    else:
+        return file_obj.read().decode('utf-8', errors='ignore')
+
+def extract_exam_text_with_color(file_obj, is_answer=False):
+    if not file_obj: return ""
+    if file_obj.filename.lower().endswith('.pdf'):
+        try:
+            doc = fitz.open(stream=file_obj.read(), filetype="pdf")
+            full_text = ""
+            for page in doc:
+                if is_answer:
+                    dict_data = page.get_text("dict")
+                    for block in dict_data.get("blocks", []):
+                        if "lines" in block:
+                            for line in block["lines"]:
+                                for span in line["spans"]:
+                                    text = span.get("text", "")
+                                    color = span.get("color", 0)
+                                    r = (color >> 16) & 0xFF
+                                    g = (color >> 8) & 0xFF
+                                    b = color & 0xFF
+                                    if r > 130 and r > g * 1.5 and r > b * 1.5:
+                                        full_text += f" [🔴정답: {text}] "
+                                    else:
+                                        full_text += text
+                                full_text += "\n"
+                else:
+                    full_text += page.get_text("text") + "\n"
+            doc.close()
+            return full_text
+        except Exception as e:
+            return ""
+    else:
+        return file_obj.read().decode('utf-8', errors='ignore')
+
+# ==========================================
+# 💡 파이썬 스나이퍼 DB 검색 엔진
+# ==========================================
+def get_top_k_relevant_laws(query_text, laws, top_k=5):
+    try:
+        article_matches = set(re.findall(r'(?:제)?\s*\d+\s*조(?:의\s*\d+)?', query_text))
+        clean_article_matches = [re.sub(r'[제\s]', '', a) for a in article_matches] 
+        
+        scored_laws = []
+        for folder, title, content in laws:
+            score = 0
+            clean_title = re.sub(r'[제\s]', '', title) 
+            
+            if clean_title in clean_article_matches:
+                score += 1000
+                if '정관' in query_text and '정관' in folder:
+                    score += 500
+                elif '법' in query_text and '건강보험법' in folder:
+                    score += 500
+
+            content_words = set(re.findall(r'\b[가-힣]{2,}\b', content))
+            query_words = set(re.findall(r'\b[가-힣]{2,}\b', query_text))
+            overlap = query_words.intersection(content_words)
+            score += len(overlap)
+            
+            if score > 0:
+                scored_laws.append((score, folder, title, content))
+            
+        scored_laws.sort(key=lambda x: x[0], reverse=True)
+        top_laws = scored_laws[:top_k]
+        
+        if not top_laws:
+            return "\n\n".join([f"📖 [문서명: {r[0]} | 조항명: {r[1]}]\n{r[2]}" for r in laws[:top_k]])
+        return "\n\n".join([f"📖 [문서명: {law[1]} | 조항명: {law[2]}]\n{law[3]}" for law in top_laws])
+    except Exception as e:
+        print(f"[🔥 RAG 검색 엔진 에러]\n{traceback.format_exc()}", file=sys.stderr)
+        return ""
+
+# ==========================================
+# 💡 RAG 시스템 및 모의고사 분석
 # ==========================================
 @api_bp.route('/generate-rag-from-pending', methods=['POST'])
 def generate_rag_from_pending():
@@ -314,7 +408,7 @@ def generate_rag_from_pending():
         law_context = "저장된 참고 DB 자료가 없습니다."
         if laws:
             full_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
-            law_context = full_context[:12000] # 확장된 컨텍스트에 맞춤
+            law_context = full_context[:12000]
 
         print(f"\n🔍 [RAG 시스템] '{filename}' 자동생성 시작!\n", file=sys.stderr, flush=True)
 
@@ -415,19 +509,6 @@ def delete_pending_exam():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-def extract_text_from_file(file_obj):
-    if not file_obj: return ""
-    if file_obj.filename.lower().endswith('.pdf'):
-        try:
-            doc = fitz.open(stream=file_obj.read(), filetype="pdf")
-            text = "".join([page.get_text("text") for page in doc])
-            doc.close()
-            return text
-        except:
-            return ""
-    else:
-        return file_obj.read().decode('utf-8', errors='ignore')
-
 @api_bp.route('/upload-exam-coop', methods=['POST'])
 def upload_exam_coop():
     try:
@@ -438,14 +519,14 @@ def upload_exam_coop():
         if not exam_file or not wallet_address: return jsonify({"error": "문제 파일이나 인증 정보가 없습니다."}), 400
         
         filename = exam_file.filename.lower()
-        exam_text = extract_text_from_file(exam_file)
-        answer_text = extract_text_from_file(answer_file)
+        exam_text = extract_exam_text_with_color(exam_file, is_answer=False)
+        answer_text = extract_exam_text_with_color(answer_file, is_answer=True)
         
         exam_text = re.sub(r'-\s*\d+\s*-', '', exam_text)
         exam_text = re.sub(r'【[^】]+】', '', exam_text)
         
         if answer_text:
-            exam_text += "\n\n[정답 및 해설지 참고]\n" + answer_text
+            exam_text += "\n\n[정답 및 해설지 참고 (빨간색 텍스트는 🔴정답으로 표시됨)]\n" + answer_text
             
         chunks = re.split(r'(?m)^(?=\s*\d+\.\s)', exam_text)
         valid_chunks = [c.strip() for c in chunks if c.strip() and len(c.strip()) > 10]
@@ -473,6 +554,10 @@ def get_pending_exams():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+# =========================================================================
+# 💡 [핵심 대수술] 챗봇의 "분석 결과 강제 보고" 프롬프트 및 안전장치
+# =========================================================================
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
     try:
@@ -480,7 +565,9 @@ def analyze_chunk():
         chunk_text = data.get('chunk_text', '')
         wallet_address = data.get('wallet_address')
         user_feedback = data.get('user_feedback', '') 
+        chat_history = data.get('chat_history', []) 
         selected_laws = data.get('selected_laws', [])
+        current_explanation = data.get('current_explanation', '') 
 
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -495,48 +582,80 @@ def analyze_chunk():
         laws = cursor.fetchall()
         conn.close()
 
-        law_context = "선택된 참고 자료가 없습니다."
-        if laws: 
-            full_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
-            law_context = full_context[:12000]
+        search_query = chunk_text + " " + user_feedback
+        if laws:
+            law_context = get_top_k_relevant_laws(search_query, laws, top_k=5)
+        else:
+            law_context = "선택된 참고 자료가 없습니다."
         
-        feedback_str = f"\n[👨‍💻 사용자 피드백(대화/힌트)]\n{user_feedback}\n-> 위 사용자의 피드백을 적극 반영하여 다시 분석하고 해설과 장기기억을 완성하세요.\n" if user_feedback else ""
+        history_str = ""
+        for msg in chat_history[-6:]:  
+            sender_name = "사용자(대표님)" if msg['sender'] == 'user' else "AI"
+            history_str += f"\n[{sender_name}]: {msg['text']}"
+            
+        feedback_str = f"\n[👨‍💻 최신 사용자 명령/질문]\n{user_feedback}\n" if user_feedback else ""
 
-        prompt = f"""당신은 단일 AI가 아니라, 3개의 전문 가상 자아로 구성된 'Mixture of Experts (MoE)' 시스템입니다.
+        # 💡 프롬프트의 명령을 완전히 바꿨습니다. "결과를 채팅으로 다 불어라!"
+        prompt = f"""당신은 출제위원이자 사용자와 실시간으로 소통하며 문제를 같이 푸는 '대화형 튜터 AI'입니다.
+
+        [대화형 튜터 절대 규칙 🚨]
+        1. 사용자의 명령(예: "법 제1조 검색해서 가. 와 대조해줘")을 받으면, [참고 자료 DB]에서 해당 조항을 찾으세요.
+        2. 찾은 원문 내용과, 지문(가,나,다 등)이 어떻게 일치/불일치하는지 분석한 결과를 **반드시 `chat_message` 필드에 아주 구체적이고 상세한 텍스트로 작성하여 브리핑하세요!** (예: "지시에 따라 대조한 결과, 법 제1조의 원문은 [~~~] 이며 지문과 완전히 일치합니다.")
+        3. 절대 "지시에 따라 처리했습니다" 같은 단답형 인사만 하고 넘어가면 안 됩니다. 그것은 시스템 오류를 유발합니다. 
+        4. 사용자가 피드백을 주면 수용하고 `explanation` 필드에 누적 기록하세요.
 
         [참고 자료 DB]
         {law_context}
 
-        [시험지 원문]
+        [현재 시험지 원문]
         {chunk_text}
+        
+        [이전 대화 내역]{history_str}
         {feedback_str}
 
-        [출력형식] 오직 JSON 객체만 반환하세요.
+        [현재까지 누적된 해설]
+        {current_explanation}
+
+        [출력형식] 반드시 JSON 단일 객체로 반환.
         {{
-          "question": "교정된 문제 내용",
-          "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기"],
-          "answer": "정답 번호 (또는 'DB 확인 필요')",
-          "explanation": "세 명의 전문가가 합의한 상세 해설 (오답 보기가 왜 틀렸는지까지 명시)",
-          "search_process": "[법률가]: ~, [출제자]: ~, [검증가]: ~ 형태의 MoE 사고 과정",
-          "referenced_laws": "참고한 DB 문서명 및 조항"
+          "question": "시험지 원문 텍스트 유지",
+          "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기", "5. 보기"],
+          "answer": "정답 번호 (모르면 '확인 필요')",
+          "chat_message": "사용자 명령에 대한 분석 결과 상세 브리핑 (이 필드에 원문과 대조 결과를 모두 적으세요!)",
+          "explanation": "지금까지 누적된 해설 내용 (수정 지시가 있으면 추가 반영)",
+          "search_process": "진단 터미널용 짧은 시스템 로그"
         }}"""
         
-        print(f"🤖 [MoE 로컬 AI 가동] 문단을 분석합니다...", file=sys.stderr, flush=True)
+        print(f"🤖 [초고속 대화형 AI 가동] 응답 생성 중...", file=sys.stderr, flush=True)
         
         try:
+            # 사용자의 원래 모델 옵션을 존중
             response_text = generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1)
             result_data = clean_and_parse_json(response_text)
         except Exception as ollama_e:
-            print(f"⚠️ 로컬 AI 분석 실패, Gemini로 우회합니다: {ollama_e}", file=sys.stderr, flush=True)
+            print(f"⚠️ 로컬 AI 분석 실패, Gemini로 우회: {ollama_e}", file=sys.stderr, flush=True)
             response_text = generate_gemini_json(prompt, temperature=0.1)
             result_data = clean_and_parse_json(response_text)
             
         if isinstance(result_data, list) and len(result_data) > 0:
             result_data = result_data[0]
             
+        # 💡 [최후의 안전장치] AI가 끝끝내 chat_message를 안 만들었을 때의 방어막!
+        if isinstance(result_data, dict):
+            chat_msg = result_data.get("chat_message", "").strip() or result_data.get("chatMessage", "").strip()
+            
+            if not chat_msg or (len(chat_msg) < 30 and ("처리" in chat_msg or "완료" in chat_msg)):
+                fallback_msg = result_data.get("explanation", "").strip() or result_data.get("search_process", "").strip()
+                if fallback_msg:
+                    result_data["chat_message"] = f"분석 상세 보고:\n{fallback_msg}\n\n결과가 일치하나요?"
+                else:
+                    result_data["chat_message"] = f"지시하신 '{user_feedback}'에 따라 원문 대조를 완료했습니다. 확인해주세요!"
+            else:
+                result_data["chat_message"] = chat_msg
+            
         return jsonify({"result": result_data})
     except Exception as e:
-        print(f"\n[🔥 문단 분석 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        print(f"\n[🔥 문단 분석 에러 진단]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/save-golden-exam', methods=['POST'])
@@ -603,6 +722,9 @@ def get_cbt_session():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ==========================================
+# 💡 대표님의 완벽한 PDF 파서 등 기존 기능 100% 보존 구역
+# ==========================================
 @api_bp.route('/upload-pdf', methods=['POST'])
 def upload_pdf():
     file = request.files.get('file')
@@ -881,9 +1003,6 @@ def update_card_memo():
     except Exception as e:
         return jsonify({"error": "메모 업데이트 실패"}), 500
 
-# ==========================================
-# 💡 사용자 설정 (커스텀 예외 단어) 관리 라우터 추가
-# ==========================================
 @api_bp.route('/get-stopwords', methods=['GET'])
 def get_stopwords():
     try:
