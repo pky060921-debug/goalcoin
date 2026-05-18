@@ -58,23 +58,15 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         setRawLawsData(catsRes.categories);
         const uniqueLawNames = Array.from(new Set(catsRes.categories.map((c: any) => c.folder_name)));
         setUploadedLaws(uniqueLawNames as string[]);
-        
-        if (selectedLaws.length === 0) {
-            setSelectedLaws(uniqueLawNames as string[]);
-        }
+        if (selectedLaws.length === 0) setSelectedLaws(uniqueLawNames as string[]);
       }
     } catch (err: any) {
       console.error("[데이터 로드 에러]", err);
     }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, [userAddress]);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
+  useEffect(() => { fetchData(); }, [userAddress]);
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
 
   const handleDeleteLaw = async (e: React.MouseEvent, folderName: string) => {
     e.stopPropagation();
@@ -88,46 +80,31 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       if (res.ok) {
         alert("법령 파일이 삭제되었습니다.");
         fetchData();
-        if (viewingFile === folderName) {
-            setViewingFile(null);
-            setViewingArticle(null);
-        }
+        if (viewingFile === folderName) { setViewingFile(null); setViewingArticle(null); }
       } else {
         const data = await res.json();
         alert("삭제 실패: " + data.error);
       }
-    } catch (err: any) {
-      alert("삭제 중 통신 오류가 발생했습니다.");
-    }
+    } catch (err: any) { alert("삭제 중 통신 오류가 발생했습니다."); }
   };
 
   const handleUploadForReview = async () => {
     if (!examFile || !userAddress) return alert("문제지 파일을 반드시 첨부해주세요.");
     setIsExamUploading(true);
-    
     const fd = new FormData();
     fd.append('exam_file', examFile);
     if (answerFile) fd.append('answer_file', answerFile);
     fd.append('wallet_address', userAddress);
 
     try {
-      const res = await fetch(`${BASE_URL}/upload-exam-coop`, {
-        method: 'POST',
-        body: fd
-      });
+      const res = await fetch(`${BASE_URL}/upload-exam-coop`, { method: 'POST', body: fd });
       const data = await res.json();
-      
       if (res.ok) {
-        setExamFile(null);
-        setAnswerFile(null);
-        alert("문제와 정답이 한 쌍으로 대기소에 안전하게 저장되었습니다!\n(정답지의 빨간색 텍스트가 정답으로 인식됩니다.)");
+        setExamFile(null); setAnswerFile(null);
+        alert("대기소에 저장되었습니다! (빨간색 텍스트 정답 인식 포함)");
         fetchData();
-      } else {
-        alert("업로드 실패: " + data.error);
-      }
-    } catch (err: any) {
-      alert(`업로드 실패: ${err.message}`);
-    }
+      } else alert("업로드 실패: " + data.error);
+    } catch (err: any) { alert(`업로드 실패: ${err.message}`); }
     setIsExamUploading(false);
   };
 
@@ -135,89 +112,30 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     if (!confirm("이 모의고사를 삭제하시겠습니까?")) return;
     try {
       await fetch(`${BASE_URL}/delete-pending-exam`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, wallet_address: userAddress })
       });
       fetchData();
     } catch (e: any) {}
   };
 
-  const handleGenerateRAGFromPending = async (id: number) => {
-    if (selectedLaws.length === 0) return alert("상단에서 최소 1개 이상의 법령을 체크해주세요!");
-    if (!confirm(`해설을 자동 생성하시겠습니까?`)) return;
-    
-    setIsAnalyzing(true);
-    try {
-      const res = await fetch(`${BASE_URL}/generate-rag-from-pending`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, wallet_address: userAddress, selected_laws: selectedLaws })
-      });
-      if (res.ok) {
-         const data = await res.json();
-         const taskId = data.task_id;
-         const timer = setInterval(async () => {
-           const sRes = await fetch(`${BASE_URL}/task-status?task_id=${taskId}`);
-           const sData = await sRes.json();
-           if (sData.status === 'completed') {
-             clearInterval(timer); 
-             setIsAnalyzing(false); 
-             fetchData();
-             alert("해설 자동 생성이 완료되었습니다!");
-           } else if (sData.status === 'error') {
-             clearInterval(timer); 
-             setIsAnalyzing(false); 
-             alert("분석 오류");
-           }
-         }, 2000);
-      }
-    } catch(e: any) {
-      setIsAnalyzing(false); 
-    }
-  };
-
-  const handleDeleteExam = async (e: React.MouseEvent, id: number) => {
-    e.stopPropagation();
-    if (!confirm("이 문제를 삭제하시겠습니까?")) return;
-    try {
-      await fetch(`${BASE_URL}/delete-exam`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, wallet_address: userAddress })
-      });
-      fetchData();
-    } catch (err: any) {}
-  };
-
-  // 💡 [개편] 대화형 튜터링 시작 화면 기본 설정
   const startCoopReview = (exam: {id: number, filename: string, chunks: string[]}) => {
-    if (selectedLaws.length === 0) {
-      alert("상단에서 참고할 근거 자료(법령/정관)를 먼저 체크해주세요!");
-      return;
-    }
-    setCurrentExamId(exam.id);
-    setChunks(exam.chunks);
-    setFilename(exam.filename);
-    setChunkIndex(0);
-    setMode('coop');
+    if (selectedLaws.length === 0) return alert("상단에서 근거 자료를 체크해주세요!");
+    setCurrentExamId(exam.id); setChunks(exam.chunks); setFilename(exam.filename); setChunkIndex(0); setMode('coop');
     
-    // 왼쪽 패널 기본 뼈대
     setParsedResult({
         question: exam.chunks[0],
         options: ["① 1개", "② 2개", "③ 3개", "④ 4개", "⑤ 5개"],
-        answer: "확인 필요",
-        explanation: "",
-        search_process: ""
+        answer: "확인 필요", explanation: "",
     });
     
-    // 오른쪽 패널 순수 채팅창
     setChatMessages([
-        { sender: 'ai', text: "안녕하세요 대표님! 문제를 하나씩 검수해 보겠습니다.\n먼저 어떤 조항을 검색해서 대조해 드릴까요?\n(예: '가' 보기를 위해 법 제1조 검색해서 일치하는지 말해줘)" }
+        { sender: 'ai', text: "안녕하세요 대표님! 문제를 같이 풀어보겠습니다.\n먼저 어떤 조항을 검색해서 대조해 드릴까요?\n(예: '가' 보기를 위해 법 제1조 검색해줘)" }
     ]); 
     setUserFeedback("");
   };
 
+  // 💡 [핵심 연동] AI 분석 시작 및 시스템 터미널로 결과 쏘기!
   const analyzeCurrentChunk = async (isFeedback = true) => {
     if (isAnalyzing) return;
     setIsAnalyzing(true);
@@ -229,7 +147,15 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         updatedHistory.push({ sender: 'user', text: currentFeedback });
         setChatMessages(updatedHistory);
         setUserFeedback("");
+        
+        // 전역 터미널에 사용자 명령 로그 전송
+        console.log(`> [USER COMMAND] ${currentFeedback}`);
+        window.dispatchEvent(new CustomEvent('global-terminal-log', { detail: `> [USER COMMAND] ${currentFeedback}` }));
     }
+
+    // 전역 터미널에 AI 프로세스 시작 알림
+    console.log(`> [AI ENGINE] Starting precision N-gram scan for chunk ${chunkIndex + 1}...`);
+    window.dispatchEvent(new CustomEvent('global-terminal-log', { detail: `> [AI ENGINE] Starting precision N-gram scan for chunk ${chunkIndex + 1}...` }));
 
     try {
       const payload = {
@@ -242,29 +168,35 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       };
       
       const res = await fetch(`${BASE_URL}/analyze-chunk`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
       const data = await res.json();
       
       if (res.ok && data.result) {
         setParsedResult(data.result);
-        const aiResponseText = data.result.chat_message || data.result.chatMessage || "알겠습니다. 다음 지시를 내려주세요!";
+        const aiResponseText = data.result.chat_message || data.result.chatMessage || "처리가 완료되었습니다.";
         setChatMessages(prev => [...prev, { sender: 'ai', text: aiResponseText }]);
+
+        // 💡 [여기가 통합의 핵심!] AI의 1, 2, 3단계 사고과정을 전역 Diagnostic Terminal로 송출합니다.
+        if (data.result.search_process) {
+            const processLog = `\n[🧠 AI SEARCH & REASONING LOG]\n${data.result.search_process}\n`;
+            console.log(processLog); // 1. 브라우저 콘솔 및 콘솔 가로채기 방식 대응
+            window.dispatchEvent(new CustomEvent('global-terminal-log', { detail: processLog })); // 2. CustomEvent 방식 대응
+        }
+
       } else {
-        alert("AI 분석 실패: " + data.error);
+        console.error("[ERROR] AI API 연산 실패", data.error);
+        alert("AI 통신 실패: " + data.error);
       }
     } catch (err: any) {
+      console.error("[CRITICAL] AI 서버 타임아웃 또는 연결 끊김");
       alert("AI 통신 에러가 발생했습니다.");
     }
     setIsAnalyzing(false);
   };
 
-  const handleEdit = (field: string, value: any) => {
-    setParsedResult({ ...parsedResult, [field]: value });
-  };
-
+  const handleEdit = (field: string, value: any) => { setParsedResult({ ...parsedResult, [field]: value }); };
   const handleOptionEdit = (idx: number, value: string) => {
     const newOptions = [...(parsedResult.options || [])];
     newOptions[idx] = value;
@@ -275,16 +207,11 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     if (!parsedResult?.question || !parsedResult?.answer) return alert("데이터가 불완전합니다.");
     try {
       await fetch(`${BASE_URL}/save-golden-exam`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          wallet_address: userAddress,
-          title: filename,
-          question: parsedResult.question,
-          options: parsedResult.options,
-          answer: parsedResult.answer,
-          explanation: parsedResult.explanation,
-          search_process: parsedResult.search_process || ""
+          wallet_address: userAddress, title: filename, question: parsedResult.question,
+          options: parsedResult.options, answer: parsedResult.answer, explanation: parsedResult.explanation,
+          search_process: "Diagnostic Terminal Output Saved" 
         })
       });
 
@@ -293,51 +220,39 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         setParsedResult({
             question: chunks[chunkIndex + 1],
             options: ["① 1개", "② 2개", "③ 3개", "④ 4개", "⑤ 5개"],
-            answer: "확인 필요",
-            explanation: "",
-            search_process: ""
+            answer: "확인 필요", explanation: "",
         });
         setChatMessages([{ sender: 'ai', text: `[${chunkIndex + 2}번 문제]입니다! 어떤 조항을 찾아드릴까요?` }]); 
         setUserFeedback("");
+        
+        console.log(`> [SYSTEM] Saved to Golden DB. Loaded next chunk [${chunkIndex + 2}].`);
+        window.dispatchEvent(new CustomEvent('global-terminal-log', { detail: `> [SYSTEM] Saved to Golden DB. Loaded next chunk [${chunkIndex + 2}].` }));
       } else {
         if (currentExamId && userAddress) {
           await fetch(`${BASE_URL}/delete-pending-exam`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id: currentExamId, wallet_address: userAddress })
           });
         }
-        alert("해당 모의고사의 모든 검수 및 AI 학습이 완료되었습니다!");
-        fetchData(); 
-        setMode('list');
+        alert("모의고사 전체 검수가 완료되었습니다!");
+        fetchData(); setMode('list');
       }
-    } catch(err: any) {
-      console.error(`[승인 및 저장 에러]`, err);
-    }
+    } catch(err: any) { console.error(`[승인 에러]`, err); }
   };
 
+  // ... (CBT 및 Result 모드 기존 코드 동일 유지)
   const startCBT = async () => {
     if (!userAddress) return alert("로그인이 필요합니다.");
     try {
       const data = await fetch(`${BASE_URL}/get-cbt-session?wallet_address=${userAddress}`).then(r => r.json());
       if (data.error) throw new Error(data.error);
-      setCbtQuestions(data);
-      setCbtCurrentIndex(0);
-      setUserAnswers({});
-      setMode('cbt');
-    } catch (e: any) {
-      alert(e.message);
-    }
+      setCbtQuestions(data); setCbtCurrentIndex(0); setUserAnswers({}); setMode('cbt');
+    } catch (e: any) { alert(e.message); }
   };
-
-  const handleMark = (ans: string) => {
-    setUserAnswers({ ...userAnswers, [cbtCurrentIndex]: ans });
-  };
-
+  const handleMark = (ans: string) => { setUserAnswers({ ...userAnswers, [cbtCurrentIndex]: ans }); };
   const submitExam = () => {
     const wrongs = cbtQuestions.filter((q, idx) => String(q.answer) !== userAnswers[idx]);
-    setWrongNotes(wrongs);
-    setMode('result');
+    setWrongNotes(wrongs); setMode('result');
   };
 
   if (mode === 'coop') {
@@ -346,20 +261,15 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         <div className="flex justify-between items-center pb-4 border-b border-white/10">
           <h2 className="text-xl text-teal-400 font-serif">🤝 대화형 AI 튜터 시스템 [{filename}]</h2>
           <div className="flex gap-4 items-center">
-            <span className="text-white/40 text-sm font-bold bg-teal-950/50 px-3 py-1 rounded-sm border border-teal-900/50">
-              진행도: {chunkIndex + 1} / {chunks.length}
-            </span>
-            <button onClick={() => setMode('list')} className="text-xs text-white/40 hover:text-white border border-white/10 px-3 py-1 rounded-sm hover:bg-white/5 transition-all">
-              목록으로 나가기
-            </button>
+            <span className="text-white/40 text-sm font-bold bg-teal-950/50 px-3 py-1 rounded-sm border border-teal-900/50">진행도: {chunkIndex + 1} / {chunks.length}</span>
+            <button onClick={() => setMode('list')} className="text-xs text-white/40 hover:text-white border border-white/10 px-3 py-1 rounded-sm hover:bg-white/5 transition-all">목록으로 나가기</button>
           </div>
         </div>
 
         <div className="flex flex-1 gap-6 overflow-hidden">
           
-          {/* 💡 [좌측 패널] 완벽하게 분리된 문제, 정답(빨간색), 해설 저장 영역 */}
+          {/* 💡 [좌측 패널] 통합 문제 & 해설 관리 영역 (사고과정 박스 제거) */}
           <div className="w-[55%] flex flex-col gap-5 border border-white/10 rounded-sm bg-black/20 p-5 overflow-y-auto custom-scrollbar shadow-inner">
-            
             <div className="flex flex-col gap-2">
               <label className="text-teal-300 font-bold text-sm">📝 1. 추출된 원문 (수정 가능)</label>
               <textarea 
@@ -368,48 +278,26 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                 className="w-full min-h-[220px] bg-black/40 border border-white/10 text-white/90 p-4 text-[15px] leading-loose outline-none resize-none rounded-sm focus:border-teal-500/50"
               />
             </div>
-
             {parsedResult && (
               <>
                 <div className="space-y-3 pt-3 border-t border-white/10">
                   <label className="text-sm font-bold text-teal-400 block mb-1">📋 2. 보기 및 정답 체크</label>
-                  <div className="text-[11px] text-white/40 mb-2">버튼을 눌러 최종 정답을 빨간색으로 지정하세요. (AI가 정답지를 보고 자동 지정하기도 합니다)</div>
+                  <div className="text-[11px] text-white/40 mb-2">버튼을 눌러 최종 정답을 지정하세요. (정답지의 빨간색 텍스트가 자동 지정됩니다.)</div>
                   {(parsedResult.options || ['', '', '', '']).map((opt: string, i: number) => {
                     const isCorrect = String(i + 1) === String(parsedResult.answer);
                     return (
                       <div key={i} className={`flex gap-3 items-center p-2 rounded-sm border transition-all ${isCorrect ? 'bg-red-950/20 border-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 'border-white/5 hover:bg-white/5'}`}>
                         <button 
                           onClick={() => handleEdit('answer', String(i + 1))}
-                          className={`shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${isCorrect ? 'border-red-500 bg-red-500 text-white font-bold' : 'border-white/30 text-transparent'}`}
-                        >
-                          ✓
-                        </button>
-                        <input 
-                          value={opt} 
-                          onChange={e => handleOptionEdit(i, e.target.value)} 
-                          className={`w-full bg-transparent outline-none text-sm transition-colors ${isCorrect ? 'text-red-400 font-bold' : 'text-white/80'}`} 
-                        />
+                          className={`shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${isCorrect ? 'border-red-500 bg-red-500 text-white font-bold' : 'border-white/30 text-transparent'}`}>✓</button>
+                        <input value={opt} onChange={e => handleOptionEdit(i, e.target.value)} className={`w-full bg-transparent outline-none text-sm transition-colors ${isCorrect ? 'text-red-400 font-bold' : 'text-white/80'}`} />
                       </div>
                     );
                   })}
                 </div>
-
                 <div className="flex flex-col gap-2 pt-3 border-t border-white/10">
-                    <label className="text-[12px] font-bold text-indigo-400 block">🧠 3. AI 사고 과정 기록 (장기 기억용)</label>
-                    <textarea 
-                      value={parsedResult.search_process || ''} 
-                      onChange={e => handleEdit('search_process', e.target.value)} 
-                      className="w-full h-16 bg-indigo-950/20 border border-indigo-500/20 text-indigo-200/70 p-3 text-xs leading-relaxed rounded-sm resize-none focus:border-indigo-400 outline-none" 
-                    />
-                </div>
-
-                <div className="flex flex-col gap-2">
-                    <label className="text-[13px] font-bold text-emerald-400 block">💡 4. 최종 공식 상세 해설 (대화하며 자동 업데이트)</label>
-                    <textarea 
-                      value={parsedResult.explanation || ''} 
-                      onChange={e => handleEdit('explanation', e.target.value)} 
-                      className="w-full min-h-[140px] bg-emerald-950/20 border border-emerald-500/30 text-emerald-100/90 p-4 text-[14px] leading-loose rounded-sm resize-none outline-none focus:border-emerald-400" 
-                    />
+                    <label className="text-[13px] font-bold text-emerald-400 block">💡 3. 최종 공식 상세 해설 (대화하며 자동 누적됨)</label>
+                    <textarea value={parsedResult.explanation || ''} onChange={e => handleEdit('explanation', e.target.value)} className="w-full min-h-[140px] bg-emerald-950/20 border border-emerald-500/30 text-emerald-100/90 p-4 text-[14px] leading-loose rounded-sm resize-none outline-none focus:border-emerald-400" />
                 </div>
               </>
             )}
@@ -461,13 +349,14 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                   ✨ 현재 해설 저장 및 다음 문제로 이동
                 </button>
             </div>
-            
           </div>
+
         </div>
       </div>
     );
   }
 
+  // ... (CBT 및 Result 모드 이하 동일)
   if (mode === 'cbt') {
     const q = cbtQuestions[cbtCurrentIndex];
     if (!q) return null;
@@ -624,7 +513,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                         대화형 검수 시작 🚀
                       </button>
                       <button onClick={() => handleGenerateRAGFromPending(exam.id)} className="px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-sm shadow-lg hover:bg-emerald-500 transition-all">
-                        해설 자동생성
+                        해설 자동생성 (Gemini)
                       </button>
                       <button onClick={() => handleDeletePendingExam(exam.id)} className="px-3 py-2 bg-red-950/40 border border-red-500/30 text-red-400 font-bold text-xs rounded-sm hover:bg-red-900/50 transition-all">
                         🗑️ 삭제
@@ -651,13 +540,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                       <div className="mt-4 pt-4 border-t border-teal-900/50 animate-in fade-in slide-in-from-top-2">
                         <div className="text-teal-400 font-bold text-sm mb-4">정답: {exam.answer}</div>
                         
-                        {exam.search_process && (
-                          <div className="mb-4 p-4 bg-black/40 border-l-2 border-indigo-500 rounded-sm">
-                            <div className="text-indigo-400 font-bold text-xs mb-2">🧠 AI 장기기억 (사고 과정)</div>
-                            <div className="text-white/60 text-xs leading-relaxed whitespace-pre-wrap">{exam.search_process}</div>
-                          </div>
-                        )}
-
                         <div className="explanation-box mt-3 text-white/80">
                           {exam.explanation}
                         </div>
@@ -683,26 +565,13 @@ export const ExamTab = ({ walletAddress, address }: any) => {
             
             <div className="flex justify-between items-center p-4 border-b border-teal-500/30 bg-teal-900/30 shrink-0">
               <h3 className="text-teal-300 font-bold text-lg">📄 {viewingFile}</h3>
-              <button 
-                onClick={() => { setViewingFile(null); setViewingArticle(null); }} 
-                className="text-white/50 hover:text-white text-2xl font-bold px-2"
-              >
-                &times;
-              </button>
+              <button onClick={() => { setViewingFile(null); setViewingArticle(null); }} className="text-white/50 hover:text-white text-2xl font-bold px-2">&times;</button>
             </div>
             
             <div className="flex flex-1 overflow-hidden">
               <div className="w-1/3 border-r border-teal-500/30 bg-black/40 overflow-y-auto custom-scrollbar p-2 space-y-1">
                 {rawLawsData.filter(l => l.folder_name === viewingFile).map((law, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => setViewingArticle(law)}
-                    className={`w-full text-left px-3 py-3 text-sm rounded transition-colors ${
-                      viewingArticle?.id === law.id 
-                        ? 'bg-teal-600 text-white font-bold shadow-md' 
-                        : 'text-teal-400 hover:bg-teal-900/50'
-                    }`}
-                  >
+                  <button key={idx} onClick={() => setViewingArticle(law)} className={`w-full text-left px-3 py-3 text-sm rounded transition-colors ${viewingArticle?.id === law.id ? 'bg-teal-600 text-white font-bold shadow-md' : 'text-teal-400 hover:bg-teal-900/50'}`}>
                     {law.title}
                   </button>
                 ))}
@@ -711,15 +580,11 @@ export const ExamTab = ({ walletAddress, address }: any) => {
               <div className="w-2/3 p-6 overflow-y-auto custom-scrollbar bg-black/20 text-white/80 text-[15px] leading-loose whitespace-pre-wrap">
                 {viewingArticle ? (
                   <div className="animate-in fade-in slide-in-from-right-2">
-                    <h4 className="text-teal-300 font-bold text-xl mb-4 border-b border-white/10 pb-4">
-                      {viewingArticle.title}
-                    </h4>
+                    <h4 className="text-teal-300 font-bold text-xl mb-4 border-b border-white/10 pb-4">{viewingArticle.title}</h4>
                     {viewingArticle.content}
                   </div>
                 ) : (
-                  <div className="h-full flex items-center justify-center text-white/30 text-sm">
-                    좌측에서 열람할 조항을 선택해주세요.
-                  </div>
+                  <div className="h-full flex items-center justify-center text-white/30 text-sm">좌측에서 열람할 조항을 선택해주세요.</div>
                 )}
               </div>
             </div>
