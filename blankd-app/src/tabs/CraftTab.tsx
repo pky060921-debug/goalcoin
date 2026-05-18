@@ -11,14 +11,12 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-// 💡 문자열 대신 객체 배열로 관리하여 '합친 내역'을 기억
 type WordItem = { text: string; subWords: string[]; };
 
 export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
-  // 💡 폴더 토글 상태 로컬 스토리지 유지
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>(() => {
     try { const saved = localStorage.getItem('blankd_craft_folders'); return saved ? JSON.parse(saved) : {}; } 
     catch(e) { return {}; }
@@ -60,13 +58,33 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
 
   const openCategory = (targetCat: any) => {
     setExpandedId(targetCat.id);
-    setSelectedWords(new Set());
     setPageBreaks(new Set());
     setMemoInput(targetCat.memo || "");
     setIsEraserMode(false);
+    
     const { body } = formatCardText(targetCat.content || targetCat.title || "");
     const initialWords = body.split(SPLIT_REGEX).filter(w => w !== "");
     setWordArray(initialWords.map(w => ({ text: w, subWords: [w] })));
+
+    // 💡 [핵심 진화] 조항을 열 때 기본적으로 "모든 단어"를 빈칸(선택)으로 만듭니다.
+    const initialSelected = new Set<number>();
+    initialWords.forEach((word, idx) => {
+      const trimmed = word.trim();
+      // 제외 조건 1: 특수기호
+      const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(trimmed) && trimmed !== "";
+      // 제외 조건 2: 법 제1조, 제1항, 제2호, ① 등 목차 및 조항명
+      const isArticleOrNum = /^(?:법\s*)?제\s*\d+\s*(?:조|장|절|관)(?:의\s*\d+)?/.test(trimmed) || 
+                             /^\(?\d+(?:항|호|목)?\)?$/.test(trimmed) || 
+                             /^\(?(?:①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)\)?$/.test(trimmed);
+      // 제외 조건 3: 흔히 쓰이는 조사, 의존명사, 접속사 등
+      const isStopWord = /^(및|등|또는|과|와|수|할|이하|이상|초과|미만|부터|까지|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여)$/.test(trimmed);
+      
+      // 위 3가지 예외 조건에 해당하지 않는 '의미 있는 핵심 단어'는 전부 기본 빈칸으로 자동 지정!
+      if (!isSymbolOnly && !isArticleOrNum && !isStopWord && trimmed.length > 0) {
+        initialSelected.add(idx);
+      }
+    });
+    setSelectedWords(initialSelected);
   };
 
   const handleWordClick = (idx: number) => {
@@ -82,6 +100,8 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       setPageBreaks(newPageBreaks);
       return; 
     }
+    
+    // 💡 이제 터치 시 "추가"가 아니라 "제외(해제)"하는 용도로 더 많이 쓰입니다.
     const s = new Set(selectedWords);
     if(s.has(idx)) s.delete(idx); else s.add(idx);
     setSelectedWords(s);
@@ -99,16 +119,25 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     if (isEraserMode) return; 
     const current = wordArray[idx];
 
-    // 💡 되돌리기 (Unmerge) 로직
+    // 💡 되돌리기 로직 (합쳐졌던 단어 쪼개기)
     if (current.subWords.length > 1) {
       const newArray = [...wordArray];
       const splitItems = current.subWords.map(w => ({ text: w, subWords: [w] }));
       newArray.splice(idx, 1, ...splitItems);
       setWordArray(newArray);
+      
       const shiftAmount = splitItems.length - 1;
       const newSelected = new Set<number>();
-      selectedWords.forEach(i => { if (i < idx) newSelected.add(i); else if (i > idx) newSelected.add(i + shiftAmount); });
+      selectedWords.forEach(i => { 
+        if (i < idx) newSelected.add(i); 
+        else if (i > idx) newSelected.add(i + shiftAmount); 
+      });
+      // 합쳐져 있던 블록이 빈칸이었다면, 쪼개진 조각들도 모두 빈칸으로 유지합니다.
+      if (selectedWords.has(idx)) {
+        for(let k = 0; k <= shiftAmount; k++) newSelected.add(idx + k);
+      }
       setSelectedWords(newSelected);
+
       const newPageBreaks = new Set<number>();
       pageBreaks.forEach(i => { if (i < idx) newPageBreaks.add(i); else if (i > idx) newPageBreaks.add(i + shiftAmount); });
       setPageBreaks(newPageBreaks);
@@ -118,7 +147,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     if (idx >= wordArray.length - 1) return;
     const next = wordArray[idx + 1];
 
-    // 💡 특수기호 단독 선택 방어
     const isSymbol1 = !/[a-zA-Z0-9가-힣]/.test(current.text) && current.text.trim() !== "";
     const isSymbol2 = !/[a-zA-Z0-9가-힣]/.test(next.text) && next.text.trim() !== "";
     if (isSymbol1 || isSymbol2) return; 
@@ -129,8 +157,16 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     setWordArray(newArray);
 
     const newSelected = new Set<number>();
-    selectedWords.forEach(i => { if (i < idx) newSelected.add(i); else if (i > idx) newSelected.add(i - 1); });
+    selectedWords.forEach(i => { 
+      if (i < idx) newSelected.add(i); 
+      else if (i > idx) newSelected.add(i - 1); 
+    });
+    // 💡 합치려는 대상 중 하나라도 빈칸이었다면, 합쳐진 거대한 블록도 빈칸으로 지정
+    if (selectedWords.has(idx) || selectedWords.has(idx + 1)) {
+      newSelected.add(idx);
+    }
     setSelectedWords(newSelected);
+
     const newPageBreaks = new Set<number>();
     pageBreaks.forEach(i => { if (i < idx) newPageBreaks.add(i); else if (i > idx) newPageBreaks.add(i - 1); });
     setPageBreaks(newPageBreaks);
@@ -231,6 +267,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                             const word = wordObj.text;
                             const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(word) && word.trim() !== "";
                             const isMerged = wordObj.subWords.length > 1;
+                            const isSelected = selectedWords.has(idx);
 
                             return (
                               <React.Fragment key={idx}>
@@ -239,7 +276,14 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                                   onClick={() => { if (isEraserMode || !isSymbolOnly) handleWordClick(idx); }} 
                                   onContextMenu={(e) => handleWordSplit(idx, e)} 
                                   onDoubleClick={() => { if (!isSymbolOnly || isMerged) handleWordMerge(idx); }} 
-                                  className={`px-[1px] rounded transition-colors ${selectedWords.has(idx) ? 'bg-amber-500 text-black font-bold cursor-pointer' : isEraserMode ? 'hover:bg-red-500/50 hover:text-white text-red-100 cursor-pointer' : isSymbolOnly ? 'text-white/30 cursor-default' : isMerged ? 'bg-indigo-900/30 border-b border-indigo-500/50 hover:bg-indigo-800/40 cursor-pointer' : 'hover:bg-white/10 cursor-pointer'}`}
+                                  className={`px-[1px] rounded transition-colors ${
+                                    isSelected ? 'bg-amber-500 text-black font-bold cursor-pointer' : 
+                                    isEraserMode ? 'hover:bg-red-500/50 hover:text-white text-red-100 cursor-pointer' : 
+                                    isSymbolOnly ? 'text-white/30 cursor-default' : 
+                                    isMerged ? 'bg-indigo-900/30 border-b border-indigo-500/50 hover:bg-indigo-800/40 cursor-pointer' : 
+                                    'hover:bg-white/10 cursor-pointer'
+                                  }`}
+                                  title={isSelected ? "클릭하여 빈칸에서 해제" : "클릭하여 빈칸으로 지정"}
                                 >
                                   {word}
                                 </span>
@@ -250,13 +294,11 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                         
                         <button 
                           onClick={() => {
-                            // 💡 현재 폴더 내에서 아이디 오름차순으로 바로 다음 조항을 탐색
                             const folderCats = safeCategories.filter((c:any) => c.folder_name === cat.folder_name).sort((a:any, b:any) => a.id - b.id);
                             const currentIdx = folderCats.findIndex(c => c.id === cat.id);
                             const nextCat = folderCats[currentIdx + 1];
                             
                             handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, () => {
-                                // 다음 조항이 즉시 펼쳐짐 (만들기 탭 유지)
                                 if (nextCat) openCategory(nextCat);
                                 else setExpandedId(null);
                             });
