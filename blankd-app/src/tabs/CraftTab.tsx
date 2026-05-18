@@ -31,41 +31,68 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
 
   const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
   
+  // 💡 [신규] 제외 단어와 포함 단어 두 가지 리스트 관리
   const [customStopWords, setCustomStopWords] = useState<string[]>([]);
+  const [customIncludeWords, setCustomIncludeWords] = useState<string[]>([]);
   const [newStopWord, setNewStopWord] = useState("");
+  const [newIncludeWord, setNewIncludeWord] = useState("");
 
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
+  // 💡 DB에서 두 가지 리스트 모두 불러오기 (호환성 처리 완비)
   useEffect(() => {
     if (safeAddress) {
       api.getStopwords(safeAddress).then(data => {
-        if (data && data.stopwords) setCustomStopWords(data.stopwords);
-      }).catch(err => addLog("⚠️ 예외 단어 DB 동기화 실패"));
+        if (data && data.stopwords) {
+          if (Array.isArray(data.stopwords)) {
+            setCustomStopWords(data.stopwords);
+            setCustomIncludeWords([]);
+          } else {
+            setCustomStopWords(data.stopwords.stop || []);
+            setCustomIncludeWords(data.stopwords.include || []);
+          }
+        }
+      }).catch(err => addLog("⚠️ 단어 설정 DB 동기화 실패"));
     }
   }, [safeAddress]);
 
-  const handleAddStopWord = async () => {
-    if (!newStopWord.trim()) return;
-    const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
-    const nextList = Array.from(new Set([...customStopWords, ...words]));
-    
-    setCustomStopWords(nextList);
-    setNewStopWord("");
-    addLog(`⚙️ 예외 단어 DB 저장 중...`);
-    
+  // DB 통합 저장 함수
+  const saveWordsToDB = async (stops: string[], includes: string[]) => {
     try {
-      await api.updateStopwords(safeAddress, nextList);
-      addLog(`✅ 예외 단어 DB 저장 완료`);
+      await api.updateStopwords(safeAddress, { stop: stops, include: includes });
+      addLog(`✅ 단어 설정 DB 동기화 완료`);
     } catch(e) { alert("DB 저장 실패"); }
   };
 
-  const handleRemoveStopWord = async (wordToRemove: string) => {
+  const handleAddStopWord = () => {
+    if (!newStopWord.trim()) return;
+    const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
+    const nextList = Array.from(new Set([...customStopWords, ...words]));
+    setCustomStopWords(nextList);
+    setNewStopWord("");
+    saveWordsToDB(nextList, customIncludeWords);
+  };
+
+  const handleRemoveStopWord = (wordToRemove: string) => {
     const nextList = customStopWords.filter(w => w !== wordToRemove);
     setCustomStopWords(nextList);
-    try {
-      await api.updateStopwords(safeAddress, nextList);
-    } catch(e) { alert("DB 삭제 실패"); }
+    saveWordsToDB(nextList, customIncludeWords);
+  };
+
+  const handleAddIncludeWord = () => {
+    if (!newIncludeWord.trim()) return;
+    const words = newIncludeWord.split(',').map(w => w.trim()).filter(w => w);
+    const nextList = Array.from(new Set([...customIncludeWords, ...words]));
+    setCustomIncludeWords(nextList);
+    setNewIncludeWord("");
+    saveWordsToDB(customStopWords, nextList);
+  };
+
+  const handleRemoveIncludeWord = (wordToRemove: string) => {
+    const nextList = customIncludeWords.filter(w => w !== wordToRemove);
+    setCustomIncludeWords(nextList);
+    saveWordsToDB(customStopWords, nextList);
   };
 
   useEffect(() => {
@@ -147,7 +174,10 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     setWordArray(initialWords.map(w => ({ text: w, subWords: [w] })));
 
     const initialSelected = new Set<number>();
+    
+    // 컴포넌트 상태를 직접 참조
     const currentCustomStopWords = customStopWords;
+    const currentCustomIncludeWords = customIncludeWords;
 
     const wordRanges: {start: number, end: number, wordIdx: number}[] = [];
     let currentPos = 0;
@@ -156,8 +186,50 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
        currentPos += w.length;
     });
 
+    const fullText = initialWords.join("");
+
+    // 💡 [핵심] 보호구역(무조건 빈칸 처리) 선언
+    const protectedIndices = new Set<number>();
+
+    // 1. 보호구역: 단일 단어 등록
+    initialWords.forEach((word, idx) => {
+        if (!word.includes(" ") && currentCustomIncludeWords.includes(word.trim())) {
+            protectedIndices.add(idx);
+        }
+    });
+
+    // 2. 보호구역: 다중 구문(띄어쓰기 포함) 등록
+    const includePatterns: RegExp[] = [];
+    currentCustomIncludeWords.forEach(cw => {
+       if (cw.includes(" ")) {
+           const regexStr = cw.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+           includePatterns.push(new RegExp(regexStr, 'g'));
+       }
+    });
+
+    includePatterns.forEach(regex => {
+       let match;
+       while ((match = regex.exec(fullText)) !== null) {
+          const matchStart = match.index;
+          const matchEnd = matchStart + match[0].length;
+          wordRanges.forEach(wr => {
+             if (wr.start < matchEnd && wr.end > matchStart) {
+                protectedIndices.add(wr.wordIdx);
+             }
+          });
+       }
+    });
+
+    // 3. 일반적인 제외 필터링 검사
     initialWords.forEach((word, idx) => {
       const trimmed = word.trim();
+      
+      // 보호구역에 있는 단어는 무조건 빈칸 지정 (순수 스페이스바 제외)
+      if (protectedIndices.has(idx)) {
+         if (trimmed.length > 0) initialSelected.add(idx);
+         return;
+      }
+
       const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(trimmed) && trimmed !== "";
       const isArticleOrNum = /^(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조)(?:의\s*\d+)?/.test(trimmed) || 
                              /^\(?\d+(?:항|호|목)?\)?$/.test(trimmed) || 
@@ -171,7 +243,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       }
     });
 
-    const fullText = initialWords.join("");
+    // 4. 제외 구문 정규식 실행 (단, 보호구역에 있는 단어는 지우지 않음!)
     const patternsToExclude: RegExp[] = [
       /(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g
     ];
@@ -191,7 +263,10 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
           
           wordRanges.forEach(wr => {
              if (wr.start < matchEnd && wr.end > matchStart) {
-                initialSelected.delete(wr.wordIdx);
+                // 보호구역(필수 포함 단어)이 아니면 빈칸에서 제외!
+                if (!protectedIndices.has(wr.wordIdx)) {
+                    initialSelected.delete(wr.wordIdx);
+                }
              }
           });
        }
@@ -309,31 +384,61 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       </div>
 
       {showStopWordsSettings && (
-        <div className="p-4 sm:p-5 bg-[#0a0a0c] border border-amber-500/30 rounded-sm mb-6 animate-in slide-in-from-top-2">
-          <div className="flex justify-between items-center mb-3">
-            <div className="text-xs sm:text-sm text-amber-400 font-bold">자동 빈칸 제외 구문/단어 설정 (클라우드 동기화)</div>
-          </div>
+        <div className="p-4 sm:p-5 bg-[#0a0a0c] border border-amber-500/30 rounded-sm mb-6 flex flex-col sm:flex-row gap-6 animate-in slide-in-from-top-2">
           
-          <div className="flex gap-2 mb-3">
-            <input 
-              type="text" 
-              value={newStopWord} 
-              onChange={(e) => setNewStopWord(e.target.value)} 
-              onKeyDown={(e) => { if (e.key === 'Enter') handleAddStopWord(); }}
-              placeholder="예: 각 호의 외의 부분, 대통령령으로 (쉼표로 복수 추가)" 
-              className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-amber-400/50"
-            />
-            <button onClick={handleAddStopWord} className="px-4 bg-amber-600/20 text-amber-400 border border-amber-500/30 text-xs font-bold rounded-sm hover:bg-amber-600/40 transition-colors">DB에 추가</button>
+          {/* ❌ 제외 단어 패널 */}
+          <div className="flex-1">
+            <div className="text-xs sm:text-sm text-amber-400 font-bold mb-3">❌ 제외 단어 (빈칸 X)</div>
+            <div className="flex gap-2 mb-3">
+              <input 
+                type="text" 
+                value={newStopWord} 
+                onChange={(e) => setNewStopWord(e.target.value)} 
+                onKeyDown={(e) => { if (e.key === 'Enter') handleAddStopWord(); }}
+                placeholder="예: 각 호의 외의 부분 (쉼표로 구분)" 
+                className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-amber-400/50"
+              />
+              <button onClick={handleAddStopWord} className="px-4 bg-amber-600/20 text-amber-400 border border-amber-500/30 text-xs font-bold rounded-sm hover:bg-amber-600/40 transition-colors">추가</button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {customStopWords.length === 0 && <span className="text-[10px] text-white/30">등록된 DB 예외 단어가 없습니다.</span>}
+              {customStopWords.map(word => (
+                <span key={word} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] sm:text-[11px] text-white/70 flex items-center gap-1.5">
+                  {word}
+                  <button onClick={() => handleRemoveStopWord(word)} className="text-white/30 hover:text-red-400">✕</button>
+                </span>
+              ))}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {customStopWords.length === 0 && <span className="text-[10px] text-white/30">등록된 DB 예외 단어가 없습니다.</span>}
-            {customStopWords.map(word => (
-              <span key={word} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] sm:text-[11px] text-white/70 flex items-center gap-1.5">
-                {word}
-                <button onClick={() => handleRemoveStopWord(word)} className="text-white/30 hover:text-red-400">✕</button>
-              </span>
-            ))}
+
+          <div className="hidden sm:block w-px bg-white/10 mx-2"></div>
+          <div className="sm:hidden h-px w-full bg-white/10 my-2"></div>
+
+          {/* ✅ 필수 포함 단어 패널 */}
+          <div className="flex-1">
+            <div className="text-xs sm:text-sm text-teal-400 font-bold mb-3">✅ 필수 포함 단어 (무조건 빈칸 O)</div>
+            <div className="flex gap-2 mb-3">
+              <input 
+                type="text" 
+                value={newIncludeWord} 
+                onChange={(e) => setNewIncludeWord(e.target.value)} 
+                onKeyDown={(e) => { if (e.key === 'Enter') handleAddIncludeWord(); }}
+                placeholder="예: 또는, 및, 할 수 있다 (쉼표로 구분)" 
+                className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-teal-400/50"
+              />
+              <button onClick={handleAddIncludeWord} className="px-4 bg-teal-600/20 text-teal-400 border border-teal-500/30 text-xs font-bold rounded-sm hover:bg-teal-600/40 transition-colors">추가</button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {customIncludeWords.length === 0 && <span className="text-[10px] text-white/30">등록된 필수 포함 단어가 없습니다.</span>}
+              {customIncludeWords.map(word => (
+                <span key={word} className="px-2 py-1 bg-teal-900/30 border border-teal-500/30 rounded text-[10px] sm:text-[11px] text-teal-300 flex items-center gap-1.5">
+                  {word}
+                  <button onClick={() => handleRemoveIncludeWord(word)} className="text-teal-500/50 hover:text-teal-300">✕</button>
+                </span>
+              ))}
+            </div>
           </div>
+
         </div>
       )}
 
