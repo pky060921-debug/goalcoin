@@ -13,7 +13,7 @@ const getGridClass = (cols: number) => {
 
 type WordItem = { text: string; subWords: string[]; };
 
-export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory }: any) => {
+export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory, loadAllData }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   const craftFolders = Array.from(new Set(safeCategories.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
@@ -35,6 +35,10 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     catch(e) { return []; }
   });
   const [newStopWord, setNewStopWord] = useState("");
+
+  // 💡 [신규 상태] 일괄 선택 모드 및 체크된 카드 ID 관리
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     localStorage.setItem('blankd_custom_stopwords', JSON.stringify(customStopWords));
@@ -72,14 +76,70 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     });
   };
 
-  const createLongPressHandlers = (callback: () => void, ms = 800) => {
+  // 💡 롱프레스 핸들러: 길게 누르면 일괄 선택 모드 진입 및 해당 카드 자동 체크
+  const createLongPressHandlers = (catId: number) => {
     let timer: any;
-    const start = () => { timer = setTimeout(callback, ms); };
+    const start = () => {
+      timer = setTimeout(() => {
+        if (!isSelectMode) {
+          setIsSelectMode(true);
+          setCheckedIds(new Set([catId]));
+          addLog("📦 일괄 선택 모드가 활성화되었습니다. 길게 누르거나 터치하여 선택하세요.");
+        }
+      }, 700);
+    };
     const clear = () => { clearTimeout(timer); };
-    return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
+    return {
+      onTouchStart: start, onTouchEnd: clear,
+      onMouseDown: start, onMouseUp: clear, onMouseLeave: clear,
+      onContextMenu: (e: any) => { e.preventDefault(); }
+    };
+  };
+
+  // 💡 체크박스 토글 함수
+  const handleToggleCheck = (catId: number) => {
+    const next = new Set(checkedIds);
+    if (next.has(catId)) {
+      next.delete(catId);
+    } else {
+      next.add(catId);
+    }
+    setCheckedIds(next);
+    if (next.size === 0) {
+      setIsSelectMode(false);
+    }
+  };
+
+  // 💡 일괄 삭제 처리 함수
+  const handleBatchDelete = async () => {
+    if (checkedIds.size === 0) return;
+    if (window.confirm(`선택한 ${checkedIds.size}개의 조항을 일괄 삭제하시겠습니까?`)) {
+      addLog(`🗑️ ${checkedIds.size}개 조항 일괄 삭제 시작...`);
+      try {
+        const deletePromises = Array.from(checkedIds).map(id =>
+          fetch("https://api.blankd.top/api/delete-category", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet_address: safeAddress, id })
+          })
+        );
+        await Promise.all(deletePromises);
+        addLog(`✅ ${checkedIds.size}개 조항 일괄 삭제 완료`);
+        setIsSelectMode(false);
+        setCheckedIds(new Set());
+        if (loadAllData) await loadAllData();
+        else window.location.reload();
+      } catch (e) {
+        alert("일괄 삭제 중 오류가 발생했습니다.");
+      }
+    }
   };
 
   const openCategory = (targetCat: any) => {
+    if (isSelectMode) {
+      handleToggleCheck(targetCat.id);
+      return;
+    }
     setExpandedId(targetCat.id);
     setPageBreaks(new Set());
     setMemoInput(targetCat.memo || "");
@@ -99,26 +159,21 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
        currentPos += w.length;
     });
 
-    // 1단계: 단일 단어 및 기본 특수기호 필터링
     initialWords.forEach((word, idx) => {
       const trimmed = word.trim();
       const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(trimmed) && trimmed !== "";
-      
       const isArticleOrNum = /^(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조)(?:의\s*\d+)?/.test(trimmed) || 
                              /^\(?\d+(?:항|호|목)?\)?$/.test(trimmed) || 
                              /^\(?(?:①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)\)?$/.test(trimmed);
                              
-      // 💡 [핵심 강화] 은, 는, 이, 가, 을, 를, 의, 에 등 기본 조사 및 의존명사 완벽 차단!
       const isStopWord = /^(은|는|이|가|을|를|의|에|에게|에서|로|으로|과|와|도|만|부터|까지|조차|마저|치고|및|등|또는|수|할|이하|이상|초과|미만|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여|바|것|자|경우|때|중)$/.test(trimmed);
-      
       const isCustomSingleStopWord = !trimmed.includes(" ") && currentCustomStopWords.includes(trimmed);
       
       if (!isSymbolOnly && !isArticleOrNum && !isStopWord && !isCustomSingleStopWord && trimmed.length > 0) {
-        initialSelected.add(idx); // 핵심 단어만 빈칸으로 칠함
+        initialSelected.add(idx);
       }
     });
 
-    // 2단계: 문장 단위 복합 정규식 및 다중 단어(구문) 필터링
     const fullText = initialWords.join("");
     const patternsToExclude: RegExp[] = [
       /(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g,
@@ -244,6 +299,18 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         >
           ⚙️ 예외 단어
         </button>
+        
+        {/* 💡 [신규 UI] 일괄 선택 모드일 때 활성화되는 일괄삭제 및 취소 버튼 컨트롤 바 */}
+        {isSelectMode && (
+          <div className="flex gap-1 animate-in fade-in zoom-in-95">
+            <button onClick={handleBatchDelete} className="px-3 sm:px-4 bg-red-600/20 border border-red-500 text-red-400 text-[10px] sm:text-xs font-bold rounded-sm hover:bg-red-600/40 transition-colors">
+              🗑️ 일괄삭제 ({checkedIds.size})
+            </button>
+            <button onClick={() => { setIsSelectMode(false); setCheckedIds(new Set()); }} className="px-2 border border-white/10 text-white/40 text-[10px] sm:text-xs rounded-sm hover:bg-white/5">
+              취소
+            </button>
+          </div>
+        )}
       </div>
 
       {showStopWordsSettings && (
@@ -311,6 +378,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
                 const isExpanded = expandedId === cat.id;
+                const isChecked = checkedIds.has(cat.id);
                 const contentToUse = cat.content || cat.title || "";
                 
                 let colClass = ""; let titleColor = "text-amber-400";
@@ -325,12 +393,43 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                 return (
                   <div key={cat.id} className={`relative transition-all w-full ${colClass}`}>
                     {!isExpanded ? (
-                      <button {...createLongPressHandlers(() => handleDeleteCategory(cat.id))} 
-                        onClick={() => openCategory(cat)} 
-                        className="w-full min-h-[60px] p-3 sm:p-4 bg-indigo-900/20 border border-indigo-500/30 rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-1.5 sm:gap-2 text-left">
-                        <span className={`${titleColor} font-bold text-[11px] sm:text-[13px] leading-snug break-keep`}>{cleanTitle}</span>
-                        {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
-                      </button>
+                      <div className="relative group/card w-full flex items-center gap-2">
+                        
+                        {/* 💡 [신규 UI] 일괄 선택 모드 활성화 시 카드 왼쪽에 출력되는 체크박스 */}
+                        {isSelectMode && (
+                          <input 
+                            type="checkbox" 
+                            checked={isChecked}
+                            onChange={() => handleToggleCheck(cat.id)}
+                            className="w-4 h-4 rounded border-white/20 bg-black accent-amber-500 cursor-pointer shrink-0 transition-all"
+                          />
+                        )}
+
+                        <button 
+                          {...createLongPressHandlers(cat.id)}
+                          onClick={() => openCategory(cat)} 
+                          className={`flex-1 min-h-[60px] p-3 sm:p-4 bg-indigo-900/20 border rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-1.5 sm:gap-2 text-left relative pr-10 ${isChecked ? 'border-amber-500/50 bg-amber-950/10' : 'border-indigo-500/30'}`}
+                        >
+                          <span className={`${titleColor} font-bold text-[11px] sm:text-[13px] leading-snug break-keep`}>{cleanTitle}</span>
+                          {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
+                          
+                          {/* 💡 [신규 UI] 카드의 호버 또는 모바일 대응을 위해 카드 내 우측 상단에 장착된 개별 즉시 삭제 X 버튼 */}
+                          {!isSelectMode && (
+                            <span
+                              onClick={async (e) => {
+                                e.stopPropagation(); // 카드 확장 이벤트 전파 방지
+                                if (confirm(`'${cleanTitle}' 조항을 대기열에서 즉시 삭제하시겠습니까?`)) {
+                                  await handleDeleteCategory(cat.id);
+                                }
+                              }}
+                              className="absolute top-1/2 -translate-y-1/2 right-3 w-5 h-5 flex items-center justify-center border border-white/10 text-white/30 hover:text-red-400 hover:border-red-500/30 rounded-full text-[10px] bg-black/40 md:opacity-0 group-hover/card:opacity-100 transition-all duration-150 cursor-pointer"
+                              title="즉시 삭제"
+                            >
+                              ✕
+                            </span>
+                          )}
+                        </button>
+                      </div>
                     ) : (
                       <div className="w-full p-4 sm:p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-3 shadow-xl z-20 relative animate-in zoom-in-95">
                         <div className="flex justify-between items-center mb-1 flex-wrap gap-2">
