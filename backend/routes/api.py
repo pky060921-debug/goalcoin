@@ -741,7 +741,8 @@ def upload_pdf():
     def process_file():
         try:
             raw_text = ""
-            if original_filename.lower().endswith('.txt'):
+            if original_filename.lower().endswith(('.txt', '.html', '.htm')):
+
                 file_bytes = file.read()
                 try: raw_text = file_bytes.decode('utf-8')
                 except UnicodeDecodeError: raw_text = file_bytes.decode('cp949', errors='ignore')
