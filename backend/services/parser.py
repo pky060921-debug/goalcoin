@@ -1,5 +1,4 @@
 import re
-import html
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
@@ -7,11 +6,9 @@ def clean_korean_law_text(text):
     text = re.sub(r'-\s*\d+\s*-', '\n', text)
     text = re.sub(r'/?\d{4}\.\d{1,2}\.\d{1,2}\s*\d{2}:\d{2}.*', '\n', text)
     text = re.sub(r'\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2}:\d{2}', '\n', text)
-    
-    # 3단 비교표에 자주 등장하는 연혁 메타데이터 삭제 방어
-    text = re.sub(r'\[(?:본조신설|전문개정|제목개정|단서신설).*?\]', '', text)
+    # 삭제, 연혁 등 지저분한 메타데이터 완벽 제거
+    text = re.sub(r'\[(?:본조신설|전문개정|제목개정|단서신설|삭제).*?\]', '', text)
     text = re.sub(r'\[(?:종전 제.*?조는 제.*?조로 이동).*?\]', '', text)
-    
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
@@ -31,67 +28,127 @@ def parse_html_3col_law(html_content):
         categories = []
         current_folder = "기본 폴더"
         
-        # 💡 [핵심] 법, 령, 칙 각각의 최근 조문 번호와 제목을 독립적으로 기억(상속)
-        context = {
-            "법": {"num": "부칙등", "title": "내용"},
-            "령": {"num": "부칙등", "title": "내용"},
-            "칙": {"num": "부칙등", "title": "내용"}
-        }
+        # 고아 텍스트 연결을 위한 문맥 맵 (link_id 기반)
+        context_map = {} 
+        last_num = "부칙등"
+        last_title = "내용"
         
-        groups = table.find_all('div', class_='lsptnThdCmpGroup')
-        for group in groups:
-            lawcon = group.find('div', class_='lawcon')
-            if not lawcon:
-                # 장/절 등의 헤더를 인식하여 폴더명으로 추출
+        # 순서 복원을 위한 정렬용 맵
+        global_order = 0
+        link_id_order_map = {}
+        
+        rows = table.find_all('tr')
+        for row in rows:
+            # 1. '장/절' 폴더명 강제 탐지기 (셀 병합 고려)
+            tds = row.find_all('td', recursive=False)
+            if len(tds) == 1:
+                row_text = clean_korean_law_text(tds[0].get_text(strip=True))
+                if re.search(r'^제\s*\d+\s*[장편절]', row_text) or "부칙" in row_text:
+                    match = re.search(r'제\s*\d+\s*[장편절][^\s]*', row_text)
+                    if match: current_folder = match.group(0).strip()
+                    elif "부칙" in row_text: current_folder = "부칙"
+                    continue
+
+            groups = row.find_all('div', class_='lsptnThdCmpGroup')
+            for group in groups:
+                # 내부 숨겨진 장/절 탐지
                 label = group.find('label')
                 if label:
                     text = label.get_text(strip=True)
-                    if "장" in text or "편" in text:
-                        current_folder = text
-                continue
+                    if re.search(r'제\s*\d+\s*[장편절]', text):
+                        match = re.search(r'제\s*\d+\s*[장편절][^\s]*', text)
+                        if match: current_folder = match.group(0).strip()
+                        continue
+                        
+                lawcon = group.find('div', class_='lawcon')
+                if not lawcon: continue
                 
-            content = clean_korean_law_text(lawcon.get_text(separator="\n", strip=True))
-            if not content or len(content) < 5: continue
-            
-            # 타입 결정 (법/령/칙)
-            type_name = "법"
-            span_lor = lawcon.find('span', id=re.compile(r'^div[LOR]$'))
-            if span_lor:
-                if span_lor['id'] == 'divL': type_name = "법"
-                elif span_lor['id'] == 'divO': type_name = "령"
-                elif span_lor['id'] == 'divR': type_name = "칙"
-            else:
-                td = group.find_parent('td')
-                if td:
-                    bold_p = td.find('p', class_='txt_bold')
-                    if bold_p:
-                        bold_text = bold_p.get_text()
-                        if '시행령' in bold_text: type_name = "령"
-                        elif '시행규칙' in bold_text: type_name = "칙"
-            
-            # 💡 조문 번호 추출 시도
-            article_match = re.search(r'제\s*(\d+)\s*조(?:의\s*(\d+))?', content)
-            
-            if article_match:
-                # 새로운 조문 번호가 등장하면, 해당 타입(법/령/칙)의 기억(context)을 업데이트!
-                context[type_name]["num"] = article_match.group(0).replace(" ", "")
+                content = clean_korean_law_text(lawcon.get_text(separator="\n", strip=True))
+                if not content or len(content) < 3: continue
                 
-                title_match = re.search(r'\(([^()]+)\)', content)
-                if title_match:
-                    context[type_name]["title"] = title_match.group(1).strip()
+                # 💡 [해결] 텍스트가 왼쪽으로 쏠리는 문제 방지 (강제 줄바꿈 주입)
+                content = re.sub(r'(?<!\n)(\d+\.)', r'\n\1', content)  # '1.', '2.' 앞에 줄바꿈
+                content = re.sub(r'(?<!\n)(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)', r'\n\1', content) # 동그라미 번호 앞에 줄바꿈
+                content = re.sub(r'\n{3,}', '\n\n', content).strip()
+                
+                type_name = "법"
+                link_id = None
+                
+                # 고유 링크 ID (divL168 등) 추출을 통한 법-령-칙 자석 매칭
+                span_lor = lawcon.find('span', id=re.compile(r'^div[LOR]$'))
+                if span_lor:
+                    if span_lor['id'] == 'divL': type_name = "법"
+                    elif span_lor['id'] == 'divO': type_name = "령"
+                    elif span_lor['id'] == 'divR': type_name = "칙"
+                    
+                    classes = span_lor.get('class', [])
+                    for cls in classes:
+                        match = re.search(r'div[LOR](\d+)', cls)
+                        if match:
+                            link_id = match.group(1)
+                            break
                 else:
-                    context[type_name]["title"] = "세부내용"
-            
-            # 만약 조문 번호가 없어도(항/호 만 있는 경우), 기억해둔 번호와 제목을 꺼내서 붙임 (상속)
-            article_num_str = context[type_name]["num"]
-            title_text = context[type_name]["title"]
-            
-            clean_title = f"[{type_name}] {article_num_str} ({title_text[:15]})"
-            categories.append({
-                "title": clean_title, 
-                "content": content, 
-                "folder_name": current_folder
-            })
+                    parent_td = group.find_parent('td')
+                    if parent_td:
+                        bold_p = parent_td.find('p', class_='txt_bold')
+                        if bold_p:
+                            bold_text = bold_p.get_text()
+                            if '시행령' in bold_text: type_name = "령"
+                            elif '시행규칙' in bold_text: type_name = "칙"
+                
+                article_match = re.search(r'제\s*(\d+)\s*조(?:의\s*(\d+))?', content)
+                my_num = last_num
+                my_title = last_title
+                
+                if article_match:
+                    my_num = article_match.group(0).replace(" ", "")
+                    title_match = re.search(r'\(([^()]+)\)', content)
+                    my_title = title_match.group(1).strip() if title_match else "세부내용"
+                    
+                    # '법'이면 번호/제목/폴더 위치를 기억장치에 저장
+                    if type_name == "법" and link_id:
+                        context_map[link_id] = {"num": my_num, "title": my_title, "folder": current_folder}
+                    
+                    if type_name == "법":
+                        last_num = my_num
+                        last_title = my_title
+                else:
+                    # 번호가 없는 '령', '칙'은 기억장치에서 부모(법)의 정보를 끌어옴
+                    if link_id and link_id in context_map:
+                        my_num = context_map[link_id]["num"]
+                        my_title = context_map[link_id]["title"]
+                        current_folder = context_map[link_id]["folder"]
+                    else:
+                        my_num = last_num
+                        my_title = last_title
+                        
+                clean_title = f"[{type_name}] {my_num} ({my_title[:15]})"
+                
+                # 💡 [해결] 꼬여버린 순서를 완벽하게 재정렬하기 위한 번호표 부여
+                if link_id:
+                    if link_id not in link_id_order_map:
+                        global_order += 10
+                        link_id_order_map[link_id] = global_order
+                    base_order = link_id_order_map[link_id]
+                    
+                    if type_name == "법": sort_order = base_order + 1
+                    elif type_name == "령": sort_order = base_order + 2
+                    else: sort_order = base_order + 3
+                else:
+                    global_order += 10
+                    sort_order = global_order
+                
+                categories.append({
+                    "title": clean_title, 
+                    "content": content, 
+                    "folder_name": current_folder,
+                    "sort_order": sort_order
+                })
+                
+        # 엉망진창이 된 DOM 순서를 버리고, 부여된 번호표 순으로 완벽 정렬
+        categories.sort(key=lambda x: x["sort_order"])
+        for cat in categories:
+            del cat["sort_order"] # 임시 번호표 삭제
             
         return categories
 
