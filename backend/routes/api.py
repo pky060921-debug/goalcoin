@@ -1036,3 +1036,56 @@ def update_stopwords():
         return jsonify({"message": "예외 단어 DB 업데이트 완료"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# ==========================================
+# 💡 사용자 체크포인트(진행 상태) 관리 API
+# ==========================================
+@api_bp.route('/save-checkpoint', methods=['POST'])
+def save_checkpoint():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        tab = data.get('tab') # 'craft' 또는 'enhance'
+        last_id = data.get('last_id')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # user_settings 테이블에 last_craft_id, last_enhance_id 컬럼이 필요함 (없으면 생성)
+        try:
+            cursor.execute(f"ALTER TABLE user_settings ADD COLUMN last_{tab}_id INTEGER")
+        except sqlite3.OperationalError:
+            pass # 이미 존재함
+            
+        cursor.execute("SELECT 1 FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+        if cursor.fetchone():
+            cursor.execute(f"UPDATE user_settings SET last_{tab}_id = ? WHERE wallet_address = ?", (last_id, wallet_address))
+        else:
+            cursor.execute(f"INSERT INTO user_settings (wallet_address, last_{tab}_id) VALUES (?, ?)", (wallet_address, last_id))
+            
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "체크포인트 저장 완료"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/get-checkpoint', methods=['GET'])
+def get_checkpoint():
+    try:
+        wallet_address = request.args.get('wallet_address')
+        tab = request.args.get('tab')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute(f"SELECT last_{tab}_id FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+            row = cursor.fetchone()
+            last_id = row[0] if row and row[0] else None
+        except sqlite3.OperationalError:
+            last_id = None
+            
+        conn.close()
+        return jsonify({"last_id": last_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
