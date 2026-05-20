@@ -722,9 +722,6 @@ def get_cbt_session():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ==========================================
-# 💡 대표님의 완벽한 PDF 파서 등 기존 기능 100% 보존 구역
-# ==========================================
 @api_bp.route('/upload-pdf', methods=['POST'])
 def upload_pdf():
     file = request.files.get('file')
@@ -736,82 +733,114 @@ def upload_pdf():
     TASK_STATUS[task_id] = "처리 중..."
     
     original_filename = file.filename if file else "일반 규정"
-    folder_name = re.sub(r'\.(pdf|txt)$', '', original_filename, flags=re.IGNORECASE)
+    folder_name = re.sub(r'\.(pdf|txt|html|htm)$', '', original_filename, flags=re.IGNORECASE)
 
     def process_file():
         try:
             raw_text = ""
+            is_html = original_filename.lower().endswith(('.html', '.htm'))
+            
             if original_filename.lower().endswith(('.txt', '.html', '.htm')):
-
                 file_bytes = file.read()
-                try: raw_text = file_bytes.decode('utf-8')
-                except UnicodeDecodeError: raw_text = file_bytes.decode('cp949', errors='ignore')
+                try: 
+                    raw_text = file_bytes.decode('utf-8')
+                except UnicodeDecodeError: 
+                    raw_text = file_bytes.decode('cp949', errors='ignore')
             else:
                 doc = fitz.open(stream=file.read(), filetype="pdf")
-                for page in doc: raw_text += page.get_text()
+                for page in doc: 
+                    raw_text += page.get_text()
             
-            raw_text = re.sub(r'<(?:신설|개정|삭제|단서신설|전문개정|본조신설)[^>]*>', '', raw_text)
-            raw_text = re.sub(r'\[(?:전문개정|본조신설|제목개정|종전제\d+조는|제\d+조에서 이동)[^\]]*\]', '', raw_text)
+            blocks = []
             
-            cleaned_text = clean_korean_law_text(raw_text)
-            blocks = parse_html_3col_law(cleaned_text)
+            # 💡 HTML 파일일 경우 3단 비교표의 데이터 누락(시행령·시행규칙 증발)을 방지하는 파서 가동
+            if is_html:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(raw_text, 'html.parser')
+                for tr in soup.find_all('tr'):
+                    cells = tr.find_all('td')
+                    if not cells:
+                        continue
+                    
+                    content_parts = []
+                    row_title = ""
+                    
+                    for cell in cells:
+                        txt = cell.get_text("\n", strip=True)
+                        if txt:
+                            content_parts.append(txt)
+                            # 셀 내부에서 가장 먼저 매칭되는 조항 번호를 타이틀 뼈대로 획득
+                            if not row_title:
+                                match = re.search(r'제\s*\d+\s*조(?:의\s*\d+)?', txt)
+                                if match:
+                                    row_title = txt.split('\n')[0].strip()[:60]
+                    
+                    if content_parts:
+                        if not row_title:
+                            row_title = content_parts[0].split('\n')[0].strip()[:60] or "일반 조항"
+                        full_content = "\n\n".join(content_parts)
+                        blocks.append({"title": row_title, "content": full_content})
             
-            # 💡 [핵심 보존 로직] 만약 파싱된 블록이 3개 미만이면, 원본에서 강제로 조항을 다시 추출합니다.
-            if not blocks or len(blocks) < 3:
-                logging.info(f"[{folder_name}] 정밀 파싱 시작: 구조 인식 실패 시 강제 추출 모드 가동")
-                blocks = []
+            # HTML 구조가 아니거나, HTML 파싱 블록을 얻지 못했을 때 기존 예외 대응 파서 가동
+            if not blocks:
+                raw_text = re.sub(r'<(?:신설|개정|삭제|단서신설|전문개정|본조신설)[^>]*>', '', raw_text)
+                raw_text = re.sub(r'\[(?:전문개정|본조신설|제목개정|종전제\d+조는|제\d+조에서 이동)[^\]]*\]', '', raw_text)
                 
-                # 조항 번호(제x조)를 기준으로 전체 텍스트를 파편화합니다.
-                # (?:제)?\s*\d+\s*조(?:\([^)]+\))? : 제x조 또는 제x조(제목) 형태를 모두 포착
-                pattern = r'(?m)^ *(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)'
-                parts = re.split(pattern, raw_text)
+                cleaned_text = clean_korean_law_text(raw_text)
+                blocks = parse_html_3col_law(cleaned_text)
                 
-                if len(parts) >= 3:
-                    for i in range(1, len(parts), 2):
-                        title = parts[i].strip()
-                        content = parts[i+1].strip()
-                        # 💡 [방어] 조항 내용이 10자 이상이면 무조건 살림
-                        if len(content) > 10:
-                            blocks.append({"title": title, "content": f"{title}\n{content}"})
-                
-                # 💡 [최후의 보루] 그럼에도 블록이 없다면, 50자 이상의 모든 덩어리를 무조건 저장함 (증발 방지)
-                if not blocks:
-                    paragraphs = [p.strip() for p in raw_text.split('\n\n') if len(p.strip()) > 50]
-                    for idx, p in enumerate(paragraphs):
-                        blocks.append({"title": f"문서 조각 {idx+1}", "content": p})
-                        
+                # 만약 파싱된 블록이 3개 미만이면 원본 데이터에서 조항 기준 강제 파편화 분리
+                if not blocks or len(blocks) < 3:
+                    logging.info(f"[{folder_name}] 정밀 파싱 시작: 구조 인식 실패 시 강제 추출 모드 가동")
+                    blocks = []
+                    
+                    pattern = r'(?m)^ *(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)'
+                    parts = re.split(pattern, raw_text)
+                    
+                    if len(parts) >= 3:
+                        for i in range(1, len(parts), 2):
+                            title = parts[i].strip()
+                            content = parts[i+1].strip()
+                            if len(content) > 10:
+                                blocks.append({"title": title, "content": f"{title}\n{content}"})
+                    
+                    # 최후의 보루: 구조화 실패 시 50자 이상의 모든 개행 단락 보존 처리
+                    if not blocks:
+                        paragraphs = [p.strip() for p in raw_text.split('\n\n') if len(p.strip()) > 50]
+                        for idx, p in enumerate(paragraphs):
+                            blocks.append({"title": f"문서 조각 {idx+1}", "content": p})
+                            
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            # 💡 [추가] 카드 테이블에서 이미 학습한 조항들의 제목 가져오기
+            # 카드 테이블에서 기존에 생성 완료된 데이터 목록 추출
             cursor.execute("SELECT card_content FROM cards WHERE wallet_address = ?", (wallet_address,))
             existing_cards = [row[0] for row in cursor.fetchall()]
             
-            # 💡 [핵심] 조항 번호만 표준화하여 추출하는 함수
+            # 조항 번호 정규화 맵 매칭용 람다 유틸 함수
             def get_article_num(text):
-                # '제', '조', 공백을 제거하고 숫자만 남깁니다. (예: "제 1 조" -> "1")
                 match = re.search(r'(?:제)?\s*(\d+)\s*조', text)
                 return match.group(1) if match else None
 
-            # 1. 카드 데이터에서 '조항 번호'만 미리 추출하여 집합(Set)으로 생성 (검색 속도 극대화)
+            # 카드 데이터셋 인덱스 번호 파싱 및 중복 제거 셋 구현
             existing_article_nums = set()
             for card in existing_cards:
                 art = get_article_num(card)
-                if art: existing_article_nums.add(art)
+                if art: 
+                    existing_article_nums.add(art)
             
-            # 2. 루프를 돌며 매칭 수행
+            # 파싱 블록 일치 검사 루프 실행 후 적재
             for block in blocks:
                 display_folder = folder_name
-                # 현재 블록의 조항 번호 추출
                 current_art = get_article_num(block['title'])
                 
-                # 조항 번호가 존재하고, 이미 카드에 있다면 꼬리표 부착
+                # 조항 인덱스 번호 유효성 검증 성공 시 완료 플래그 폴더 생성
                 if current_art and current_art in existing_article_nums:
                     display_folder = f"{folder_name} [완료]"
                 
-                # 저장 실행
                 cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
                                (wallet_address, block['title'], block['content'], display_folder))
+            
             conn.commit()
             conn.close()
             TASK_STATUS[task_id] = "완료"
@@ -821,7 +850,7 @@ def upload_pdf():
 
     threading.Thread(target=process_file).start()
     return jsonify({"message": f"{folder_name} 분석 시작", "task_id": task_id})
-
+    
 @api_bp.route('/get-categories')
 def get_categories():
     try:
