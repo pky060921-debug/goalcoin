@@ -780,8 +780,23 @@ def upload_pdf():
             
             conn = get_db_connection()
             cursor = conn.cursor()
+            
+            # 💡 [추가] 카드 테이블에서 이미 학습한 조항들의 제목 가져오기
+            cursor.execute("SELECT card_content FROM cards WHERE wallet_address = ?", (wallet_address,))
+            existing_cards = [row[0] for row in cursor.fetchall()]
+            
             for block in blocks:
-                cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", (wallet_address, block['title'], block['content'], folder_name))
+                # 💡 [추가] 매칭 로직: 카드 내용에 조항명이 포함되어 있는지 확인
+                display_folder = folder_name
+                for card in existing_cards:
+                    if block['title'] in card:
+                        display_folder = f"{folder_name} [완료]"
+                        break
+                
+                # 기존 로직: 꼬리표가 붙은 folder_name으로 저장
+                cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
+                               (wallet_address, block['title'], block['content'], display_folder))
+            
             conn.commit()
             conn.close()
             TASK_STATUS[task_id] = "완료"
