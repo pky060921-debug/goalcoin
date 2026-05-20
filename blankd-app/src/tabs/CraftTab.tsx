@@ -29,13 +29,10 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   const [memoInput, setMemoInput] = useState(""); 
   const [isEraserMode, setIsEraserMode] = useState(false);
   
-  // 💡 [추가] 텍스트 편집기 모드 상태 관리
   const [isEditingText, setIsEditingText] = useState(false);
   const [editingContent, setEditingContent] = useState("");
-
   const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
   
-  // 제외 단어와 포함 단어 리스트 관리
   const [customStopWords, setCustomStopWords] = useState<string[]>([]);
   const [customIncludeWords, setCustomIncludeWords] = useState<string[]>([]);
   const [newStopWord, setNewStopWord] = useState("");
@@ -44,7 +41,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
-  // DB에서 두 가지 리스트 모두 불러오기
   useEffect(() => {
     if (safeAddress) {
       api.getStopwords(safeAddress).then(data => {
@@ -61,7 +57,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     }
   }, [safeAddress]);
 
-  // DB 통합 저장 함수
   const saveWordsToDB = async (stops: string[], includes: string[]) => {
     try {
       await api.updateStopwords(safeAddress, { stop: stops, include: includes });
@@ -166,7 +161,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     }
   };
 
-  // 💡 [추가] 텍스트를 단어 배열로 쪼개고 빈칸 자동 추천을 실행하는 핵심 로직 (재사용을 위해 분리)
   const applyTextToState = (textBody: string) => {
     const initialWords = textBody.split(SPLIT_REGEX).filter(w => w !== "");
     setWordArray(initialWords.map(w => ({ text: w, subWords: [w] })));
@@ -184,23 +178,16 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     });
 
     const fullText = initialWords.join("");
-
     const protectedIndices = new Set<number>();
 
-    // 1. 보호구역: 단일 단어 등록
-    initialWords.forEach((word, idx) => {
-        if (!word.includes(" ") && currentCustomIncludeWords.includes(word.trim())) {
-            protectedIndices.add(idx);
-        }
-    });
-
-    // 2. 보호구역: 다중 구문(띄어쓰기 포함) 등록
+    // 💡 [개선] 1. 필수 포함 단어 (띄어쓰기 유무와 상관없이 무조건 정규식으로 본문 전체에서 낚아챔)
     const includePatterns: RegExp[] = [];
     currentCustomIncludeWords.forEach(cw => {
-       if (cw.includes(" ")) {
-           const regexStr = cw.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
-           includePatterns.push(new RegExp(regexStr, 'g'));
-       }
+       const trimmedCw = cw.trim();
+       if (!trimmedCw) return;
+       // 공백이 있다면 유연하게, 없다면 정확하게 매칭하되 특수문자 무시
+       const regexStr = trimmedCw.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+       includePatterns.push(new RegExp(regexStr, 'g'));
     });
 
     includePatterns.forEach(regex => {
@@ -216,10 +203,19 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
        }
     });
 
+    // 💡 [개선] 쪼개진 배열 자체에 부분 문자열(예: '또는,')로 포함되어 있어도 100% 보호
+    initialWords.forEach((word, idx) => {
+        const trimmed = word.trim();
+        if (currentCustomIncludeWords.some(cw => trimmed === cw || trimmed.includes(cw))) {
+            protectedIndices.add(idx);
+        }
+    });
+
     // 3. 일반적인 제외 필터링 검사
     initialWords.forEach((word, idx) => {
       const trimmed = word.trim();
       
+      // 보호된 단어(필수 포함)는 필터링을 무시하고 무조건 빈칸으로 지정
       if (protectedIndices.has(idx)) {
          if (trimmed.length > 0) initialSelected.add(idx);
          return;
@@ -231,23 +227,24 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                              /^\(?(?:①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)\)?$/.test(trimmed);
                              
       const isStopWord = /^(은|는|이|가|을|를|의|에|에게|에서|로|으로|과|와|도|만|부터|까지|조차|마저|치고|및|등|또는|수|할|이하|이상|초과|미만|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여|바|것|자|경우|때|중)$/.test(trimmed);
-      const isCustomSingleStopWord = !trimmed.includes(" ") && currentCustomStopWords.includes(trimmed);
+      
+      const isCustomSingleStopWord = currentCustomStopWords.some(cw => trimmed === cw || trimmed === cw + "." || trimmed === cw + ",");
       
       if (!isSymbolOnly && !isArticleOrNum && !isStopWord && !isCustomSingleStopWord && trimmed.length > 0) {
         initialSelected.add(idx);
       }
     });
 
-    // 4. 제외 구문 정규식 실행
+    // 4. 제외 구문(여러 단어 묶음) 정규식 실행
     const patternsToExclude: RegExp[] = [
       /(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g
     ];
 
     currentCustomStopWords.forEach(cw => {
-       if (cw.includes(" ")) {
-           const regexStr = cw.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
-           patternsToExclude.push(new RegExp(regexStr, 'g'));
-       }
+       const trimmedCw = cw.trim();
+       if (!trimmedCw) return;
+       const regexStr = trimmedCw.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+       patternsToExclude.push(new RegExp(regexStr, 'g'));
     });
 
     patternsToExclude.forEach(regex => {
@@ -278,13 +275,11 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     
     const { body } = formatCardText(targetCat.content || targetCat.title || "");
     
-    // 💡 [추가] 카테고리를 열 때 편집 상태 초기화
     setIsEditingText(false);
     setEditingContent(body);
     applyTextToState(body);
   };
 
-  // 💡 [추가] 편집기 모드 토글 핸들러
   const handleEditToggle = () => {
     if (!isEditingText) {
       if (selectedWords.size > 0 || pageBreaks.size > 0) {
@@ -570,7 +565,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                           </div>
                           
                           <div className="flex gap-2">
-                            {/* 💡 [추가] 텍스트 원본 편집 버튼 */}
                             <button 
                               onClick={handleEditToggle} 
                               className={`px-3 py-1 text-[11px] font-bold rounded-sm border transition-all ${isEditingText ? 'bg-green-600 border-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.3)]' : 'bg-white/5 border-white/20 text-white/50 hover:bg-white/10'}`}
@@ -578,7 +572,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                               {isEditingText ? '✅ 텍스트 적용' : '✏️ 원본 텍스트 편집'}
                             </button>
 
-                            {/* 편집 중이 아닐 때만 지우개 모드 노출 */}
                             {!isEditingText && (
                               <button onClick={() => setIsEraserMode(!isEraserMode)} className={`px-3 py-1 text-[11px] font-bold rounded-sm border transition-all ${isEraserMode ? 'bg-red-600 border-red-500 text-white animate-pulse' : 'bg-white/5 border-white/20 text-white/50 hover:bg-white/10'}`}>
                                 {isEraserMode ? '🗑️ 지우개 켜짐' : '🧹 지우개 모드'}
@@ -589,7 +582,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
 
                         <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-2 text-xs text-teal-200 outline-none rounded-sm" />
                         
-                        {/* 💡 [추가] 편집기 화면 or 빈칸 선택 화면 분기 처리 */}
                         {isEditingText ? (
                           <div className="w-full relative mt-2 animate-in fade-in zoom-in-95">
                             <textarea
