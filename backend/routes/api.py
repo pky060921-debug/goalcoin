@@ -734,23 +734,27 @@ def upload_pdf():
     
     original_filename = file.filename if file else "일반 규정"
     base_filename = re.sub(r'\.(pdf|txt|html|htm)$', '', original_filename, flags=re.IGNORECASE)
+    
+    # 💡 [핵심 1] 메인 스레드에서 파일을 미리 읽어 메모리에 안전하게 저장합니다. 
+    # (백그라운드 스레드에서 읽으려 하면 파일이 이미 닫혀버리는 Flask 고질적 에러 원천 차단)
+    file_bytes = file.read()
 
-def process_file():
+    def process_file():
         try:
             raw_text = ""
             is_html = original_filename.lower().endswith(('.html', '.htm'))
             
+            # 읽어둔 바이트 데이터를 텍스트나 PDF로 변환
             if is_html or original_filename.lower().endswith('.txt'):
-                file_bytes = file.read()
                 try: raw_text = file_bytes.decode('utf-8')
                 except UnicodeDecodeError: raw_text = file_bytes.decode('cp949', errors='ignore')
             else:
-                doc = fitz.open(stream=file.read(), filetype="pdf")
+                doc = fitz.open(stream=file_bytes, filetype="pdf")
                 for page in doc: raw_text += page.get_text()
             
             blocks = []
             
-            # 💡 [핵심 수정] HTML 파일은 무조건 정밀하게 설계된 parser.py로 즉시 보냅니다!
+            # HTML 파일은 무조건 정밀하게 설계된 parser.py로 즉시 보냅니다.
             if is_html:
                 blocks = parse_html_3col_law(raw_text)
                 
@@ -760,16 +764,16 @@ def process_file():
 
             # HTML 파싱이 안 되었거나, 일반 TXT/PDF 문서일 경우의 백업 로직
             if not blocks:
-                raw_text = re.sub(r'<(?:신설|개정|삭제|단서신설|전문개정|본조신설)[^>]*>', '', raw_text)
-                raw_text = re.sub(r'\[(?:전문개정|본조신설|제목개정|종전제\d+조는|제\d+조에서 이동)[^\]]*\]', '', raw_text)
-                cleaned_text = clean_korean_law_text(raw_text)
+                raw_text_clean = re.sub(r'<(?:신설|개정|삭제|단서신설|전문개정|본조신설)[^>]*>', '', raw_text)
+                raw_text_clean = re.sub(r'\[(?:전문개정|본조신설|제목개정|종전제\d+조는|제\d+조에서 이동)[^\]]*\]', '', raw_text_clean)
+                cleaned_text = clean_korean_law_text(raw_text_clean)
                 
                 if not is_html:
                     blocks = parse_html_3col_law(cleaned_text)
                 
                 # 강제 추출 모드
                 if not blocks or len(blocks) < 3:
-                    logging.info(f"[{folder_name}] 정밀 파싱 시작: 구조 인식 실패 시 강제 추출 모드 가동")
+                    logging.info(f"[{base_filename}] 구조 인식 실패 시 강제 추출 모드 가동")
                     blocks = []
                     pattern = r'(?m)^ *(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)'
                     parts = re.split(pattern, cleaned_text)
@@ -779,55 +783,16 @@ def process_file():
                             title = parts[i].strip()
                             content = parts[i+1].strip()
                             if len(content) > 10:
-                                blocks.append({"title": title, "content": f"{title}\n{content}", "folder_name": folder_name})
-                    if not blocks:
-                        paragraphs = [p.strip() for p in cleaned_text.split('\n\n') if len(p.strip()) > 50]
-                        for idx, p in enumerate(paragraphs):
-                            blocks.append({"title": f"문서 조각 {idx+1}", "content": p, "folder_name": folder_name})
-
-            # DB 저장 로직
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            for block in blocks:
-                folder = block.get('folder_name', folder_name)
-                cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
-                               (wallet_address, block['title'], block['content'], folder))
-            conn.commit()
-            conn.close()
-            TASK_STATUS[task_id] = "완료"
-        except Exception as e:
-            logging.error(f"분석 에러: {traceback.format_exc()}")
-            TASK_STATUS[task_id] = f"에러: {str(e)}"
-            
-            # 💡 [기존 로직 보존] 위에서 HTML 파싱이 안 되었거나, PDF/TXT 문서일 경우 기존 로직 실행
-            if not blocks:
-                raw_text = re.sub(r'<(?:신설|개정|삭제|단서신설|전문개정|본조신설)[^>]*>', '', raw_text)
-                raw_text = re.sub(r'\[(?:전문개정|본조신설|제목개정|종전제\d+조는|제\d+조에서 이동)[^\]]*\]', '', raw_text)
-                cleaned_text = clean_korean_law_text(raw_text)
-                blocks = parse_html_3col_law(cleaned_text)
-                
-                # 강제 추출 모드 (기존 parser.py도 실패했을 경우)
-                if not blocks or len(blocks) < 3:
-                    logging.info(f"[{base_filename}] 정밀 파싱 시작: 구조 인식 실패 시 강제 추출 모드 가동")
-                    blocks = []
-                    pattern = r'(?m)^ *(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)'
-                    parts = re.split(pattern, raw_text)
-                    
-                    if len(parts) >= 3:
-                        for i in range(1, len(parts), 2):
-                            title = parts[i].strip()
-                            content = parts[i+1].strip()
-                            if len(content) > 10:
                                 blocks.append({"title": title, "content": f"{title}\n{content}", "folder_name": base_filename})
                     if not blocks:
-                        paragraphs = [p.strip() for p in raw_text.split('\n\n') if len(p.strip()) > 50]
+                        paragraphs = [p.strip() for p in cleaned_text.split('\n\n') if len(p.strip()) > 50]
                         for idx, p in enumerate(paragraphs):
                             blocks.append({"title": f"문서 조각 {idx+1}", "content": p, "folder_name": base_filename})
 
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            # 💡 [핵심 2] 카드로 만든 조항 자동 [완료] 매칭
+            # 카드로 만든 조항 자동 [완료] 매칭
             cursor.execute("SELECT card_content FROM cards WHERE wallet_address = ?", (wallet_address,))
             existing_cards = [row[0] for row in cursor.fetchall()]
             
@@ -841,11 +806,10 @@ def process_file():
                 if art: existing_article_nums.add(art)
             
             for block in blocks:
-                # 파서가 찾아낸 장/절 폴더명을 그대로 유지 (없으면 파일명 사용)
+                # 💡 [핵심 2] 변수명 오타 수정 (folder_name -> base_filename)
                 target_folder = block.get('folder_name', base_filename)
                 current_art = get_article_num(block['title'])
                 
-                # 매칭 성공 시 [완료] 꼬리표 부착
                 if current_art and current_art in existing_article_nums:
                     target_folder = f"{target_folder} [완료]"
                 
@@ -854,6 +818,7 @@ def process_file():
             conn.commit()
             conn.close()
             TASK_STATUS[task_id] = "완료"
+            
         except Exception as e:
             logging.error(f"분석 에러: {traceback.format_exc()}")
             TASK_STATUS[task_id] = f"에러: {str(e)}"
