@@ -229,7 +229,7 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // 💡 [핵심 보존] 강화 탭에서 학습 완료 시 원본 순서(ORIG_ID)대로 다음 카드 바로 띄우기
+  // 💡 [핵심 보존] 채우기 탭에서 학습 완료 시 원본 순서(ORIG_ID)대로 다음 카드 바로 띄우기
   const finishCard = () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true; 
@@ -366,7 +366,7 @@ function MainApp() {
         {isLoggedIn && (
           <div className="flex items-center w-full sm:w-auto justify-between gap-4">
             <nav className="flex gap-2 sm:gap-6 overflow-x-auto scrollbar-hide">
-              {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '강화' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
+              {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
                 <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`text-[11px] sm:text-sm font-bold tracking-widest whitespace-nowrap px-2 py-1 transition-all ${activeTab === tab.id ? 'text-white border-b-2 border-white' : 'text-white/40 hover:text-white'}`}>{tab.label}</button>
               ))}
             </nav>
