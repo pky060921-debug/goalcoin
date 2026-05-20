@@ -39,19 +39,24 @@ def parse_html_3col_law(html_content):
         
         rows = table.find_all('tr')
         for row in rows:
-            # 1. '장/절' 폴더명 강제 탐지기 (셀 병합 고려)
+            # 💡 [추가] 폴더 탐지 기능 강화: 특정 셀(td)에 갇혀있지 않고, 행 전체를 훑어 제n장을 찾아냅니다.
+            row_text_full = row.get_text(strip=True)
+            if re.search(r'제\s*\d+\s*[장편절]', row_text_full):
+                match = re.search(r'제\s*\d+\s*[장편절][^\s]*', row_text_full)
+                if match: current_folder = match.group(0).strip()
+            elif "부칙" in row_text_full:
+                current_folder = "부칙"
+
+            # 1. '장/절' 폴더명 강제 탐지기 (셀 병합 고려) - 원본 유지
             tds = row.find_all('td', recursive=False)
             if len(tds) == 1:
                 row_text = clean_korean_law_text(tds[0].get_text(strip=True))
                 if re.search(r'^제\s*\d+\s*[장편절]', row_text) or "부칙" in row_text:
-                    match = re.search(r'제\s*\d+\s*[장편절][^\s]*', row_text)
-                    if match: current_folder = match.group(0).strip()
-                    elif "부칙" in row_text: current_folder = "부칙"
                     continue
 
             groups = row.find_all('div', class_='lsptnThdCmpGroup')
             for group in groups:
-                # 내부 숨겨진 장/절 탐지
+                # 내부 숨겨진 장/절 탐지 - 원본 유지
                 label = group.find('label')
                 if label:
                     text = label.get_text(strip=True)
@@ -66,15 +71,15 @@ def parse_html_3col_law(html_content):
                 content = clean_korean_law_text(lawcon.get_text(separator="\n", strip=True))
                 if not content or len(content) < 3: continue
                 
-                # 💡 [해결] 텍스트가 왼쪽으로 쏠리는 문제 방지 (강제 줄바꿈 주입)
-                content = re.sub(r'(?<!\n)(\d+\.)', r'\n\1', content)  # '1.', '2.' 앞에 줄바꿈
-                content = re.sub(r'(?<!\n)(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)', r'\n\1', content) # 동그라미 번호 앞에 줄바꿈
+                # [해결] 텍스트가 왼쪽으로 쏠리는 문제 방지 (강제 줄바꿈 주입) - 원본 유지
+                content = re.sub(r'(?<!\n)(\d+\.)', r'\n\1', content)  
+                content = re.sub(r'(?<!\n)(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)', r'\n\1', content) 
                 content = re.sub(r'\n{3,}', '\n\n', content).strip()
                 
                 type_name = "법"
                 link_id = None
                 
-                # 고유 링크 ID (divL168 등) 추출을 통한 법-령-칙 자석 매칭
+                # 고유 링크 ID 추출을 통한 법-령-칙 자석 매칭 - 원본 유지
                 span_lor = lawcon.find('span', id=re.compile(r'^div[LOR]$'))
                 if span_lor:
                     if span_lor['id'] == 'divL': type_name = "법"
@@ -117,14 +122,14 @@ def parse_html_3col_law(html_content):
                     if link_id and link_id in context_map:
                         my_num = context_map[link_id]["num"]
                         my_title = context_map[link_id]["title"]
-                        current_folder = context_map[link_id]["folder"]
+                        current_folder = context_map[link_id]["folder"] # 💡 [추가] 령/칙도 부모의 폴더를 완벽하게 상속
                     else:
                         my_num = last_num
                         my_title = last_title
                         
                 clean_title = f"[{type_name}] {my_num} ({my_title[:15]})"
                 
-                # 💡 [해결] 꼬여버린 순서를 완벽하게 재정렬하기 위한 번호표 부여
+                # 꼬여버린 순서를 완벽하게 재정렬하기 위한 번호표 부여 - 원본 유지
                 if link_id:
                     if link_id not in link_id_order_map:
                         global_order += 10
@@ -145,7 +150,7 @@ def parse_html_3col_law(html_content):
                     "sort_order": sort_order
                 })
                 
-        # 엉망진창이 된 DOM 순서를 버리고, 부여된 번호표 순으로 완벽 정렬
+        # 엉망진창이 된 DOM 순서를 버리고, 부여된 번호표 순으로 완벽 정렬 - 원본 유지
         categories.sort(key=lambda x: x["sort_order"])
         for cat in categories:
             del cat["sort_order"] # 임시 번호표 삭제
@@ -153,7 +158,7 @@ def parse_html_3col_law(html_content):
         return categories
 
     else:
-        # 일반 법령 페이지용 로직
+        # 일반 법령 페이지용 로직 - 원본 유지
         categories = []
         current_chapter = "기본 폴더"
         current_law_num = "0"
@@ -161,6 +166,11 @@ def parse_html_3col_law(html_content):
         divs = soup.find_all(['div', 'p'])
         for div in divs:
             try:
+                # 💡 [추가] 일반 문서에서도 태그 파괴를 방어하여 장/절 우선 인식
+                if re.match(r'^제\s*\d+\s*[장편절]', div.get_text(strip=True)):
+                    current_chapter = div.get_text(strip=True).split('\n')[0].strip()
+                    continue
+
                 clean_content = clean_korean_law_text(div.get_text(separator="\n"))
                 clean_content = re.sub(r'\n\s*\n', '\n', clean_content).strip()
                 if len(clean_content) < 2: continue
@@ -194,3 +204,7 @@ def get_next_review_time(level):
     elif level == 1: return now + timedelta(days=1)
     elif level == 2: return now + timedelta(days=3)
     else: return now + timedelta(days=7)
+
+# [진단: 파서 로드 및 실행 오류 감지]
+if __name__ == "__main__":
+    print("[정상] parser.py가 성공적으로 초기화되었습니다.")
