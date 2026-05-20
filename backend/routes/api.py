@@ -735,7 +735,7 @@ def upload_pdf():
     original_filename = file.filename if file else "일반 규정"
     base_filename = re.sub(r'\.(pdf|txt|html|htm)$', '', original_filename, flags=re.IGNORECASE)
 
-    def process_file():
+def process_file():
         try:
             raw_text = ""
             is_html = original_filename.lower().endswith(('.html', '.htm'))
@@ -750,64 +750,55 @@ def upload_pdf():
             
             blocks = []
             
-            # 💡 [핵심 1] 3단 비교표 HTML 전용 "무적 파서" (증발 방지 & 제외 필터링)
+            # 💡 [핵심 수정] HTML 파일은 무조건 정밀하게 설계된 parser.py로 즉시 보냅니다!
             if is_html:
-                from bs4 import BeautifulSoup
-                soup = BeautifulSoup(raw_text, 'html.parser')
+                blocks = parse_html_3col_law(raw_text)
                 
-                # 🚫 필터링할 하위 규칙/고시 키워드 (이 단어가 든 칸은 통째로 삭제됨)
-                EXCLUDE_RULES = [
-                    "요양급여의 기준에 관한 규칙",
-                    "건강보험 요양급여 비용의 내역"
-                ]
-                
-                current_chapter = base_filename # 장/절 폴더명 기억 장치
-                
-                for tr in soup.find_all('tr'):
-                    row_text_full = tr.get_text(strip=True)
-                    
-                    # '제N장', '제N절', '부칙' 폴더 감지
-                    if re.search(r'제\s*\d+\s*[장편절]', row_text_full):
-                        match = re.search(r'제\s*\d+\s*[장편절][^\s]*', row_text_full)
-                        if match: current_chapter = match.group(0).strip()
-                    elif "부칙" in row_text_full:
-                        current_chapter = "부칙"
-                        
-                    cells = tr.find_all('td')
-                    if not cells: continue
-                    
-                    content_parts = []
-                    row_title = ""
-                    
-                    for cell in cells:
-                        txt = cell.get_text("\n", strip=True)
-                        if not txt: continue
-                        
-                        # 💡 [필터링 방어막] 제외 키워드가 칸(td)에 포함되어 있으면 통째로 무시!
-                        if any(rule in txt for rule in EXCLUDE_RULES):
-                            continue
-                            
-                        content_parts.append(txt)
-                        if not row_title:
-                            match = re.search(r'제\s*\d+\s*조(?:의\s*\d+)?', txt)
-                            if match:
-                                row_title = txt.split('\n')[0].strip()[:60]
-                                
-                    if content_parts:
-                        if not row_title:
-                            row_title = content_parts[0].split('\n')[0].strip()[:60] or "일반 조항"
-                            
-                        full_content = "\n\n".join(content_parts)
-                        # HTML 지저분한 태그 흔적 텍스트 청소
-                        full_content = re.sub(r'<(?:신설|개정|삭제)[^>]*>', '', full_content)
-                        
-                        # 💡 파싱된 블록 저장 (어느 장/절 소속인지 폴더명도 함께 보존)
-                        blocks.append({
-                            "title": row_title, 
-                            "content": full_content,
-                            "folder_name": current_chapter
-                        })
+                # 필요시 특정 규칙 배제 로직 (요양급여 등)
+                EXCLUDE_RULES = ["요양급여의 기준에 관한 규칙", "건강보험 요양급여 비용의 내역"]
+                blocks = [b for b in blocks if not any(rule in b['content'] for rule in EXCLUDE_RULES)]
 
+            # HTML 파싱이 안 되었거나, 일반 TXT/PDF 문서일 경우의 백업 로직
+            if not blocks:
+                raw_text = re.sub(r'<(?:신설|개정|삭제|단서신설|전문개정|본조신설)[^>]*>', '', raw_text)
+                raw_text = re.sub(r'\[(?:전문개정|본조신설|제목개정|종전제\d+조는|제\d+조에서 이동)[^\]]*\]', '', raw_text)
+                cleaned_text = clean_korean_law_text(raw_text)
+                
+                if not is_html:
+                    blocks = parse_html_3col_law(cleaned_text)
+                
+                # 강제 추출 모드
+                if not blocks or len(blocks) < 3:
+                    logging.info(f"[{folder_name}] 정밀 파싱 시작: 구조 인식 실패 시 강제 추출 모드 가동")
+                    blocks = []
+                    pattern = r'(?m)^ *(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)'
+                    parts = re.split(pattern, cleaned_text)
+                    
+                    if len(parts) >= 3:
+                        for i in range(1, len(parts), 2):
+                            title = parts[i].strip()
+                            content = parts[i+1].strip()
+                            if len(content) > 10:
+                                blocks.append({"title": title, "content": f"{title}\n{content}", "folder_name": folder_name})
+                    if not blocks:
+                        paragraphs = [p.strip() for p in cleaned_text.split('\n\n') if len(p.strip()) > 50]
+                        for idx, p in enumerate(paragraphs):
+                            blocks.append({"title": f"문서 조각 {idx+1}", "content": p, "folder_name": folder_name})
+
+            # DB 저장 로직
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            for block in blocks:
+                folder = block.get('folder_name', folder_name)
+                cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
+                               (wallet_address, block['title'], block['content'], folder))
+            conn.commit()
+            conn.close()
+            TASK_STATUS[task_id] = "완료"
+        except Exception as e:
+            logging.error(f"분석 에러: {traceback.format_exc()}")
+            TASK_STATUS[task_id] = f"에러: {str(e)}"
+            
             # 💡 [기존 로직 보존] 위에서 HTML 파싱이 안 되었거나, PDF/TXT 문서일 경우 기존 로직 실행
             if not blocks:
                 raw_text = re.sub(r'<(?:신설|개정|삭제|단서신설|전문개정|본조신설)[^>]*>', '', raw_text)
