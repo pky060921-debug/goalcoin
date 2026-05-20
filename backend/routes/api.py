@@ -758,21 +758,16 @@ def upload_pdf():
             blocks = parse_html_3col_law(cleaned_text)
             
             if not blocks or len(blocks) < 3:
-                logging.info(f"[{folder_name}] 일반 문서 파서로 정밀 분석을 시작합니다.")
                 blocks = []
-                
                 pattern = r'(?m)^ *(제\s*\d+\s*조(?:의\s*\d+)?)'
                 parts = re.split(pattern, raw_text)
-                
                 if len(parts) >= 3:
                     for i in range(1, len(parts), 2):
                         article_num = parts[i].strip()
                         content_body = parts[i+1].strip() if i+1 < len(parts) else ""
-                        
                         match = re.match(r'^(\s*\(.*?\))', content_body)
                         full_title = f"{article_num} {match.group(1).strip()}" if match else article_num
                         clean_body = re.sub(r'\n{2,}', '\n', content_body).strip()
-                        
                         blocks.append({"title": full_title, "content": f"{full_title}\n{clean_body}"})
                 else:
                     paragraphs = [p.strip() for p in raw_text.split('\n\n') if len(p.strip()) > 30]
@@ -781,8 +776,22 @@ def upload_pdf():
             
             conn = get_db_connection()
             cursor = conn.cursor()
+            
+            # 💡 [핵심] 기존 카드 데이터 목록 가져오기 (매칭용)
+            cursor.execute("SELECT card_content FROM cards WHERE wallet_address = ?", (wallet_address,))
+            existing_cards = [row[0] for row in cursor.fetchall()]
+            
             for block in blocks:
-                cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", (wallet_address, block['title'], block['content'], folder_name))
+                # 조항명이 카드 내용에 포함되어 있으면 '완료' 꼬리표 붙이기
+                display_folder = folder_name
+                for card in existing_cards:
+                    if block['title'] in card:
+                        display_folder = f"{folder_name} [완료]"
+                        break
+                
+                cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
+                               (wallet_address, block['title'], block['content'], display_folder))
+            
             conn.commit()
             conn.close()
             TASK_STATUS[task_id] = "완료"
