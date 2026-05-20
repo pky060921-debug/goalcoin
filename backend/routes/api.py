@@ -756,28 +756,30 @@ def upload_pdf():
             cleaned_text = clean_korean_law_text(raw_text)
             blocks = parse_html_3col_law(cleaned_text)
             
+            # 💡 [핵심 보존 로직] 만약 파싱된 블록이 3개 미만이면, 원본에서 강제로 조항을 다시 추출합니다.
             if not blocks or len(blocks) < 3:
-                logging.info(f"[{folder_name}] 일반 문서 파서로 정밀 분석을 시작합니다.")
+                logging.info(f"[{folder_name}] 정밀 파싱 시작: 구조 인식 실패 시 강제 추출 모드 가동")
                 blocks = []
                 
-                pattern = r'(?m)^ *(제\s*\d+\s*조(?:의\s*\d+)?)'
+                # 조항 번호(제x조)를 기준으로 전체 텍스트를 파편화합니다.
+                # (?:제)?\s*\d+\s*조(?:\([^)]+\))? : 제x조 또는 제x조(제목) 형태를 모두 포착
+                pattern = r'(?m)^ *(제\s*\d+\s*조(?:의\s*\d+)?\s*(?:\([^)]+\))?)'
                 parts = re.split(pattern, raw_text)
                 
                 if len(parts) >= 3:
                     for i in range(1, len(parts), 2):
-                        article_num = parts[i].strip()
-                        content_body = parts[i+1].strip() if i+1 < len(parts) else ""
-                        
-                        match = re.match(r'^(\s*\(.*?\))', content_body)
-                        full_title = f"{article_num} {match.group(1).strip()}" if match else article_num
-                        clean_body = re.sub(r'\n{2,}', '\n', content_body).strip()
-                        
-                        blocks.append({"title": full_title, "content": f"{full_title}\n{clean_body}"})
-                else:
-                    paragraphs = [p.strip() for p in raw_text.split('\n\n') if len(p.strip()) > 30]
+                        title = parts[i].strip()
+                        content = parts[i+1].strip()
+                        # 💡 [방어] 조항 내용이 10자 이상이면 무조건 살림
+                        if len(content) > 10:
+                            blocks.append({"title": title, "content": f"{title}\n{content}"})
+                
+                # 💡 [최후의 보루] 그럼에도 블록이 없다면, 50자 이상의 모든 덩어리를 무조건 저장함 (증발 방지)
+                if not blocks:
+                    paragraphs = [p.strip() for p in raw_text.split('\n\n') if len(p.strip()) > 50]
                     for idx, p in enumerate(paragraphs):
                         blocks.append({"title": f"문서 조각 {idx+1}", "content": p})
-            
+                        
             conn = get_db_connection()
             cursor = conn.cursor()
             
