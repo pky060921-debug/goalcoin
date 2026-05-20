@@ -28,10 +28,14 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   const [pageBreaks, setPageBreaks] = useState<Set<number>>(new Set());
   const [memoInput, setMemoInput] = useState(""); 
   const [isEraserMode, setIsEraserMode] = useState(false);
+  
+  // 💡 [추가] 텍스트 편집기 모드 상태 관리
+  const [isEditingText, setIsEditingText] = useState(false);
+  const [editingContent, setEditingContent] = useState("");
 
   const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
   
-  // 💡 [신규] 제외 단어와 포함 단어 두 가지 리스트 관리
+  // 제외 단어와 포함 단어 리스트 관리
   const [customStopWords, setCustomStopWords] = useState<string[]>([]);
   const [customIncludeWords, setCustomIncludeWords] = useState<string[]>([]);
   const [newStopWord, setNewStopWord] = useState("");
@@ -40,7 +44,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
-  // 💡 DB에서 두 가지 리스트 모두 불러오기 (호환성 처리 완비)
+  // DB에서 두 가지 리스트 모두 불러오기
   useEffect(() => {
     if (safeAddress) {
       api.getStopwords(safeAddress).then(data => {
@@ -162,20 +166,13 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     }
   };
 
-  const openCategory = (targetCat: any) => {
-    if (isSelectMode) { handleToggleCheck(targetCat.id); return; }
-    setExpandedId(targetCat.id);
-    setPageBreaks(new Set());
-    setMemoInput(targetCat.memo || "");
-    setIsEraserMode(false);
-    
-    const { body } = formatCardText(targetCat.content || targetCat.title || "");
-    const initialWords = body.split(SPLIT_REGEX).filter(w => w !== "");
+  // 💡 [추가] 텍스트를 단어 배열로 쪼개고 빈칸 자동 추천을 실행하는 핵심 로직 (재사용을 위해 분리)
+  const applyTextToState = (textBody: string) => {
+    const initialWords = textBody.split(SPLIT_REGEX).filter(w => w !== "");
     setWordArray(initialWords.map(w => ({ text: w, subWords: [w] })));
 
     const initialSelected = new Set<number>();
     
-    // 컴포넌트 상태를 직접 참조
     const currentCustomStopWords = customStopWords;
     const currentCustomIncludeWords = customIncludeWords;
 
@@ -188,7 +185,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
 
     const fullText = initialWords.join("");
 
-    // 💡 [핵심] 보호구역(무조건 빈칸 처리) 선언
     const protectedIndices = new Set<number>();
 
     // 1. 보호구역: 단일 단어 등록
@@ -224,7 +220,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     initialWords.forEach((word, idx) => {
       const trimmed = word.trim();
       
-      // 보호구역에 있는 단어는 무조건 빈칸 지정 (순수 스페이스바 제외)
       if (protectedIndices.has(idx)) {
          if (trimmed.length > 0) initialSelected.add(idx);
          return;
@@ -243,7 +238,7 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       }
     });
 
-    // 4. 제외 구문 정규식 실행 (단, 보호구역에 있는 단어는 지우지 않음!)
+    // 4. 제외 구문 정규식 실행
     const patternsToExclude: RegExp[] = [
       /(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g
     ];
@@ -263,7 +258,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
           
           wordRanges.forEach(wr => {
              if (wr.start < matchEnd && wr.end > matchStart) {
-                // 보호구역(필수 포함 단어)이 아니면 빈칸에서 제외!
                 if (!protectedIndices.has(wr.wordIdx)) {
                     initialSelected.delete(wr.wordIdx);
                 }
@@ -273,6 +267,36 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     });
 
     setSelectedWords(initialSelected);
+  };
+
+  const openCategory = (targetCat: any) => {
+    if (isSelectMode) { handleToggleCheck(targetCat.id); return; }
+    setExpandedId(targetCat.id);
+    setPageBreaks(new Set());
+    setMemoInput(targetCat.memo || "");
+    setIsEraserMode(false);
+    
+    const { body } = formatCardText(targetCat.content || targetCat.title || "");
+    
+    // 💡 [추가] 카테고리를 열 때 편집 상태 초기화
+    setIsEditingText(false);
+    setEditingContent(body);
+    applyTextToState(body);
+  };
+
+  // 💡 [추가] 편집기 모드 토글 핸들러
+  const handleEditToggle = () => {
+    if (!isEditingText) {
+      if (selectedWords.size > 0 || pageBreaks.size > 0) {
+        if (!window.confirm("텍스트를 다시 편집하면 현재 수동으로 합친 단어들과 지정된 빈칸이 모두 초기화됩니다. 편집하시겠습니까?")) return;
+      }
+      setIsEditingText(true);
+      setIsEraserMode(false);
+    } else {
+      applyTextToState(editingContent);
+      setPageBreaks(new Set());
+      setIsEditingText(false);
+    }
   };
 
   const handleWordClick = (idx: number) => {
@@ -386,7 +410,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       {showStopWordsSettings && (
         <div className="p-4 sm:p-5 bg-[#0a0a0c] border border-amber-500/30 rounded-sm mb-6 flex flex-col sm:flex-row gap-6 animate-in slide-in-from-top-2">
           
-          {/* ❌ 제외 단어 패널 */}
           <div className="flex-1">
             <div className="text-xs sm:text-sm text-amber-400 font-bold mb-3">❌ 제외 단어 (빈칸 X)</div>
             <div className="flex gap-2 mb-3">
@@ -414,7 +437,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
           <div className="hidden sm:block w-px bg-white/10 mx-2"></div>
           <div className="sm:hidden h-px w-full bg-white/10 my-2"></div>
 
-          {/* ✅ 필수 포함 단어 패널 */}
           <div className="flex-1">
             <div className="text-xs sm:text-sm text-teal-400 font-bold mb-3">✅ 필수 포함 단어 (무조건 빈칸 O)</div>
             <div className="flex gap-2 mb-3">
@@ -546,43 +568,72 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                               className="px-2 py-0.5 bg-white/5 border border-white/20 rounded-sm text-[9px] text-white/50 hover:bg-white/10 transition-colors"
                             >📂 폴더 이동</button>
                           </div>
-                          <button onClick={() => setIsEraserMode(!isEraserMode)} className={`px-3 py-1 text-[11px] font-bold rounded-sm border transition-all ${isEraserMode ? 'bg-red-600 border-red-500 text-white animate-pulse' : 'bg-white/5 border-white/20 text-white/50 hover:bg-white/10'}`}>
-                            {isEraserMode ? '🗑️ 지우개 켜짐' : '✏️ 지우개 모드'}
-                          </button>
+                          
+                          <div className="flex gap-2">
+                            {/* 💡 [추가] 텍스트 원본 편집 버튼 */}
+                            <button 
+                              onClick={handleEditToggle} 
+                              className={`px-3 py-1 text-[11px] font-bold rounded-sm border transition-all ${isEditingText ? 'bg-green-600 border-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.3)]' : 'bg-white/5 border-white/20 text-white/50 hover:bg-white/10'}`}
+                            >
+                              {isEditingText ? '✅ 텍스트 적용' : '✏️ 원본 텍스트 편집'}
+                            </button>
+
+                            {/* 편집 중이 아닐 때만 지우개 모드 노출 */}
+                            {!isEditingText && (
+                              <button onClick={() => setIsEraserMode(!isEraserMode)} className={`px-3 py-1 text-[11px] font-bold rounded-sm border transition-all ${isEraserMode ? 'bg-red-600 border-red-500 text-white animate-pulse' : 'bg-white/5 border-white/20 text-white/50 hover:bg-white/10'}`}>
+                                {isEraserMode ? '🗑️ 지우개 켜짐' : '🧹 지우개 모드'}
+                              </button>
+                            )}
+                          </div>
                         </div>
+
                         <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-2 text-xs text-teal-200 outline-none rounded-sm" />
                         
-                        <div className={`font-serif text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative transition-all ${isEraserMode ? 'border-red-500/50 ring-1 ring-red-500/30' : 'border-white/10'}`}>
-                          {wordArray.map((wordObj, idx) => {
-                            const word = wordObj.text;
-                            const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(word) && word.trim() !== "";
-                            const isMerged = wordObj.subWords.length > 1;
-                            const isSelected = selectedWords.has(idx);
+                        {/* 💡 [추가] 편집기 화면 or 빈칸 선택 화면 분기 처리 */}
+                        {isEditingText ? (
+                          <div className="w-full relative mt-2 animate-in fade-in zoom-in-95">
+                            <textarea
+                              value={editingContent}
+                              onChange={(e) => setEditingContent(e.target.value)}
+                              className="w-full h-48 bg-black border border-green-500/50 p-4 text-green-100 text-[13px] sm:text-[15px] leading-loose rounded outline-none resize-y custom-scrollbar"
+                              placeholder="원하는 대로 내용을 지우거나 띄어쓰기를 수정하세요..."
+                            />
+                            <div className="absolute top-2 right-2 text-[10px] text-green-400 bg-black/50 px-2 py-1 rounded">수정 후 [✅ 텍스트 적용] 버튼 클릭</div>
+                          </div>
+                        ) : (
+                          <div className={`font-serif mt-2 text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative transition-all ${isEraserMode ? 'border-red-500/50 ring-1 ring-red-500/30' : 'border-white/10'}`}>
+                            {wordArray.map((wordObj, idx) => {
+                              const word = wordObj.text;
+                              const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(word) && word.trim() !== "";
+                              const isMerged = wordObj.subWords.length > 1;
+                              const isSelected = selectedWords.has(idx);
 
-                            return (
-                              <React.Fragment key={idx}>
-                                {pageBreaks.has(idx) && <div className="w-full border-t border-red-500/50 my-2 relative"><span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black px-1 text-[8px] text-red-400 font-bold uppercase tracking-tighter">Page Break</span></div>}
-                                <span 
-                                  onClick={() => { if (isEraserMode || !isSymbolOnly) handleWordClick(idx); }} 
-                                  onContextMenu={(e) => handleWordSplit(idx, e)} 
-                                  onDoubleClick={() => { if (!isSymbolOnly || isMerged) handleWordMerge(idx); }} 
-                                  className={`px-[1px] rounded transition-colors ${
-                                    isSelected ? 'bg-amber-500 text-black font-bold cursor-pointer' : 
-                                    isEraserMode ? 'hover:bg-red-500/50 hover:text-white text-red-100 cursor-pointer' : 
-                                    isSymbolOnly ? 'text-white/30 cursor-default' : 
-                                    isMerged ? 'bg-indigo-900/30 border-b border-indigo-500/50 hover:bg-indigo-800/40 cursor-pointer' : 
-                                    'hover:bg-white/10 cursor-pointer'
-                                  }`}
-                                  title={isSelected ? "클릭하여 빈칸에서 해제" : "클릭하여 빈칸으로 지정"}
-                                >
-                                  {word}
-                                </span>
-                              </React.Fragment>
-                            );
-                          })}
-                        </div>
+                              return (
+                                <React.Fragment key={idx}>
+                                  {pageBreaks.has(idx) && <div className="w-full border-t border-red-500/50 my-2 relative"><span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black px-1 text-[8px] text-red-400 font-bold uppercase tracking-tighter">Page Break</span></div>}
+                                  <span 
+                                    onClick={() => { if (isEraserMode || !isSymbolOnly) handleWordClick(idx); }} 
+                                    onContextMenu={(e) => handleWordSplit(idx, e)} 
+                                    onDoubleClick={() => { if (!isSymbolOnly || isMerged) handleWordMerge(idx); }} 
+                                    className={`px-[1px] rounded transition-colors ${
+                                      isSelected ? 'bg-amber-500 text-black font-bold cursor-pointer' : 
+                                      isEraserMode ? 'hover:bg-red-500/50 hover:text-white text-red-100 cursor-pointer' : 
+                                      isSymbolOnly ? 'text-white/30 cursor-default' : 
+                                      isMerged ? 'bg-indigo-900/30 border-b border-indigo-500/50 hover:bg-indigo-800/40 cursor-pointer' : 
+                                      'hover:bg-white/10 cursor-pointer'
+                                    }`}
+                                    title={isSelected ? "클릭하여 빈칸에서 해제" : "클릭하여 빈칸으로 지정"}
+                                  >
+                                    {word}
+                                  </span>
+                                </React.Fragment>
+                              );
+                            })}
+                          </div>
+                        )}
                         
                         <button 
+                          disabled={isEditingText}
                           onClick={() => {
                             const folderCats = safeCategories.filter((c:any) => c.folder_name === cat.folder_name).sort((a:any, b:any) => a.id - b.id);
                             const currentIdx = folderCats.findIndex(c => c.id === cat.id);
@@ -593,9 +644,9 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                                 else setExpandedId(null);
                             });
                           }} 
-                          className="w-full py-2.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs sm:text-sm font-bold rounded-sm mt-2 hover:bg-amber-500/30 transition-all"
+                          className={`w-full py-2.5 text-xs sm:text-sm font-bold rounded-sm mt-2 transition-all ${isEditingText ? 'bg-white/5 text-white/30 border border-white/10 cursor-not-allowed' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'}`}
                         >
-                          지식 추출 저장 및 다음 조항 이어서 만들기
+                          {isEditingText ? '텍스트 적용 후에 저장할 수 있습니다' : '지식 추출 저장 및 다음 조항 이어서 만들기'}
                         </button>
                       </div>
                     )}
