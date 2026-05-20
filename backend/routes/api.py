@@ -785,18 +785,31 @@ def upload_pdf():
             cursor.execute("SELECT card_content FROM cards WHERE wallet_address = ?", (wallet_address,))
             existing_cards = [row[0] for row in cursor.fetchall()]
             
+            # 💡 [핵심] 조항 번호만 표준화하여 추출하는 함수
+            def get_article_num(text):
+                # '제', '조', 공백을 제거하고 숫자만 남깁니다. (예: "제 1 조" -> "1")
+                match = re.search(r'(?:제)?\s*(\d+)\s*조', text)
+                return match.group(1) if match else None
+
+            # 1. 카드 데이터에서 '조항 번호'만 미리 추출하여 집합(Set)으로 생성 (검색 속도 극대화)
+            existing_article_nums = set()
+            for card in existing_cards:
+                art = get_article_num(card)
+                if art: existing_article_nums.add(art)
+            
+            # 2. 루프를 돌며 매칭 수행
             for block in blocks:
-                # 💡 [추가] 매칭 로직: 카드 내용에 조항명이 포함되어 있는지 확인
                 display_folder = folder_name
-                for card in existing_cards:
-                    if block['title'] in card:
-                        display_folder = f"{folder_name} [완료]"
-                        break
+                # 현재 블록의 조항 번호 추출
+                current_art = get_article_num(block['title'])
                 
-                # 기존 로직: 꼬리표가 붙은 folder_name으로 저장
+                # 조항 번호가 존재하고, 이미 카드에 있다면 꼬리표 부착
+                if current_art and current_art in existing_article_nums:
+                    display_folder = f"{folder_name} [완료]"
+                
+                # 저장 실행
                 cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
                                (wallet_address, block['title'], block['content'], display_folder))
-            
             conn.commit()
             conn.close()
             TASK_STATUS[task_id] = "완료"
