@@ -6,6 +6,7 @@ def clean_korean_law_text(text):
     text = re.sub(r'-\s*\d+\s*-', '\n', text)
     text = re.sub(r'/?\d{4}\.\d{1,2}\.\d{1,2}\s*\d{2}:\d{2}.*', '\n', text)
     text = re.sub(r'\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2}:\d{2}', '\n', text)
+    # 삭제, 연혁 등 지저분한 메타데이터 완벽 제거
     text = re.sub(r'\[(?:본조신설|전문개정|제목개정|단서신설|삭제).*?\]', '', text)
     text = re.sub(r'\[(?:종전 제.*?조는 제.*?조로 이동).*?\]', '', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
@@ -27,33 +28,26 @@ def parse_html_3col_law(html_content):
         categories = []
         current_folder = "기본 폴더"
         
+        # 고아 텍스트 연결을 위한 문맥 맵 (link_id 기반)
         context_map = {} 
         last_num = "부칙등"
         last_title = "내용"
         
+        # 순서 복원을 위한 정렬용 맵
         global_order = 0
         link_id_order_map = {}
         
         rows = table.find_all('tr')
         for row in rows:
-            # 행 전체 텍스트에서 장/절/부칙 식별 (텍스트가 있을 때만 안전하게 업데이트)
-            row_text_full = row.get_text(strip=True)
-            if re.search(r'제\s*\d+\s*[장편절]', row_text_full):
-                match = re.search(r'제\s*\d+\s*[장편절][^\s]*', row_text_full)
-                if match: 
-                    # 장/절 명칭 뒤에 붙은 불필요한 노이즈 제거 (예: 제1장총칙 -> 제1장 총칙)
-                    raw_folder = match.group(0).strip()
-                    if "총칙" in row_text_full and "총칙" not in raw_folder:
-                        current_folder = f"{raw_folder} 총칙"
-                    else:
-                        current_folder = raw_folder
-            elif "부칙" in row_text_full and len(row_text_full) < 50: 
-                # 부칙 본문이 아닌 헤더 행일 때만 폴더 변경
-                current_folder = "부칙"
-
+            # 1. '장/절' 폴더명 강제 탐지기 (셀 병합 고려)
             tds = row.find_all('td', recursive=False)
             if len(tds) == 1:
-                continue
+                row_text = clean_korean_law_text(tds[0].get_text(strip=True))
+                if re.search(r'^제\s*\d+\s*[장편절]', row_text) or "부칙" in row_text:
+                    match = re.search(r'제\s*\d+\s*[장편절][^\s]*', row_text)
+                    if match: current_folder = match.group(0).strip()
+                    elif "부칙" in row_text: current_folder = "부칙"
+                    continue
 
             groups = row.find_all('div', class_='lsptnThdCmpGroup')
             for group in groups:
@@ -70,16 +64,17 @@ def parse_html_3col_law(html_content):
                 if not lawcon: continue
                 
                 content = clean_korean_law_text(lawcon.get_text(separator="\n", strip=True))
-                # 💡 [보정 1] 의미 없는 빈 컨텐츠나 공백 무더기 상자 필터링 (오염 원천 차단)
-                if not content or len(content.replace("\n", "").strip()) < 3: continue
+                if not content or len(content) < 3: continue
                 
-                content = re.sub(r'(?<!\n)(\d+\.)', r'\n\1', content)  
-                content = re.sub(r'(?<!\n)(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)', r'\n\1', content) 
+                # 💡 [해결] 텍스트가 왼쪽으로 쏠리는 문제 방지 (강제 줄바꿈 주입)
+                content = re.sub(r'(?<!\n)(\d+\.)', r'\n\1', content)  # '1.', '2.' 앞에 줄바꿈
+                content = re.sub(r'(?<!\n)(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)', r'\n\1', content) # 동그라미 번호 앞에 줄바꿈
                 content = re.sub(r'\n{3,}', '\n\n', content).strip()
                 
                 type_name = "법"
                 link_id = None
                 
+                # 고유 링크 ID (divL168 등) 추출을 통한 법-령-칙 자석 매칭
                 span_lor = lawcon.find('span', id=re.compile(r'^div[LOR]$'))
                 if span_lor:
                     if span_lor['id'] == 'divL': type_name = "법"
@@ -110,6 +105,7 @@ def parse_html_3col_law(html_content):
                     title_match = re.search(r'\(([^()]+)\)', content)
                     my_title = title_match.group(1).strip() if title_match else "세부내용"
                     
+                    # '법'이면 번호/제목/폴더 위치를 기억장치에 저장
                     if type_name == "법" and link_id:
                         context_map[link_id] = {"num": my_num, "title": my_title, "folder": current_folder}
                     
@@ -117,7 +113,7 @@ def parse_html_3col_law(html_content):
                         last_num = my_num
                         last_title = my_title
                 else:
-                    # 💡 [보정 2] 조문 번호가 없는 하위 조항 처리 시 문맥의 엄격한 상속
+                    # 번호가 없는 '령', '칙'은 기억장치에서 부모(법)의 정보를 끌어옴
                     if link_id and link_id in context_map:
                         my_num = context_map[link_id]["num"]
                         my_title = context_map[link_id]["title"]
@@ -128,7 +124,7 @@ def parse_html_3col_law(html_content):
                         
                 clean_title = f"[{type_name}] {my_num} ({my_title[:15]})"
                 
-                # 💡 [보정 3] 순서 정렬 일관성 강화
+                # 💡 [해결] 꼬여버린 순서를 완벽하게 재정렬하기 위한 번호표 부여
                 if link_id:
                     if link_id not in link_id_order_map:
                         global_order += 10
@@ -149,10 +145,10 @@ def parse_html_3col_law(html_content):
                     "sort_order": sort_order
                 })
                 
-        # 완벽 정렬 후 임시 키 제거
+        # 엉망진창이 된 DOM 순서를 버리고, 부여된 번호표 순으로 완벽 정렬
         categories.sort(key=lambda x: x["sort_order"])
         for cat in categories:
-            del cat["sort_order"]
+            del cat["sort_order"] # 임시 번호표 삭제
             
         return categories
 
@@ -165,10 +161,6 @@ def parse_html_3col_law(html_content):
         divs = soup.find_all(['div', 'p'])
         for div in divs:
             try:
-                if re.match(r'^제\s*\d+\s*[장편절]', div.get_text(strip=True)):
-                    current_chapter = div.get_text(strip=True).split('\n')[0].strip()
-                    continue
-
                 clean_content = clean_korean_law_text(div.get_text(separator="\n"))
                 clean_content = re.sub(r'\n\s*\n', '\n', clean_content).strip()
                 if len(clean_content) < 2: continue
@@ -202,6 +194,3 @@ def get_next_review_time(level):
     elif level == 1: return now + timedelta(days=1)
     elif level == 2: return now + timedelta(days=3)
     else: return now + timedelta(days=7)
-
-if __name__ == "__main__":
-    print("[정상] parser.py가 성공적으로 초기화되었습니다.")
