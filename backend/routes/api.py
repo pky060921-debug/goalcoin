@@ -789,35 +789,46 @@ def upload_pdf():
                         for idx, p in enumerate(paragraphs):
                             blocks.append({"title": f"문서 조각 {idx+1}", "content": p, "folder_name": base_filename})
 
+            # === [교체 구간 시작] ===
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            # 카드로 만든 조항 자동 [완료] 매칭
-            cursor.execute("SELECT card_content FROM cards WHERE wallet_address = ?", (wallet_address,))
-            existing_cards = [row[0] for row in cursor.fetchall()]
+            # 💡 [보정] 기존 카드의 title을 완벽하게 수집 (없다면 card_content 백업 활용)
+            cursor.execute("SELECT title, card_content FROM cards WHERE wallet_address = ?", (wallet_address,))
+            existing_rows = cursor.fetchall()
             
-            def get_article_num(text):
-                match = re.search(r'(?:제)?\s*(\d+)\s*조', text)
-                return match.group(1) if match else None
+            existing_titles = set()
+            for r_title, r_content in existing_rows:
+                if r_title:
+                    existing_titles.add(r_title.strip())
+                elif r_content:
+                    # 옛날 데이터 예외 처리
+                    try:
+                        c_data = json.loads(r_content)
+                        # 원본 텍스트의 첫 줄을 제목 대용으로 매칭
+                        if c_data.get("words"):
+                            existing_titles.add(c_data["words"][0].strip())
+                    except: pass
 
-            existing_article_nums = set()
-            for card in existing_cards:
-                art = get_article_num(card)
-                if art: existing_article_nums.add(art)
-            
             for block in blocks:
-                # 💡 [핵심 2] 변수명 오타 수정 (folder_name -> base_filename)
                 target_folder = block.get('folder_name', base_filename)
-                current_art = get_article_num(block['title'])
+                current_title = block['title'].strip()
                 
-                if current_art and current_art in existing_article_nums:
-                    target_folder = f"{target_folder} [완료]"
+                # 💡 [핵심] 번호 매칭이 아니라, 종류와 조문이 100% 일치할 때만 [완료] 폴더로 보냄
+                if current_title in existing_titles:
+                    # 이미 '[완료]'가 붙어있지 않은 경우에만 결합
+                    if not target_folder.endswith('[완료]'):
+                        target_folder = f"{target_folder} [완료]"
                 
-                cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
-                               (wallet_address, block['title'], block['content'], target_folder))
+                cursor.execute("""
+                    INSERT INTO categories (wallet_address, title, content, folder_name) 
+                    VALUES (?, ?, ?, ?)
+                """, (wallet_address, block['title'], block['content'], target_folder))
+                
             conn.commit()
             conn.close()
             TASK_STATUS[task_id] = "완료"
+            # === [교체 구간 끝] ===
             
         except Exception as e:
             logging.error(f"분석 에러: {traceback.format_exc()}")
