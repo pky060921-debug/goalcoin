@@ -77,7 +77,7 @@ def generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1):
             "format": "json",
             "options": {
                 "temperature": temperature,
-                "num_ctx": 16384,      # 16K Context Window
+                "num_ctx": 16384,      
                 "num_predict": 1024,
                 "top_k": 40,           
                 "top_p": 0.9,
@@ -122,58 +122,58 @@ def generate_gemini_json(prompt_or_contents, temperature=0.1):
         except Exception as e:
             error_msg = str(e).lower()
             if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
-                print(f"⚠️ [API 진단] API 키 {current_api_key_index} 한도 초과! 다음 키로 전환합니다.", file=sys.stderr, flush=True)
                 current_api_key_index = (current_api_key_index + 1) % len(GEMINI_API_KEYS)
             elif "503" in error_msg or "unavailable" in error_msg or "high demand" in error_msg:
-                print(f"⚠️ [API 진단] 구글 서버({current_model}) 폭주(503). 우회합니다...", file=sys.stderr, flush=True)
                 time.sleep(1)
             else:
                 if attempt == max_retries - 1:
-                    print(f"❌ [API 치명적 진단] 제미나이 최종 실패:\n{traceback.format_exc()}", file=sys.stderr, flush=True)
                     raise e
                 time.sleep(1)
                 
     raise Exception("🚨 구글 서버 불안정 또는 모든 API 키 한도 초과입니다.")
 
+
+# ==========================================
+# 💡 [핵심 대수술] 무적의 JSON 파서 (에러 원천 차단)
+# ==========================================
 def clean_and_parse_json(response_text):
     try:
-        # 1. 마크다운 기호 제거
         text = response_text.strip()
         text = re.sub(r'^```json', '', text, flags=re.MULTILINE)
         text = re.sub(r'^```', '', text, flags=re.MULTILINE).strip()
         
-        # 2. 첫 { 와 마지막 } 추출
         start = text.find('{')
         end = text.rfind('}')
         if start != -1 and end != -1:
             text = text[start:end+1]
         
-        # 3. 줄바꿈 처리
-        clean_text = text.replace('\n', '\\n').replace('\r', '')
-        
-        # 4. JSON 디코딩 시도
+        # 💡 [핵심] strict=False 를 적용하여 실제 엔터키(\n)나 특수문자가 섞여있어도 파이썬이 부드럽게 넘어가도록 허용합니다.
         try:
-            return json.loads(clean_text)
+            return json.loads(text, strict=False)
         except json.decoder.JSONDecodeError:
-            # 💡 [핵심 복구] AI가 Key값에 큰따옴표를 빼먹었을 경우 강제로 씌워줌
-            fixed_text = re.sub(r'([{,]\s*)([a-zA-Z0-9_]+)\s*:', r'\1"\2":', clean_text)
+            # 파싱 실패 시, 따옴표가 누락된 경우를 대비해 보정 시도
+            fixed_text = re.sub(r"([{,]\s*)'([^']+)'(\s*:)", r'\1"\2"\3', text)
+            fixed_text = re.sub(r'([{,]\s*)([a-zA-Z0-9_]+)\s*:', r'\1"\2":', fixed_text)
             try:
-                return json.loads(fixed_text)
+                return json.loads(fixed_text, strict=False)
             except:
-                python_dict = ast.literal_eval(clean_text.replace('\\n', '\n'))
+                # 최후의 수단 ast 적용
+                python_text = text.replace('true', 'True').replace('false', 'False').replace('null', 'None')
+                python_dict = ast.literal_eval(python_text)
                 return json.loads(json.dumps(python_dict))
-
+                
     except Exception as e:
-        print(f"[🔥 파싱 에러 진단] Raw Text: {response_text}\nError: {e}", file=sys.stderr)
-        # 에러가 나더라도 통신이 끊어지지 않도록 강제 기본값 반환
+        print(f"[🔥 파싱 에러 진단] Raw Text: {response_text}\nError: {traceback.format_exc()}", file=sys.stderr)
+        # 에러가 발생해도 통신이 뻗지 않고 프론트엔드로 안전하게 에러 메시지 반환
         return {
-            "question": "파싱 에러 발생",
-            "options": ["1", "2", "3", "4", "5"],
+            "question": "파싱 에러 방어 발동",
+            "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기", "5. 보기"],
             "answer": "확인 필요",
-            "chat_message": f"AI가 답변 형식을 어겼습니다. 다시 전송해주세요.\n(에러: {e})",
-            "explanation": "응답 파싱 실패",
-            "search_process": "[CRITICAL ERROR] JSON Parse Failed."
+            "chat_message": "AI가 응답에 처리할 수 없는 특수기호나 실제 엔터키를 사용하여 시스템이 안전하게 방어했습니다. 다시 명령을 내려주세요!",
+            "explanation": f"에러 원인: {str(e)}",
+            "search_process": "[CRITICAL ERROR] JSON 형식이 깨져 복구 모드로 전환됨."
         }
+
 
 # ==========================================
 # 💡 DB 초기화 (user_settings 포함)
@@ -417,8 +417,6 @@ def generate_rag_from_pending():
             full_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
             law_context = full_context[:12000]
 
-        print(f"\n🔍 [RAG 시스템] '{filename}' 자동생성 시작!\n", file=sys.stderr, flush=True)
-
         task_id = str(uuid.uuid4())
         TASK_STATUS[task_id] = {"status": "running", "progress": 20, "message": "AI가 문제를 법령과 대조하여 분석 중..."}
 
@@ -441,11 +439,11 @@ def generate_rag_from_pending():
                 [출력 JSON 규격]
                 [
                   {{ 
-                      "question": "문제 1 내용", 
-                      "answer": "정답 1 번호", 
-                      "explanation": "해설 1 내용",
-                      "search_process": "논리적 과정 1",
-                      "referenced_laws": "참고 조항 1"
+                      "question": "문제 내용", 
+                      "answer": "정답 번호", 
+                      "explanation": "해설 내용",
+                      "search_process": "논리적 과정",
+                      "referenced_laws": "참고 조항"
                   }}
                 ]'''
 
@@ -467,14 +465,12 @@ def generate_rag_from_pending():
 
                 TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"{len(exam_data)}개의 문항 분석 완료."})
             except Exception as e:
-                print(f"\n[🔥 지능형 해설 스레드 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
                 TASK_STATUS[task_id].update({"status": "error", "message": "JSON 파싱 에러 (AI 응답 형식 오류)"})
 
         threading.Thread(target=process_rag_pending).start()
         return jsonify({"task_id": task_id, "message": "분석 시작"})
 
     except Exception as e:
-        print(f"\n[🔥 라우터 진입 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/upload-exam', methods=['POST'])
@@ -563,7 +559,7 @@ def get_pending_exams():
 
 
 # =========================================================================
-# 💡 [핵심 대수술] 챗봇의 "분석 결과 강제 보고" 프롬프트 및 안전장치
+# 💡 [초핵심 연동] 대화형 AI 분석 엔진 (결과 강제 브리핑 & 줄바꿈 제한)
 # =========================================================================
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
@@ -602,7 +598,6 @@ def analyze_chunk():
             
         feedback_str = f"\n[👨‍💻 최신 사용자 명령/질문]\n{user_feedback}\n" if user_feedback else ""
 
-        # 💡 프롬프트의 명령을 완전히 바꿨습니다. "결과를 채팅으로 다 불어라!"
         prompt = f"""당신은 출제위원이자 사용자와 실시간으로 소통하며 문제를 같이 푸는 '대화형 튜터 AI'입니다.
 
         [대화형 튜터 절대 규칙 🚨]
@@ -610,6 +605,7 @@ def analyze_chunk():
         2. 찾은 원문 내용과, 지문(가,나,다 등)이 어떻게 일치/불일치하는지 분석한 결과를 **반드시 `chat_message` 필드에 아주 구체적이고 상세한 텍스트로 작성하여 브리핑하세요!** (예: "지시에 따라 대조한 결과, 법 제1조의 원문은 [~~~] 이며 지문과 완전히 일치합니다.")
         3. 절대 "지시에 따라 처리했습니다" 같은 단답형 인사만 하고 넘어가면 안 됩니다. 그것은 시스템 오류를 유발합니다. 
         4. 사용자가 피드백을 주면 수용하고 `explanation` 필드에 누적 기록하세요.
+        5. [중요] 문자열 안에서 줄바꿈이 필요할 때는 실제 엔터(Enter)키를 누르지 말고 반드시 기호 '\\n' 을 사용하세요!
 
         [참고 자료 DB]
         {law_context}
@@ -628,7 +624,7 @@ def analyze_chunk():
           "question": "시험지 원문 텍스트 유지",
           "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기", "5. 보기"],
           "answer": "정답 번호 (모르면 '확인 필요')",
-          "chat_message": "사용자 명령에 대한 분석 결과 상세 브리핑 (이 필드에 원문과 대조 결과를 모두 적으세요!)",
+          "chat_message": "사용자 명령에 대한 분석 결과 상세 브리핑 (여기에 모든 원문 대조 결과를 적으세요)",
           "explanation": "지금까지 누적된 해설 내용 (수정 지시가 있으면 추가 반영)",
           "search_process": "진단 터미널용 짧은 시스템 로그"
         }}"""
@@ -636,8 +632,7 @@ def analyze_chunk():
         print(f"🤖 [초고속 대화형 AI 가동] 응답 생성 중...", file=sys.stderr, flush=True)
         
         try:
-            # 사용자의 원래 모델 옵션을 존중
-            response_text = generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1)
+            response_text = generate_ollama_json(prompt, temperature=0.1)
             result_data = clean_and_parse_json(response_text)
         except Exception as ollama_e:
             print(f"⚠️ 로컬 AI 분석 실패, Gemini로 우회: {ollama_e}", file=sys.stderr, flush=True)
@@ -647,7 +642,7 @@ def analyze_chunk():
         if isinstance(result_data, list) and len(result_data) > 0:
             result_data = result_data[0]
             
-        # 💡 [최후의 안전장치] AI가 끝끝내 chat_message를 안 만들었을 때의 방어막!
+        # 💡 [최후의 안전장치] AI가 채팅창에 결과를 안 적고 숨겼을 경우 강제 적발
         if isinstance(result_data, dict):
             chat_msg = result_data.get("chat_message", "").strip() or result_data.get("chatMessage", "").strip()
             
@@ -748,8 +743,7 @@ def upload_pdf():
     def process_file():
         try:
             raw_text = ""
-            if original_filename.lower().endswith(('.txt', '.html', '.htm')):
-
+            if original_filename.lower().endswith('.txt'):
                 file_bytes = file.read()
                 try: raw_text = file_bytes.decode('utf-8')
                 except UnicodeDecodeError: raw_text = file_bytes.decode('cp949', errors='ignore')
