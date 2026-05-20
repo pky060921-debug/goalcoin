@@ -137,36 +137,43 @@ def generate_gemini_json(prompt_or_contents, temperature=0.1):
 
 def clean_and_parse_json(response_text):
     try:
+        # 1. 마크다운 기호 제거
         text = response_text.strip()
         text = re.sub(r'^```json', '', text, flags=re.MULTILINE)
         text = re.sub(r'^```', '', text, flags=re.MULTILINE).strip()
         
-        start_idx_arr = text.find('[')
-        end_idx_arr = text.rfind(']')
-        start_idx_obj = text.find('{')
-        end_idx_obj = text.rfind('}')
+        # 2. 첫 { 와 마지막 } 추출
+        start = text.find('{')
+        end = text.rfind('}')
+        if start != -1 and end != -1:
+            text = text[start:end+1]
         
-        if start_idx_arr != -1 and end_idx_arr != -1 and (start_idx_obj == -1 or start_idx_arr < start_idx_obj):
-            clean_text = text[start_idx_arr:end_idx_arr+1]
-        elif start_idx_obj != -1 and end_idx_obj != -1:
-            clean_text = text[start_idx_obj:end_idx_obj+1]
-        else:
-            clean_text = text
-            
-        clean_text = clean_text.replace('\n', '\\n').replace('\r', '')
+        # 3. 줄바꿈 처리
+        clean_text = text.replace('\n', '\\n').replace('\r', '')
         
+        # 4. JSON 디코딩 시도
         try:
             return json.loads(clean_text)
         except json.decoder.JSONDecodeError:
+            # 💡 [핵심 복구] AI가 Key값에 큰따옴표를 빼먹었을 경우 강제로 씌워줌
+            fixed_text = re.sub(r'([{,]\s*)([a-zA-Z0-9_]+)\s*:', r'\1"\2":', clean_text)
             try:
+                return json.loads(fixed_text)
+            except:
                 python_dict = ast.literal_eval(clean_text.replace('\\n', '\n'))
                 return json.loads(json.dumps(python_dict))
-            except Exception as ast_e:
-                fixed_text = re.sub(r"([{,]\s*)'([^']+)'(\s*:)", r'\1"\2"\3', clean_text)
-                return json.loads(fixed_text)
+
     except Exception as e:
-        print(f"JSON Parsing Error. Raw Text: {response_text}", file=sys.stderr)
-        raise e
+        print(f"[🔥 파싱 에러 진단] Raw Text: {response_text}\nError: {e}", file=sys.stderr)
+        # 에러가 나더라도 통신이 끊어지지 않도록 강제 기본값 반환
+        return {
+            "question": "파싱 에러 발생",
+            "options": ["1", "2", "3", "4", "5"],
+            "answer": "확인 필요",
+            "chat_message": f"AI가 답변 형식을 어겼습니다. 다시 전송해주세요.\n(에러: {e})",
+            "explanation": "응답 파싱 실패",
+            "search_process": "[CRITICAL ERROR] JSON Parse Failed."
+        }
 
 # ==========================================
 # 💡 DB 초기화 (user_settings 포함)
