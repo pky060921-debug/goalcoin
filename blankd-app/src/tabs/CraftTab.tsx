@@ -781,7 +781,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
     </div>
   );
 };
-"""
 
 # Let's count lines in full_transcript for verification, but I should provide the code blocks clearly.
 # The user thinks they were truncated. I will put them into full code blocks.
