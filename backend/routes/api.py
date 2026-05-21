@@ -757,17 +757,70 @@ def upload_pdf():
                     for idx, p in enumerate(paragraphs):
                         blocks.append({"title": f"문서 조각 {idx+1}", "content": p})
             
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            for block in blocks:
-                cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", (wallet_address, block['title'], block['content'], folder_name))
-            conn.commit()
-            conn.close()
-            TASK_STATUS[task_id] = "완료"
-        except Exception as e:
-            logging.error(f"분석 에러: {traceback.format_exc()}")
-            TASK_STATUS[task_id] = f"에러: {str(e)}"
-
+def process_file():
+    try:
+        raw_text = ""
+        if original_filename.lower().endswith(('.txt', '.html', '.htm')):
+ 
+            file_bytes = file.read()
+            try: raw_text = file_bytes.decode('utf-8')
+            except UnicodeDecodeError: raw_text = file_bytes.decode('cp949', errors='ignore')
+        else:
+            doc = fitz.open(stream=file.read(), filetype="pdf")
+            for page in doc: raw_text += page.get_text()
+        
+        raw_text = re.sub(r'<(?:신설|개정|삭제|단서신설|전문개정|본조신설)[^>]*>', '', raw_text)
+        raw_text = re.sub(r'\[(?:전문개정|본조신설|제목개정|종전제\d+조는|제\d+조에서 이동)[^\]]*\]', '', raw_text)
+        
+        cleaned_text = clean_korean_law_text(raw_text)
+        blocks = parse_html_3col_law(cleaned_text)
+        
+        if not blocks or len(blocks) < 3:
+            logging.info(f"[{folder_name}] 일반 문서 파서로 정밀 분석을 시작합니다.")
+            blocks = []
+            
+            pattern = r'(?m)^ *(제\s*\d+\s*조(?:의\s*\d+)?)'
+            parts = re.split(pattern, raw_text)
+            
+            if len(parts) >= 3:
+                for i in range(1, len(parts), 2):
+                    article_num = parts[i].strip()
+                    content_body = parts[i+1].strip() if i+1 < len(parts) else ""
+                    
+                    match = re.match(r'^(\s*\(.*?\))', content_body)
+                    full_title = f"{article_num} {match.group(1).strip()}" if match else article_num
+                    clean_body = re.sub(r'\n{2,}', '\n', content_body).strip()
+                    
+                    blocks.append({"title": full_title, "content": f"{full_title}\n{clean_body}", "folder_name": folder_name})
+            else:
+                paragraphs = [p.strip() for p in raw_text.split('\n\n') if len(p.strip()) > 30]
+                for idx, p in enumerate(paragraphs):
+                    blocks.append({"title": f"문서 조각 {idx+1}", "content": p, "folder_name": folder_name})
+        
+        # 🔴 개선된 저장 로직: block의 folder_name 우선 사용
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        for block in blocks:
+            # block에 folder_name이 있으면 그것을 사용 (파서가 생성한 장 폴더)
+            # 없으면 파일명을 기반으로 한 folder_name 사용
+            block_folder = block.get('folder_name', folder_name)
+            
+            logging.info(f"저장: {block['title'][:30]} → {block_folder}")
+            
+            cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
+                          (wallet_address, block['title'], block['content'], block_folder))
+        conn.commit()
+        conn.close()
+        
+        # 통계 정보
+        unique_folders = len(set(b.get('folder_name', folder_name) for b in blocks))
+        logging.info(f"✅ 저장 완료: {len(blocks)}개 항목, {unique_folders}개 폴더")
+        
+        TASK_STATUS[task_id] = "완료"
+    except Exception as e:
+        logging.error(f"분석 에러: {traceback.format_exc()}")
+        TASK_STATUS[task_id] = f"에러: {str(e)}"
+        
     threading.Thread(target=process_file).start()
     return jsonify({"message": f"{folder_name} 분석 시작", "task_id": task_id})
 
