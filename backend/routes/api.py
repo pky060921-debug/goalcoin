@@ -821,8 +821,8 @@ def process_file():
         logging.error(f"분석 에러: {traceback.format_exc()}")
         TASK_STATUS[task_id] = f"에러: {str(e)}"
         
-    threading.Thread(target=process_file).start()
-    return jsonify({"message": f"{folder_name} 분석 시작", "task_id": task_id})
+threading.Thread(target=process_file).start()
+return jsonify({"message": f"{folder_name} 분석 시작", "task_id": task_id})
 
 @api_bp.route('/get-categories')
 def get_categories():
