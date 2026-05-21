@@ -20,12 +20,10 @@ def normalize_text(text):
     return text.strip()
 
 def parse_html_3col_law(html_content):
-    print("\n🔍 ==================== [아키 엔진: 파서 정밀 진단 시스템 가동] ====================")
     soup = BeautifulSoup(html_content, 'html.parser')
     table = soup.find('table', {'class': 'lsPtnThdCmpTable'})
     
     if table:
-        print("[진단-성공] 3단 비교표 테이블(lsPtnThdCmpTable)을 정상 감지했습니다.")
         categories = []
         current_chapter = "기본 폴더"
         
@@ -36,61 +34,48 @@ def parse_html_3col_law(html_content):
         global_order = 0
         link_id_order_map = {}
         
-        # 💡 요양급여의 기준에 관한 규칙 제외 설정 (기존 안정 로직)
-        col_excludes = set()
-        thead = table.find('thead')
-        if not thead:
-            first_tr = table.find('tr')
-            header_cells = first_tr.find_all(['th', 'td']) if first_tr else []
-        else:
-            header_cells = thead.find_all(['th', 'td'])
-            
-        for idx, cell in enumerate(header_cells):
-            cell_text = cell.get_text(strip=True)
-            if "요양급여의 기준" in cell_text or "요양급여비용" in cell_text:
-                col_excludes.add(idx)
-        print(f"[진단-정보] 제외 대상 Column 인덱스 번호 리스트: {list(col_excludes)}")
-        
         rows = table.find_all('tr')
-        print(f"[진단-정보] 총 스캔 대상 HTML 행(Row) 개수: {len(rows)}개")
-        
         for row_idx, row in enumerate(rows):
             tds = row.find_all('td', recursive=False)
             if not tds: continue
             
-            # 💡 [진단 핵심 1] 첫 번째 칸의 텍스트가 정규식에 걸리는지 추적 중계
+            # 💡 첫 번째 칸에서 장/절의 전체 이름을 유연하게 추출
             first_cell_clean = clean_korean_law_text(tds[0].get_text(separator="\n", strip=True))
             first_cell_lines = [l.strip() for l in first_cell_clean.split('\n') if l.strip()]
             
             for line in first_cell_lines:
                 chapter_match = re.match(r'^제\s*\d+\s*[장편절](?:\s+[^\n]+)?', line)
                 if chapter_match:
-                    old_folder = current_chapter
                     current_chapter = chapter_match.group(0).strip()
-                    print(f"   └ [진단-폴더전환] 행 번호 {row_idx}: 폴더가 [{old_folder}] ──> [{current_chapter}]로 변경되었습니다.")
                     break
                 elif line.startswith("부칙") and "제" not in line:
                     current_chapter = "부칙"
-                    print(f"   └ [진단-폴더전환] 행 번호 {row_idx}: 부칙 구간에 진입하여 폴더가 [부칙]으로 고정됩니다.")
                     break
             
             if len(tds) == 1:
-                print(f"[진단-행스킵] 행 번호 {row_idx}: 1칸짜리 병합행(장/절 타이틀 행)이므로 폴더명만 보존하고 넘어갑니다. (텍스트: {first_cell_lines[:1]})")
                 continue
             
             for col_idx, td in enumerate(tds):
-                if col_idx in col_excludes:
-                    continue
-                    
                 groups = td.find_all('div', class_='lsptnThdCmpGroup')
                 for group in groups:
+                    
+                    # 💡 [가드레일 보강] 칸 인덱스를 보지 않고, 텍스트 레이아웃 구조 내에 '요양급여의 기준에 관한 규칙' 소속 명칭이 포함되면 명확히 걸러냅니다.
+                    is_yoyang_rule = False
+                    parent_td = group.find_parent('td')
+                    if parent_td:
+                        bold_p = parent_td.find('p', class_='txt_bold')
+                        if bold_p and "요양급여의 기준에 관한 규칙" in bold_p.get_text():
+                            is_yoyang_rule = True
+                            
+                    if is_yoyang_rule:
+                        continue # 국민건강보험법, 시행령 본문은 살리고 해당 규칙 조항만 핀셋 제거
+                    
                     label = group.find('label')
                     if label:
                         text = label.get_text(strip=True)
                         label_match = re.match(r'^제\s*\d+\s*[장편절](?:\s+[^\n]+)?', text)
                         if label_match:
                             current_chapter = label_match.group(0).strip()
-                            print(f"       └ [진단-라벨폴더] 내부 라벨에서 장/절 발견: 폴더 [{current_chapter}] 갱신")
                             continue
                     
                     lawcon = group.find('div', class_='lawcon')
@@ -173,12 +158,9 @@ def parse_html_3col_law(html_content):
         for cat in categories:
             del cat["sort_order"]
             
-        print(f"[진단-완료] 파싱 최종 완료됨: 총 {len(categories)}개 조항 빌드 완료.")
-        print("💡 ==================== [진단 시스템 종료] ====================\n")
         return categories
 
     else:
-        print("[진단-실패] 테이블을 찾지 못해 백업 단일 법령 파서로 긴급 우회합니다.")
         categories = []
         current_chapter = "기본 폴더"
         current_law_num = "0"
