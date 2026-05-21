@@ -3,15 +3,14 @@ import { formatCardText, getStrictTitleOnly, SPLIT_REGEX } from '../utils/consta
 import { api } from '../services/api';
 
 const getGridClass = (cols: number) => {
-  if(cols === 1) return "md:grid-cols-1";
-  if(cols === 2) return "md:grid-cols-2";
-  if(cols === 3) return "md:grid-cols-3";
-  if(cols === 4) return "md:grid-cols-4";
-  if(cols === 5) return "md:grid-cols-5";
+  if (cols === 1) return "md:grid-cols-1";
+  if (cols === 2) return "md:grid-cols-2";
+  if (cols === 3) return "md:grid-cols-3";
+  if (cols === 4) return "md:grid-cols-4";
+  if (cols === 5) return "md:grid-cols-5";
   return "md:grid-cols-3";
 };
 
-// 🔴 개선사항 1: 장(Chapter) 번호순으로 폴더를 정렬하는 함수
 const sortChapters = (folders: string[]): string[] => {
   return folders.sort((a, b) => {
     const matchA = a.match(/^제\s*(\d+)\s*장/);
@@ -28,12 +27,10 @@ const sortChapters = (folders: string[]): string[] => {
 
 type WordItem = { text: string; subWords: string[]; };
 
-export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory, loadAllData }: any) => {
+export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory, loadAllData }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   
-  // --- 👇 여기서부터 수정 시작 👇 ---
-  
-  // 1. 공백, 특수문자, 대괄호 안의 내용(예: [법])을 모두 제거하여 순수한 텍스트만 추출하는 헬퍼 함수
+  // 💡 정밀 매칭을 위한 텍스트 정제 함수
   const getCleanText = (text: string) => {
     if (!text) return "";
     return text.replace(/\[.*?\]/g, '') // [법], [령] 등 제거
@@ -41,12 +38,12 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                .trim();
   };
 
-  // 2. savedCards의 제목들을 "순수 텍스트" 형태로 Set에 저장
+  // 💡 제작 완료된 조항들의 '순수 텍스트' 추출
   const createdCleanTitles = new Set(
     (Array.isArray(savedCards) ? savedCards : []).map((c: any) => getCleanText(c.title))
   );
 
-  // 3. 폴더 완료 여부 확인 함수 (순수 텍스트 비교 적용 + 로그 출력 추가)
+  // 💡 진단 기능을 포함한 폴더 제작 완료 판별
   const isFolderFullyCreated = (folderName: string) => {
     const items = safeCategories.filter((c: any) => c.folder_name === folderName);
     if (items.length === 0) return false;
@@ -55,12 +52,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     items.forEach((c: any) => {
       const cleanCatTitle = getCleanText(c.title);
       const isMatch = createdCleanTitles.has(cleanCatTitle);
-      
-      // 💡 진단용 로그: 브라우저 콘솔(F12)에서 이유를 확인할 수 있습니다.
-      // console.log(`[비교 진단] 폴더명: ${folderName}`);
-      // console.log(` - CraftTab 조항 원본: "${c.title}" -> 정제됨: "${cleanCatTitle}"`);
-      // console.log(` - EnhanceTab 매칭결과: ${isMatch ? "✅ 일치" : "❌ 불일치"}`);
-      
       if (!isMatch) {
         allCreated = false;
       }
@@ -69,21 +60,23 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     return allCreated;
   };
   
-  // 4. 개별 조항이 생성되었는지 확인하는 함수 (렌더링 시 사용)
+  // 💡 개별 조항 제작 완료 판별
   const isCategoryCreated = (catTitle: string) => {
     return createdCleanTitles.has(getCleanText(catTitle));
   };
 
-  // --- 👆 여기까지 덮어쓰기 완료 👆 ---
-
   const craftFolders = sortChapters(
-    Array.from(new Set(safeCategories.map((c:any) => c.folder_name)))
+    Array.from(new Set(safeCategories.map((c: any) => c.folder_name)))
       .filter(f => f && f !== '기본 폴더') as string[]
   );
   
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>(() => {
-    try { const saved = localStorage.getItem('blankd_craft_folders'); return saved ? JSON.parse(saved) : {}; } 
-    catch(e) { return {}; }
+    try { 
+      const saved = localStorage.getItem('blankd_craft_folders'); 
+      return saved ? JSON.parse(saved) : {}; 
+    } catch(e) { 
+      return {}; 
+    }
   });
 
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -125,7 +118,9 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     try {
       await api.updateStopwords(safeAddress, { stop: stops, include: includes });
       addLog(`✅ 단어 설정 DB 동기화 완료`);
-    } catch(e) { alert("DB 저장 실패"); }
+    } catch(e) { 
+      alert("DB 저장 실패"); 
+    }
   };
 
   const handleAddStopWord = () => {
@@ -163,7 +158,10 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       const next = { ...prev };
       let changed = false;
       craftFolders.forEach(f => {
-        if (next[f] === undefined) { next[f] = true; changed = true; }
+        if (next[f] === undefined) { 
+          next[f] = true; 
+          changed = true; 
+        }
       });
       if (changed) localStorage.setItem('blankd_craft_folders', JSON.stringify(next));
       return next;
@@ -191,15 +189,19 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     };
     const clear = () => { clearTimeout(timer); };
     return {
-      onTouchStart: start, onTouchEnd: clear,
-      onMouseDown: start, onMouseUp: clear, onMouseLeave: clear,
+      onTouchStart: start, 
+      onTouchEnd: clear,
+      onMouseDown: start, 
+      onMouseUp: clear, 
+      onMouseLeave: clear,
       onContextMenu: (e: any) => { e.preventDefault(); }
     };
   };
 
   const handleToggleCheck = (catId: number) => {
     const next = new Set(checkedIds);
-    if (next.has(catId)) next.delete(catId); else next.add(catId);
+    if (next.has(catId)) next.delete(catId); 
+    else next.add(catId);
     setCheckedIds(next);
     if (next.size === 0) setIsSelectMode(false);
   };
@@ -211,7 +213,8 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       try {
         const deletePromises = Array.from(checkedIds).map(id =>
           fetch("https://api.blankd.top/api/delete-category", {
-            method: "POST", headers: { "Content-Type": "application/json" },
+            method: "POST", 
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ wallet_address: safeAddress, id })
           })
         );
@@ -221,7 +224,9 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         setCheckedIds(new Set());
         if (loadAllData) await loadAllData();
         else window.location.reload();
-      } catch (e) { alert("일괄 삭제 중 오류가 발생했습니다."); }
+      } catch (e) { 
+        alert("일괄 삭제 중 오류가 발생했습니다."); 
+      }
     }
   };
 
@@ -230,7 +235,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     setWordArray(initialWords.map(w => ({ text: w, subWords: [w] })));
 
     const initialSelected = new Set<number>();
-    
     const currentCustomStopWords = customStopWords;
     const currentCustomIncludeWords = customIncludeWords;
 
@@ -321,7 +325,10 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
   };
 
   const openCategory = (targetCat: any) => {
-    if (isSelectMode) { handleToggleCheck(targetCat.id); return; }
+    if (isSelectMode) { 
+      handleToggleCheck(targetCat.id); 
+      return; 
+    }
     setExpandedId(targetCat.id);
     setPageBreaks(new Set());
     setMemoInput(targetCat.memo || "");
@@ -353,17 +360,26 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       const newArray = [...wordArray];
       newArray.splice(idx, 1); 
       setWordArray(newArray);
+      
       const newSelected = new Set<number>();
-      selectedWords.forEach(i => { if (i < idx) newSelected.add(i); else if (i > idx) newSelected.add(i - 1); });
+      selectedWords.forEach(i => { 
+        if (i < idx) newSelected.add(i); 
+        else if (i > idx) newSelected.add(i - 1); 
+      });
       setSelectedWords(newSelected);
+      
       const newPageBreaks = new Set<number>();
-      pageBreaks.forEach(i => { if (i < idx) newPageBreaks.add(i); else if (i > idx) newPageBreaks.add(i - 1); });
+      pageBreaks.forEach(i => { 
+        if (i < idx) newPageBreaks.add(i); 
+        else if (i > idx) newPageBreaks.add(i - 1); 
+      });
       setPageBreaks(newPageBreaks);
       return; 
     }
     
     const s = new Set(selectedWords);
-    if(s.has(idx)) s.delete(idx); else s.add(idx);
+    if(s.has(idx)) s.delete(idx); 
+    else s.add(idx);
     setSelectedWords(s);
   };
 
@@ -371,7 +387,8 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     e.preventDefault(); 
     if (isEraserMode) return; 
     const p = new Set(pageBreaks);
-    if (p.has(idx)) p.delete(idx); else if (window.confirm("이 위치에서 페이지를 나누시겠습니까?")) p.add(idx);
+    if (p.has(idx)) p.delete(idx); 
+    else if (window.confirm("이 위치에서 페이지를 나누시겠습니까?")) p.add(idx);
     setPageBreaks(p);
   };
 
@@ -397,7 +414,10 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       setSelectedWords(newSelected);
 
       const newPageBreaks = new Set<number>();
-      pageBreaks.forEach(i => { if (i < idx) newPageBreaks.add(i); else if (i > idx) newPageBreaks.add(i + shiftAmount); });
+      pageBreaks.forEach(i => { 
+        if (i < idx) newPageBreaks.add(i); 
+        else if (i > idx) newPageBreaks.add(i + shiftAmount); 
+      });
       setPageBreaks(newPageBreaks);
       return;
     }
@@ -425,13 +445,15 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     setSelectedWords(newSelected);
 
     const newPageBreaks = new Set<number>();
-    pageBreaks.forEach(i => { if (i < idx) newPageBreaks.add(i); else if (i > idx) newPageBreaks.add(i - 1); });
+    pageBreaks.forEach(i => { 
+      if (i < idx) newPageBreaks.add(i); 
+      else if (i > idx) newPageBreaks.add(i - 1); 
+    });
     setPageBreaks(newPageBreaks);
   };
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in w-full">
-      
       <div className="flex gap-2 mb-2 sm:mb-4">
         <label className="flex-1 border border-white/20 p-2 sm:p-2.5 text-center text-[10px] sm:text-xs hover:bg-white/10 cursor-pointer text-white/80 rounded-sm transition-colors">
           <input type="file" accept=".pdf,.txt,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 학습자료 업로드'}
@@ -458,7 +480,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
 
       {showStopWordsSettings && (
         <div className="p-4 sm:p-5 bg-[#0a0a0c] border border-amber-500/30 rounded-sm mb-6 flex flex-col sm:flex-row gap-6 animate-in slide-in-from-top-2">
-          
           <div className="flex-1">
             <div className="text-xs sm:text-sm text-amber-400 font-bold mb-3">❌ 제외 단어 (빈칸 X)</div>
             <div className="flex gap-2 mb-3">
@@ -509,7 +530,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
               ))}
             </div>
           </div>
-
         </div>
       )}
 
@@ -527,7 +547,13 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                 e.stopPropagation();
                 const newName = prompt(`'${f}' 폴더의 새로운 이름을 입력하세요:`, f);
                 if(newName && newName.trim() !== "" && newName !== f) {
-                  try { await api.renameFolder(safeAddress, f, newName.trim()); addLog(`✏️ 폴더명 변경 완료.`); window.location.reload(); } catch (err) { alert("변경 실패"); }
+                  try { 
+                    await api.renameFolder(safeAddress, f, newName.trim()); 
+                    addLog(`✏️ 폴더명 변경 완료.`); 
+                    window.location.reload(); 
+                  } catch (err) { 
+                    alert("변경 실패"); 
+                  }
                 }
               }}
               className="absolute right-6 top-1/2 -translate-y-1/2 text-white/30 hover:text-blue-400 px-1.5 py-1 text-[10px] transition-colors"
@@ -536,7 +562,13 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
               onClick={async (e) => {
                 e.stopPropagation();
                 if(confirm(`'${f}' 폴더를 모두 삭제하시겠습니까?`)) {
-                  try { await api.deleteFolder(safeAddress, f); addLog(`🗑️ 삭제 완료`); window.location.reload(); } catch (err) { alert("삭제 실패"); }
+                  try { 
+                    await api.deleteFolder(safeAddress, f); 
+                    addLog(`🗑️ 삭제 완료`); 
+                    window.location.reload(); 
+                  } catch (err) { 
+                    alert("삭제 실패"); 
+                  }
                 }
               }}
               className="absolute right-1 top-1/2 -translate-y-1/2 text-white/30 hover:text-red-400 px-1.5 py-1 text-[10px] transition-colors"
@@ -545,22 +577,29 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         ))}
       </div>
       
-      {/* 🔴 개선사항 3: 폴더를 정렬된 순서대로 렌더링 */}
       {craftFolders.map((folder: string) => {
         const isChapterFolder = /^제\s*\d+\s*장/.test(folder);
+        // 💡 폴더 전체 완료 여부 체크
+        const fullyCreated = isFolderFullyCreated(folder);
+        
         return openFolders[folder] && (
-          <div key={folder} className={`mb-6 sm:mb-8 border-l rounded-l-sm pl-3 sm:pl-4 transition-all ${isChapterFolder ? 'border-blue-500/50' : 'border-white/5'}`}>
+          <div key={folder} className={`mb-6 sm:mb-8 border-l rounded-l-sm pl-3 sm:pl-4 transition-all ${isChapterFolder ? 'border-blue-500/50' : 'border-white/5'} ${fullyCreated ? 'opacity-40 grayscale' : ''}`}>
             <div className={`text-xs sm:text-sm mb-2 sm:mb-3 border-b pb-1.5 sm:pb-2 font-bold transition-all ${isChapterFolder ? 'text-blue-400 border-blue-500/30' : 'text-white/50 border-white/10'}`}>
-              {folder}
+              {folder} {fullyCreated && " (완료됨)"}
             </div>
 
-            <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
+            {/* 💡 폴더가 완료되면 내부 클릭도 전부 방지합니다 */}
+            <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start ${fullyCreated ? 'pointer-events-none' : ''}`}>
               {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
                   const isExpanded = expandedId === cat.id;
                   const isChecked = checkedIds.has(cat.id);
                   const contentToUse = cat.content || cat.title || "";
                   
-                  let colClass = ""; let titleColor = "text-amber-400";
+                  // 💡 개별 조항 완료 여부 체크
+                  const isCreated = isCategoryCreated(cat.title);
+                  
+                  let colClass = ""; 
+                  let titleColor = "text-amber-400";
                   const checkText = `${cat.title || ''} ${cat.content || ''}`;
                   if (checkText.includes('[법]')) titleColor = "text-red-500";
                   else if (checkText.includes('[령]')) titleColor = "text-blue-400";
@@ -584,10 +623,18 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
 
                           <button 
                             {...createLongPressHandlers(cat.id)}
-                            onClick={() => openCategory(cat)} 
-                            className={`flex-1 min-h-[60px] p-3 sm:p-4 bg-indigo-900/20 border rounded-sm transition-colors hover:bg-indigo-900/40 flex flex-col gap-1.5 sm:gap-2 text-left relative pr-10 ${isChecked ? 'border-amber-500/50 bg-amber-950/10' : 'border-indigo-500/30'}`}
+                            onClick={() => { if(!isCreated) openCategory(cat); }} 
+                            className={`flex-1 min-h-[60px] p-3 sm:p-4 border rounded-sm transition-colors flex flex-col gap-1.5 sm:gap-2 text-left relative pr-10 ${
+                              isChecked ? 'border-amber-500/50 bg-amber-950/10' : 
+                              isCreated ? 'bg-indigo-900/10 border-indigo-500/10 opacity-30 cursor-not-allowed grayscale' : 
+                              'border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40'
+                            }`}
                           >
-                            <span className={`${titleColor} font-bold text-[11px] sm:text-[13px] leading-snug break-keep`}>{cleanTitle}</span>
+                            <div className="flex justify-between items-center w-full">
+                              <span className={`${titleColor} font-bold text-[11px] sm:text-[13px] leading-snug break-keep`}>{cleanTitle}</span>
+                              {isCreated && <span className="text-[9px] bg-black/50 text-indigo-300 px-1.5 py-0.5 rounded ml-2 whitespace-nowrap border border-indigo-500/30">제작됨</span>}
+                            </div>
+                            
                             {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
                             
                             {!isSelectMode && (
@@ -604,6 +651,19 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                                 ✕
                               </span>
                             )}
+                            
+                            {/* 💡 오류 진단용 버튼 (테스트 후 삭제 무방) */}
+                            <span 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                alert(`[진단결과]\n원본 제목: "${cat.title}"\n비교용 정제 제목: "${getCleanText(cat.title)}"\n\n매칭 대상(EnhanceTab) 리스트는 F12 콘솔 창에 출력되었습니다.`);
+                                console.log("매칭 대상(만들어진 카드들) 리스트:", createdCleanTitles);
+                              }}
+                              className="absolute top-1 right-1 text-[8px] bg-red-500/50 hover:bg-red-500 text-white px-1.5 py-0.5 rounded z-50 cursor-pointer md:opacity-0 group-hover/card:opacity-100 transition-opacity"
+                              title="디버깅 진단 버튼"
+                            >
+                              ?
+                            </span>
                           </button>
                         </div>
                       ) : (
@@ -616,7 +676,10 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
                                   e.stopPropagation();
                                   const newFolder = prompt("이동시킬 폴더명:", cat.folder_name);
                                   if (newFolder && newFolder.trim() !== "" && newFolder !== cat.folder_name) {
-                                    try { await api.updateCategoryFolder(safeAddress, cat.id, newFolder.trim()); window.location.reload(); } catch (err) {}
+                                    try { 
+                                      await api.updateCategoryFolder(safeAddress, cat.id, newFolder.trim()); 
+                                      window.location.reload(); 
+                                    } catch (err) {}
                                   }
                                 }}
                                 className="px-2 py-0.5 bg-white/5 border border-white/20 rounded-sm text-[9px] text-white/50 hover:bg-white/10 transition-colors"
