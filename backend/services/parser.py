@@ -20,12 +20,10 @@ def normalize_text(text):
     return text.strip()
 
 def parse_html_3col_law(html_content):
-    print("\n================ [파서 정밀 진단 시작] ================")
     soup = BeautifulSoup(html_content, 'html.parser')
     table = soup.find('table', {'class': 'lsPtnThdCmpTable'})
     
     if table:
-        print("[진단-성공] 3단 비교표 테이블을 찾았습니다. 분석을 시작합니다.")
         categories = []
         current_chapter = "기본 폴더"
         
@@ -33,65 +31,59 @@ def parse_html_3col_law(html_content):
         last_num = "부칙등"
         last_title = "내용"
         
+        # 💡 [핵심 방어벽] 요양급여 칸 찾기 (반드시 3번째 칸 이상에서만 찾음)
         yoyang_col_idx = -1
         rows = table.find_all('tr')
-        
-        # 💡 [치명적 오류 수정] 표의 맨 위 3줄 안에서, 반드시 '3번째 칸(인덱스 2)' 이후에서만 규칙을 찾습니다.
-        # 절대 0번(법)과 1번(시행령) 칸은 지우지 않습니다!
-        for r_idx, row in enumerate(rows[:3]):
+        for row in rows[:3]:
             cells = row.find_all(['th', 'td'])
-            if len(cells) >= 3: # 정상적인 3단표 행일 때만
+            if len(cells) >= 3:
                 for c_idx, cell in enumerate(cells):
-                    if c_idx >= 2: # 💡 여기입니다! 2번째 인덱스(3번째 칸) 이상일 때만 허용
+                    # 💡 c_idx가 0(법)과 1(령)일 때는 절대 요양급여 판정을 내리지 않음!
+                    if c_idx >= 2: 
                         cell_text = cell.get_text(strip=True)
                         if "요양급여의 기준" in cell_text or "요양급여비용" in cell_text:
                             yoyang_col_idx = c_idx
-                            print(f"[진단-제외] 🔥 요양급여 규칙이 표의 {r_idx}번째 줄, {c_idx}번째 세로칸에서 감지되었습니다! (이 칸은 삭제됩니다)")
                             break
-            if yoyang_col_idx != -1: break
-            
-        if yoyang_col_idx == -1:
-            print("[진단-알림] 요양급여 규칙 전용 칸을 찾지 못했습니다. 일반 파싱을 진행합니다.")
+            if yoyang_col_idx != -1:
+                break
         
         for row_idx, row in enumerate(rows):
             tds = row.find_all('td', recursive=False)
             if not tds: continue
             
+            # 💡 [폴더명 추출 1] 병합된 셀(장/절 제목)인 경우
             if len(tds) == 1:
                 row_text = clean_korean_law_text(tds[0].get_text(strip=True))
-                if re.match(r'^제\s*\d+\s*[장편절]', row_text):
-                    match = re.match(r'^제\s*\d+\s*[장편절][^\s]*', row_text)
-                    if match:
-                        raw_folder = match.group(0).strip()
-                        if "총칙" in row_text and "총칙" not in raw_folder:
-                            current_chapter = f"{raw_folder} 총칙"
-                        else:
-                            current_chapter = raw_folder
-                        print(f"[진단-폴더] 📁 병합셀에서 새 폴더 감지: {current_chapter}")
+                match = re.match(r'^제\s*\d+\s*[장편절][^\s]*', row_text)
+                if match:
+                    raw_folder = match.group(0).strip()
+                    if "총칙" in row_text and "총칙" not in raw_folder:
+                        current_chapter = f"{raw_folder} 총칙"
+                    else:
+                        current_chapter = raw_folder
                 elif row_text.startswith("부칙") and "제" not in row_text:
                     current_chapter = "부칙"
-                    print(f"[진단-폴더] 📁 부칙 폴더 감지")
-                continue 
+                continue # 장/절 제목이므로 본문 파싱 생략
             
+            # 💡 [조문 파싱 및 요양급여 제외]
             for col_idx, td in enumerate(tds):
-                # 정확히 찾아낸 요양급여 세로칸만 파싱 제외
+                # 찾은 요양급여 칸이면 완전히 건너뜀 (법과 령은 절대 안 건너뜀)
                 if yoyang_col_idx != -1 and col_idx == yoyang_col_idx:
                     continue
 
                 groups = td.find_all('div', class_='lsptnThdCmpGroup')
                 for group in groups:
+                    # 💡 [폴더명 추출 2] 숨겨진 라벨에서 장/절 찾기
                     label = group.find('label')
                     if label:
                         label_text = label.get_text(strip=True)
-                        if re.match(r'^제\s*\d+\s*[장편절]', label_text):
-                            match = re.match(r'^제\s*\d+\s*[장편절][^\s]*', label_text)
-                            if match:
-                                raw_folder = match.group(0).strip()
-                                if "총칙" in label_text and "총칙" not in raw_folder:
-                                    current_chapter = f"{raw_folder} 총칙"
-                                else:
-                                    current_chapter = raw_folder
-                                print(f"[진단-폴더] 📁 그룹 라벨에서 새 폴더 감지: {current_chapter}")
+                        match = re.match(r'^제\s*\d+\s*[장편절][^\s]*', label_text)
+                        if match:
+                            raw_folder = match.group(0).strip()
+                            if "총칙" in label_text and "총칙" not in raw_folder:
+                                current_chapter = f"{raw_folder} 총칙"
+                            else:
+                                current_chapter = raw_folder
                             continue
                     
                     lawcon = group.find('div', class_='lawcon')
@@ -143,20 +135,23 @@ def parse_html_3col_law(html_content):
                         if link_id and link_id in context_map:
                             my_num = context_map[link_id]["num"]
                             my_title = context_map[link_id]["title"]
+                            # 하위 조항도 부모 폴더 상속
                             current_chapter = context_map[link_id]["folder"]
                         else:
                             my_num = last_num
                             my_title = last_title
                             
                     clean_title = f"[{type_name}] {my_num} ({my_title[:15]})"
-                    categories.append({"title": clean_title, "content": content, "folder_name": current_chapter})
                     
-        print(f"[진단-완료] 총 {len(categories)}개의 조항 추출. 마지막 감지 폴더: {current_chapter}")
-        print("================================================\n")
+                    categories.append({
+                        "title": clean_title, 
+                        "content": content, 
+                        "folder_name": current_chapter
+                    })
         return categories
 
     else:
-        print("[진단-에러] 3단 비교표 형식이 아닙니다! 일반 파서로 넘어갑니다.")
+        # 단일 법령용 백업 로직
         categories = []
         current_chapter = "기본 폴더"
         current_law_num = "0"
