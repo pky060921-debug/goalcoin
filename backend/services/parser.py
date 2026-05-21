@@ -34,59 +34,48 @@ def parse_html_3col_law(html_content):
         global_order = 0
         link_id_order_map = {}
         
-        # 💡 [핵심 방어벽 1] 표의 상단 10줄을 샅샅이 뒤져 '요양급여'가 적힌 세로칸 번호 완벽 색출
-        col_excludes = []
-        for row in table.find_all('tr')[:10]:
-            cells = row.find_all(['th', 'td'])
-            if len(cells) >= 2: # 헤더나 본문이 시작되는 행
-                for i, cell in enumerate(cells):
-                    cell_text = cell.get_text(strip=True)
-                    if "요양급여" in cell_text:
-                        if i not in col_excludes:
-                            col_excludes.append(i)
+        # 💡 [방어벽 1] 본문이 아닌 '표의 최상단 헤더(칸 제목)'에서만 요양급여 칸을 찾아냅니다.
+        col_excludes = set()
+        thead = table.find('thead')
+        if not thead:
+            first_tr = table.find('tr')
+            header_cells = first_tr.find_all(['th', 'td']) if first_tr else []
+        else:
+            header_cells = thead.find_all(['th', 'td'])
+            
+        for idx, cell in enumerate(header_cells):
+            cell_text = cell.get_text(strip=True)
+            if "요양급여의 기준" in cell_text or "요양급여비용" in cell_text:
+                col_excludes.add(idx)
         
         rows = table.find_all('tr')
         for row_idx, row in enumerate(rows):
             tds = row.find_all('td', recursive=False)
             if not tds: continue
             
-            # 💡 [핵심 방어벽 2] 칸이 하나로 합쳐진 가로줄(병합 셀)인 경우, 장/절 제목이거나 부칙임
-            if len(tds) == 1:
-                row_text_full = clean_korean_law_text(tds[0].get_text(strip=True))
-                if re.match(r'^제\s*\d+\s*[장편절]', row_text_full):
-                    match = re.match(r'^제\s*\d+\s*[장편절][^\s]*', row_text_full)
+            # 💡 [방어벽 2] 표의 모양과 상관없이 '첫 번째 칸(법률)'의 첫 줄에서 무조건 장(Chapter)을 빼냅니다.
+            first_td_text = clean_korean_law_text(tds[0].get_text(separator='\n'))
+            lines = [line.strip() for line in first_td_text.split('\n') if line.strip()]
+            if lines:
+                first_line = lines[0]
+                if re.match(r'^제\s*\d+\s*[장편절]', first_line):
+                    match = re.match(r'^제\s*\d+\s*[장편절][^\s]*', first_line)
                     if match:
                         raw_folder = match.group(0).strip()
-                        if "총칙" in row_text_full and "총칙" not in raw_folder:
+                        if "총칙" in first_line and "총칙" not in raw_folder:
                             current_folder = f"{raw_folder} 총칙"
                         else:
                             current_folder = raw_folder
-                    continue # 제목만 있는 행이므로 본문 파싱 생략
-                elif row_text_full.startswith("부칙"):
+                elif first_line.startswith("부칙") and "제" not in first_line:
                     current_folder = "부칙"
-                    continue
-            
+
             for col_idx, td in enumerate(tds):
-                # 💡 색출해낸 요양급여 세로줄(보통 3번째 칸)은 파싱하지 않고 즉시 버림!
+                # 💡 제목칸에서 색출한 요양급여 칸은 아예 파싱을 건너뜁니다.
                 if col_idx in col_excludes:
                     continue
-                
+                    
                 groups = td.find_all('div', class_='lsptnThdCmpGroup')
                 for group in groups:
-                    # 💡 [핵심 방어벽 3] 각 칸 내부 <label>에 숨어있는 장/절 제목 완벽 탐지
-                    label = group.find('label')
-                    if label:
-                        label_text = label.get_text(strip=True)
-                        if re.match(r'^제\s*\d+\s*[장편절]', label_text):
-                            match = re.match(r'^제\s*\d+\s*[장편절][^\s]*', label_text)
-                            if match:
-                                raw_folder = match.group(0).strip()
-                                if "총칙" in label_text and "총칙" not in raw_folder:
-                                    current_folder = f"{raw_folder} 총칙"
-                                else:
-                                    current_folder = raw_folder
-                            continue # 라벨(제목)만 있는 블록 패스
-                    
                     lawcon = group.find('div', class_='lawcon')
                     if not lawcon: continue
                     
@@ -97,12 +86,9 @@ def parse_html_3col_law(html_content):
                     content = re.sub(r'(?<!\n)(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)', r'\n\1', content) 
                     content = re.sub(r'\n{3,}', '\n\n', content).strip()
                     
-                    # 칸 번호를 기반으로 법/령/칙 1차 부여
-                    if col_idx == 0: type_name = "법"
-                    elif col_idx == 1: type_name = "령"
-                    else: type_name = "칙"
-                    
+                    type_name = "법"
                     link_id = None
+                    
                     span_lor = lawcon.find('span', id=re.compile(r'^div[LOR]$'))
                     if span_lor:
                         if span_lor['id'] == 'divL': type_name = "법"
@@ -116,13 +102,10 @@ def parse_html_3col_law(html_content):
                                 link_id = match.group(1)
                                 break
                     else:
-                        parent_td = group.find_parent('td')
-                        if parent_td:
-                            bold_p = parent_td.find('p', class_='txt_bold')
-                            if bold_p:
-                                bold_text = bold_p.get_text()
-                                if '시행령' in bold_text: type_name = "령"
-                                elif '시행규칙' in bold_text: type_name = "칙"
+                        # 태그가 깨졌을 때를 대비한 안전망 (왼쪽부터 순서대로 법, 령, 칙 부여)
+                        if col_idx == 0: type_name = "법"
+                        elif col_idx == 1: type_name = "령"
+                        elif col_idx >= 2: type_name = "칙"
                     
                     article_match = re.search(r'제\s*(\d+)\s*조(?:의\s*(\d+))?', content)
                     my_num = last_num
@@ -140,11 +123,10 @@ def parse_html_3col_law(html_content):
                             last_num = my_num
                             last_title = my_title
                     else:
-                        # 💡 조문 번호가 없는 하위 조항 처리 시 문맥의 엄격한 상속
                         if link_id and link_id in context_map:
                             my_num = context_map[link_id]["num"]
                             my_title = context_map[link_id]["title"]
-                            current_folder = context_map[link_id]["folder"]
+                            current_folder = context_map[link_id]["folder"] # 령/칙도 부모(법)의 폴더를 상속받음
                         else:
                             my_num = last_num
                             my_title = last_title
@@ -178,7 +160,7 @@ def parse_html_3col_law(html_content):
         return categories
 
     else:
-        # 일반 단문 법령 페이지용 로직
+        # 단일 법령용 백업 로직
         categories = []
         current_chapter = "기본 폴더"
         current_law_num = "0"
