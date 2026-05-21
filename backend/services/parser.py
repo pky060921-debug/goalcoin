@@ -25,7 +25,7 @@ def parse_html_3col_law(html_content):
     
     if table:
         categories = []
-        current_folder = "기본 폴더"
+        current_chapter = "기본 폴더"  # 장이 발견되기 전 기본값
         
         context_map = {} 
         last_num = "부칙등"
@@ -34,7 +34,7 @@ def parse_html_3col_law(html_content):
         global_order = 0
         link_id_order_map = {}
         
-        # 💡 [방어벽 1] 본문이 아닌 '표의 최상단 헤더(칸 제목)'에서만 요양급여 칸을 찾아냅니다.
+        # 💡 [요양급여 기준 규칙 칸 제외 설정]
         col_excludes = set()
         thead = table.find('thead')
         if not thead:
@@ -53,25 +53,42 @@ def parse_html_3col_law(html_content):
             tds = row.find_all('td', recursive=False)
             if not tds: continue
             
-            # 💡 [보안 및 기능 보강] 첫 번째 칸(법률)의 모든 줄을 탐색하여 공백 잘림 없이 장/절 전체 폴더명을 정확히 추출합니다.
-            first_td_text = clean_korean_law_text(tds[0].get_text(separator='\n'))
-            lines = [line.strip() for line in first_td_text.split('\n') if line.strip()]
-            if lines:
-                for line in lines:
-                    if re.match(r'^제\s*\d+\s*[장편절]', line):
-                        current_folder = line
-                        break
-                    elif line.startswith("부칙") and "제" not in line:
-                        current_folder = "부칙"
-                        break
-
+            # 💡 [장/절 폴더 추적 엔진 강화]
+            # 셀이 1개이든 3개이든 첫 번째 칸에 '제 N 장' 텍스트가 있다면 무조건 상속받을 폴더명을 갱신합니다.
+            first_cell_clean = clean_korean_law_text(tds[0].get_text(separator="\n", strip=True))
+            first_cell_lines = [l.strip() for l in first_cell_clean.split('\n') if l.strip()]
+            
+            for line in first_cell_lines:
+                # 공백이나 탭 문자가 섞여 있어도 '제X장' 또는 '제X절'을 완벽히 인식하여 매칭합니다.
+                chapter_match = re.match(r'^제\s*\d+\s*[장편절](?:\s+[^\n]+)?', line)
+                if chapter_match:
+                    current_chapter = chapter_match.group(0).strip()
+                    break
+                elif line.startswith("부칙") and "제" not in line:
+                    current_chapter = "부칙"
+                    break
+            
+            # 행 전체가 하나로 합쳐진 제목 행일 경우, 폴더명만 갱신하고 조문 파싱 루프는 건너뜁니다.
+            if len(tds) == 1:
+                continue
+            
             for col_idx, td in enumerate(tds):
-                # 💡 제목칸에서 색출한 요양급여 칸은 아예 파싱을 건너뜁니다.
+                # 제외 대상인 '요양급여의 기준에 관한 규칙' 세로 칸은 원천 배제합니다.
                 if col_idx in col_excludes:
                     continue
                     
                 groups = td.find_all('div', class_='lsptnThdCmpGroup')
                 for group in groups:
+                    
+                    # 💡 하위 라벨에 또 한 번 숨겨진 장/절 매칭 가드레일
+                    label = group.find('label')
+                    if label:
+                        label_text = label.get_text(strip=True)
+                        label_match = re.match(r'^제\s*\d+\s*[장편절](?:\s+[^\n]+)?', label_text)
+                        if label_match:
+                            current_chapter = label_match.group(0).strip()
+                            continue
+                    
                     lawcon = group.find('div', class_='lawcon')
                     if not lawcon: continue
                     
@@ -98,7 +115,6 @@ def parse_html_3col_law(html_content):
                                 link_id = match.group(1)
                                 break
                     else:
-                        # 태그가 깨졌을 때를 대비한 안전망 (왼쪽부터 순서대로 법, 령, 칙 부여)
                         if col_idx == 0: type_name = "법"
                         elif col_idx == 1: type_name = "령"
                         elif col_idx >= 2: type_name = "칙"
@@ -110,19 +126,19 @@ def parse_html_3col_law(html_content):
                     if article_match:
                         my_num = article_match.group(0).replace(" ", "")
                         title_match = re.search(r'\(([^()]+)\)', content)
-                        my_title = title_match.group(1).strip() if title_match else "세부내용"
+                        my_num_title = title_match.group(1).strip() if title_match else "세부내용"
                         
                         if type_name == "법" and link_id:
-                            context_map[link_id] = {"num": my_num, "title": my_title, "folder": current_folder}
+                            context_map[link_id] = {"num": my_num, "title": my_num_title, "folder": current_chapter}
                         
                         if type_name == "법":
                             last_num = my_num
-                            last_title = my_title
+                            last_title = my_num_title
                     else:
                         if link_id and link_id in context_map:
                             my_num = context_map[link_id]["num"]
                             my_title = context_map[link_id]["title"]
-                            current_folder = context_map[link_id]["folder"] # 령/칙도 부모(법)의 폴더를 상속받음
+                            current_chapter = context_map[link_id]["folder"] # 부모(법)의 폴더 흐름 동기화
                         else:
                             my_num = last_num
                             my_title = last_title
@@ -145,7 +161,7 @@ def parse_html_3col_law(html_content):
                     categories.append({
                         "title": clean_title, 
                         "content": content, 
-                        "folder_name": current_folder,
+                        "folder_name": current_chapter,
                         "sort_order": sort_order
                     })
                     
