@@ -23,9 +23,6 @@ def parse_html_3col_law(html_content):
     soup = BeautifulSoup(html_content, 'html.parser')
     table = soup.find('table', {'class': 'lsPtnThdCmpTable'})
     
-    # 💡 [필터링 핵심] 문서 내에 '요양급여 규칙'이 존재하면 강력한 차단 플래그 작동
-    exclude_rule = "요양급여의 기준에 관한 규칙" in html_content
-    
     if table:
         categories = []
         current_folder = "기본 폴더"
@@ -37,120 +34,130 @@ def parse_html_3col_law(html_content):
         global_order = 0
         link_id_order_map = {}
         
+        # 💡 [핵심 차단 1] 표의 맨 위 제목칸(헤더)을 검사하여 '요양급여' 칸 번호 색출
+        col_excludes = []
+        header_cells = []
+        thead = table.find('thead')
+        if thead:
+            header_cells = thead.find_all(['th', 'td'])
+        else:
+            first_row = table.find('tr')
+            if first_row: header_cells = first_row.find_all(['th', 'td'])
+                
+        for i, cell in enumerate(header_cells):
+            cell_text = cell.get_text(strip=True)
+            # 해당 규칙 제목이 있는 '칸 번호(Index)'를 블랙리스트에 추가
+            if "요양급여의 기준" in cell_text or "요양급여비용" in cell_text:
+                col_excludes.append(i)
+        
         rows = table.find_all('tr')
-        for row in rows:
+        for row_idx, row in enumerate(rows):
+            # 헤더 행이면 패스
+            if not thead and row_idx == 0: 
+                continue
+                
             tds = row.find_all('td', recursive=False)
+            if not tds: continue
             
-            # 💡 [보정 1] 오직 단일 병합 셀(진짜 제목칸)에서만 장/절 탐지.
-            # 본문 중간의 '제n장'을 무시하기 위해 re.search 대신 문자열 맨 앞을 검사하는 ^(re.match) 사용!
-            if len(tds) == 1:
-                row_text_full = clean_korean_law_text(row.get_text(strip=True))
-                if re.match(r'^제\s*\d+\s*[장편절]', row_text_full):
-                    match = re.match(r'^제\s*\d+\s*[장편절][^\s]*', row_text_full)
-                    if match: 
+            # 💡 [핵심 차단 2] 장/절 탐지는 '가장 왼쪽 칸(법률)'의 '가장 윗 줄'에서만 수행!
+            first_td = tds[0]
+            lines = [line.strip() for line in clean_korean_law_text(first_td.get_text(separator='\n')).split('\n') if line.strip()]
+            
+            if lines:
+                first_line = lines[0]
+                if re.match(r'^제\s*\d+\s*[장편절]', first_line):
+                    match = re.match(r'^제\s*\d+\s*[장편절][^\s]*', first_line)
+                    if match:
                         raw_folder = match.group(0).strip()
-                        if "총칙" in row_text_full and "총칙" not in raw_folder:
+                        if "총칙" in first_line and "총칙" not in raw_folder:
                             current_folder = f"{raw_folder} 총칙"
                         else:
                             current_folder = raw_folder
-                elif "부칙" in row_text_full and len(row_text_full) < 50: 
+                elif first_line.startswith("부칙") and "제" not in first_line:
                     current_folder = "부칙"
-                continue
-
-            groups = row.find_all('div', class_='lsptnThdCmpGroup')
-            for group in groups:
-                label = group.find('label')
-                if label:
-                    text = label.get_text(strip=True)
-                    if re.match(r'^제\s*\d+\s*[장편절]', text):
-                        match = re.match(r'^제\s*\d+\s*[장편절][^\s]*', text)
-                        if match: current_folder = match.group(0).strip()
-                        continue
-                        
-                lawcon = group.find('div', class_='lawcon')
-                if not lawcon: continue
-                
-                content = clean_korean_law_text(lawcon.get_text(separator="\n", strip=True))
-                if not content or len(content.replace("\n", "").strip()) < 3: continue
-                
-                content = re.sub(r'(?<!\n)(\d+\.)', r'\n\1', content)  
-                content = re.sub(r'(?<!\n)(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)', r'\n\1', content) 
-                content = re.sub(r'\n{3,}', '\n\n', content).strip()
-                
-                type_name = "법"
-                link_id = None
-                
-                span_lor = lawcon.find('span', id=re.compile(r'^div[LOR]$'))
-                if span_lor:
-                    if span_lor['id'] == 'divL': type_name = "법"
-                    elif span_lor['id'] == 'divO': type_name = "령"
-                    elif span_lor['id'] == 'divR': type_name = "칙"
-                    
-                    classes = span_lor.get('class', [])
-                    for cls in classes:
-                        match = re.search(r'div[LOR](\d+)', cls)
-                        if match:
-                            link_id = match.group(1)
-                            break
-                else:
-                    parent_td = group.find_parent('td')
-                    if parent_td:
-                        bold_p = parent_td.find('p', class_='txt_bold')
-                        if bold_p:
-                            bold_text = bold_p.get_text()
-                            if '시행령' in bold_text: type_name = "령"
-                            elif '시행규칙' in bold_text: type_name = "칙"
-                
-                # 💡 [보정 2] 요양급여 규칙이 '칙(우측 칸)' 자리에 있으면 텍스트가 뭐든 아예 통째로 뜯어내서 버림!
-                if exclude_rule and type_name == "칙":
+            
+            for col_idx, td in enumerate(tds):
+                # 💡 블랙리스트에 등록된 요양급여 칸은 파싱 안하고 즉시 버림 -> 시행규칙(보통 3번째 칸)은 완벽 보존!
+                if col_idx in col_excludes:
                     continue
                 
-                article_match = re.search(r'제\s*(\d+)\s*조(?:의\s*(\d+))?', content)
-                my_num = last_num
-                my_title = last_title
-                
-                if article_match:
-                    my_num = article_match.group(0).replace(" ", "")
-                    title_match = re.search(r'\(([^()]+)\)', content)
-                    my_title = title_match.group(1).strip() if title_match else "세부내용"
+                groups = td.find_all('div', class_='lsptnThdCmpGroup')
+                for group in groups:
+                    lawcon = group.find('div', class_='lawcon')
+                    if not lawcon: continue
                     
-                    if type_name == "법" and link_id:
-                        context_map[link_id] = {"num": my_num, "title": my_title, "folder": current_folder}
+                    content = clean_korean_law_text(lawcon.get_text(separator="\n", strip=True))
+                    if not content or len(content.replace("\n", "").strip()) < 3: continue
                     
-                    if type_name == "법":
-                        last_num = my_num
-                        last_title = my_title
-                else:
-                    if link_id and link_id in context_map:
-                        my_num = context_map[link_id]["num"]
-                        my_title = context_map[link_id]["title"]
-                        current_folder = context_map[link_id]["folder"]
-                    else:
-                        my_num = last_num
-                        my_title = last_title
+                    content = re.sub(r'(?<!\n)(\d+\.)', r'\n\1', content)  
+                    content = re.sub(r'(?<!\n)(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)', r'\n\1', content) 
+                    content = re.sub(r'\n{3,}', '\n\n', content).strip()
+                    
+                    # 칸 번호를 기준으로 1차 법/령/칙 유추
+                    if col_idx == 0: type_name = "법"
+                    elif col_idx == 1: type_name = "령"
+                    else: type_name = "칙"
+                    
+                    link_id = None
+                    span_lor = lawcon.find('span', id=re.compile(r'^div[LOR]$'))
+                    if span_lor:
+                        if span_lor['id'] == 'divL': type_name = "법"
+                        elif span_lor['id'] == 'divO': type_name = "령"
+                        elif span_lor['id'] == 'divR': type_name = "칙"
                         
-                clean_title = f"[{type_name}] {my_num} ({my_title[:15]})"
-                
-                if link_id:
-                    if link_id not in link_id_order_map:
-                        global_order += 10
-                        link_id_order_map[link_id] = global_order
-                    base_order = link_id_order_map[link_id]
+                        classes = span_lor.get('class', [])
+                        for cls in classes:
+                            match = re.search(r'div[LOR](\d+)', cls)
+                            if match:
+                                link_id = match.group(1)
+                                break
                     
-                    if type_name == "법": sort_order = base_order + 1
-                    elif type_name == "령": sort_order = base_order + 2
-                    else: sort_order = base_order + 3
-                else:
-                    global_order += 10
-                    sort_order = global_order
-                
-                categories.append({
-                    "title": clean_title, 
-                    "content": content, 
-                    "folder_name": current_folder,
-                    "sort_order": sort_order
-                })
-                
+                    article_match = re.search(r'제\s*(\d+)\s*조(?:의\s*(\d+))?', content)
+                    my_num = last_num
+                    my_title = last_title
+                    
+                    if article_match:
+                        my_num = article_match.group(0).replace(" ", "")
+                        title_match = re.search(r'\(([^()]+)\)', content)
+                        my_title = title_match.group(1).strip() if title_match else "세부내용"
+                        
+                        if type_name == "법" and link_id:
+                            context_map[link_id] = {"num": my_num, "title": my_title, "folder": current_folder}
+                        
+                        if type_name == "법":
+                            last_num = my_num
+                            last_title = my_title
+                    else:
+                        if link_id and link_id in context_map:
+                            my_num = context_map[link_id]["num"]
+                            my_title = context_map[link_id]["title"]
+                            current_folder = context_map[link_id]["folder"]
+                        else:
+                            my_num = last_num
+                            my_title = last_title
+                            
+                    clean_title = f"[{type_name}] {my_num} ({my_title[:15]})"
+                    
+                    if link_id:
+                        if link_id not in link_id_order_map:
+                            global_order += 10
+                            link_id_order_map[link_id] = global_order
+                        base_order = link_id_order_map[link_id]
+                        
+                        if type_name == "법": sort_order = base_order + 1
+                        elif type_name == "령": sort_order = base_order + 2
+                        else: sort_order = base_order + 3
+                    else:
+                        global_order += 10
+                        sort_order = global_order
+                    
+                    categories.append({
+                        "title": clean_title, 
+                        "content": content, 
+                        "folder_name": current_folder,
+                        "sort_order": sort_order
+                    })
+                    
         categories.sort(key=lambda x: x["sort_order"])
         for cat in categories:
             del cat["sort_order"]
@@ -158,6 +165,7 @@ def parse_html_3col_law(html_content):
         return categories
 
     else:
+        # 일반 법령 페이지용 로직
         categories = []
         current_chapter = "기본 폴더"
         current_law_num = "0"
