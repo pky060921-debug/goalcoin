@@ -667,7 +667,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     </div>
   );
 };
-"""
 
 # EnhanceTab.tsx content fetched via tool or provided in conversation
 enhance_tab_content = """import React, { useState, useEffect } from 'react';
