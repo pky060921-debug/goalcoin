@@ -11,6 +11,14 @@ def clean_korean_law_text(text):
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
+def normalize_text(text):
+    text = re.sub(r'(\s*)(제\s*\d+\s*조)', r'\n\n\2', text)
+    text = re.sub(r'(\s*)(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)', r'\n\2', text)
+    text = re.sub(r'([^\n다까요\.])\n(?!(제\s*\d+\s*조|①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩))', r'\1 ', text)
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
 def parse_html_3col_law(html_content):
     soup = BeautifulSoup(html_content, 'html.parser')
     table = soup.find('table', {'class': 'lsPtnThdCmpTable'})
@@ -26,14 +34,26 @@ def parse_html_3col_law(html_content):
         global_order = 0
         link_id_order_map = {}
         
-        # 💡 [위험 로직 완전 폐기] 표 상단에서 '요양급여' 단어로 칸을 통째로 날리던 위험한 코드를 완전히 삭제했습니다.
+        # 💡 [방어벽 1] 본문이 아닌 '표의 최상단 헤더(칸 제목)'에서만 요양급여 칸을 찾아냅니다.
+        col_excludes = set()
+        thead = table.find('thead')
+        if not thead:
+            first_tr = table.find('tr')
+            header_cells = first_tr.find_all(['th', 'td']) if first_tr else []
+        else:
+            header_cells = thead.find_all(['th', 'td'])
+            
+        for idx, cell in enumerate(header_cells):
+            cell_text = cell.get_text(strip=True)
+            if "요양급여의 기준" in cell_text or "요양급여비용" in cell_text:
+                col_excludes.add(idx)
         
         rows = table.find_all('tr')
         for row_idx, row in enumerate(rows):
             tds = row.find_all('td', recursive=False)
             if not tds: continue
             
-            # 💡 [장/절 탐지] 첫 번째 칸(법률)의 첫 줄에서 무조건 장(Chapter)을 빼냅니다.
+            # 💡 [방어벽 2] 표의 모양과 상관없이 '첫 번째 칸(법률)'의 첫 줄에서 무조건 장(Chapter)을 빼냅니다.
             first_td_text = clean_korean_law_text(tds[0].get_text(separator='\n'))
             lines = [line.strip() for line in first_td_text.split('\n') if line.strip()]
             if lines:
@@ -50,6 +70,10 @@ def parse_html_3col_law(html_content):
                     current_folder = "부칙"
 
             for col_idx, td in enumerate(tds):
+                # 💡 제목칸에서 색출한 요양급여 칸은 아예 파싱을 건너뜁니다.
+                if col_idx in col_excludes:
+                    continue
+                    
                 groups = td.find_all('div', class_='lsptnThdCmpGroup')
                 for group in groups:
                     lawcon = group.find('div', class_='lawcon')
@@ -78,21 +102,11 @@ def parse_html_3col_law(html_content):
                                 link_id = match.group(1)
                                 break
                     else:
+                        # 태그가 깨졌을 때를 대비한 안전망 (왼쪽부터 순서대로 법, 령, 칙 부여)
                         if col_idx == 0: type_name = "법"
                         elif col_idx == 1: type_name = "령"
                         elif col_idx >= 2: type_name = "칙"
                     
-                    # 💡 [정밀 타격 방어벽] 오직 '시행규칙(칙)'에 대해서만, 
-                    # 텍스트 내에 "국민건강보험 요양급여의 기준에 관한 규칙" 또는 "요양급여비용의 내역" 등이 들어있으면 버림!
-                    # 법이나 시행령은 절대 건드리지 않습니다.
-                    if type_name == "칙" and ("요양급여의 기준에 관한 규칙" in html_content or "요양급여비용" in html_content):
-                        # 하지만 이 조항이 진짜 '국민건강보험법 시행규칙' 소속이라면 살려야 하므로 소속 확인!
-                        parent_td = group.find_parent('td')
-                        if parent_td:
-                             bold_p = parent_td.find('p', class_='txt_bold')
-                             if bold_p and "요양급여" in bold_p.get_text():
-                                 continue # 요양급여 관련 규칙의 칸이면 파싱 패스!
-
                     article_match = re.search(r'제\s*(\d+)\s*조(?:의\s*(\d+))?', content)
                     my_num = last_num
                     my_title = last_title
@@ -112,7 +126,7 @@ def parse_html_3col_law(html_content):
                         if link_id and link_id in context_map:
                             my_num = context_map[link_id]["num"]
                             my_title = context_map[link_id]["title"]
-                            current_folder = context_map[link_id]["folder"]
+                            current_folder = context_map[link_id]["folder"] # 령/칙도 부모(법)의 폴더를 상속받음
                         else:
                             my_num = last_num
                             my_title = last_title
@@ -184,3 +198,13 @@ def parse_html_3col_law(html_content):
             except Exception: 
                 continue
         return categories
+
+def get_next_review_time(level):
+    now = datetime.utcnow()
+    if level == 0: return now + timedelta(hours=12)
+    elif level == 1: return now + timedelta(days=1)
+    elif level == 2: return now + timedelta(days=3)
+    else: return now + timedelta(days=7)
+
+if __name__ == "__main__":
+    print("[정상] parser.py가 성공적으로 초기화되었습니다.")
