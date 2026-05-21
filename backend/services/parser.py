@@ -42,15 +42,7 @@ def parse_html_3col_law(html_content):
                         break
             if yoyang_col_idx != -1:
                 break
-
-        yoyang_col_idx = -1
-        header_row = table.find('tr')
-        if header_row:
-            for idx, cell in enumerate(header_row.find_all(['th', 'td'])):
-                if "요양급여의 기준에 관한 규칙" in cell.get_text(strip=True):
-                    yoyang_col_idx = idx
-                    break
- 
+        
         rows = table.find_all('tr')
         # 💡 [기능 추가] 요양급여 관련 규칙 제외를 위한 인덱스 찾기
         yoyang_col_idx = -1
@@ -75,13 +67,10 @@ def parse_html_3col_law(html_content):
                             current_chapter = f"{raw_folder} 총칙"
                         else:
                             current_chapter = raw_folder
-                elif row_text.startswith("부칙") and "제" not in row_text:
-                    current_chapter = "부칙"
                 continue
-            # --- [여기까지 수정 추가] ---
             
             for col_idx, td in enumerate(tds):
-                # 요양급여 규칙이 있는 칸은 아예 파싱하지 않음
+                # 💡 [기능 추가] 해당 규칙 칸이면 건너뜀
                 if yoyang_col_idx != -1 and col_idx == yoyang_col_idx:
                     continue
 
@@ -99,20 +88,7 @@ def parse_html_3col_law(html_content):
                                 else:
                                     current_chapter = raw_folder
                             continue
-                    label = group.find('label')
                     
-                    if label:
-                        label_text = label.get_text(strip=True)
-                        if re.match(r'^제\s*\d+\s*[장편절]', label_text):
-                            match = re.match(r'^제\s*\d+\s*[장편절][^\s]*', label_text)
-                            if match:
-                                raw_folder = match.group(0).strip()
-                                if "총칙" in label_text and "총칙" not in raw_folder:
-                                    current_chapter = f"{raw_folder} 총칙"
-                                else:
-                                    current_chapter = raw_folder
-                            continue # 제목행은 건너뜀
-                            
                     lawcon = group.find('div', class_='lawcon')
                     if not lawcon: continue
                     
