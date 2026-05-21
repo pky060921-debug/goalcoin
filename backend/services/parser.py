@@ -34,7 +34,7 @@ def parse_html_3col_law(html_content):
         global_order = 0
         link_id_order_map = {}
         
-        # 💡 [방어벽 1] 본문이 아닌 '표의 최상단 헤더(칸 제목)'에서만 요양급여 칸을 찾아냅니다. (기존 유지)
+        # 💡 [방어벽 1] 본문이 아닌 '표의 최상단 헤더(칸 제목)'에서만 요양급여 칸을 찾아냅니다.
         col_excludes = set()
         thead = table.find('thead')
         if not thead:
@@ -53,20 +53,20 @@ def parse_html_3col_law(html_content):
             tds = row.find_all('td', recursive=False)
             if not tds: continue
             
-            # 💡 [수정 보강] 첫 번째 칸의 모든 줄을 검사하여 공백 뒤의 장/절 전체 이름까지 완벽하게 추출합니다.
+            # 💡 [보안 및 기능 보강] 첫 번째 칸(법률)의 모든 줄을 탐색하여 공백 잘림 없이 장/절 전체 폴더명을 정확히 추출합니다.
             first_td_text = clean_korean_law_text(tds[0].get_text(separator='\n'))
             lines = [line.strip() for line in first_td_text.split('\n') if line.strip()]
             if lines:
                 for line in lines:
                     if re.match(r'^제\s*\d+\s*[장편절]', line):
-                        current_folder = line.strip()
+                        current_folder = line
                         break
                     elif line.startswith("부칙") and "제" not in line:
                         current_folder = "부칙"
                         break
 
             for col_idx, td in enumerate(tds):
-                # 💡 제목칸에서 색출한 요양급여 칸은 아예 파싱을 건너뜁니다. (기존 유지)
+                # 💡 제목칸에서 색출한 요양급여 칸은 아예 파싱을 건너뜁니다.
                 if col_idx in col_excludes:
                     continue
                     
