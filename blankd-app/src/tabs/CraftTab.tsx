@@ -200,12 +200,10 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     const fullText = initialWords.join("");
     const protectedIndices = new Set<number>();
 
-    // 💡 [개선] 1. 필수 포함 단어 (띄어쓰기 유무와 상관없이 무조건 정규식으로 본문 전체에서 낚아챔)
     const includePatterns: RegExp[] = [];
     currentCustomIncludeWords.forEach(cw => {
        const trimmedCw = cw.trim();
        if (!trimmedCw) return;
-       // 공백이 있다면 유연하게, 없다면 정확하게 매칭하되 특수문자 무시
        const regexStr = trimmedCw.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
        includePatterns.push(new RegExp(regexStr, 'g'));
     });
@@ -223,7 +221,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
        }
     });
 
-    // 💡 [개선] 쪼개진 배열 자체에 부분 문자열(예: '또는,')로 포함되어 있어도 100% 보호
     initialWords.forEach((word, idx) => {
         const trimmed = word.trim();
         if (currentCustomIncludeWords.some(cw => trimmed === cw || trimmed.includes(cw))) {
@@ -231,23 +228,18 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
         }
     });
 
-    // 3. 일반적인 제외 필터링 검사
     initialWords.forEach((word, idx) => {
       const trimmed = word.trim();
-      
-      // 보호된 단어(필수 포함)는 필터링을 무시하고 무조건 빈칸으로 지정
       if (protectedIndices.has(idx)) {
          if (trimmed.length > 0) initialSelected.add(idx);
          return;
       }
-
       const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(trimmed) && trimmed !== "";
       const isArticleOrNum = /^(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조)(?:의\s*\d+)?/.test(trimmed) || 
                              /^\(?\d+(?:항|호|목)?\)?$/.test(trimmed) || 
                              /^\(?(?:①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)\)?$/.test(trimmed);
                              
       const isStopWord = /^(은|는|이|가|을|를|의|에|에게|에서|로|으로|과|와|도|만|부터|까지|조차|마저|치고|및|등|또는|수|할|이하|이상|초과|미만|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여|바|것|자|경우|때|중)$/.test(trimmed);
-      
       const isCustomSingleStopWord = currentCustomStopWords.some(cw => trimmed === cw || trimmed === cw + "." || trimmed === cw + ",");
       
       if (!isSymbolOnly && !isArticleOrNum && !isStopWord && !isCustomSingleStopWord && trimmed.length > 0) {
@@ -255,7 +247,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
       }
     });
 
-    // 4. 제외 구문(여러 단어 묶음) 정규식 실행
     const patternsToExclude: RegExp[] = [
       /(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g
     ];
@@ -272,7 +263,6 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
        while ((match = regex.exec(fullText)) !== null) {
           const matchStart = match.index;
           const matchEnd = matchStart + match[0].length;
-          
           wordRanges.forEach(wr => {
              if (wr.start < matchEnd && wr.end > matchStart) {
                 if (!protectedIndices.has(wr.wordIdx)) {
@@ -677,3 +667,126 @@ export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeA
     </div>
   );
 };
+"""
+
+# EnhanceTab.tsx content fetched via tool or provided in conversation
+enhance_tab_content = """import React, { useState, useEffect } from 'react';
+import { getStrictTitleOnly, formatCardText, parseCardStats } from '../utils/constants';
+
+const getGridClass = (cols: number) => {
+  if(cols === 1) return "md:grid-cols-1";
+  if(cols === 2) return "md:grid-cols-2";
+  if(cols === 3) return "md:grid-cols-3";
+  if(cols === 4) return "md:grid-cols-4";
+  if(cols === 5) return "md:grid-cols-5";
+  return "md:grid-cols-3";
+};
+
+export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleDeleteCard }: any) => {
+  const safeCards = Array.isArray(savedCards) ? savedCards : [];
+  const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
+  
+  const [openFolders, setOpenFolders] = useState<Record<string, boolean>>(() => {
+    try { const saved = localStorage.getItem('blankd_enhance_folders'); return saved ? JSON.parse(saved) : {}; } 
+    catch(e) { return {}; }
+  });
+
+  useEffect(() => {
+    setOpenFolders(prev => {
+      const next = { ...prev };
+      let changed = false;
+      enhanceFolders.forEach(f => {
+        if (next[f] === undefined) { next[f] = true; changed = true; }
+      });
+      if (changed) localStorage.setItem('blankd_enhance_folders', JSON.stringify(next));
+      return next;
+    });
+  }, [savedCards]);
+
+  const handleToggleFolder = (f: string) => {
+    setOpenFolders(prev => {
+      const next = { ...prev, [f]: !prev[f] };
+      localStorage.setItem('blankd_enhance_folders', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const createLongPressHandlers = (callback: () => void, ms = 800) => {
+    let timer: any;
+    const start = () => { timer = setTimeout(callback, ms); };
+    const clear = () => { clearTimeout(timer); };
+    return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
+  };
+
+  return (
+    <div className="space-y-6 sm:space-y-8 animate-in fade-in w-full">
+      <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-4 sm:mb-6">
+        {enhanceFolders.map((f: string) => (
+          <button 
+            key={f}
+            onClick={() => handleToggleFolder(f)} 
+            className={`px-3 py-1.5 sm:py-2 text-[10px] sm:text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-teal-600 border-teal-500 text-white shadow-sm' : 'bg-teal-900/40 text-teal-300 border-teal-500/30'}`}
+          >
+            📁 {f}
+          </button>
+        ))}
+      </div>
+      
+      {enhanceFolders.map((folder: string) => openFolders[folder] && (
+        <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
+          <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
+          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
+            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => {
+                const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
+                const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
+                return origIdA - origIdB;
+            }).map((card: any) => {
+                const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+                const cleanTitle = getStrictTitleOnly(cleanContent);
+                const { body } = formatCardText(cleanContent);
+                const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
+                const stats = parseCardStats(card.memo);
+                const hasWrong = stats.wrongIndices.length > 0;
+                
+                let colClass = "";
+                let titleColor = "text-teal-400";
+                
+                if (viewMode === 'all' && colCount >= 3) {
+                  if (cleanContent.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
+                  else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
+                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
+                } else {
+                  if (cleanContent.includes('[법]')) titleColor = "text-red-500";
+                  else if (cleanContent.includes('[령]')) titleColor = "text-blue-400";
+                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
+                }
+
+                return (
+                  <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
+                    <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
+                      <div className="flex flex-row justify-between items-center w-full gap-2">
+                        <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{cleanTitle}</div>
+                        <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
+                          <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
+                          <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">반복:{stats.filled}</span>
+                          <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+"""
+
+# Let's count lines in full_transcript for verification, but I should provide the code blocks clearly.
+# The user thinks they were truncated. I will put them into full code blocks.
+
+print("CraftTab content length:", len(full_transcript))
+print("EnhanceTab content length:", len(enhance_tab_content))
+}
