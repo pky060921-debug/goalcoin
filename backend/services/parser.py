@@ -44,6 +44,14 @@ def parse_html_3col_law(html_content):
                 break
         
         rows = table.find_all('tr')
+        # 💡 [기능 추가] 요양급여 관련 규칙 제외를 위한 인덱스 찾기
+        yoyang_col_idx = -1
+        header_row = table.find('tr')
+        if header_row:
+            for idx, cell in enumerate(header_row.find_all(['th', 'td'])):
+                if "요양급여의 기준에 관한 규칙" in cell.get_text(strip=True):
+                    yoyang_col_idx = idx
+                    break
         for row in rows:
             tds = row.find_all('td', recursive=False)
             if not tds: continue
@@ -62,8 +70,8 @@ def parse_html_3col_law(html_content):
                 continue
             
             for col_idx, td in enumerate(tds):
-                # 💡 [핵심] 찾아낸 요양급여 칸 인덱스라면, 아예 파싱하지 않고 투명인간 취급!
-                if yoyang_col_idx != -1 and col_idx == yoyang_col_idx and len(tds) >= 3:
+                # 💡 [기능 추가] 해당 규칙 칸이면 건너뜀
+                if yoyang_col_idx != -1 and col_idx == yoyang_col_idx:
                     continue
 
                 groups = td.find_all('div', class_='lsptnThdCmpGroup')
