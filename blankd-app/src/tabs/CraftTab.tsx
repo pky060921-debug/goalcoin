@@ -38,9 +38,13 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                .trim();
   };
 
-  // 💡 제작 완료된 조항들의 '순수 텍스트' 추출
+  // 💡 제작 완료된 조항들의 '순수 텍스트' 추출 (🚨 핵심 수정 사항)
   const createdCleanTitles = new Set(
-    (Array.isArray(savedCards) ? savedCards : []).map((c: any) => getCleanText(c.title))
+    (Array.isArray(savedCards) ? savedCards : []).map((c: any) => {
+      // 💡 백엔드에 title이 없으므로, content의 첫 줄을 추출하여 제목으로 사용합니다.
+      const rawTitle = c.title || (c.content ? c.content.split('\n')[0] : "");
+      return getCleanText(rawTitle);
+    })
   );
 
   // 💡 진단 기능을 포함한 폴더 제작 완료 판별
