@@ -31,7 +31,51 @@ type WordItem = { text: string; subWords: string[]; };
 export const CraftTab = ({ categories, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory, loadAllData }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   
-  // 🔴 개선사항 2: sortChapters 함수로 폴더를 정렬
+  // --- 👇 여기서부터 수정 시작 👇 ---
+  
+  // 1. 공백, 특수문자, 대괄호 안의 내용(예: [법])을 모두 제거하여 순수한 텍스트만 추출하는 헬퍼 함수
+  const getCleanText = (text: string) => {
+    if (!text) return "";
+    return text.replace(/\[.*?\]/g, '') // [법], [령] 등 제거
+               .replace(/\s+/g, '')     // 모든 공백 제거
+               .trim();
+  };
+
+  // 2. savedCards의 제목들을 "순수 텍스트" 형태로 Set에 저장
+  const createdCleanTitles = new Set(
+    (Array.isArray(savedCards) ? savedCards : []).map((c: any) => getCleanText(c.title))
+  );
+
+  // 3. 폴더 완료 여부 확인 함수 (순수 텍스트 비교 적용 + 로그 출력 추가)
+  const isFolderFullyCreated = (folderName: string) => {
+    const items = safeCategories.filter((c: any) => c.folder_name === folderName);
+    if (items.length === 0) return false;
+
+    let allCreated = true;
+    items.forEach((c: any) => {
+      const cleanCatTitle = getCleanText(c.title);
+      const isMatch = createdCleanTitles.has(cleanCatTitle);
+      
+      // 💡 진단용 로그: 브라우저 콘솔(F12)에서 이유를 확인할 수 있습니다.
+      // console.log(`[비교 진단] 폴더명: ${folderName}`);
+      // console.log(` - CraftTab 조항 원본: "${c.title}" -> 정제됨: "${cleanCatTitle}"`);
+      // console.log(` - EnhanceTab 매칭결과: ${isMatch ? "✅ 일치" : "❌ 불일치"}`);
+      
+      if (!isMatch) {
+        allCreated = false;
+      }
+    });
+
+    return allCreated;
+  };
+  
+  // 4. 개별 조항이 생성되었는지 확인하는 함수 (렌더링 시 사용)
+  const isCategoryCreated = (catTitle: string) => {
+    return createdCleanTitles.has(getCleanText(catTitle));
+  };
+
+  // --- 👆 여기까지 덮어쓰기 완료 👆 ---
+
   const craftFolders = sortChapters(
     Array.from(new Set(safeCategories.map((c:any) => c.folder_name)))
       .filter(f => f && f !== '기본 폴더') as string[]
