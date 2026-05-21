@@ -717,11 +717,11 @@ def upload_pdf():
     original_filename = file.filename if file else "일반 규정"
     folder_name = re.sub(r'\.(pdf|txt)$', '', original_filename, flags=re.IGNORECASE)
 
+# === [api.py 내의 process_file 함수 내부 저장 구역 수정] ===
     def process_file():
         try:
             raw_text = ""
             if original_filename.lower().endswith(('.txt', '.html', '.htm')):
-
                 file_bytes = file.read()
                 try: raw_text = file_bytes.decode('utf-8')
                 except UnicodeDecodeError: raw_text = file_bytes.decode('cp949', errors='ignore')
@@ -757,20 +757,31 @@ def upload_pdf():
                     for idx, p in enumerate(paragraphs):
                         blocks.append({"title": f"문서 조각 {idx+1}", "content": p})
             
+            # 💡 [여기서부터 수정 추가] 장별 폴더명을 안전하게 반영하도록 교체합니다.
             conn = get_db_connection()
             cursor = conn.cursor()
             for block in blocks:
-                cursor.execute("INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", (wallet_address, block['title'], block['content'], folder_name))
+                # 파서가 전달해 준 폴더명(folder_name)이 존재하면 그것을 쓰고, 
+                # 일반 문서 파서 등으로 인해 없을 때만 상위의 기본 folder_name(파일명 등)을 사용합니다.
+                block_folder = block.get('folder_name', folder_name)
+                
+                cursor.execute(
+                    "INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
+                    (wallet_address, block['title'], block['content'], block_folder)
+                )
             conn.commit()
             conn.close()
+            # 💡 [여기까지 수정 추가끝]
+            
             TASK_STATUS[task_id] = "완료"
         except Exception as e:
             logging.error(f"분석 에러: {traceback.format_exc()}")
             TASK_STATUS[task_id] = f"에러: {str(e)}"
 
+    # [기존 스레드 및 리턴 로직 유지]
     threading.Thread(target=process_file).start()
     return jsonify({"message": f"{folder_name} 분석 시작", "task_id": task_id})
-
+    
 @api_bp.route('/get-categories')
 def get_categories():
     try:
