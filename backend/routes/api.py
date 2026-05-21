@@ -208,7 +208,9 @@ def init_golden_db():
         except: pass
         try: conn.execute('ALTER TABLE cards ADD COLUMN best_time REAL DEFAULT 999.0')
         except: pass
-
+        try: conn.execute('ALTER TABLE user_settings ADD COLUMN ai_rules TEXT DEFAULT ""')
+        except: pass
+            
         conn.commit()
         conn.close()
     except Exception as e:
@@ -555,9 +557,6 @@ def get_pending_exams():
         return jsonify({"error": str(e)}), 500
 
 
-# =========================================================================
-# 💡 [핵심 대수술] 챗봇의 "분석 결과 강제 보고" 프롬프트 및 안전장치
-# =========================================================================
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
     try:
@@ -566,92 +565,72 @@ def analyze_chunk():
         wallet_address = data.get('wallet_address')
         user_feedback = data.get('user_feedback', '') 
         chat_history = data.get('chat_history', []) 
-        selected_laws = data.get('selected_laws', [])
-        current_explanation = data.get('current_explanation', '') 
 
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        if selected_laws and len(selected_laws) > 0:
-            placeholders = ','.join('?' for _ in selected_laws)
-            query = f"SELECT folder_name, title, content FROM categories WHERE wallet_address = ? AND folder_name IN ({placeholders})"
-            cursor.execute(query, [wallet_address] + selected_laws)
-        else:
-            cursor.execute("SELECT folder_name, title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
-            
+        # 1. 💡 장기기억(판별 규칙) 불러오기
+        cursor.execute("SELECT ai_rules FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+        rule_row = cursor.fetchone()
+        ai_memory = rule_row[0] if rule_row and rule_row[0] else "아직 저장된 특별한 판별 규칙이 없습니다."
+
+        # 2. 💡 전체 법령 DB(categories) 무조건 검색
+        cursor.execute("SELECT folder_name, title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
         laws = cursor.fetchall()
         conn.close()
 
+        # 사용자가 질문한 내용(예: "제1조 검색해줘")을 기반으로 스나이퍼 검색
         search_query = chunk_text + " " + user_feedback
-        if laws:
-            law_context = get_top_k_relevant_laws(search_query, laws, top_k=5)
-        else:
-            law_context = "선택된 참고 자료가 없습니다."
+        law_context = get_top_k_relevant_laws(search_query, laws, top_k=3) if laws else "참고 자료가 없습니다."
         
         history_str = ""
         for msg in chat_history[-6:]:  
-            sender_name = "사용자(대표님)" if msg['sender'] == 'user' else "AI"
+            sender_name = "사용자" if msg['sender'] == 'user' else "AI"
             history_str += f"\n[{sender_name}]: {msg['text']}"
-            
-        feedback_str = f"\n[👨‍💻 최신 사용자 명령/질문]\n{user_feedback}\n" if user_feedback else ""
 
-        # 💡 프롬프트의 명령을 완전히 바꿨습니다. "결과를 채팅으로 다 불어라!"
-        prompt = f"""당신은 출제위원이자 사용자와 실시간으로 소통하며 문제를 같이 푸는 '대화형 튜터 AI'입니다.
+        # 3. 💡 O/X 판별 특화 프롬프트
+        prompt = f"""당신은 출제위원이자 법령 대조 전문 AI입니다.
 
         [대화형 튜터 절대 규칙 🚨]
-        1. 사용자의 명령(예: "법 제1조 검색해서 가. 와 대조해줘")을 받으면, [참고 자료 DB]에서 해당 조항을 찾으세요.
-        2. 찾은 원문 내용과, 지문(가,나,다 등)이 어떻게 일치/불일치하는지 분석한 결과를 **반드시 `chat_message` 필드에 아주 구체적이고 상세한 텍스트로 작성하여 브리핑하세요!** (예: "지시에 따라 대조한 결과, 법 제1조의 원문은 [~~~] 이며 지문과 완전히 일치합니다.")
-        3. 절대 "지시에 따라 처리했습니다" 같은 단답형 인사만 하고 넘어가면 안 됩니다. 그것은 시스템 오류를 유발합니다. 
-        4. 사용자가 피드백을 주면 수용하고 `explanation` 필드에 누적 기록하세요.
+        1. 사용자가 특정 법조항명(예: "법 제1조")을 언급하면 [참고 자료 DB]에서 해당 원문을 정확히 찾으세요.
+        2. 원문과 [현재 지문]을 대조하여 내용이 일치하는지, 혹은 교묘하게 틀리게 출제되었는지 분석하세요.
+        3. `chat_message` 필드에는 반드시 아래 형식을 지켜서 답변하세요:
+           - 첫 줄: "[대조 결과: O]" 또는 "[대조 결과: X]"
+           - 둘째 줄부터: "원문은 [~~]라고 되어 있으나, 지문은 [~~]라고 되어 있어 일치합니다/틀립니다."
+        4. 아래 [AI 장기기억]에 사용자가 주입한 팁이나 규칙이 있다면 무조건 우선 적용하여 판단하세요.
+
+        [AI 장기기억 (사용자 주입 규칙)]
+        {ai_memory}
 
         [참고 자료 DB]
         {law_context}
 
-        [현재 시험지 원문]
+        [현재 지문]
         {chunk_text}
         
-        [이전 대화 내역]{history_str}
-        {feedback_str}
+        [이전 대화]
+        {history_str}
+        
+        [사용자 질문]
+        {user_feedback}
 
-        [현재까지 누적된 해설]
-        {current_explanation}
-
-        [출력형식] 반드시 JSON 단일 객체로 반환.
+        [출력형식] 반드시 JSON 단일 객체로 반환. (줄바꿈은 \\n 사용)
         {{
           "question": "시험지 원문 텍스트 유지",
           "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기", "5. 보기"],
           "answer": "정답 번호 (모르면 '확인 필요')",
-          "chat_message": "사용자 명령에 대한 분석 결과 상세 브리핑 (이 필드에 원문과 대조 결과를 모두 적으세요!)",
-          "explanation": "지금까지 누적된 해설 내용 (수정 지시가 있으면 추가 반영)",
-          "search_process": "진단 터미널용 짧은 시스템 로그"
+          "chat_message": "[대조 결과: O/X]\\n상세 대조 브리핑...",
+          "explanation": "해설 요약"
         }}"""
         
         print(f"🤖 [초고속 대화형 AI 가동] 응답 생성 중...", file=sys.stderr, flush=True)
         
-        try:
-            # 사용자의 원래 모델 옵션을 존중
-            response_text = generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1)
-            result_data = clean_and_parse_json(response_text)
-        except Exception as ollama_e:
-            print(f"⚠️ 로컬 AI 분석 실패, Gemini로 우회: {ollama_e}", file=sys.stderr, flush=True)
-            response_text = generate_gemini_json(prompt, temperature=0.1)
-            result_data = clean_and_parse_json(response_text)
+        # 이전 답변에서 안내해 드린 '무적의 JSON 파서' 사용
+        response_text = generate_ollama_json(prompt, temperature=0.1)
+        result_data = clean_and_parse_json(response_text)
             
         if isinstance(result_data, list) and len(result_data) > 0:
             result_data = result_data[0]
-            
-        # 💡 [최후의 안전장치] AI가 끝끝내 chat_message를 안 만들었을 때의 방어막!
-        if isinstance(result_data, dict):
-            chat_msg = result_data.get("chat_message", "").strip() or result_data.get("chatMessage", "").strip()
-            
-            if not chat_msg or (len(chat_msg) < 30 and ("처리" in chat_msg or "완료" in chat_msg)):
-                fallback_msg = result_data.get("explanation", "").strip() or result_data.get("search_process", "").strip()
-                if fallback_msg:
-                    result_data["chat_message"] = f"분석 상세 보고:\n{fallback_msg}\n\n결과가 일치하나요?"
-                else:
-                    result_data["chat_message"] = f"지시하신 '{user_feedback}'에 따라 원문 대조를 완료했습니다. 확인해주세요!"
-            else:
-                result_data["chat_message"] = chat_msg
             
         return jsonify({"result": result_data})
     except Exception as e:
@@ -1087,5 +1066,35 @@ def get_checkpoint():
             
         conn.close()
         return jsonify({"last_id": last_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+        
+# ==========================================
+# 💡 [신규] AI 장기기억 (판별 규칙) 관리
+# ==========================================
+@api_bp.route('/save-ai-memory', methods=['POST'])
+def save_ai_memory():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        new_rule = data.get('rule', '').strip()
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT ai_rules FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+        row = cursor.fetchone()
+        
+        if row:
+            current_rules = row[0] or ""
+            updated_rules = current_rules + f"\n- {new_rule}"
+            cursor.execute("UPDATE user_settings SET ai_rules = ? WHERE wallet_address = ?", (updated_rules, wallet_address))
+        else:
+            updated_rules = f"- {new_rule}"
+            cursor.execute("INSERT INTO user_settings (wallet_address, ai_rules) VALUES (?, ?)", (wallet_address, updated_rules))
+            
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "장기기억 저장 완료", "ai_rules": updated_rules})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
