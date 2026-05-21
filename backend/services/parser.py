@@ -33,27 +33,30 @@ def parse_html_3col_law(html_content):
         last_num = "부칙등"
         last_title = "내용"
         
-        # 💡 [진단 1] 상위 10개 행을 뒤져 '요양급여' 칸 번호를 찾아냅니다.
         yoyang_col_idx = -1
         rows = table.find_all('tr')
-        for r_idx, row in enumerate(rows[:10]):
+        
+        # 💡 [치명적 오류 수정] 표의 맨 위 3줄 안에서, 반드시 '3번째 칸(인덱스 2)' 이후에서만 규칙을 찾습니다.
+        # 절대 0번(법)과 1번(시행령) 칸은 지우지 않습니다!
+        for r_idx, row in enumerate(rows[:3]):
             cells = row.find_all(['th', 'td'])
-            for c_idx, cell in enumerate(cells):
-                cell_text = cell.get_text(strip=True)
-                if "요양급여의 기준" in cell_text or "요양급여비용" in cell_text:
-                    yoyang_col_idx = c_idx
-                    print(f"[진단-제외] 🔥 요양급여 규칙이 표의 {r_idx}번째 줄, {c_idx}번째 세로칸에서 감지되었습니다! (이 칸은 삭제됩니다)")
-                    break
+            if len(cells) >= 3: # 정상적인 3단표 행일 때만
+                for c_idx, cell in enumerate(cells):
+                    if c_idx >= 2: # 💡 여기입니다! 2번째 인덱스(3번째 칸) 이상일 때만 허용
+                        cell_text = cell.get_text(strip=True)
+                        if "요양급여의 기준" in cell_text or "요양급여비용" in cell_text:
+                            yoyang_col_idx = c_idx
+                            print(f"[진단-제외] 🔥 요양급여 규칙이 표의 {r_idx}번째 줄, {c_idx}번째 세로칸에서 감지되었습니다! (이 칸은 삭제됩니다)")
+                            break
             if yoyang_col_idx != -1: break
             
         if yoyang_col_idx == -1:
-            print("[진단-경고] ⚠️ 상위 10줄에서 '요양급여' 제목을 찾지 못했습니다. HTML 구조가 다릅니다.")
+            print("[진단-알림] 요양급여 규칙 전용 칸을 찾지 못했습니다. 일반 파싱을 진행합니다.")
         
         for row_idx, row in enumerate(rows):
             tds = row.find_all('td', recursive=False)
             if not tds: continue
             
-            # 💡 [진단 2] 칸이 하나로 병합된 행에서 장/절 탐지
             if len(tds) == 1:
                 row_text = clean_korean_law_text(tds[0].get_text(strip=True))
                 if re.match(r'^제\s*\d+\s*[장편절]', row_text):
@@ -65,16 +68,18 @@ def parse_html_3col_law(html_content):
                         else:
                             current_chapter = raw_folder
                         print(f"[진단-폴더] 📁 병합셀에서 새 폴더 감지: {current_chapter}")
-                continue # 단일 셀은 조항이 아니므로 건너뜀
+                elif row_text.startswith("부칙") and "제" not in row_text:
+                    current_chapter = "부칙"
+                    print(f"[진단-폴더] 📁 부칙 폴더 감지")
+                continue 
             
             for col_idx, td in enumerate(tds):
-                # 찾은 요양급여 칸은 파싱 패스
+                # 정확히 찾아낸 요양급여 세로칸만 파싱 제외
                 if yoyang_col_idx != -1 and col_idx == yoyang_col_idx:
                     continue
 
                 groups = td.find_all('div', class_='lsptnThdCmpGroup')
                 for group in groups:
-                    # 💡 [진단 3] 숨겨진 라벨에서 장/절 탐지
                     label = group.find('label')
                     if label:
                         label_text = label.get_text(strip=True)
@@ -138,7 +143,6 @@ def parse_html_3col_law(html_content):
                         if link_id and link_id in context_map:
                             my_num = context_map[link_id]["num"]
                             my_title = context_map[link_id]["title"]
-                            # 하위 조항도 부모 폴더를 그대로 상속
                             current_chapter = context_map[link_id]["folder"]
                         else:
                             my_num = last_num
@@ -153,7 +157,6 @@ def parse_html_3col_law(html_content):
 
     else:
         print("[진단-에러] 3단 비교표 형식이 아닙니다! 일반 파서로 넘어갑니다.")
-        # 일반 법령 페이지용 로직
         categories = []
         current_chapter = "기본 폴더"
         current_law_num = "0"
