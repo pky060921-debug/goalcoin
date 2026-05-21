@@ -31,60 +31,46 @@ def parse_html_3col_law(html_content):
         last_num = "부칙등"
         last_title = "내용"
         
-        # 💡 [핵심 방어벽] 요양급여 칸 찾기 (반드시 3번째 칸 이상에서만 찾음)
-        yoyang_col_idx = -1
         rows = table.find_all('tr')
-        for row in rows[:3]:
-            cells = row.find_all(['th', 'td'])
-            if len(cells) >= 3:
-                for c_idx, cell in enumerate(cells):
-                    # 💡 c_idx가 0(법)과 1(령)일 때는 절대 요양급여 판정을 내리지 않음!
-                    if c_idx >= 2: 
-                        cell_text = cell.get_text(strip=True)
-                        if "요양급여의 기준" in cell_text or "요양급여비용" in cell_text:
-                            yoyang_col_idx = c_idx
-                            break
-            if yoyang_col_idx != -1:
-                break
-        
-        for row_idx, row in enumerate(rows):
+        for row in rows:
             tds = row.find_all('td', recursive=False)
             if not tds: continue
             
-            # 💡 [폴더명 추출 1] 병합된 셀(장/절 제목)인 경우
+            # 💡 [폴더 추출 개선 1] 장/절 정보가 담긴 병합 셀을 유연하게 탐지합니다.
             if len(tds) == 1:
-                row_text = clean_korean_law_text(tds[0].get_text(strip=True))
-                match = re.match(r'^제\s*\d+\s*[장편절][^\s]*', row_text)
-                if match:
-                    raw_folder = match.group(0).strip()
-                    if "총칙" in row_text and "총칙" not in raw_folder:
-                        current_chapter = f"{raw_folder} 총칙"
-                    else:
-                        current_chapter = raw_folder
-                elif row_text.startswith("부칙") and "제" not in row_text:
+                row_text = tds[0].get_text(strip=True)
+                # 공백이나 형태에 상관없이 제N장/제N절을 찾습니다.
+                chapter_match = re.search(r'제\s*\d+\s*[장편절]\s*([^\n]+)?', row_text)
+                if chapter_match:
+                    current_chapter = chapter_match.group(0).strip()
+                elif row_text.startswith("부칙"):
                     current_chapter = "부칙"
-                continue # 장/절 제목이므로 본문 파싱 생략
+                continue
             
-            # 💡 [조문 파싱 및 요양급여 제외]
             for col_idx, td in enumerate(tds):
-                # 찾은 요양급여 칸이면 완전히 건너뜀 (법과 령은 절대 안 건너뜀)
-                if yoyang_col_idx != -1 and col_idx == yoyang_col_idx:
-                    continue
-
                 groups = td.find_all('div', class_='lsptnThdCmpGroup')
                 for group in groups:
-                    # 💡 [폴더명 추출 2] 숨겨진 라벨에서 장/절 찾기
+                    
+                    # 💡 [핀셋 가드레일] 열 전체를 날리지 않고, 해당 칸의 소속 규칙명이 '요양급여의 기준에 관한 규칙'일 때만 명확히 제외합니다.
+                    is_yoyang_rule = False
+                    parent_td = group.find_parent('td')
+                    if parent_td:
+                        bold_p = parent_td.find('p', class_='txt_bold')
+                        if bold_p and "요양급여의 기준에 관한 규칙" in bold_p.get_text():
+                            is_yoyang_rule = True
+                    
+                    if is_yoyang_rule:
+                        continue # 국민건강보험법, 시행령의 요양급여 본문은 살리고 해당 규칙만 제외
+
+                    # 💡 [폴더 추출 개선 2] 그룹 내 label에 숨겨진 장/절 정보를 매칭하되 본문이 유실되지 않도록 보정합니다.
                     label = group.find('label')
                     if label:
                         label_text = label.get_text(strip=True)
-                        match = re.match(r'^제\s*\d+\s*[장편절][^\s]*', label_text)
-                        if match:
-                            raw_folder = match.group(0).strip()
-                            if "총칙" in label_text and "총칙" not in raw_folder:
-                                current_chapter = f"{raw_folder} 총칙"
-                            else:
-                                current_chapter = raw_folder
-                            continue
+                        chapter_match = re.search(r'제\s*\d+\s*[장편절]\s*([^\n]+)?', label_text)
+                        if chapter_match:
+                            current_chapter = chapter_match.group(0).strip()
+                            if not group.find('div', class_='lawcon'):
+                                continue
                     
                     lawcon = group.find('div', class_='lawcon')
                     if not lawcon: continue
@@ -112,9 +98,13 @@ def parse_html_3col_law(html_content):
                                 link_id = match.group(1)
                                 break
                     else:
-                        if col_idx == 0: type_name = "법"
-                        elif col_idx == 1: type_name = "령"
-                        elif col_idx >= 2: type_name = "칙"
+                        parent_td = group.find_parent('td')
+                        if parent_td:
+                            bold_p = parent_td.find('p', class_='txt_bold')
+                            if bold_p:
+                                bold_text = bold_p.get_text()
+                                if '시행령' in bold_text: type_name = "령"
+                                elif '시행규칙' in bold_text: type_name = "칙"
                     
                     article_match = re.search(r'제\s*(\d+)\s*조(?:의\s*(\d+))?', content)
                     my_num = last_num
@@ -135,19 +125,13 @@ def parse_html_3col_law(html_content):
                         if link_id and link_id in context_map:
                             my_num = context_map[link_id]["num"]
                             my_title = context_map[link_id]["title"]
-                            # 하위 조항도 부모 폴더 상속
                             current_chapter = context_map[link_id]["folder"]
                         else:
                             my_num = last_num
                             my_title = last_title
                             
                     clean_title = f"[{type_name}] {my_num} ({my_title[:15]})"
-                    
-                    categories.append({
-                        "title": clean_title, 
-                        "content": content, 
-                        "folder_name": current_chapter
-                    })
+                    categories.append({"title": clean_title, "content": content, "folder_name": current_chapter})
         return categories
 
     else:
@@ -196,3 +180,6 @@ def get_next_review_time(level):
     elif level == 1: return now + timedelta(days=1)
     elif level == 2: return now + timedelta(days=3)
     else: return now + timedelta(days=7)
+
+if __name__ == "__main__":
+    print("[정상] parser.py가 성공적으로 초기화되었습니다.")
