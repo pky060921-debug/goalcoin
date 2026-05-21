@@ -11,19 +11,6 @@ def clean_korean_law_text(text):
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
-# 💡 [폴더 추출기] "제1장 총칙" 등 폴더명을 가장 정확하게 뽑아내는 전용 함수
-def extract_folder_name(text):
-    text = text.strip()
-    match = re.match(r'^제\s*\d+\s*[장편절]', text)
-    if match:
-        raw_folder = match.group(0).strip()
-        if "총칙" in text and "총칙" not in raw_folder:
-            return f"{raw_folder} 총칙"
-        return raw_folder
-    elif text.startswith("부칙") and not re.match(r'^부칙\s*제', text):
-        return "부칙"
-    return None
-
 def normalize_text(text):
     text = re.sub(r'(\s*)(제\s*\d+\s*조)', r'\n\n\2', text)
     text = re.sub(r'(\s*)(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)', r'\n\2', text)
@@ -47,55 +34,48 @@ def parse_html_3col_law(html_content):
         global_order = 0
         link_id_order_map = {}
         
-        # 💡 [정밀 타격 1] 표의 맨 윗줄(칸 제목)을 훑어 제외할 '특정 규칙 칸' 번호를 찾습니다.
+        # 💡 [방어벽 1] 본문이 아닌 '표의 최상단 헤더(칸 제목)'에서만 요양급여 칸을 찾아냅니다.
         col_excludes = set()
-        for row in table.find_all('tr')[:5]:
-            cells = row.find_all(['th', 'td'])
-            if len(cells) > 1:
-                is_header = False
-                for idx, cell in enumerate(cells):
-                    cell_text = cell.get_text(strip=True)
-                    # 이 줄이 제목줄인지 판단
-                    if "법률" in cell_text or "시행령" in cell_text or "규칙" in cell_text or "요양급여" in cell_text:
-                        is_header = True
-                    # 오직 아래 문구가 포함된 특수 규칙 칸만 블랙리스트에 추가
-                    if "요양급여의 기준에 관한 규칙" in cell_text or "요양급여비용" in cell_text:
-                        col_excludes.add(idx)
-                
-                if is_header:
-                    break # 제목줄을 한 번 스캔했으면 스탑!
+        thead = table.find('thead')
+        if not thead:
+            first_tr = table.find('tr')
+            header_cells = first_tr.find_all(['th', 'td']) if first_tr else []
+        else:
+            header_cells = thead.find_all(['th', 'td'])
+            
+        for idx, cell in enumerate(header_cells):
+            cell_text = cell.get_text(strip=True)
+            if "요양급여의 기준" in cell_text or "요양급여비용" in cell_text:
+                col_excludes.add(idx)
         
         rows = table.find_all('tr')
         for row_idx, row in enumerate(rows):
             tds = row.find_all('td', recursive=False)
             if not tds: continue
             
-            # 💡 [폴더 인식 1] 칸이 한 개로 병합된 제목줄에서 폴더명("제1장 총칙" 등) 획득
-            if len(tds) == 1:
-                row_text_full = clean_korean_law_text(tds[0].get_text(strip=True))
-                folder_name = extract_folder_name(row_text_full)
-                if folder_name:
-                    current_folder = folder_name
-                continue
-            
+            # 💡 [방어벽 2] 표의 모양과 상관없이 '첫 번째 칸(법률)'의 첫 줄에서 무조건 장(Chapter)을 빼냅니다.
+            first_td_text = clean_korean_law_text(tds[0].get_text(separator='\n'))
+            lines = [line.strip() for line in first_td_text.split('\n') if line.strip()]
+            if lines:
+                first_line = lines[0]
+                if re.match(r'^제\s*\d+\s*[장편절]', first_line):
+                    match = re.match(r'^제\s*\d+\s*[장편절][^\s]*', first_line)
+                    if match:
+                        raw_folder = match.group(0).strip()
+                        if "총칙" in first_line and "총칙" not in raw_folder:
+                            current_folder = f"{raw_folder} 총칙"
+                        else:
+                            current_folder = raw_folder
+                elif first_line.startswith("부칙") and "제" not in first_line:
+                    current_folder = "부칙"
+
             for col_idx, td in enumerate(tds):
-                # 블랙리스트에 등록된 "요양급여 규칙" 칸은 아예 파싱하지 않고 건너뜁니다! (법/령은 안전)
+                # 💡 제목칸에서 색출한 요양급여 칸은 아예 파싱을 건너뜁니다.
                 if col_idx in col_excludes:
                     continue
                     
                 groups = td.find_all('div', class_='lsptnThdCmpGroup')
                 for group in groups:
-                    # 💡 [폴더 인식 2] 각 칸 내부에 숨겨진 제목 라벨에서도 폴더명 획득
-                    label = group.find('label')
-                    if label:
-                        label_text = label.get_text(strip=True)
-                        folder_name = extract_folder_name(label_text)
-                        if folder_name:
-                            current_folder = folder_name
-                        # 글씨만 있고 조문 내용은 없는 블록이면 패스
-                        if not group.find('div', class_='lawcon'):
-                            continue
-                    
                     lawcon = group.find('div', class_='lawcon')
                     if not lawcon: continue
                     
@@ -122,6 +102,7 @@ def parse_html_3col_law(html_content):
                                 link_id = match.group(1)
                                 break
                     else:
+                        # 태그가 깨졌을 때를 대비한 안전망 (왼쪽부터 순서대로 법, 령, 칙 부여)
                         if col_idx == 0: type_name = "법"
                         elif col_idx == 1: type_name = "령"
                         elif col_idx >= 2: type_name = "칙"
@@ -145,7 +126,7 @@ def parse_html_3col_law(html_content):
                         if link_id and link_id in context_map:
                             my_num = context_map[link_id]["num"]
                             my_title = context_map[link_id]["title"]
-                            current_folder = context_map[link_id]["folder"] 
+                            current_folder = context_map[link_id]["folder"] # 령/칙도 부모(법)의 폴더를 상속받음
                         else:
                             my_num = last_num
                             my_title = last_title
@@ -179,6 +160,7 @@ def parse_html_3col_law(html_content):
         return categories
 
     else:
+        # 단일 법령용 백업 로직
         categories = []
         current_chapter = "기본 폴더"
         current_law_num = "0"
@@ -186,10 +168,8 @@ def parse_html_3col_law(html_content):
         divs = soup.find_all(['div', 'p'])
         for div in divs:
             try:
-                row_text_full = div.get_text(strip=True)
-                folder_name = extract_folder_name(row_text_full)
-                if folder_name:
-                    current_chapter = folder_name
+                if re.match(r'^제\s*\d+\s*[장편절]', div.get_text(strip=True)):
+                    current_chapter = div.get_text(strip=True).split('\n')[0].strip()
                     continue
 
                 clean_content = clean_korean_law_text(div.get_text(separator="\n"))
@@ -197,9 +177,8 @@ def parse_html_3col_law(html_content):
                 if len(clean_content) < 2: continue
                 if clean_content in ["시행규칙", "법률", "내용없음", ".", "-"]: continue
                 
-                folder_name_inner = extract_folder_name(clean_content)
-                if folder_name_inner:
-                    current_chapter = folder_name_inner
+                if re.match(r'^제\s*\d+\s*[장편절]', clean_content):
+                    current_chapter = clean_content.split('\n')[0].strip()
                     continue
                 
                 article_match = re.search(r'제\s*(\d+)\s*조(?:의\s*(\d+))?', clean_content)
@@ -219,3 +198,13 @@ def parse_html_3col_law(html_content):
             except Exception: 
                 continue
         return categories
+
+def get_next_review_time(level):
+    now = datetime.utcnow()
+    if level == 0: return now + timedelta(hours=12)
+    elif level == 1: return now + timedelta(days=1)
+    elif level == 2: return now + timedelta(days=3)
+    else: return now + timedelta(days=7)
+
+if __name__ == "__main__":
+    print("[정상] parser.py가 성공적으로 초기화되었습니다.")
