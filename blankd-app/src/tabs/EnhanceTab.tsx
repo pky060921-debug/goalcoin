@@ -71,27 +71,29 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
             }).map((card: any) => {
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
                 
-                // 💡 [오류 진단 코드 포함] 강화 탭 제목 정밀 복구 로직
+                // 💡 [초정밀 복구 로직] 본문 전체에서 조항명을 우선 탐색합니다.
                 let displayTitle = "";
                 try {
-                  const bodyText = cleanContent.split('\n').slice(1).join('\n'); 
-                  const realMatch = bodyText.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
+                  const rawTitle = card.title || "";
+                  const regex = /(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\(\s*([^)]+)\s*\)/;
 
-                  if (realMatch && realMatch[2] && realMatch[2].trim() !== "내용") {
-                      displayTitle = `${realMatch[1].replace(/\s+/g, '')} ${realMatch[2].trim()}`;
+                  // 1. 본문 전체에서 찾기 (빈칸 괄호 [[ ]] 가 포함되어 있어도 필터링함)
+                  let match = cleanContent.match(regex);
+                  if (match && !match[2].includes("내용")) {
+                      displayTitle = `${match[1].replace(/\s+/g, '')} ${match[2].replace(/\[|\]/g, '').trim()}`;
                   } else {
-                      const fallbackTitle = cleanContent.split('\n')[0] || "";
-                      const titleMatch = fallbackTitle.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?).*\((.*?)\)/);
-                      if (titleMatch && titleMatch[2].trim() !== "내용") {
-                          displayTitle = `${titleMatch[1].replace(/\s+/g, '')} ${titleMatch[2].trim()}`;
+                      // 2. 본문에 없으면 원본 제목에서 찾기
+                      match = rawTitle.match(regex);
+                      if (match && !match[2].includes("내용")) {
+                          displayTitle = `${match[1].replace(/\s+/g, '')} ${match[2].replace(/\[|\]/g, '').trim()}`;
                       } else {
-                          displayTitle = fallbackTitle.replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').replace(/내용/g, '').trim() || "제목 없음";
+                          // 3. 다 없으면 태그와 괄호, '내용' 글자 삭제 후 기본 표시
+                          displayTitle = rawTitle.replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').replace(/내용/g, '').trim() || "제목 없음";
                       }
                   }
                 } catch (error) {
-                  // 🩺 진단 코드: 콘솔에서 렌더링 에러 발생 원인 추적
-                  console.error("[진단 오류] EnhanceTab 제목 추출 실패:", error, "카드 원본:", card);
-                  displayTitle = "제목 추출 에러";
+                  console.error("[진단 오류] EnhanceTab 제목 추출 실패:", error, card);
+                  displayTitle = "제목 오류";
                 }
 
                 const { body } = formatCardText(cleanContent);
