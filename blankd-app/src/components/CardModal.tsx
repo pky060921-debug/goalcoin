@@ -34,6 +34,7 @@ export const CardModal: React.FC<CardModalProps> = ({
   if (!activeCard) return null;
 
   const progressPercent = totalTimeLimit > 0 ? Math.min((elapsed / totalTimeLimit) * 100, 100) : 0;
+  const remainingTime = Math.max(0, totalTimeLimit - elapsed).toFixed(1);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -47,19 +48,27 @@ export const CardModal: React.FC<CardModalProps> = ({
           />
         </div>
 
+        {/* 💡 타이머 숫자 표시 (좌측 상단 플로팅) */}
+        <div className="absolute top-3 left-4 text-xs font-mono font-bold z-20 flex items-center gap-1.5 bg-black/60 px-2 py-1 rounded border border-white/5">
+            <span>⏱️</span>
+            <span className={progressPercent > 80 ? 'text-red-400 animate-pulse' : 'text-teal-400'}>
+                {remainingTime}s
+            </span>
+            <span className="text-white/30 text-[10px]">/ {totalTimeLimit.toFixed(1)}s</span>
+        </div>
+
         {/* 우측 상단 닫기 버튼 */}
         <button 
           onClick={onClose} 
-          className="absolute top-3 right-3 text-white/40 hover:text-white z-20 p-2 font-bold transition-colors"
+          className="absolute top-3 right-3 text-white/50 hover:text-white bg-white/5 hover:bg-white/10 rounded-full w-8 h-8 flex items-center justify-center transition-colors z-20"
         >
           ✕
         </button>
 
-        {/* 본문 렌더링 영역 (인라인 입력창 포함) */}
-        <div className="p-6 sm:p-8 overflow-y-auto custom-scrollbar flex-1 mt-4">
+        {/* 메인 컨텐츠 영역 */}
+        <div className="p-6 sm:p-8 flex-1 overflow-y-auto custom-scrollbar mt-6 relative z-10">
           {renderContent()}
         </div>
-        
       </div>
     </div>
   );
