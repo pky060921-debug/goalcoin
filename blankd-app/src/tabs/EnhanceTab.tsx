@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getStrictTitleOnly, formatCardText, parseCardStats } from '../utils/constants';
+import { formatCardText, parseCardStats } from '../utils/constants';
 
 const getGridClass = (cols: number) => {
   if(cols === 1) return "md:grid-cols-1";
@@ -71,21 +71,27 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
             }).map((card: any) => {
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
                 
-                // 💡 [핵심 복구 로직] 오염된 제목 대신 본문에서 진짜 조항명을 찾아 표시합니다.
+                // 💡 [오류 진단 코드 포함] 강화 탭 제목 정밀 복구 로직
                 let displayTitle = "";
-                const bodyText = cleanContent.split('\n').slice(1).join('\n');
-                const realMatch = bodyText.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
+                try {
+                  const bodyText = cleanContent.split('\n').slice(1).join('\n'); 
+                  const realMatch = bodyText.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
 
-                if (realMatch && realMatch[2] && realMatch[2].trim() !== "내용") {
-                  displayTitle = `${realMatch[1].replace(/\s+/g, '')} ${realMatch[2].trim()}`;
-                } else {
-                  const fallbackTitle = cleanContent.split('\n')[0] || "";
-                  const titleMatch = fallbackTitle.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?).*\((.*?)\)/);
-                  if (titleMatch && titleMatch[2].trim() !== "내용") {
-                    displayTitle = `${titleMatch[1].replace(/\s+/g, '')} ${titleMatch[2].trim()}`;
+                  if (realMatch && realMatch[2] && realMatch[2].trim() !== "내용") {
+                      displayTitle = `${realMatch[1].replace(/\s+/g, '')} ${realMatch[2].trim()}`;
                   } else {
-                    displayTitle = fallbackTitle.replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').replace(/내용/g, '').trim();
+                      const fallbackTitle = cleanContent.split('\n')[0] || "";
+                      const titleMatch = fallbackTitle.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?).*\((.*?)\)/);
+                      if (titleMatch && titleMatch[2].trim() !== "내용") {
+                          displayTitle = `${titleMatch[1].replace(/\s+/g, '')} ${titleMatch[2].trim()}`;
+                      } else {
+                          displayTitle = fallbackTitle.replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').replace(/내용/g, '').trim() || "제목 없음";
+                      }
                   }
+                } catch (error) {
+                  // 🩺 진단 코드: 콘솔에서 렌더링 에러 발생 원인 추적
+                  console.error("[진단 오류] EnhanceTab 제목 추출 실패:", error, "카드 원본:", card);
+                  displayTitle = "제목 추출 에러";
                 }
 
                 const { body } = formatCardText(cleanContent);
@@ -96,7 +102,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 let colClass = "";
                 let titleColor = "text-teal-400";
                 
-                // 💡 [법/령/규] 색상 구분 (원본 데이터 기준)
                 if (viewMode === 'all' && colCount >= 3) {
                   if (cleanContent.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
                   else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
