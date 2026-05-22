@@ -616,27 +616,26 @@ function MainApp() {
                     renderContent={() => {
             const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
             
-            // 💡 [추가] 모달창 내부 제목 정밀 복구 로직
+            // 💡 [수정] 괄호를 띄어쓰기로 변환하여 "제41조 요양급여" 형태로 완벽 정제
             let displayTitle = "";
             try {
-              const rawTitle = activeCard.title || "";
-              const regex = /(제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?)\s*\(\s*([^)]+)\s*\)/;
-
-              let match = cleanContent.match(regex);
-              if (match && !match[2].includes("내용")) {
-                  displayTitle = `${match[1].replace(/\s+/g, '')} ${match[2].replace(/\[|\]/g, '').trim()}`;
-              } else {
-                  match = rawTitle.match(regex);
-                  if (match && !match[2].includes("내용")) {
-                      displayTitle = `${match[1].replace(/\s+/g, '')} ${match[2].replace(/\[|\]/g, '').trim()}`;
-                  } else {
-                      const firstLine = (cleanContent.split('\n')[0] || rawTitle).trim();
-                      displayTitle = firstLine.replace(/\[.*?\]/g, '').replace(/\(\s*내용\s*\)/g, '').trim() || "제목 없음";
-                  }
-              }
+                const rawTitle = (activeCard.title || "").trim();
+                const firstLine = (cleanContent.split('\n')[0] || "").trim();
+                let candidate = firstLine.includes("내용") && !rawTitle.includes("내용") ? rawTitle : firstLine;
+                
+                displayTitle = candidate
+                    .replace(/\[.*?\]/g, '')         // [법], [령] 등 태그 제거
+                    .replace(/\(\s*내용\s*\)/g, '')  // (내용) 오염 제거
+                    .replace(/내용/g, '')            // 내용 단어 제거
+                    .replace(/[()]/g, ' ')           // 괄호를 띄어쓰기로 변환 (제41조(요양급여) -> 제41조 요양급여)
+                    .replace(/\s+/g, ' ')            // 여러 칸 띄어쓰기를 한 칸으로 압축
+                    .trim();
+                    
+                if (!displayTitle) displayTitle = "제목 없음";
             } catch (error) {
-              displayTitle = "제목 오류";
+                displayTitle = "제목 오류";
             }
+
 
             const { body } = formatCardText(cleanContent);
             const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== ''); 
