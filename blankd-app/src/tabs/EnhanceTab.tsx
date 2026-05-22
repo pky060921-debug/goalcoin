@@ -66,31 +66,30 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => {
                 const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
-                                const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
+                const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
                 return origIdA - origIdB;
             }).map((card: any) => {
-    const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-    
-    // 🩺 [진단/복구] 제목이 '내용'이거나 없으면 본문에서 강제로 추출
-    let displayTitle = "";
-    const rawTitle = (card.title || "").trim();
-    const bodyFirstLine = (cleanContent.split('\n')[0] || "").trim();
-    
-    // 조항 번호 찾기 (제 00조)
-    const match = bodyFirstLine.match(/제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?/) || rawTitle.match(/제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?/);
-    const article = match ? match[0] : "";
-    
-    // 제목 찾기 (괄호 안의 글자)
-    const titleMatch = bodyFirstLine.match(/\(([^)]+)\)/) || rawTitle.match(/\(([^)]+)\)/);
-    const titleName = titleMatch ? titleMatch[1].replace("내용", "").trim() : "";
-    
-    displayTitle = `${article} ${titleName}`.trim();
-    if (!displayTitle || displayTitle === "조") displayTitle = rawTitle.replace(/내용/g, '').trim() || "제목 없음";
-
-    // ... 이후 코드 동일
-
-
-
+                const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+                
+                // 💡 [최종 복구 로직] 찌꺼기 텍스트만 걸러내고 조항번호+이름 전체를 살려냅니다.
+                let displayTitle = "";
+                const rawTitle = (card.title || "").trim();
+                const bodyFirstLine = (cleanContent.split('\n')[0] || "").trim();
+                
+                let candidate = bodyFirstLine;
+                if ((bodyFirstLine.includes("내용") && !rawTitle.includes("내용")) || !bodyFirstLine) {
+                    candidate = rawTitle;
+                }
+                
+                displayTitle = candidate
+                    .replace(/\[.*?\]/g, '')         // [법], [령] 태그 제거
+                    .replace(/\(\s*내용\s*\)/g, '')  // (내용) 오염 제거
+                    .replace(/내용/g, '')            // 내용 텍스트 제거
+                    .replace(/[()]/g, ' ')           // 괄호를 띄어쓰기로 변환하여 글자 살림
+                    .replace(/\s+/g, ' ')            // 다중 공백 압축
+                    .trim();
+                    
+                if (!displayTitle) displayTitle = "제목 없음";
 
                 const { body } = formatCardText(cleanContent);
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
