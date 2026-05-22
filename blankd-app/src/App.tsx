@@ -711,7 +711,7 @@ function MainApp() {
             return (
               <div className="flex flex-col gap-6 w-full">
                 <div className="flex justify-between items-center border-b border-white/10 pb-2">
-                    <span className="text-amber-400 font-bold text-[14px] leading-tight">{cleanContent.split('\n')[0]}</span>
+                    <span className="text-amber-400 font-bold text-[14px] leading-tight">{displayTitle}</span>
                     <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
                 </div>
                 
