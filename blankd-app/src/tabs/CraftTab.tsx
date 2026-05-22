@@ -38,16 +38,14 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                .trim();
   };
 
-  // 💡 제작 완료된 조항들의 '순수 텍스트' 추출 (🚨 핵심 수정 사항)
+  // 💡 [핵심 수정] title이 없을 경우 content의 첫 줄을 추출하도록 변경
   const createdCleanTitles = new Set(
     (Array.isArray(savedCards) ? savedCards : []).map((c: any) => {
-      // 💡 백엔드에 title이 없으므로, content의 첫 줄을 추출하여 제목으로 사용합니다.
       const rawTitle = c.title || (c.content ? c.content.split('\n')[0] : "");
       return getCleanText(rawTitle);
     })
   );
 
-  // 💡 진단 기능을 포함한 폴더 제작 완료 판별
   const isFolderFullyCreated = (folderName: string) => {
     const items = safeCategories.filter((c: any) => c.folder_name === folderName);
     if (items.length === 0) return false;
@@ -64,7 +62,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     return allCreated;
   };
   
-  // 💡 개별 조항 제작 완료 판별
   const isCategoryCreated = (catTitle: string) => {
     return createdCleanTitles.has(getCleanText(catTitle));
   };
@@ -655,19 +652,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                                 ✕
                               </span>
                             )}
-                            
-                            {/* 💡 오류 진단용 버튼 (테스트 후 삭제 무방) */}
-                            <span 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                alert(`[진단결과]\n원본 제목: "${cat.title}"\n비교용 정제 제목: "${getCleanText(cat.title)}"\n\n매칭 대상(EnhanceTab) 리스트는 F12 콘솔 창에 출력되었습니다.`);
-                                console.log("매칭 대상(만들어진 카드들) 리스트:", createdCleanTitles);
-                              }}
-                              className="absolute top-1 right-1 text-[8px] bg-red-500/50 hover:bg-red-500 text-white px-1.5 py-0.5 rounded z-50 cursor-pointer md:opacity-0 group-hover/card:opacity-100 transition-opacity"
-                              title="디버깅 진단 버튼"
-                            >
-                              ?
-                            </span>
                           </button>
                         </div>
                       ) : (
