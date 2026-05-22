@@ -192,7 +192,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     }
   };
 
-  // 💡 [체크포인트 제어] 대시보드 및 내부 탭 이동 시 원격 동기화 구동
   useEffect(() => {
     if (expandedId !== null) {
       localStorage.setItem('blankd_craft_expanded', expandedId.toString());
@@ -573,8 +572,12 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                               const nextCat = folderCats[currentIdx + 1];
                               
                               handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, () => {
-                                  if (nextCat) openCategory(nextCat, true);
-                                  else setExpandedId(null);
+                                  // 💡 [수정] 저장이 끝나면 다음 조항의 ID를 expandedId로 지정하여 열리게 합니다.
+                                  if (nextCat) {
+                                      setExpandedId(nextCat.id);
+                                  } else {
+                                      setExpandedId(null);
+                                  }
                               });
                             }} 
                             className={`w-full py-2.5 text-xs sm:text-sm font-bold rounded-sm mt-2 transition-all ${isEditingText ? 'bg-white/5 text-white/30 border border-white/10 cursor-not-allowed' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'}`}
