@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { parseCardStats, formatCardText, getStrictTitleOnly } from '../utils/constants'; 
+import { parseCardStats, formatCardText, getStrictTitleOnly } from '../utils/constants';
 
-export const DashboardTab = ({ categories, savedCards }: any) => {
+export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpandedId, setActiveCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const safeCategories = Array.isArray(categories) ? categories : [];
   
@@ -31,20 +31,28 @@ export const DashboardTab = ({ categories, savedCards }: any) => {
 
   const craftProgress = safeCategories.length > 0 ? Math.round((safeCards.length / safeCategories.length) * 100) : 0;
   
-  const [recentCraft, setRecentCraft] = useState("");
-  const [recentEnhance, setRecentEnhance] = useState("");
+  const [recentCraftId, setRecentCraftId] = useState<number | null>(null);
+  const [recentCraftTitle, setRecentCraftTitle] = useState("");
+  const [recentEnhanceId, setRecentEnhanceId] = useState<number | null>(null);
+  const [recentEnhanceTitle, setRecentEnhanceTitle] = useState("");
   
   useEffect(() => {
-    setRecentCraft(localStorage.getItem('blankd_last_crafted') || "아직 생성된 카드가 없습니다");
-    setRecentEnhance(localStorage.getItem('blankd_last_enhanced') || "학습 기록이 없습니다");
-  }, [safeCards]);
+    const cId = localStorage.getItem('blankd_last_crafted_id');
+    const cTitle = localStorage.getItem('blankd_last_crafted_title');
+    const eId = localStorage.getItem('blankd_last_enhanced_id');
+    const eTitle = localStorage.getItem('blankd_last_enhanced_title');
+
+    if (cId) setRecentCraftId(parseInt(cId, 10));
+    setRecentCraftTitle(cTitle || "아직 생성된 카드가 없습니다");
+    if (eId) setRecentEnhanceId(parseInt(eId, 10));
+    setRecentEnhanceTitle(eTitle || "학습 기록이 없습니다");
+  }, [savedCards]);
 
   const sortedFolders = Object.keys(folderStats).sort();
 
   return (
     <div className="space-y-6 animate-in fade-in max-w-full pb-10">
       
-      {/* 상단 통계 영역 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
          <div className="bg-indigo-900/20 border border-indigo-500/30 p-4 rounded-sm flex flex-col justify-center">
             <div className="text-indigo-400 font-bold text-sm mb-2">지식 추출(만들기) 진척도</div>
@@ -67,17 +75,40 @@ export const DashboardTab = ({ categories, savedCards }: any) => {
          </div>
       </div>
 
-      {/* 💡 체크포인트(최근 활동) 영역 추가 */}
+      {/* 💡 상호작용 체크포인트: 카드 클릭 시 즉시 탭 이동 및 마지막 위치를 타겟팅합니다. */}
       <div className="bg-black/40 border border-white/10 p-4 rounded-sm">
-         <div className="text-amber-400 font-bold text-sm mb-3">최근 활동 기록 (체크포인트)</div>
+         <div className="text-amber-400 font-bold text-sm mb-3">최근 활동 기록 (체크포인트 원격 복원)</div>
          <div className="flex flex-col gap-2">
-            <div className="bg-white/5 p-3 rounded-sm border border-white/5 flex justify-between items-center">
-               <span className="text-xs text-white/50">마지막으로 만든 카드</span>
-               <span className="text-sm font-bold text-indigo-300 truncate max-w-[60%]">{recentCraft}</span>
+            <div 
+              onClick={() => {
+                if (recentCraftId) {
+                  setExpandedId(recentCraftId);
+                  setActiveTab('create');
+                }
+              }}
+              className="bg-white/5 p-3 rounded-sm border border-white/5 flex justify-between items-center hover:bg-indigo-900/10 hover:border-indigo-500/40 cursor-pointer transition-colors"
+            >
+               <span className="text-xs text-white/50">마지막으로 만든 카드 (누르면 만들기로 이동)</span>
+               <span className="text-sm font-bold text-indigo-300 truncate max-w-[60%]">{recentCraftTitle}</span>
             </div>
-            <div className="bg-white/5 p-3 rounded-sm border border-white/5 flex justify-between items-center">
-               <span className="text-xs text-white/50">마지막으로 학습한 카드</span>
-               <span className="text-sm font-bold text-teal-300 truncate max-w-[60%]">{recentEnhance}</span>
+            
+            <div 
+              onClick={() => {
+                if (recentEnhanceId) {
+                  const matchedCard = safeCards.find((c: any) => c.id === recentEnhanceId);
+                  if (matchedCard) {
+                    setActiveCard(matchedCard);
+                    setActiveTab('enhance');
+                  } else if (safeCards.length > 0) {
+                    setActiveCard(safeCards[0]);
+                    setActiveTab('enhance');
+                  }
+                }
+              }}
+              className="bg-white/5 p-3 rounded-sm border border-white/5 flex justify-between items-center hover:bg-teal-900/10 hover:border-teal-500/40 cursor-pointer transition-colors"
+            >
+               <span className="text-xs text-white/50">마지막으로 학습한 카드 (누르면 채우기 모달 로드)</span>
+               <span className="text-sm font-bold text-teal-300 truncate max-w-[60%]">{recentEnhanceTitle}</span>
             </div>
          </div>
       </div>
