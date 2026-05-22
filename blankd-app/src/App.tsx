@@ -220,7 +220,8 @@ function MainApp() {
     });
     
     if (res.ok) {
-      await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
+      // 💡 [수정] 다시 수정이 가능하도록 Category를 삭제하지 않고 유지합니다.
+      localStorage.setItem('blankd_last_crafted', cat.title); // 진행상황 탭에 보여주기 위해 저장
       addLog("✅ 지식 추출 완료: 다음 조항을 바로 오픈합니다.");
       await loadAllData(); 
       onComplete(); 
@@ -244,22 +245,41 @@ function MainApp() {
           foundBlanks.push({ answer: part.replace(/\[|\]/g, '').trim(), correct: false });
         }
       });
-      setBlanks(foundBlanks); 
-      setCurrentBlankIdx(0); 
+      
+      // 💡 [체크포인트] 이전에 풀었던 빈칸 위치 불러오기
+      const savedProgress = localStorage.getItem(`blankd_progress_${activeCard.id}`);
+      const lastIdx = savedProgress ? parseInt(savedProgress, 10) : 0;
+      
+      // 불러온 위치 이전은 모두 정답 처리
+      const restoredBlanks = foundBlanks.map((b, i) => ({
+          ...b,
+          correct: i < lastIdx 
+      }));
+
+      setBlanks(restoredBlanks); 
+      setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); 
       setAnswerInput(""); 
       setInputStatus('idle');
-      setTotalTimeLimit(5.0 * foundBlanks.length); 
+      
+      const stats = parseCardStats(activeCard.memo);
+      // 💡 [타이머 단축] 기본 10초, 반복할 때마다 0.5초 감소, 최소 3초 보장
+      const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
+      setTotalTimeLimit(timePerBlank * foundBlanks.length); 
+      
       setStartTime(Date.now()); 
       setElapsed(0);
       setIsListening(false); 
       setIsMemoOpen(false); 
       
-      const stats = parseCardStats(activeCard.memo);
       let cleanText = stats.text;
       if (cleanText) {
          cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim();
       }
       statsRef.current = { text: cleanText, filled: stats.filled, wrongIndices: new Set(stats.wrongIndices) };
+      
+      // 진행상황 탭에 보여주기 위해 최근 학습 카드 저장
+      const cleanTitle = getStrictTitleOnly(cleanContent);
+      localStorage.setItem('blankd_last_enhanced', cleanTitle || "이름 없는 카드");
     }
   }, [activeCard]);
 
@@ -281,6 +301,9 @@ function MainApp() {
     
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
     const nextCard = folderCards[currentIdx + 1] || null;
+
+    // 💡 카드를 완료하면 체크포인트 삭제
+    localStorage.removeItem(`blankd_progress_${currentId}`);
 
     setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
@@ -324,6 +347,7 @@ function MainApp() {
     if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput : answerInput.replace(/\s+/g, '').toLowerCase();
+    
     if (expected === actual) {
       const activeEl = document.activeElement as HTMLElement;
       if (activeEl) activeEl.blur(); 
@@ -332,12 +356,20 @@ function MainApp() {
       const nb = [...blanks]; nb[currentBlankIdx].correct = true; setBlanks(nb);
       statsRef.current.wrongIndices.delete(currentBlankIdx);
       statsRef.current.filled += 1;
+      
       setTimeout(() => { 
         setAnswerInput(""); 
         setTimeout(() => {
           setInputStatus('idle'); 
-          if (currentBlankIdx + 1 < nb.length) setCurrentBlankIdx(currentBlankIdx + 1); 
-          else finishCard(); 
+          if (currentBlankIdx + 1 < nb.length) {
+            setCurrentBlankIdx(currentBlankIdx + 1); 
+            // 💡 [체크포인트] 맞출 때마다 위치 저장
+            localStorage.setItem(`blankd_progress_${activeCard.id}`, (currentBlankIdx + 1).toString());
+          } else { 
+            // 다 풀었으면 저장된 위치 삭제
+            localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+            finishCard(); 
+          }
         }, 130);
       }, 20);
     } else { 
@@ -357,8 +389,14 @@ function MainApp() {
     setTimeout(() => {
       setAnswerInput(""); 
       setInputStatus('idle');
-      if (currentBlankIdx + 1 < nb.length) setCurrentBlankIdx(currentBlankIdx + 1);
-      else finishCard();
+      if (currentBlankIdx + 1 < nb.length) {
+        setCurrentBlankIdx(currentBlankIdx + 1);
+        // 💡 [체크포인트] 넘길 때도 위치 저장
+        localStorage.setItem(`blankd_progress_${activeCard.id}`, (currentBlankIdx + 1).toString());
+      } else {
+        localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+        finishCard();
+      }
     }, 1000);
   };
 
