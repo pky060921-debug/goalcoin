@@ -30,19 +30,23 @@ type WordItem = { text: string; subWords: string[]; };
 export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory, loadAllData, expandedId, setExpandedId }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   
-  const getCleanText = (text: string) => {
+  // 💡 조항 번호 매칭: "제XX조" 패턴만 추출하여 정확도 향상
+  const getOnlyArticleNumber = (text: string) => {
     if (!text) return "";
-    return text.replace(/\[.*?\]/g, '').replace(/\s+/g, '').trim();
+    const match = text.match(/제\s*\d+\s*조(?:\s*의\s*\d+)?/);
+    return match ? match[0].replace(/\s+/g, '') : text.replace(/\s+/g, '');
   };
 
   const createdCleanTitles = new Set(
     (Array.isArray(savedCards) ? savedCards : []).map((c: any) => {
       const rawTitle = c.title || (c.content ? c.content.split('\n')[0] : "");
-      return getCleanText(rawTitle);
+      return getOnlyArticleNumber(rawTitle);
     })
   );
 
-  const isCategoryCreated = (catTitle: string) => createdCleanTitles.has(getCleanText(catTitle));
+  const isCategoryCreated = (catTitle: string) => {
+    return createdCleanTitles.has(getOnlyArticleNumber(catTitle));
+  };
 
   const craftFolders = sortChapters(
     Array.from(new Set(safeCategories.map((c: any) => c.folder_name)))
@@ -475,18 +479,25 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
               {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
                   const isExpanded = expandedId === cat.id;
                   const isChecked = checkedIds.has(cat.id);
-                  const contentToUse = cat.content || cat.title || "";
-                  
                   const isCreated = isCategoryCreated(cat.title);
                   
-                  let colClass = ""; let titleColor = "text-amber-400";
+                  let colClass = ""; 
+                  let titleColor = "text-amber-400";
+                  
+                  // 💡 원본 데이터를 바탕으로 색상 유지 로직
                   const checkText = `${cat.title || ''} ${cat.content || ''}`;
                   if (checkText.includes('[법]')) titleColor = "text-red-500";
                   else if (checkText.includes('[령]')) titleColor = "text-blue-400";
                   else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
                   
                   if (isExpanded) colClass = "col-span-full";
-                  const cleanTitle = getStrictTitleOnly(contentToUse);
+
+                  // 💡 괄호 및 태그 제거하여 화면 표시용 타이틀 생성
+                  const rawTitle = cat.title || (cat.content ? cat.content.split('\n')[0] : "");
+                  const titleMatch = rawTitle.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?).*\((.*?)\)/);
+                  const displayTitle = titleMatch 
+                    ? `${titleMatch[1]} ${titleMatch[2]}` 
+                    : rawTitle.replace(/\[.*?\]/g, '').trim();
 
                   return (
                     <div key={cat.id} className={`relative transition-all w-full ${colClass}`}>
@@ -506,14 +517,14 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                             }`}
                           >
                             <div className="flex justify-between items-center w-full">
-                              <span className={`${isCreated ? 'text-white/30 font-medium' : `${titleColor} font-bold`} text-[11px] sm:text-[13px] leading-snug break-keep`}>{cleanTitle}</span>
+                              <span className={`${isCreated ? 'text-white/30 font-medium' : `${titleColor} font-bold`} text-[11px] sm:text-[13px] leading-snug break-keep`}>{displayTitle}</span>
                               {isCreated && <span className="text-[9px] bg-white/5 text-white/30 px-1.5 py-0.5 rounded ml-2 whitespace-nowrap border border-white/10">제작됨</span>}
                             </div>
                             
                             {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
                             
                             {!isSelectMode && (
-                              <span onClick={async (e) => { e.stopPropagation(); if (confirm(`'${cleanTitle}' 조항을 대기열에서 즉시 삭제하시겠습니까?`)) { await handleDeleteCategory(cat.id); } }} className="absolute top-1/2 -translate-y-1/2 right-3 w-5 h-5 flex items-center justify-center border border-white/10 text-white/30 hover:text-red-400 hover:border-red-500/30 rounded-full text-[10px] bg-black/40 md:opacity-0 group-hover/card:opacity-100 transition-all duration-150 cursor-pointer" title="즉시 삭제">✕</span>
+                              <span onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 조항을 대기열에서 즉시 삭제하시겠습니까?`)) { await handleDeleteCategory(cat.id); } }} className="absolute top-1/2 -translate-y-1/2 right-3 w-5 h-5 flex items-center justify-center border border-white/10 text-white/30 hover:text-red-400 hover:border-red-500/30 rounded-full text-[10px] bg-black/40 md:opacity-0 group-hover/card:opacity-100 transition-all duration-150 cursor-pointer" title="즉시 삭제">✕</span>
                             )}
                           </button>
                         </div>
@@ -521,7 +532,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                         <div className="w-full p-4 sm:p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-3 shadow-xl z-20 relative animate-in zoom-in-95">
                           <div className="flex justify-between items-center mb-1 flex-wrap gap-2">
                             <div className="flex items-center gap-2">
-                              <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{cleanTitle}</span>
+                              <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{displayTitle}</span>
                               {isCreated && <span className="text-[10px] text-amber-500 font-bold ml-2">⚠️ 저장하면 카드를 덮어씁니다</span>}
                             </div>
                             
@@ -567,14 +578,11 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                           <button 
                             disabled={isEditingText}
                             onClick={() => {
-                              console.log("저장 전 cat.title 원본:", cat.title); // <--- 이 로그를 확인하세요!
-                              const cleanTitle = getStrictTitleOnly(cat.title);
                               const folderCats = safeCategories.filter((c:any) => c.folder_name === cat.folder_name).sort((a:any, b:any) => a.id - b.id);
                               const currentIdx = folderCats.findIndex(c => c.id === cat.id);
                               const nextCat = folderCats[currentIdx + 1];
                               
                               handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, () => {
-                                  // 💡 [수정] 저장이 끝나면 다음 조항의 ID를 expandedId로 지정하여 열리게 합니다.
                                   if (nextCat) {
                                       setExpandedId(nextCat.id);
                                   } else {
@@ -584,7 +592,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                             }} 
                             className={`w-full py-2.5 text-xs sm:text-sm font-bold rounded-sm mt-2 transition-all ${isEditingText ? 'bg-white/5 text-white/30 border border-white/10 cursor-not-allowed' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'}`}
                           >
-                            {isEditingText ? '텍스트 적용 후에 저장할 수 있습니다' : '지식 추출 저장 및 다음 조항 이어서 만들기'}
+                            만들기
                           </button>
                         </div>
                       )}
@@ -598,7 +606,3 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     </div>
   );
 };
-
-
-
-
