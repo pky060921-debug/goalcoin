@@ -567,6 +567,8 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                           <button 
                             disabled={isEditingText}
                             onClick={() => {
+                              console.log("저장 전 cat.title 원본:", cat.title); // <--- 이 로그를 확인하세요!
+                              const cleanTitle = getStrictTitleOnly(cat.title);
                               const folderCats = safeCategories.filter((c:any) => c.folder_name === cat.folder_name).sort((a:any, b:any) => a.id - b.id);
                               const currentIdx = folderCats.findIndex(c => c.id === cat.id);
                               const nextCat = folderCats[currentIdx + 1];
