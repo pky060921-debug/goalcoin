@@ -77,13 +77,22 @@ export const extractLawTag = (title: string) => {
   return '';
 };
 
-export const getStrictTitleOnly = (text?: string) => {
+export const getStrictTitleOnly = (text: string) => {
   if (!text) return "제목 없음";
-  const { title } = formatCardText(text);
-  return title
-    .replace(/\[(?:법|령|칙|규)\]/g, '')
-    .replace(/(제\s*\d+조(?:의\s*\d+)?)[（(]([^)）]+)[)）]/, '$1 $2')
-    .trim();
+  
+  // 💡 정규식 개선: '제XX조' 패턴을 찾고, 그 뒤에 오는 내용을 괄호와 관계없이 추출합니다.
+  // 1. '제'로 시작하여 '조'로 끝나는 조항 번호 패턴
+  // 2. 그 뒤에 오는 공백과 나머지 조항명 (괄호 포함)을 추출
+  const match = text.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*(.*)/);
+  
+  if (match) {
+    const articleNumber = match[1].replace(/\s+/g, ' '); // 제41조
+    const titleName = match[2] ? match[2].replace(/[()]/g, '').trim() : ""; // 괄호 제거 후 이름만
+    return `${articleNumber} ${titleName}`.trim();
+  }
+  
+  // 실패 시 첫 줄 반환
+  return text.split('\n')[0].replace(/[()]/g, '').trim();
 };
 
 export const getSortNumber = (text?: string) => {
