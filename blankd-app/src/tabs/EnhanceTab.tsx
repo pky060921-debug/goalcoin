@@ -92,26 +92,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 return (
                   <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
-                  // 💡 진단용 클릭 로직 (오류가 나면 콘솔과 알림창에 띄워줍니다)
-                      onClick={(e) => {
-                        e.stopPropagation(); // 이벤트 버블링 차단
-                        console.log(`🔥 [진단] '${cleanTitle}' 카드 클릭됨!`, card);
-                        
-                        if (typeof setActiveCard === 'function') {
-                          try {
-                            setActiveCard(card);
-                            console.log("✅ setActiveCard 함수 실행 완료. 모달창이 열려야 합니다.");
-                          } catch (err: any) {
-                            console.error("❌ setActiveCard 실행 중 에러 발생:", err);
-                            alert(`오류 발생: 모달을 여는 중 문제가 생겼습니다.\n${err.message}`);
-                          }
-                        } else {
-                          console.error("❌ setActiveCard가 함수가 아닙니다. App.tsx에서 제대로 전달되지 않았습니다.", setActiveCard);
-                          alert("오류: setActiveCard 함수가 제대로 연결되지 않았습니다.");
-                        }
-                      }}
-                      
-                      
                       <div className="flex flex-row justify-between items-center w-full gap-2">
                         <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{cleanTitle}</div>
                         <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
