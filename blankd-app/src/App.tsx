@@ -89,7 +89,6 @@ function MainApp() {
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
   
-  // 💡 음성 인식 무한 유지를 위한 Ref 및 상태
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
   
@@ -208,12 +207,11 @@ function MainApp() {
     
     if (isBlanking) bodyContent += " ]";
     
-    // 💡 1. 덮어쓰기를 위해 기존 카드가 있는지 확인 후 삭제 요청
-    const cleanTitle = getStrictTitleOnly(cat.title || cat.content || "");
-    const existingCard = savedCards.find((c: any) => getStrictTitleOnly(c.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '')) === cleanTitle);
+    // 💡 완벽한 덮어쓰기 로직: 조항의 고유 ID(ORIG_ID)를 기준으로 정확히 일치하는 기존 카드를 찾습니다.
+    const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${cat.id}]]`));
     
     if (existingCard) {
-      addLog("🔄 기존 채우기 카드를 삭제하고 새로운 빈칸으로 덮어씁니다...");
+      addLog("🔄 기존 채우기 카드를 찾아 삭제 후 덮어씁니다...");
       await fetch("https://api.blankd.top/api/delete-card", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ wallet_address: safeAddress, id: existingCard.id })
@@ -231,7 +229,7 @@ function MainApp() {
     if (res.ok) {
       localStorage.setItem('blankd_last_crafted_id', cat.id.toString());
       localStorage.setItem('blankd_last_crafted_title', cat.title);
-      addLog("✅ 지식 추출 완료: 수정된 내용이 채우기에 반영되었습니다.");
+      addLog("✅ 만들기 완료: 수정된 내용이 채우기에 완벽하게 반영되었습니다.");
       await loadAllData(); 
       onComplete(); 
     }
@@ -269,7 +267,6 @@ function MainApp() {
       setInputStatus('idle');
       
       const stats = parseCardStats(activeCard.memo);
-      // 💡 [타이머 검증] 빈칸 1개당 10초 - (반복횟수 * 0.5초). 최소 3초 보장.
       const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
       
@@ -287,7 +284,6 @@ function MainApp() {
       localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
       localStorage.setItem('blankd_last_enhanced_title', cleanTitle || "이름 없는 카드");
     } else {
-      // 💡 모달이 닫히면 음성 인식 강제 종료
       if (recognitionRef.current) {
         recognitionRef.current.onend = null;
         recognitionRef.current.stop();
@@ -368,7 +364,6 @@ function MainApp() {
       setInputStatus('correct');
       const nb = [...blanks]; nb[currentBlankIdx].correct = true; setBlanks(nb);
       statsRef.current.wrongIndices.delete(currentBlankIdx);
-      // 💡 여기서 반복 횟수를 증가시키지 않습니다. (완료 시 증가)
       
       setTimeout(() => { 
         setAnswerInput(""); 
@@ -379,7 +374,6 @@ function MainApp() {
             localStorage.setItem(`blankd_progress_${activeCard.id}`, (currentBlankIdx + 1).toString());
           } else { 
             localStorage.removeItem(`blankd_progress_${activeCard.id}`);
-            // 💡 끝까지 다 맞췄을 때 비로소 반복 횟수 1 증가!
             statsRef.current.filled += 1; 
             finishCard(); 
           }
@@ -407,19 +401,17 @@ function MainApp() {
         localStorage.setItem(`blankd_progress_${activeCard.id}`, (currentBlankIdx + 1).toString());
       } else {
         localStorage.removeItem(`blankd_progress_${activeCard.id}`);
-        // 💡 오답을 보면서 넘어갔더라도 끝까지 갔다면 1 증가
         statsRef.current.filled += 1;
         finishCard();
       }
     }, 1000);
   };
 
-  // 💡 음성 인식 무한 유지 (Continuous) 토글 함수
   const toggleVoiceRecognition = () => {
     if (isListening) {
       setIsListening(false);
       if (recognitionRef.current) {
-        recognitionRef.current.onend = null; // 강제 종료 시 재시작 방지
+        recognitionRef.current.onend = null; 
         recognitionRef.current.stop();
         recognitionRef.current = null;
       }
@@ -433,7 +425,7 @@ function MainApp() {
     const recognition = new SpeechRecognition();
     recognition.lang = 'ko-KR'; 
     recognition.interimResults = false;
-    recognition.continuous = true; // 💡 비활성화할 때까지 계속 듣기
+    recognition.continuous = true; 
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => { 
@@ -458,7 +450,6 @@ function MainApp() {
     };
     
     recognition.onend = () => { 
-      // 사용자가 끄지 않았는데 끊어졌다면 무한 재시작
       if (recognitionRef.current) {
          try { recognitionRef.current.start(); } catch(e) {}
       } else {
@@ -707,7 +698,6 @@ function MainApp() {
                     {isMemoOpen ? '닫기 ✕' : '📝 메모 열기'}
                   </button>
                   
-                  {/* 💡 음성 인식 토글 버튼 */}
                   <button 
                     onClick={toggleVoiceRecognition} 
                     className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${
