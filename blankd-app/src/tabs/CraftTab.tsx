@@ -572,7 +572,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                               const nextCat = folderCats[currentIdx + 1];
                               
                               handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, () => {
-                                  // 💡 [수정] 저장이 끝나면 다음 조항의 ID를 expandedId로 지정하여 열리게 합니다.
                                   if (nextCat) {
                                       setExpandedId(nextCat.id);
                                   } else {
@@ -582,7 +581,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                             }} 
                             className={`w-full py-2.5 text-xs sm:text-sm font-bold rounded-sm mt-2 transition-all ${isEditingText ? 'bg-white/5 text-white/30 border border-white/10 cursor-not-allowed' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'}`}
                           >
-                            {isEditingText ? '텍스트 적용 후에 저장할 수 있습니다' : '지식 추출 저장 및 다음 조항 이어서 만들기'}
+                            {isEditingText ? '텍스트 적용 후에 저장할 수 있습니다' : '만들기'}
                           </button>
                         </div>
                       )}
