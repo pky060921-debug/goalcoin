@@ -92,6 +92,12 @@ function MainApp() {
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
 
+  // 💡 만들기 탭의 확장 상태를 App 단으로 끌어올려 대시보드와 동기화합니다.
+  const [expandedId, setExpandedId] = useState<number | null>(() => {
+    const saved = localStorage.getItem('blankd_craft_expanded');
+    return saved ? parseInt(saved, 10) : null;
+  });
+
   const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-40));
 
   useEffect(() => { document.title = "BlankD | 인지 과학 기반 학습"; }, []);
@@ -220,8 +226,9 @@ function MainApp() {
     });
     
     if (res.ok) {
-      // 💡 [수정] 다시 수정이 가능하도록 Category를 삭제하지 않고 유지합니다.
-      localStorage.setItem('blankd_last_crafted', cat.title); // 진행상황 탭에 보여주기 위해 저장
+      // 💡 진행상황 체크포인트를 위해 카드의 ID와 제목 정보를 정밀 동기화합니다.
+      localStorage.setItem('blankd_last_crafted_id', cat.id.toString());
+      localStorage.setItem('blankd_last_crafted_title', cat.title);
       addLog("✅ 지식 추출 완료: 다음 조항을 바로 오픈합니다.");
       await loadAllData(); 
       onComplete(); 
@@ -246,11 +253,9 @@ function MainApp() {
         }
       });
       
-      // 💡 [체크포인트] 이전에 풀었던 빈칸 위치 불러오기
       const savedProgress = localStorage.getItem(`blankd_progress_${activeCard.id}`);
       const lastIdx = savedProgress ? parseInt(savedProgress, 10) : 0;
       
-      // 불러온 위치 이전은 모두 정답 처리
       const restoredBlanks = foundBlanks.map((b, i) => ({
           ...b,
           correct: i < lastIdx 
@@ -262,7 +267,6 @@ function MainApp() {
       setInputStatus('idle');
       
       const stats = parseCardStats(activeCard.memo);
-      // 💡 [타이머 단축] 기본 10초, 반복할 때마다 0.5초 감소, 최소 3초 보장
       const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
       
@@ -277,9 +281,10 @@ function MainApp() {
       }
       statsRef.current = { text: cleanText, filled: stats.filled, wrongIndices: new Set(stats.wrongIndices) };
       
-      // 진행상황 탭에 보여주기 위해 최근 학습 카드 저장
+      // 💡 진행상황 체크포인트를 위해 학습 카드의 ID와 제목 정보를 연동합니다.
       const cleanTitle = getStrictTitleOnly(cleanContent);
-      localStorage.setItem('blankd_last_enhanced', cleanTitle || "이름 없는 카드");
+      localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
+      localStorage.setItem('blankd_last_enhanced_title', cleanTitle || "이름 없는 카드");
     }
   }, [activeCard]);
 
@@ -302,7 +307,6 @@ function MainApp() {
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
     const nextCard = folderCards[currentIdx + 1] || null;
 
-    // 💡 카드를 완료하면 체크포인트 삭제
     localStorage.removeItem(`blankd_progress_${currentId}`);
 
     setActiveCard(nextCard);
@@ -363,10 +367,8 @@ function MainApp() {
           setInputStatus('idle'); 
           if (currentBlankIdx + 1 < nb.length) {
             setCurrentBlankIdx(currentBlankIdx + 1); 
-            // 💡 [체크포인트] 맞출 때마다 위치 저장
             localStorage.setItem(`blankd_progress_${activeCard.id}`, (currentBlankIdx + 1).toString());
           } else { 
-            // 다 풀었으면 저장된 위치 삭제
             localStorage.removeItem(`blankd_progress_${activeCard.id}`);
             finishCard(); 
           }
@@ -391,7 +393,6 @@ function MainApp() {
       setInputStatus('idle');
       if (currentBlankIdx + 1 < nb.length) {
         setCurrentBlankIdx(currentBlankIdx + 1);
-        // 💡 [체크포인트] 넘길 때도 위치 저장
         localStorage.setItem(`blankd_progress_${activeCard.id}`, (currentBlankIdx + 1).toString());
       } else {
         localStorage.removeItem(`blankd_progress_${activeCard.id}`);
@@ -464,7 +465,14 @@ function MainApp() {
           <ErrorBoundary fallbackLog={addLog}>
             
             <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
-              <DashboardTab categories={categories} savedCards={savedCards} />
+              {/* 💡 대시보드 탭에 네비게이션 및 핀셋 체크포인트 제어 상태를 넘깁니다. */}
+              <DashboardTab 
+                categories={categories} 
+                savedCards={savedCards} 
+                setActiveTab={setActiveTab}
+                setExpandedId={setExpandedId}
+                setActiveCard={setActiveCard}
+              />
             </div>
             
             <div className={activeTab === 'create' ? 'block' : 'hidden'}>
@@ -481,6 +489,8 @@ function MainApp() {
                 handleMakeBlankCard={handleMakeBlankCard} 
                 handleSplitCategory={handleSplitCategory} 
                 addLog={addLog} 
+                expandedId={expandedId}
+                setExpandedId={setExpandedId}
                 handleDeleteCategory={async (id: number) => {
                   if(confirm('삭제하시겠습니까?')){
                     await fetch("https://api.blankd.top/api/delete-category", {
