@@ -71,28 +71,26 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
             }).map((card: any) => {
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
                 
-                // 💡 [초정밀 복구 로직] 본문 전체에서 조항명을 우선 탐색합니다.
+                // 💡 [수정] "제목없음" 방지 및 조항명 초정밀 복구 로직
                 let displayTitle = "";
                 try {
                   const rawTitle = card.title || "";
-                  const regex = /(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\(\s*([^)]+)\s*\)/;
+                  const regex = /(제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?)\s*\(\s*([^)]+)\s*\)/;
 
-                  // 1. 본문 전체에서 찾기 (빈칸 괄호 [[ ]] 가 포함되어 있어도 필터링함)
                   let match = cleanContent.match(regex);
                   if (match && !match[2].includes("내용")) {
                       displayTitle = `${match[1].replace(/\s+/g, '')} ${match[2].replace(/\[|\]/g, '').trim()}`;
                   } else {
-                      // 2. 본문에 없으면 원본 제목에서 찾기
                       match = rawTitle.match(regex);
                       if (match && !match[2].includes("내용")) {
                           displayTitle = `${match[1].replace(/\s+/g, '')} ${match[2].replace(/\[|\]/g, '').trim()}`;
                       } else {
-                          // 3. 다 없으면 태그와 괄호, '내용' 글자 삭제 후 기본 표시
-                          displayTitle = rawTitle.replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').replace(/내용/g, '').trim() || "제목 없음";
+                          // 패턴 매칭 실패 시 첫 줄을 가져와 [법] 태그와 "(내용)" 이라는 텍스트만 정확히 삭제
+                          const firstLine = (cleanContent.split('\n')[0] || rawTitle).trim();
+                          displayTitle = firstLine.replace(/\[.*?\]/g, '').replace(/\(\s*내용\s*\)/g, '').trim() || "제목 없음";
                       }
                   }
                 } catch (error) {
-                  console.error("[진단 오류] EnhanceTab 제목 추출 실패:", error, card);
                   displayTitle = "제목 오류";
                 }
 
