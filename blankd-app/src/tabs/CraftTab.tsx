@@ -15,10 +15,7 @@ const sortChapters = (folders: string[]): string[] => {
   return folders.sort((a, b) => {
     const matchA = a.match(/^제\s*(\d+)\s*장/);
     const matchB = b.match(/^제\s*(\d+)\s*장/);
-    
-    if (matchA && matchB) {
-      return parseInt(matchA[1]) - parseInt(matchB[1]);
-    }
+    if (matchA && matchB) return parseInt(matchA[1]) - parseInt(matchB[1]);
     if (matchA) return -1;
     if (matchB) return 1;
     return a.localeCompare(b, 'ko');
@@ -30,15 +27,11 @@ type WordItem = { text: string; subWords: string[]; };
 export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory, loadAllData }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   
-  // 💡 정밀 매칭을 위한 텍스트 정제 함수
   const getCleanText = (text: string) => {
     if (!text) return "";
-    return text.replace(/\[.*?\]/g, '') // [법], [령] 등 제거
-               .replace(/\s+/g, '')     // 모든 공백 제거
-               .trim();
+    return text.replace(/\[.*?\]/g, '').replace(/\s+/g, '').trim();
   };
 
-  // 💡 [핵심 수정] title이 없을 경우 content의 첫 줄을 추출하도록 변경
   const createdCleanTitles = new Set(
     (Array.isArray(savedCards) ? savedCards : []).map((c: any) => {
       const rawTitle = c.title || (c.content ? c.content.split('\n')[0] : "");
@@ -46,25 +39,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     })
   );
 
-  const isFolderFullyCreated = (folderName: string) => {
-    const items = safeCategories.filter((c: any) => c.folder_name === folderName);
-    if (items.length === 0) return false;
-
-    let allCreated = true;
-    items.forEach((c: any) => {
-      const cleanCatTitle = getCleanText(c.title);
-      const isMatch = createdCleanTitles.has(cleanCatTitle);
-      if (!isMatch) {
-        allCreated = false;
-      }
-    });
-
-    return allCreated;
-  };
-  
-  const isCategoryCreated = (catTitle: string) => {
-    return createdCleanTitles.has(getCleanText(catTitle));
-  };
+  const isCategoryCreated = (catTitle: string) => createdCleanTitles.has(getCleanText(catTitle));
 
   const craftFolders = sortChapters(
     Array.from(new Set(safeCategories.map((c: any) => c.folder_name)))
@@ -75,18 +50,20 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     try { 
       const saved = localStorage.getItem('blankd_craft_folders'); 
       return saved ? JSON.parse(saved) : {}; 
-    } catch(e) { 
-      return {}; 
-    }
+    } catch(e) { return {}; }
   });
 
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  // 💡 [체크포인트] 마지막으로 작업하던 카드를 기억합니다
+  const [expandedId, setExpandedId] = useState<number | null>(() => {
+    const saved = localStorage.getItem('blankd_craft_expanded');
+    return saved ? parseInt(saved, 10) : null;
+  });
+
   const [wordArray, setWordArray] = useState<WordItem[]>([]);
   const [selectedWords, setSelectedWords] = useState<Set<number>>(new Set());
   const [pageBreaks, setPageBreaks] = useState<Set<number>>(new Set());
   const [memoInput, setMemoInput] = useState(""); 
   const [isEraserMode, setIsEraserMode] = useState(false);
-  
   const [isEditingText, setIsEditingText] = useState(false);
   const [editingContent, setEditingContent] = useState("");
   const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
@@ -95,7 +72,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [customIncludeWords, setCustomIncludeWords] = useState<string[]>([]);
   const [newStopWord, setNewStopWord] = useState("");
   const [newIncludeWord, setNewIncludeWord] = useState("");
-
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
@@ -119,9 +95,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     try {
       await api.updateStopwords(safeAddress, { stop: stops, include: includes });
       addLog(`✅ 단어 설정 DB 동기화 완료`);
-    } catch(e) { 
-      alert("DB 저장 실패"); 
-    }
+    } catch(e) { alert("DB 저장 실패"); }
   };
 
   const handleAddStopWord = () => {
@@ -159,10 +133,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       const next = { ...prev };
       let changed = false;
       craftFolders.forEach(f => {
-        if (next[f] === undefined) { 
-          next[f] = true; 
-          changed = true; 
-        }
+        if (next[f] === undefined) { next[f] = true; changed = true; }
       });
       if (changed) localStorage.setItem('blankd_craft_folders', JSON.stringify(next));
       return next;
@@ -190,19 +161,15 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     };
     const clear = () => { clearTimeout(timer); };
     return {
-      onTouchStart: start, 
-      onTouchEnd: clear,
-      onMouseDown: start, 
-      onMouseUp: clear, 
-      onMouseLeave: clear,
+      onTouchStart: start, onTouchEnd: clear,
+      onMouseDown: start, onMouseUp: clear, onMouseLeave: clear,
       onContextMenu: (e: any) => { e.preventDefault(); }
     };
   };
 
   const handleToggleCheck = (catId: number) => {
     const next = new Set(checkedIds);
-    if (next.has(catId)) next.delete(catId); 
-    else next.add(catId);
+    if (next.has(catId)) next.delete(catId); else next.add(catId);
     setCheckedIds(next);
     if (next.size === 0) setIsSelectMode(false);
   };
@@ -214,8 +181,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       try {
         const deletePromises = Array.from(checkedIds).map(id =>
           fetch("https://api.blankd.top/api/delete-category", {
-            method: "POST", 
-            headers: { "Content-Type": "application/json" },
+            method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ wallet_address: safeAddress, id })
           })
         );
@@ -225,11 +191,22 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
         setCheckedIds(new Set());
         if (loadAllData) await loadAllData();
         else window.location.reload();
-      } catch (e) { 
-        alert("일괄 삭제 중 오류가 발생했습니다."); 
-      }
+      } catch (e) { alert("일괄 삭제 중 오류가 발생했습니다."); }
     }
   };
+
+  // 💡 [체크포인트] 확장된 카드 상태 저장
+  useEffect(() => {
+    if (expandedId !== null) {
+      localStorage.setItem('blankd_craft_expanded', expandedId.toString());
+      const targetCat = safeCategories.find((c: any) => c.id === expandedId);
+      if (targetCat && wordArray.length === 0) {
+        openCategory(targetCat, true); 
+      }
+    } else {
+      localStorage.removeItem('blankd_craft_expanded');
+    }
+  }, [expandedId]);
 
   const applyTextToState = (textBody: string) => {
     const initialWords = textBody.split(SPLIT_REGEX).filter(w => w !== "");
@@ -325,12 +302,9 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     setSelectedWords(initialSelected);
   };
 
-  const openCategory = (targetCat: any) => {
-    if (isSelectMode) { 
-      handleToggleCheck(targetCat.id); 
-      return; 
-    }
-    setExpandedId(targetCat.id);
+  const openCategory = (targetCat: any, bypassToggle = false) => {
+    if (isSelectMode) { handleToggleCheck(targetCat.id); return; }
+    if (!bypassToggle) setExpandedId(targetCat.id);
     setPageBreaks(new Set());
     setMemoInput(targetCat.memo || "");
     setIsEraserMode(false);
@@ -363,24 +337,17 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       setWordArray(newArray);
       
       const newSelected = new Set<number>();
-      selectedWords.forEach(i => { 
-        if (i < idx) newSelected.add(i); 
-        else if (i > idx) newSelected.add(i - 1); 
-      });
+      selectedWords.forEach(i => { if (i < idx) newSelected.add(i); else if (i > idx) newSelected.add(i - 1); });
       setSelectedWords(newSelected);
       
       const newPageBreaks = new Set<number>();
-      pageBreaks.forEach(i => { 
-        if (i < idx) newPageBreaks.add(i); 
-        else if (i > idx) newPageBreaks.add(i - 1); 
-      });
+      pageBreaks.forEach(i => { if (i < idx) newPageBreaks.add(i); else if (i > idx) newPageBreaks.add(i - 1); });
       setPageBreaks(newPageBreaks);
       return; 
     }
     
     const s = new Set(selectedWords);
-    if(s.has(idx)) s.delete(idx); 
-    else s.add(idx);
+    if(s.has(idx)) s.delete(idx); else s.add(idx);
     setSelectedWords(s);
   };
 
@@ -388,8 +355,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     e.preventDefault(); 
     if (isEraserMode) return; 
     const p = new Set(pageBreaks);
-    if (p.has(idx)) p.delete(idx); 
-    else if (window.confirm("이 위치에서 페이지를 나누시겠습니까?")) p.add(idx);
+    if (p.has(idx)) p.delete(idx); else if (window.confirm("이 위치에서 페이지를 나누시겠습니까?")) p.add(idx);
     setPageBreaks(p);
   };
 
@@ -405,20 +371,12 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       
       const shiftAmount = splitItems.length - 1;
       const newSelected = new Set<number>();
-      selectedWords.forEach(i => { 
-        if (i < idx) newSelected.add(i); 
-        else if (i > idx) newSelected.add(i + shiftAmount); 
-      });
-      if (selectedWords.has(idx)) {
-        for(let k = 0; k <= shiftAmount; k++) newSelected.add(idx + k);
-      }
+      selectedWords.forEach(i => { if (i < idx) newSelected.add(i); else if (i > idx) newSelected.add(i + shiftAmount); });
+      if (selectedWords.has(idx)) { for(let k = 0; k <= shiftAmount; k++) newSelected.add(idx + k); }
       setSelectedWords(newSelected);
 
       const newPageBreaks = new Set<number>();
-      pageBreaks.forEach(i => { 
-        if (i < idx) newPageBreaks.add(i); 
-        else if (i > idx) newPageBreaks.add(i + shiftAmount); 
-      });
+      pageBreaks.forEach(i => { if (i < idx) newPageBreaks.add(i); else if (i > idx) newPageBreaks.add(i + shiftAmount); });
       setPageBreaks(newPageBreaks);
       return;
     }
@@ -436,20 +394,12 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     setWordArray(newArray);
 
     const newSelected = new Set<number>();
-    selectedWords.forEach(i => { 
-      if (i < idx) newSelected.add(i); 
-      else if (i > idx) newSelected.add(i - 1); 
-    });
-    if (selectedWords.has(idx) || selectedWords.has(idx + 1)) {
-      newSelected.add(idx);
-    }
+    selectedWords.forEach(i => { if (i < idx) newSelected.add(i); else if (i > idx) newSelected.add(i - 1); });
+    if (selectedWords.has(idx) || selectedWords.has(idx + 1)) newSelected.add(idx);
     setSelectedWords(newSelected);
 
     const newPageBreaks = new Set<number>();
-    pageBreaks.forEach(i => { 
-      if (i < idx) newPageBreaks.add(i); 
-      else if (i > idx) newPageBreaks.add(i - 1); 
-    });
+    pageBreaks.forEach(i => { if (i < idx) newPageBreaks.add(i); else if (i > idx) newPageBreaks.add(i - 1); });
     setPageBreaks(newPageBreaks);
   };
 
@@ -460,21 +410,12 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           <input type="file" accept=".pdf,.txt,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 학습자료 업로드'}
         </label>
         <button onClick={uploadLaw} className="px-3 sm:px-4 border border-white/20 text-[10px] sm:text-xs hover:bg-white/10 transition-colors rounded-sm">전송</button>
-        <button 
-          onClick={() => setShowStopWordsSettings(!showStopWordsSettings)} 
-          className={`px-3 sm:px-4 border rounded-sm text-[10px] sm:text-xs transition-colors ${showStopWordsSettings ? 'bg-amber-600/30 border-amber-500/50 text-amber-300' : 'border-white/20 text-white/50 hover:bg-white/10'}`}
-        >
-          ⚙️ 예외 단어 (DB)
-        </button>
+        <button onClick={() => setShowStopWordsSettings(!showStopWordsSettings)} className={`px-3 sm:px-4 border rounded-sm text-[10px] sm:text-xs transition-colors ${showStopWordsSettings ? 'bg-amber-600/30 border-amber-500/50 text-amber-300' : 'border-white/20 text-white/50 hover:bg-white/10'}`}>⚙️ 예외 단어 (DB)</button>
         
         {isSelectMode && (
           <div className="flex gap-1 animate-in fade-in zoom-in-95">
-            <button onClick={handleBatchDelete} className="px-3 sm:px-4 bg-red-600/20 border border-red-500 text-red-400 text-[10px] sm:text-xs font-bold rounded-sm hover:bg-red-600/40 transition-colors">
-              🗑️ 일괄삭제 ({checkedIds.size})
-            </button>
-            <button onClick={() => { setIsSelectMode(false); setCheckedIds(new Set()); }} className="px-2 border border-white/10 text-white/40 text-[10px] sm:text-xs rounded-sm hover:bg-white/5">
-              취소
-            </button>
+            <button onClick={handleBatchDelete} className="px-3 sm:px-4 bg-red-600/20 border border-red-500 text-red-400 text-[10px] sm:text-xs font-bold rounded-sm hover:bg-red-600/40 transition-colors">🗑️ 일괄삭제 ({checkedIds.size})</button>
+            <button onClick={() => { setIsSelectMode(false); setCheckedIds(new Set()); }} className="px-2 border border-white/10 text-white/40 text-[10px] sm:text-xs rounded-sm hover:bg-white/5">취소</button>
           </div>
         )}
       </div>
@@ -484,49 +425,29 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           <div className="flex-1">
             <div className="text-xs sm:text-sm text-amber-400 font-bold mb-3">❌ 제외 단어 (빈칸 X)</div>
             <div className="flex gap-2 mb-3">
-              <input 
-                type="text" 
-                value={newStopWord} 
-                onChange={(e) => setNewStopWord(e.target.value)} 
-                onKeyDown={(e) => { if (e.key === 'Enter') handleAddStopWord(); }}
-                placeholder="예: 각 호의 외의 부분 (쉼표로 구분)" 
-                className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-amber-400/50"
-              />
+              <input type="text" value={newStopWord} onChange={(e) => setNewStopWord(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddStopWord(); }} placeholder="예: 각 호의 외의 부분 (쉼표로 구분)" className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-amber-400/50" />
               <button onClick={handleAddStopWord} className="px-4 bg-amber-600/20 text-amber-400 border border-amber-500/30 text-xs font-bold rounded-sm hover:bg-amber-600/40 transition-colors">추가</button>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {customStopWords.length === 0 && <span className="text-[10px] text-white/30">등록된 DB 예외 단어가 없습니다.</span>}
               {customStopWords.map(word => (
                 <span key={word} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] sm:text-[11px] text-white/70 flex items-center gap-1.5">
-                  {word}
-                  <button onClick={() => handleRemoveStopWord(word)} className="text-white/30 hover:text-red-400">✕</button>
+                  {word} <button onClick={() => handleRemoveStopWord(word)} className="text-white/30 hover:text-red-400">✕</button>
                 </span>
               ))}
             </div>
           </div>
-
           <div className="hidden sm:block w-px bg-white/10 mx-2"></div>
           <div className="sm:hidden h-px w-full bg-white/10 my-2"></div>
-
           <div className="flex-1">
             <div className="text-xs sm:text-sm text-teal-400 font-bold mb-3">✅ 필수 포함 단어 (무조건 빈칸 O)</div>
             <div className="flex gap-2 mb-3">
-              <input 
-                type="text" 
-                value={newIncludeWord} 
-                onChange={(e) => setNewIncludeWord(e.target.value)} 
-                onKeyDown={(e) => { if (e.key === 'Enter') handleAddIncludeWord(); }}
-                placeholder="예: 또는, 및, 할 수 있다 (쉼표로 구분)" 
-                className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-teal-400/50"
-              />
+              <input type="text" value={newIncludeWord} onChange={(e) => setNewIncludeWord(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddIncludeWord(); }} placeholder="예: 또는, 및, 할 수 있다 (쉼표로 구분)" className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-teal-400/50" />
               <button onClick={handleAddIncludeWord} className="px-4 bg-teal-600/20 text-teal-400 border border-teal-500/30 text-xs font-bold rounded-sm hover:bg-teal-600/40 transition-colors">추가</button>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {customIncludeWords.length === 0 && <span className="text-[10px] text-white/30">등록된 필수 포함 단어가 없습니다.</span>}
               {customIncludeWords.map(word => (
                 <span key={word} className="px-2 py-1 bg-teal-900/30 border border-teal-500/30 rounded text-[10px] sm:text-[11px] text-teal-300 flex items-center gap-1.5">
-                  {word}
-                  <button onClick={() => handleRemoveIncludeWord(word)} className="text-teal-500/50 hover:text-teal-300">✕</button>
+                  {word} <button onClick={() => handleRemoveIncludeWord(word)} className="text-teal-500/50 hover:text-teal-300">✕</button>
                 </span>
               ))}
             </div>
@@ -537,70 +458,32 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-4 sm:mb-6">
         {craftFolders.map((f: string) => (
           <div key={f} className="relative group flex items-center">
-            <button 
-              onClick={() => handleToggleFolder(f)} 
-              className={`pl-2.5 pr-14 py-1.5 sm:py-2 text-[10px] sm:text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' : 'bg-indigo-900/40 text-indigo-300 border-indigo-500/30'}`}
-            >
+            <button onClick={() => handleToggleFolder(f)} className={`pl-2.5 pr-14 py-1.5 sm:py-2 text-[10px] sm:text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' : 'bg-indigo-900/40 text-indigo-300 border-indigo-500/30'}`}>
               📁 {f}
             </button>
-            <button 
-              onClick={async (e) => {
-                e.stopPropagation();
-                const newName = prompt(`'${f}' 폴더의 새로운 이름을 입력하세요:`, f);
-                if(newName && newName.trim() !== "" && newName !== f) {
-                  try { 
-                    await api.renameFolder(safeAddress, f, newName.trim()); 
-                    addLog(`✏️ 폴더명 변경 완료.`); 
-                    window.location.reload(); 
-                  } catch (err) { 
-                    alert("변경 실패"); 
-                  }
-                }
-              }}
-              className="absolute right-6 top-1/2 -translate-y-1/2 text-white/30 hover:text-blue-400 px-1.5 py-1 text-[10px] transition-colors"
-            >✏️</button>
-            <button 
-              onClick={async (e) => {
-                e.stopPropagation();
-                if(confirm(`'${f}' 폴더를 모두 삭제하시겠습니까?`)) {
-                  try { 
-                    await api.deleteFolder(safeAddress, f); 
-                    addLog(`🗑️ 삭제 완료`); 
-                    window.location.reload(); 
-                  } catch (err) { 
-                    alert("삭제 실패"); 
-                  }
-                }
-              }}
-              className="absolute right-1 top-1/2 -translate-y-1/2 text-white/30 hover:text-red-400 px-1.5 py-1 text-[10px] transition-colors"
-            >✕</button>
+            <button onClick={async (e) => { e.stopPropagation(); const newName = prompt(`'${f}' 폴더의 새로운 이름을 입력하세요:`, f); if(newName && newName.trim() !== "" && newName !== f) { try { await api.renameFolder(safeAddress, f, newName.trim()); addLog(`✏️ 폴더명 변경 완료.`); window.location.reload(); } catch (err) { alert("변경 실패"); } } }} className="absolute right-6 top-1/2 -translate-y-1/2 text-white/30 hover:text-blue-400 px-1.5 py-1 text-[10px] transition-colors">✏️</button>
+            <button onClick={async (e) => { e.stopPropagation(); if(confirm(`'${f}' 폴더를 모두 삭제하시겠습니까?`)) { try { await api.deleteFolder(safeAddress, f); addLog(`🗑️ 삭제 완료`); window.location.reload(); } catch (err) { alert("삭제 실패"); } } }} className="absolute right-1 top-1/2 -translate-y-1/2 text-white/30 hover:text-red-400 px-1.5 py-1 text-[10px] transition-colors">✕</button>
           </div>
         ))}
       </div>
       
       {craftFolders.map((folder: string) => {
         const isChapterFolder = /^제\s*\d+\s*장/.test(folder);
-        // 💡 폴더 전체 완료 여부 체크
-        const fullyCreated = isFolderFullyCreated(folder);
-        
         return openFolders[folder] && (
-          <div key={folder} className={`mb-6 sm:mb-8 border-l rounded-l-sm pl-3 sm:pl-4 transition-all ${isChapterFolder ? 'border-blue-500/50' : 'border-white/5'} ${fullyCreated ? 'opacity-40 grayscale' : ''}`}>
+          <div key={folder} className={`mb-6 sm:mb-8 border-l rounded-l-sm pl-3 sm:pl-4 transition-all ${isChapterFolder ? 'border-blue-500/50' : 'border-white/5'}`}>
             <div className={`text-xs sm:text-sm mb-2 sm:mb-3 border-b pb-1.5 sm:pb-2 font-bold transition-all ${isChapterFolder ? 'text-blue-400 border-blue-500/30' : 'text-white/50 border-white/10'}`}>
-              {folder} {fullyCreated && " (완료됨)"}
+              {folder}
             </div>
 
-            {/* 💡 폴더가 완료되면 내부 클릭도 전부 방지합니다 */}
-            <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start ${fullyCreated ? 'pointer-events-none' : ''}`}>
+            <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
               {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
                   const isExpanded = expandedId === cat.id;
                   const isChecked = checkedIds.has(cat.id);
                   const contentToUse = cat.content || cat.title || "";
                   
-                  // 💡 개별 조항 완료 여부 체크
                   const isCreated = isCategoryCreated(cat.title);
                   
-                  let colClass = ""; 
-                  let titleColor = "text-amber-400";
+                  let colClass = ""; let titleColor = "text-amber-400";
                   const checkText = `${cat.title || ''} ${cat.content || ''}`;
                   if (checkText.includes('[법]')) titleColor = "text-red-500";
                   else if (checkText.includes('[령]')) titleColor = "text-blue-400";
@@ -614,43 +497,27 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                       {!isExpanded ? (
                         <div className="relative group/card w-full flex items-center gap-2">
                           {isSelectMode && (
-                            <input 
-                              type="checkbox" 
-                              checked={isChecked}
-                              onChange={() => handleToggleCheck(cat.id)}
-                              className="w-4 h-4 rounded border-white/20 bg-black accent-amber-500 cursor-pointer shrink-0 transition-all"
-                            />
+                            <input type="checkbox" checked={isChecked} onChange={() => handleToggleCheck(cat.id)} className="w-4 h-4 rounded border-white/20 bg-black accent-amber-500 cursor-pointer shrink-0 transition-all"/>
                           )}
 
                           <button 
                             {...createLongPressHandlers(cat.id)}
-                            onClick={() => { if(!isCreated) openCategory(cat); }} 
+                            onClick={() => openCategory(cat)} 
                             className={`flex-1 min-h-[60px] p-3 sm:p-4 border rounded-sm transition-colors flex flex-col gap-1.5 sm:gap-2 text-left relative pr-10 ${
                               isChecked ? 'border-amber-500/50 bg-amber-950/10' : 
-                              isCreated ? 'bg-indigo-900/10 border-indigo-500/10 opacity-30 cursor-not-allowed grayscale' : 
+                              isCreated ? 'border-white/5 bg-black/40 hover:bg-white/5' : 
                               'border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40'
                             }`}
                           >
                             <div className="flex justify-between items-center w-full">
-                              <span className={`${titleColor} font-bold text-[11px] sm:text-[13px] leading-snug break-keep`}>{cleanTitle}</span>
-                              {isCreated && <span className="text-[9px] bg-black/50 text-indigo-300 px-1.5 py-0.5 rounded ml-2 whitespace-nowrap border border-indigo-500/30">제작됨</span>}
+                              <span className={`${isCreated ? 'text-white/30 font-medium' : `${titleColor} font-bold`} text-[11px] sm:text-[13px] leading-snug break-keep`}>{cleanTitle}</span>
+                              {isCreated && <span className="text-[9px] bg-white/5 text-white/30 px-1.5 py-0.5 rounded ml-2 whitespace-nowrap border border-white/10">제작됨</span>}
                             </div>
                             
                             {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
                             
                             {!isSelectMode && (
-                              <span
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  if (confirm(`'${cleanTitle}' 조항을 대기열에서 즉시 삭제하시겠습니까?`)) {
-                                    await handleDeleteCategory(cat.id);
-                                  }
-                                }}
-                                className="absolute top-1/2 -translate-y-1/2 right-3 w-5 h-5 flex items-center justify-center border border-white/10 text-white/30 hover:text-red-400 hover:border-red-500/30 rounded-full text-[10px] bg-black/40 md:opacity-0 group-hover/card:opacity-100 transition-all duration-150 cursor-pointer"
-                                title="즉시 삭제"
-                              >
-                                ✕
-                              </span>
+                              <span onClick={async (e) => { e.stopPropagation(); if (confirm(`'${cleanTitle}' 조항을 대기열에서 즉시 삭제하시겠습니까?`)) { await handleDeleteCategory(cat.id); } }} className="absolute top-1/2 -translate-y-1/2 right-3 w-5 h-5 flex items-center justify-center border border-white/10 text-white/30 hover:text-red-400 hover:border-red-500/30 rounded-full text-[10px] bg-black/40 md:opacity-0 group-hover/card:opacity-100 transition-all duration-150 cursor-pointer" title="즉시 삭제">✕</span>
                             )}
                           </button>
                         </div>
@@ -659,29 +526,13 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                           <div className="flex justify-between items-center mb-1 flex-wrap gap-2">
                             <div className="flex items-center gap-2">
                               <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{cleanTitle}</span>
-                              <button 
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  const newFolder = prompt("이동시킬 폴더명:", cat.folder_name);
-                                  if (newFolder && newFolder.trim() !== "" && newFolder !== cat.folder_name) {
-                                    try { 
-                                      await api.updateCategoryFolder(safeAddress, cat.id, newFolder.trim()); 
-                                      window.location.reload(); 
-                                    } catch (err) {}
-                                  }
-                                }}
-                                className="px-2 py-0.5 bg-white/5 border border-white/20 rounded-sm text-[9px] text-white/50 hover:bg-white/10 transition-colors"
-                              >📂 폴더 이동</button>
+                              {isCreated && <span className="text-[10px] text-amber-500 font-bold ml-2">⚠️ 저장하면 카드를 덮어씁니다</span>}
                             </div>
                             
                             <div className="flex gap-2">
-                              <button 
-                                onClick={handleEditToggle} 
-                                className={`px-3 py-1 text-[11px] font-bold rounded-sm border transition-all ${isEditingText ? 'bg-green-600 border-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.3)]' : 'bg-white/5 border-white/20 text-white/50 hover:bg-white/10'}`}
-                              >
+                              <button onClick={handleEditToggle} className={`px-3 py-1 text-[11px] font-bold rounded-sm border transition-all ${isEditingText ? 'bg-green-600 border-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.3)]' : 'bg-white/5 border-white/20 text-white/50 hover:bg-white/10'}`}>
                                 {isEditingText ? '✅ 텍스트 적용' : '✏️ 원본 텍스트 편집'}
                               </button>
-
                               {!isEditingText && (
                                 <button onClick={() => setIsEraserMode(!isEraserMode)} className={`px-3 py-1 text-[11px] font-bold rounded-sm border transition-all ${isEraserMode ? 'bg-red-600 border-red-500 text-white animate-pulse' : 'bg-white/5 border-white/20 text-white/50 hover:bg-white/10'}`}>
                                   {isEraserMode ? '🗑️ 지우개 켜짐' : '🧹 지우개 모드'}
@@ -694,12 +545,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                           
                           {isEditingText ? (
                             <div className="w-full relative mt-2 animate-in fade-in zoom-in-95">
-                              <textarea
-                                value={editingContent}
-                                onChange={(e) => setEditingContent(e.target.value)}
-                                className="w-full h-48 bg-black border border-green-500/50 p-4 text-green-100 text-[13px] sm:text-[15px] leading-loose rounded outline-none resize-y custom-scrollbar"
-                                placeholder="원하는 대로 내용을 지우거나 띄어쓰기를 수정하세요..."
-                              />
+                              <textarea value={editingContent} onChange={(e) => setEditingContent(e.target.value)} className="w-full h-48 bg-black border border-green-500/50 p-4 text-green-100 text-[13px] sm:text-[15px] leading-loose rounded outline-none resize-y custom-scrollbar" placeholder="원하는 대로 내용을 지우거나 띄어쓰기를 수정하세요..." />
                               <div className="absolute top-2 right-2 text-[10px] text-green-400 bg-black/50 px-2 py-1 rounded">수정 후 [✅ 텍스트 적용] 버튼 클릭</div>
                             </div>
                           ) : (
@@ -713,19 +559,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                                 return (
                                   <React.Fragment key={idx}>
                                     {pageBreaks.has(idx) && <div className="w-full border-t border-red-500/50 my-2 relative"><span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black px-1 text-[8px] text-red-400 font-bold uppercase tracking-tighter">Page Break</span></div>}
-                                    <span 
-                                      onClick={() => { if (isEraserMode || !isSymbolOnly) handleWordClick(idx); }} 
-                                      onContextMenu={(e) => handleWordSplit(idx, e)} 
-                                      onDoubleClick={() => { if (!isSymbolOnly || isMerged) handleWordMerge(idx); }} 
-                                      className={`px-[1px] rounded transition-colors ${
-                                        isSelected ? 'bg-amber-500 text-black font-bold cursor-pointer' : 
-                                        isEraserMode ? 'hover:bg-red-500/50 hover:text-white text-red-100 cursor-pointer' : 
-                                        isSymbolOnly ? 'text-white/30 cursor-default' : 
-                                        isMerged ? 'bg-indigo-900/30 border-b border-indigo-500/50 hover:bg-indigo-800/40 cursor-pointer' : 
-                                        'hover:bg-white/10 cursor-pointer'
-                                      }`}
-                                      title={isSelected ? "클릭하여 빈칸에서 해제" : "클릭하여 빈칸으로 지정"}
-                                    >
+                                    <span onClick={() => { if (isEraserMode || !isSymbolOnly) handleWordClick(idx); }} onContextMenu={(e) => handleWordSplit(idx, e)} onDoubleClick={() => { if (!isSymbolOnly || isMerged) handleWordMerge(idx); }} className={`px-[1px] rounded transition-colors ${isSelected ? 'bg-amber-500 text-black font-bold cursor-pointer' : isEraserMode ? 'hover:bg-red-500/50 hover:text-white text-red-100 cursor-pointer' : isSymbolOnly ? 'text-white/30 cursor-default' : isMerged ? 'bg-indigo-900/30 border-b border-indigo-500/50 hover:bg-indigo-800/40 cursor-pointer' : 'hover:bg-white/10 cursor-pointer'}`} title={isSelected ? "클릭하여 빈칸에서 해제" : "클릭하여 빈칸으로 지정"}>
                                       {word}
                                     </span>
                                   </React.Fragment>
@@ -742,7 +576,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                               const nextCat = folderCats[currentIdx + 1];
                               
                               handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, () => {
-                                  if (nextCat) openCategory(nextCat);
+                                  if (nextCat) openCategory(nextCat, true);
                                   else setExpandedId(null);
                               });
                             }} 
