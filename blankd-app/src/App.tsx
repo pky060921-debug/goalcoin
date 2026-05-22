@@ -613,31 +613,12 @@ function MainApp() {
           setAnswerInput={setAnswerInput}
           inputStatus={inputStatus}
           handleSequentialInput={handleSequentialInput}
-                    // [수정 전후 교체할 로직]
-renderContent={() => {
-renderContent={() => {
-    const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-    
-    // 🩺 [진단/복구] 모달창 제목 복구
-    let displayTitle = "";
-    const rawTitle = (activeCard.title || "").trim();
-    const firstLine = (cleanContent.split('\n')[0] || "").trim();
-    const articleMatch = firstLine.match(/제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?/) || rawTitle.match(/제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?/);
-    const titleMatch = firstLine.match(/\(([^)]+)\)/) || rawTitle.match(/\(([^)]+)\)/);
-    
-    const article = articleMatch ? articleMatch[0] : "";
-    const titleName = (titleMatch && !titleMatch[1].includes("내용")) ? titleMatch[1] : "";
-    displayTitle = `${article} ${titleName}`.trim();
-    if (!displayTitle || displayTitle === "조") displayTitle = rawTitle.replace(/내용/g, '').trim() || "제목 없음";
-
-    // ... 이후 코드 동일
-
-    const { body } = formatCardText(cleanContent);
-
+          renderContent={() => {
+            const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+            const { body } = formatCardText(cleanContent);
             const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== ''); 
             
             let displayPage = 0; 
-
             let tempGlobalBlank = 0; 
             let tempPage = 0;
             for (let part of parts) {
@@ -706,7 +687,7 @@ renderContent={() => {
             return (
               <div className="flex flex-col gap-6 w-full">
                 <div className="flex justify-between items-center border-b border-white/10 pb-2">
-                    <span className="text-amber-400 font-bold text-[14px] leading-tight">{displayTitle}</span>
+                    <span className="text-amber-400 font-bold text-[14px] leading-tight">{cleanContent.split('\n')[0]}</span>
                     <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
                 </div>
                 
