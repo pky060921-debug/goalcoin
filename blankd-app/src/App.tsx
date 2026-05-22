@@ -613,31 +613,21 @@ function MainApp() {
           setAnswerInput={setAnswerInput}
           inputStatus={inputStatus}
           handleSequentialInput={handleSequentialInput}
-                    renderContent={() => {
-            const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-            
-            // 💡 [수정] 괄호를 띄어쓰기로 변환하여 "제41조 요양급여" 형태로 완벽 정제
-            let displayTitle = "";
-            try {
-                const rawTitle = (activeCard.title || "").trim();
-                const firstLine = (cleanContent.split('\n')[0] || "").trim();
-                let candidate = firstLine.includes("내용") && !rawTitle.includes("내용") ? rawTitle : firstLine;
-                
-                displayTitle = candidate
-                    .replace(/\[.*?\]/g, '')         // [법], [령] 등 태그 제거
-                    .replace(/\(\s*내용\s*\)/g, '')  // (내용) 오염 제거
-                    .replace(/내용/g, '')            // 내용 단어 제거
-                    .replace(/[()]/g, ' ')           // 괄호를 띄어쓰기로 변환 (제41조(요양급여) -> 제41조 요양급여)
-                    .replace(/\s+/g, ' ')            // 여러 칸 띄어쓰기를 한 칸으로 압축
-                    .trim();
-                    
-                if (!displayTitle) displayTitle = "제목 없음";
-            } catch (error) {
-                displayTitle = "제목 오류";
-            }
+                    // [수정 전후 교체할 로직]
+renderContent={() => {
+    const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+    
+    // 🩺 진단 코드: 카드 모달창 제목 복구
+    let displayTitle = "";
+    const articleRegex = /제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?/;
+    const firstLine = (cleanContent.split('\n')[0] || "").trim();
+    
+    const match = firstLine.match(articleRegex) || (activeCard.title || "").match(articleRegex);
+    displayTitle = match ? match[0] : (activeCard.title !== "내용" ? activeCard.title : "조항 정보 없음");
 
+    // ... 이하 기존 렌더링 로직 (body 생성 등) ...
+    const { body } = formatCardText(cleanContent);
 
-            const { body } = formatCardText(cleanContent);
             const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== ''); 
             
             let displayPage = 0; 
