@@ -71,25 +71,11 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
             }).map((card: any) => {
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
                 
-// 💡 [최종 복구 로직] 찌꺼기 텍스트만 걸러내고 조항번호+이름 전체를 살려냅니다.
-                let displayTitle = "";
-                const rawTitle = (card.title || "").trim();
-                const bodyFirstLine = (cleanContent.split('\n')[0] || "").trim();
-                
-                let candidate = bodyFirstLine;
-                if ((bodyFirstLine.includes("내용") && !rawTitle.includes("내용")) || !bodyFirstLine) {
-                    candidate = rawTitle;
-                }
-                
-                displayTitle = candidate
-                    .replace(/\[.*?\]/g, '')         // [법], [령] 태그 제거
-                    .replace(/\(\s*내용\s*\)/g, '')  // (내용) 오염 제거
-                    .replace(/내용/g, '')            // 내용 텍스트 제거
-                    .replace(/[()]/g, ' ')           // 괄호를 띄어쓰기로 변환하여 글자 살림
-                    .replace(/\s+/g, ' ')            // 다중 공백 압축
-                    .trim();
-                    
-                if (!displayTitle) displayTitle = "제목 없음";
+                // 💡 [수정] 조항명만 깔끔하게 추출 (DB 의존성 삭제)
+                let displayTitle = (card.title || "").replace(/\[.*?\]/g, '').replace(/내용/g, '').trim();
+                const match = cleanContent.match(/제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?\s*[\(\s].+?[\)\s]/);
+                if (match) displayTitle = match[0].replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
+                if (!displayTitle || displayTitle === "조") displayTitle = cleanContent.split('\n')[0].substring(0, 20);
 
                 const { body } = formatCardText(cleanContent);
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
@@ -99,15 +85,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 let colClass = "";
                 let titleColor = "text-teal-400";
                 
-                if (viewMode === 'all' && colCount >= 3) {
-                  if (cleanContent.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
-                  else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
-                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
-                } else {
-                  if (cleanContent.includes('[법]')) titleColor = "text-red-500";
-                  else if (cleanContent.includes('[령]')) titleColor = "text-blue-400";
-                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
-                }
+                if (cleanContent.includes('[법]')) titleColor = "text-red-500";
+                else if (cleanContent.includes('[령]')) titleColor = "text-blue-400";
+                else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
 
                 return (
                   <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
