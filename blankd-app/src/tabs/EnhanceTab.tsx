@@ -71,7 +71,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
             }).map((card: any) => {
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
                 
-                // 💡 [최종 복구 로직] 찌꺼기 텍스트만 걸러내고 조항번호+이름 전체를 살려냅니다.
+// 💡 [최종 복구 로직] 찌꺼기 텍스트만 걸러내고 조항번호+이름 전체를 살려냅니다.
                 let displayTitle = "";
                 const rawTitle = (card.title || "").trim();
                 const bodyFirstLine = (cleanContent.split('\n')[0] || "").trim();
