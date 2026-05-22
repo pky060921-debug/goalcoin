@@ -567,28 +567,22 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                           <button 
                             disabled={isEditingText}
                             onClick={() => {
-                              // 💡 핵심: 저장할 때 cat.title을 원문에서 한 번 더 정밀 추출합니다.
-                              const titleLine = (cat.content || cat.title || "").split('\n')[0].trim();
-                              const titleMatch = titleLine.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*(\(.*\))?/);
-                              const finalTitle = titleMatch ? titleMatch[0] : titleLine;
-                              const updatedCat = { ...cat, title: finalTitle };
                               const folderCats = safeCategories.filter((c:any) => c.folder_name === cat.folder_name).sort((a:any, b:any) => a.id - b.id);
                               const currentIdx = folderCats.findIndex(c => c.id === cat.id);
                               const nextCat = folderCats[currentIdx + 1];
-    
-                              // 💡 여기서 정제된 updatedCat을 넘깁니다.
-                              handleMakeBlankCard(updatedCat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, () => {
+                              
+                              handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, () => {
+                                  // 💡 [수정] 저장이 끝나면 다음 조항의 ID를 expandedId로 지정하여 열리게 합니다.
                                   if (nextCat) {
                                       setExpandedId(nextCat.id);
                                   } else {
                                       setExpandedId(null);
                                   }
-             
                               });
                             }} 
                             className={`w-full py-2.5 text-xs sm:text-sm font-bold rounded-sm mt-2 transition-all ${isEditingText ? 'bg-white/5 text-white/30 border border-white/10 cursor-not-allowed' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'}`}
                           >
-                            {isEditingText ? '텍스트 적용 후에 저장할 수 있습니다' : '만들기'}
+                            {isEditingText ? '텍스트 적용 후에 저장할 수 있습니다' : '지식 추출 저장 및 다음 조항 이어서 만들기'}
                           </button>
                         </div>
                       )}
@@ -602,3 +596,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     </div>
   );
 };
+
+
+
+
