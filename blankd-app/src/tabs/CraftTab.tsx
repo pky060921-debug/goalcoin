@@ -15,7 +15,10 @@ const sortChapters = (folders: string[]): string[] => {
   return folders.sort((a, b) => {
     const matchA = a.match(/^제\s*(\d+)\s*장/);
     const matchB = b.match(/^제\s*(\d+)\s*장/);
-    if (matchA && matchB) return parseInt(matchA[1]) - parseInt(matchB[1]);
+    
+    if (matchA && matchB) {
+      return parseInt(matchA[1]) - parseInt(matchB[1]);
+    }
     if (matchA) return -1;
     if (matchB) return 1;
     return a.localeCompare(b, 'ko');
@@ -24,7 +27,7 @@ const sortChapters = (folders: string[]): string[] => {
 
 type WordItem = { text: string; subWords: string[]; };
 
-export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory, loadAllData }: any) => {
+export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory, loadAllData, expandedId, setExpandedId }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   
   const getCleanText = (text: string) => {
@@ -51,12 +54,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       const saved = localStorage.getItem('blankd_craft_folders'); 
       return saved ? JSON.parse(saved) : {}; 
     } catch(e) { return {}; }
-  });
-
-  // 💡 [체크포인트] 마지막으로 작업하던 카드를 기억합니다
-  const [expandedId, setExpandedId] = useState<number | null>(() => {
-    const saved = localStorage.getItem('blankd_craft_expanded');
-    return saved ? parseInt(saved, 10) : null;
   });
 
   const [wordArray, setWordArray] = useState<WordItem[]>([]);
@@ -195,18 +192,18 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     }
   };
 
-  // 💡 [체크포인트] 확장된 카드 상태 저장
+  // 💡 [체크포인트 제어] 대시보드 및 내부 탭 이동 시 원격 동기화 구동
   useEffect(() => {
     if (expandedId !== null) {
       localStorage.setItem('blankd_craft_expanded', expandedId.toString());
       const targetCat = safeCategories.find((c: any) => c.id === expandedId);
-      if (targetCat && wordArray.length === 0) {
+      if (targetCat) {
         openCategory(targetCat, true); 
       }
     } else {
       localStorage.removeItem('blankd_craft_expanded');
     }
-  }, [expandedId]);
+  }, [expandedId, categories]);
 
   const applyTextToState = (textBody: string) => {
     const initialWords = textBody.split(SPLIT_REGEX).filter(w => w !== "");
@@ -274,7 +271,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     });
 
     const patternsToExclude: RegExp[] = [
-      /(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g
+      /(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)( Lifespan)?(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g
     ];
 
     currentCustomStopWords.forEach(cw => {
