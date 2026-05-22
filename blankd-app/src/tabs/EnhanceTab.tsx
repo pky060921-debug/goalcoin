@@ -68,28 +68,34 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
                 const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
                 return origIdA - origIdB;
-            }).map((card: any) => {
-                const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-                
-                // 💡 [수정] 괄호를 띄어쓰기로 변환하여 "제41조 요양급여" 형태로 완벽 정제
-                let displayTitle = "";
-                try {
-                    const rawTitle = (card.title || "").trim();
-                    const firstLine = (cleanContent.split('\n')[0] || "").trim();
-                    let candidate = firstLine.includes("내용") && !rawTitle.includes("내용") ? rawTitle : firstLine;
-                    
-                    displayTitle = candidate
-                        .replace(/\[.*?\]/g, '')         // [법], [령] 등 태그 제거
-                        .replace(/\(\s*내용\s*\)/g, '')  // (내용) 오염 제거
-                        .replace(/내용/g, '')            // 내용 단어 제거
-                        .replace(/[()]/g, ' ')           // 괄호를 띄어쓰기로 변환 (제41조(요양급여) -> 제41조 요양급여)
-                        .replace(/\s+/g, ' ')            // 여러 칸 띄어쓰기를 한 칸으로 압축
-                        .trim();
-                        
-                    if (!displayTitle) displayTitle = "제목 없음";
-                } catch (error) {
-                    displayTitle = "제목 오류";
-                }
+            // [수정 전후 교체할 로직]
+.map((card: any) => {
+    const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+    
+    // 🩺 진단 코드: 제목 추출이 실패하면 콘솔에 카드의 ID와 내용을 로그로 남깁니다.
+    let displayTitle = "";
+    try {
+        const rawTitle = (card.title || "").trim();
+        const firstLine = (cleanContent.split('\n')[0] || "").trim();
+        
+        // 정규식: "제 00조" 패턴 찾기
+        const articleRegex = /제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?/;
+        const match = firstLine.match(articleRegex) || rawTitle.match(articleRegex);
+
+        if (match) {
+            displayTitle = match[0];
+        } else if (rawTitle && rawTitle !== "내용") {
+            displayTitle = rawTitle;
+        } else {
+            // 강제 복구: 첫 줄에서 [법] 등 태그 제거 후 시도
+            displayTitle = firstLine.replace(/\[.*?\]/g, '').trim() || "번호없음";
+        }
+    } catch (e) {
+        console.error("DEBUG_TITLE_ERROR:", card.id, card.content);
+        displayTitle = "추출오류";
+    }
+    // ... 이하 렌더링 동일
+
 
 
                 const { body } = formatCardText(cleanContent);
