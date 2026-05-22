@@ -23,486 +23,588 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
   }
   render() {
     if (this.state.hasError) return (
-      <div className="p-4 bg-red-900/20 border border-red-500 rounded text-red-200">
-        치명적 오류 발생: {this.state.errorMessage} <br/><button onClick={() => window.location.reload()} className="mt-2 px-3 py-1 bg-red-500 text-white rounded">새로고침</button>
+      <div className="p-6 text-red-400 font-mono border border-red-500/30 bg-red-900/10 rounded-sm shadow-xl">
+        <h3 className="text-lg font-bold mb-2">⚠️ 시스템 치명적 오류</h3>
+        <p className="text-sm opacity-80">{this.state.errorMessage}</p>
       </div>
     );
     return this.props.children;
   }
 }
 
-export default function App() {
-  const account = useCurrentAccount();
-  const enokiFlow = useEnokiFlow();
-  const { zkLoginSession } = useZkLogin();
+const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
+  try {
+    const qStr = localStorage.getItem('blankd_sync_queue');
+    const q = qStr ? JSON.parse(qStr) : { memos: [], answers: [] };
+    if (type === 'MEMO') {
+      q.memos = q.memos.filter((m: any) => m.id !== payload.id); 
+      q.memos.push(payload);
+    } else if (type === 'ANSWER') {
+      q.answers.push(payload);
+    }
+    localStorage.setItem('blankd_sync_queue', JSON.stringify(q));
+  } catch (e) { 
+    console.error("큐 저장 실패", e); 
+  }
+};
 
-  const safeAddress = account?.address || zkLoginSession?.address || "";
+function MainApp() {
+  const enokiFlow = useEnokiFlow();
+  const zkLogin = useZkLogin();
+  const suiWalletAccount = useCurrentAccount();
+  const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
+  const isLoggedIn = safeAddress.length > 0;
   
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('blankd_active_tab') || 'progress';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('blankd_active_tab', activeTab);
+  }, [activeTab]);
+
   const [categories, setCategories] = useState<any[]>([]);
   const [savedCards, setSavedCards] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
-  const [viewMode, setViewMode] = useState<'all' | 'one'>('all');
-  const [colCount, setColCount] = useState<number>(3);
-  const [useAiRecommend, setUseAiRecommend] = useState(true);
-  const [lawFile, setLawFile] = useState<File | null>(null);
-  
+  const [exams, setExams] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
+  
+  const [viewMode, setViewMode] = useState('all');
+  const [colCount, setColCount] = useState(3);
+  const [useAiRecommend, setUseAiRecommend] = useState(true);
+  
+  const [lawFile, setLawFile] = useState<File | null>(null);
+  const [examFile, setExamFile] = useState<File | null>(null);
+  const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  
+  const [isMemoOpen, setIsMemoOpen] = useState(false);
+
+  const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
+  const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [answerInput, setAnswerInput] = useState("");
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
-  const [elapsed, setElapsed] = useState(0);
-  const [timerActive, setTimerActive] = useState(false);
+  const [startTime, setStartTime] = useState<number>(0);
+  const [elapsed, setElapsed] = useState<number>(0);
+  const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
-  const [expandedId, setExpandedId] = useState<number | null>(null);
-
+  const [goalBalance, setGoalBalance] = useState<number>(0);
+  
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
   
-  const [totalTimeLimit, setTotalTimeLimit] = useState(60); 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
-  const [isMemoOpen, setIsMemoOpen] = useState(false);
+  const isClosingRef = useRef(false);
 
-  const addLog = (msg: string) => setLogs(p => [...p.slice(-4), msg]);
+  const [expandedId, setExpandedId] = useState<number | null>(() => {
+    const saved = localStorage.getItem('blankd_craft_expanded');
+    return saved ? parseInt(saved, 10) : null;
+  });
+
+  const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-40));
+
+  useEffect(() => { document.title = "BlankD | 인지 과학 기반 학습"; }, []);
 
   useEffect(() => {
-    const savedLimit = localStorage.getItem('blankd_time_limit');
-    if (savedLimit) setTotalTimeLimit(parseInt(savedLimit, 10));
-  }, []);
-
-  const handleSetTimeLimit = (val: number) => {
-    setTotalTimeLimit(val);
-    localStorage.setItem('blankd_time_limit', val.toString());
-  };
+    if (window.location.hash) {
+      enokiFlow.handleAuthCallback().then(() => { 
+        window.history.replaceState(null, '', window.location.pathname); 
+        addLog("✅ 로그인 콜백 처리 완료"); 
+      }).catch((err: any) => addLog(`❌ 인증 실패: ${err.message}`));
+    }
+    if (isLoggedIn) loadAllData();
+  }, [isLoggedIn, safeAddress, enokiFlow]);
 
   const loadAllData = async () => {
-    if (!safeAddress) return;
-    setLoading(true);
-    addLog("⏳ 데이터 동기화 중...");
     try {
-      const [catData, cardData] = await Promise.all([
-        api.getCategories(safeAddress),
-        api.getMyCards(safeAddress)
+      const [catRes, cardRes, examRes, balance] = await Promise.all([
+        fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r=>r.json()),
+        fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`).then(r=>r.json()),
+        fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`).then(r=>r.json()),
+        api.getGoalCoinBalance(safeAddress).catch(()=>0)
       ]);
-      setCategories(catData.categories || []);
-      setSavedCards(cardData.cards || []);
-      addLog("✅ 데이터 동기화 완료.");
-    } catch (e: any) {
-      addLog(`❌ 동기화 실패: ${e.message}`);
-    } finally {
-      setLoading(false);
+      setCategories(catRes.categories || []); 
+      setSavedCards(cardRes.cards || []); 
+      setExams(examRes.exams || []);
+      setGoalBalance(balance);
+    } catch (e: any) { 
+      addLog(`❌ 데이터 동기화 실패: ${e.message}`);
+    }
+  };
+
+  const flushQueue = async () => {
+    if (!safeAddress) return;
+    try {
+      const qStr = localStorage.getItem('blankd_sync_queue');
+      if (!qStr) return;
+      const q = JSON.parse(qStr);
+      if (q.memos.length === 0 && q.answers.length === 0) return;
+
+      const res = await fetch("https://api.blankd.top/api/sync-batch", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, memos: q.memos, answers: q.answers })
+      });
+      if (res.ok) {
+        localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
+        addLog(`🔄 백그라운드 동기화 완료 (M:${q.memos.length}, A:${q.answers.length})`);
+        const newBalance = await api.getGoalCoinBalance(safeAddress).catch(()=>goalBalance);
+        setGoalBalance(newBalance);
+      }
+    } catch (e) { 
+      addLog("⚠️ 오프라인 감지: 데이터는 로컬에 안전하게 보관 중입니다."); 
     }
   };
 
   useEffect(() => {
-    if (safeAddress) {
-      addLog("🟢 지갑/구글 로그인 성공.");
-      loadAllData();
-    } else {
-      setCategories([]);
-      setSavedCards([]);
-    }
+    if (!safeAddress) return;
+    const interval = setInterval(flushQueue, 30000); 
+    const handleVisibility = () => { if(document.visibilityState === 'hidden') flushQueue(); };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', handleVisibility); };
   }, [safeAddress]);
 
   const uploadLaw = async () => {
-    if (!lawFile || !safeAddress) return alert("파일을 선택하세요.");
-    setLoading(true);
-    addLog(`📤 법령 파일 전송 중... (${lawFile.name})`);
-    try {
-      await api.uploadExamCoop(lawFile, safeAddress);
-      addLog("✅ 법령 파일 처리 완료. 백엔드에서 조항별로 분리하여 카테고리에 저장했습니다.");
+    if (!lawFile) return alert("파일을 선택해주세요.");
+    addLog("▶️ 법령 텍스트 분석 업로드 시작...");
+    const fd = new FormData(); fd.append("file", lawFile); fd.append("wallet_address", safeAddress);
+    const res = await fetch(`https://api.blankd.top/api/upload-pdf`, { method: "POST", body: fd });
+    if (res.ok) { 
       setLawFile(null);
-      await loadAllData();
-    } catch (e: any) {
-      addLog(`❌ 업로드 실패: ${e.message}`);
-    } finally {
-      setLoading(false);
+      addLog("✅ 업로드 완료. AI 아카이빙 중..."); 
+      setTimeout(() => loadAllData(), 2500); 
     }
   };
 
-  const handleDeleteCategory = async (id: number) => {
-    setLoading(true);
-    addLog("🗑️ 카테고리 삭제 중...");
+  const handleSplitCategory = async (cat: any, text1: string, text2: string, title1: string, title2: string) => {
     try {
-      const res = await fetch("https://api.blankd.top/api/delete-category", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: safeAddress, id })
-      });
-      if (!res.ok) throw new Error("삭제 실패");
-      addLog("✅ 카테고리 삭제 완료.");
-      await loadAllData();
-    } catch (e: any) {
-      addLog(`❌ 삭제 실패: ${e.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDeleteCard = async (id: number) => {
-    if (!window.confirm("카드를 삭제하시겠습니까?")) return;
-    setLoading(true);
-    addLog("🗑️ 카드 삭제 중...");
-    try {
-      await api.deleteCard(safeAddress, id);
-      addLog("✅ 카드 삭제 완료.");
-      await loadAllData();
-    } catch (e: any) {
-      addLog(`❌ 삭제 실패: ${e.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleMakeBlankCard = async (
-    category: any, 
-    words: string[], 
-    selectedIndices: Set<number>, 
-    pageBreaks: Set<number>, 
-    memoInput: string,
-    onSuccess?: () => void 
-  ) => {
-    if (selectedIndices.size === 0) return alert("빈칸으로 만들 단어를 하나 이상 선택하세요.");
-    
-    const existingCard = savedCards.find((c: any) => {
-      const match = c.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
-      return match && parseInt(match[1]) === category.id;
-    });
-
-    setLoading(true);
-    addLog(`✨ '${getStrictTitleOnly(category.title)}' 카드 생성/덮어쓰기 진행 중...`);
-    try {
-      if (existingCard) {
-         await api.deleteCard(safeAddress, existingCard.id);
-      }
-
-      let content = "";
-      words.forEach((w, i) => {
-        if (pageBreaks.has(i)) content += "\n\n##PAGE_BREAK##\n\n";
-        content += selectedIndices.has(i) ? `[${w}]` : w;
-      });
-      content += `\n\n[[ORIG_ID:${category.id}]]`;
-
-      const memoData = stringifyCardStats(memoInput, 0, []);
-
-      const res = await fetch("https://api.blankd.top/api/save-card", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet_address: safeAddress,
-          title: getStrictTitleOnly(category.title),
-          content: content,
-          memo: memoData,
-          folder_name: category.folder_name || '기본 폴더'
-        })
-      });
-      if (!res.ok) throw new Error("저장 실패");
-      
-      addLog(`✅ 카드 생성 완료! (빈칸 ${selectedIndices.size}개)`);
-      await loadAllData();
-
-      if (onSuccess) onSuccess(); 
-      
-    } catch (e: any) {
-      addLog(`❌ 생성 실패: ${e.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    let timer: any;
-    if (timerActive) {
-      timer = setInterval(() => {
-        setElapsed(prev => {
-          if (prev >= totalTimeLimit && totalTimeLimit > 0) {
-            handleTimeOver();
-            return totalTimeLimit;
-          }
-          return prev + 0.1;
+        const res = await fetch("https://api.blankd.top/api/split-category", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet_address: safeAddress, id: cat.id, text1, text2, title1, title2, folder_name: cat.folder_name })
         });
-      }, 100);
-    }
-    return () => clearInterval(timer);
-  }, [timerActive, totalTimeLimit]);
-
-  const handleTimeOver = () => {
-    setTimerActive(false);
-    if (!activeCard) return;
-    
-    const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-    const { body } = formatCardText(cleanContent);
-    const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== '');
-    let blankIndex = -1;
-    let foundCurrent = false;
-
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i].startsWith('[') && parts[i].endsWith(']')) {
-        blankIndex++;
-        if (blankIndex === currentBlankIndex) {
-          setInputStatus('wrong');
-          statsRef.current.wrongIndices.add(blankIndex);
-          setTimeout(() => {
-            setInputStatus('idle');
-            setAnswerInput("");
-            setCurrentBlankIndex(prev => prev + 1);
-            setTimerActive(true);
-          }, 800);
-          foundCurrent = true;
-          break;
+        if (res.ok) { 
+          addLog(`✂️ [${title1}] 분할 완료`); 
+          await loadAllData(); 
         }
-      }
-    }
-
-    if (!foundCurrent) {
-      handleCompleteCard();
+    } catch (e: any) { 
+      addLog(`❌ 분할 처리 통신 에러`);
     }
   };
 
-  const handleCompleteCard = () => {
-    setTimerActive(false);
-    statsRef.current.filled += 1;
+  const handleMakeBlankCard = async (cat: any, wordsArray: string[], selectedIndices: Set<number>, pageBreaks: Set<number>, memo: string, onComplete: () => void) => {
+    let bodyContent = "";
+    let answerText = ""; 
+    let isBlanking = false;
     
-    if (activeCard) {
-      handleUpdateMemoBackground(activeCard.id, stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices)));
-    }
-    setTimeout(() => {
-      setActiveCard(null);
-      setCurrentBlankIndex(0);
-      setAnswerInput("");
-      setElapsed(0);
-      setIsMemoOpen(false);
-      
-      const el = document.getElementById("answer-input");
-      if (el) el.blur();
-      
-      if (isListening && recognitionRef.current) {
-        recognitionRef.current.stop();
-        setIsListening(false);
+    wordsArray.forEach((word, index) => {
+      if (pageBreaks.has(index)) { bodyContent += " ##PAGE_BREAK## "; }
+      if (selectedIndices.has(index)) {
+        if (!isBlanking) { bodyContent += "[ "; isBlanking = true; }
+        bodyContent += word; answerText += (answerText ? ", " : "") + word;
+      } else { 
+        if (isBlanking) { bodyContent += " ]"; isBlanking = false; } 
+        bodyContent += word; 
       }
-    }, 1500);
-  };
-
-  const handleUpdateMemoBackground = async (cardId: number, newMemo: string) => {
-    try {
-      await fetch("https://api.blankd.top/api/update-card", {
+    });
+    
+    if (isBlanking) bodyContent += " ]";
+    
+    // 💡 완벽한 덮어쓰기 로직: 조항의 고유 ID(ORIG_ID)를 기준으로 정확히 일치하는 기존 카드를 찾습니다.
+    const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${cat.id}]]`));
+    
+    if (existingCard) {
+      addLog("🔄 기존 채우기 카드를 찾아 삭제 후 덮어씁니다...");
+      await fetch("https://api.blankd.top/api/delete-card", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: safeAddress, id: cardId, memo: newMemo })
+        body: JSON.stringify({ wallet_address: safeAddress, id: existingCard.id })
       });
-      loadAllData();
-    } catch(e) {}
+    }
+
+    const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n[[ORIG_ID:${cat.id}]]`;
+    const initialMemo = stringifyCardStats(memo, 0, []);
+    
+    const res = await fetch("https://api.blankd.top/api/save-card", { 
+      method: "POST", headers: { "Content-Type": "application/json" }, 
+      body: JSON.stringify({ wallet_address: safeAddress, card_id: cat.id, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo }) 
+    });
+    
+    if (res.ok) {
+      localStorage.setItem('blankd_last_crafted_id', cat.id.toString());
+      localStorage.setItem('blankd_last_crafted_title', cat.title);
+      addLog("✅ 만들기 완료: 수정된 내용이 채우기에 완벽하게 반영되었습니다.");
+      await loadAllData(); 
+      onComplete(); 
+    }
   };
 
-  const [currentBlankIndex, setCurrentBlankIndex] = useState(0);
+  const handleUpdateMemoBackground = (id: number, memo: string) => {
+    setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
+    pushToQueue('MEMO', { id, memo });
+  };
 
   useEffect(() => {
     if (activeCard) {
-      setTimerActive(true);
-      setElapsed(0);
-      setCurrentBlankIndex(0);
-      setAnswerInput("");
-      setIsMemoOpen(false);
+      isClosingRef.current = false;
+      const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+      const { body } = formatCardText(cleanContent);
+      const foundBlanks: {answer: string, correct: boolean}[] = [];
+      const parts = body.split(/(\[.*?\])/g);
+      parts.forEach(part => {
+        if (part.startsWith('[') && part.endsWith(']')) {
+          foundBlanks.push({ answer: part.replace(/\[|\]/g, '').trim(), correct: false });
+        }
+      });
       
-      const initialStats = parseCardStats(activeCard.memo);
-      statsRef.current = { text: initialStats.text, filled: initialStats.filled, wrongIndices: new Set() };
+      const savedProgress = localStorage.getItem(`blankd_progress_${activeCard.id}`);
+      const lastIdx = savedProgress ? parseInt(savedProgress, 10) : 0;
+      
+      const restoredBlanks = foundBlanks.map((b, i) => ({
+          ...b,
+          correct: i < lastIdx 
+      }));
+
+      setBlanks(restoredBlanks); 
+      setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); 
+      setAnswerInput(""); 
+      setInputStatus('idle');
+      
+      const stats = parseCardStats(activeCard.memo);
+      const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
+      setTotalTimeLimit(timePerBlank * foundBlanks.length); 
+      
+      setStartTime(Date.now()); 
+      setElapsed(0);
+      setIsMemoOpen(false); 
+      
+      let cleanText = stats.text;
+      if (cleanText) {
+         cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim();
+      }
+      statsRef.current = { text: cleanText, filled: stats.filled, wrongIndices: new Set(stats.wrongIndices) };
+      
+      const cleanTitle = getStrictTitleOnly(cleanContent);
+      localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
+      localStorage.setItem('blankd_last_enhanced_title', cleanTitle || "이름 없는 카드");
     } else {
-      setTimerActive(false);
-      if (isListening && recognitionRef.current) {
+      if (recognitionRef.current) {
+        recognitionRef.current.onend = null;
         recognitionRef.current.stop();
+        recognitionRef.current = null;
         setIsListening(false);
       }
     }
   }, [activeCard]);
 
-  useEffect(() => {
-    if ('webkitSpeechRecognition' in window) {
-      const sr = new (window as any).webkitSpeechRecognition();
-      sr.continuous = true;
-      sr.interimResults = true;
-      sr.lang = 'ko-KR';
+  const finishCard = () => {
+    if (isClosingRef.current || !activeCard) return;
+    isClosingRef.current = true; 
+    const currentId = activeCard.id;
+    const currentFolder = activeCard.folder_name;
+    const finalTime = elapsed;
+    const wrongArr = Array.from(statsRef.current.wrongIndices);
+    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+    const isCorrect = wrongArr.length === 0;
 
-      sr.onresult = (event: any) => {
-        let interimTranscript = '';
-        let finalTranscript = '';
+    const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
+        const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
+        const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
+        return origIdA - origIdB;
+    });
+    
+    const currentIdx = folderCards.findIndex(c => c.id === currentId);
+    const nextCard = folderCards[currentIdx + 1] || null;
 
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript;
-          } else {
-            interimTranscript += event.results[i][0].transcript;
-          }
-        }
+    localStorage.removeItem(`blankd_progress_${currentId}`);
 
-        const currentText = finalTranscript || interimTranscript;
-        
-        if (currentText.trim()) {
-           const cleanedText = currentText.replace(/\s+/g, '').replace(/[.,!?]/g, '');
-           setAnswerInput(cleanedText);
-           
-           if (event.results[event.results.length -1].isFinal) {
-              handleSequentialInput(cleanedText);
-              setAnswerInput("");
-           }
-        }
-      };
-
-      sr.onerror = (event: any) => {
-        console.error("음성 인식 오류:", event.error);
-        if (event.error === 'not-allowed') {
-          setIsListening(false);
-          addLog("⚠️ 마이크 권한이 거부되었습니다.");
-        }
-      };
-      
-      sr.onend = () => {
-         if (isListening) {
-             try { sr.start(); } catch(e) {}
-         }
-      };
-
-      recognitionRef.current = sr;
-    }
-  }, [isListening]);
-
-  const toggleVoiceRecognition = () => {
-    if (isListening) {
-      recognitionRef.current?.stop();
-      setIsListening(false);
-    } else {
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.start();
-          setIsListening(true);
-        } catch (e) {
-          console.error(e);
-        }
-      } else {
-        alert("이 브라우저에서는 음성 인식을 지원하지 않습니다.");
-      }
-    }
+    setActiveCard(nextCard);
+    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
+    pushToQueue('MEMO', { id: currentId, memo: newMemo });
+    pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime });
+    addLog(`✅ 학습 완료 (ID:${currentId})`);
+    flushQueue();
   };
 
-  const handleSequentialInput = (overrideInput?: string | any) => {
-    let inputVal = typeof overrideInput === 'string' ? overrideInput : answerInput;
-    if (!inputVal.trim() && !overrideInput) return;
-    
-    if (!activeCard) return;
+  const handleCloseModal = () => {
+    if (isClosingRef.current || !activeCard) return;
+    isClosingRef.current = true;
+    const currentId = activeCard.id;
+    const wrongArr = Array.from(statsRef.current.wrongIndices);
+    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+    setActiveCard(null);
+    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
+    pushToQueue('MEMO', { id: currentId, memo: newMemo });
+    flushQueue();
+  };
 
-    const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-    const { body } = formatCardText(cleanContent);
-    const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== '');
-    
-    let blankIndex = -1;
-    let foundCurrent = false;
-
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i].startsWith('[') && parts[i].endsWith(']')) {
-        blankIndex++;
-        if (blankIndex === currentBlankIndex) {
-          const rawCorrectAnswer = parts[i].slice(1, -1);
-          const normalizedCorrect = rawCorrectAnswer.replace(/\s+/g, '');
-          const normalizedInput = inputVal.replace(/\s+/g, '');
-          
-          if (normalizedInput === normalizedCorrect) {
-            setInputStatus('correct');
-            setTimeout(() => {
-              setInputStatus('idle');
-              setAnswerInput("");
-              setCurrentBlankIndex(prev => prev + 1);
-            }, 300);
-          } else {
-            setInputStatus('wrong');
-            statsRef.current.wrongIndices.add(blankIndex);
-            setTimeout(() => {
-              setInputStatus('idle');
-              setAnswerInput("");
-              setCurrentBlankIndex(prev => prev + 1);
-            }, 800);
-          }
-          foundCurrent = true;
-          break;
-        }
-      }
+  useEffect(() => {
+    if (activeCard && currentBlankIdx < blanks.length) {
+      const interval = setInterval(() => {
+        const diff = (Date.now() - startTime) / 1000; setElapsed(diff);
+        if (diff >= totalTimeLimit) { clearInterval(interval); alert("집중 시간 초과! 현재 기록을 저장합니다."); finishCard(); }
+      }, 100);
+      return () => clearInterval(interval);
     }
+  }, [activeCard, currentBlankIdx, blanks.length, startTime, totalTimeLimit]);
 
-    if (!foundCurrent) {
-       handleCompleteCard();
+  useEffect(() => {
+    if (inputStatus === 'idle' && blanks[currentBlankIdx] && answerInput) {
+      const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
+      const actual = answerInput.replace(/\s+/g, '').toLowerCase();
+      if (expected === actual) handleSequentialInput(actual); 
+    }
+  }, [answerInput, inputStatus, blanks, currentBlankIdx]);
+
+  const handleSequentialInput = (overrideInput?: string | any) => {
+    if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
+    const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
+    let actual = typeof overrideInput === 'string' ? overrideInput : answerInput.replace(/\s+/g, '').toLowerCase();
+    
+    if (expected === actual) {
+      const activeEl = document.activeElement as HTMLElement;
+      if (activeEl) activeEl.blur(); 
+
+      setInputStatus('correct');
+      const nb = [...blanks]; nb[currentBlankIdx].correct = true; setBlanks(nb);
+      statsRef.current.wrongIndices.delete(currentBlankIdx);
+      
+      setTimeout(() => { 
+        setAnswerInput(""); 
+        setTimeout(() => {
+          setInputStatus('idle'); 
+          if (currentBlankIdx + 1 < nb.length) {
+            setCurrentBlankIdx(currentBlankIdx + 1); 
+            localStorage.setItem(`blankd_progress_${activeCard.id}`, (currentBlankIdx + 1).toString());
+          } else { 
+            localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+            statsRef.current.filled += 1; 
+            finishCard(); 
+          }
+        }, 130);
+      }, 20);
+    } else { 
+      setInputStatus('wrong'); 
+      statsRef.current.wrongIndices.add(currentBlankIdx); 
+      setTimeout(() => setInputStatus('idle'), 500); 
     }
   };
 
   const handleShowAnswer = () => {
-     if (!activeCard) return;
-     setInputStatus('wrong');
-     statsRef.current.wrongIndices.add(currentBlankIndex);
-     setTimeout(() => {
-        setInputStatus('idle');
-        setAnswerInput("");
-        setCurrentBlankIndex(prev => prev + 1);
-     }, 800);
+    if (!blanks[currentBlankIdx]) return;
+    setInputStatus('wrong'); 
+    statsRef.current.wrongIndices.add(currentBlankIdx); 
+    const nb = [...blanks];
+    nb[currentBlankIdx].correct = true; 
+    setBlanks(nb);
+    setTimeout(() => {
+      setAnswerInput(""); 
+      setInputStatus('idle');
+      if (currentBlankIdx + 1 < nb.length) {
+        setCurrentBlankIdx(currentBlankIdx + 1);
+        localStorage.setItem(`blankd_progress_${activeCard.id}`, (currentBlankIdx + 1).toString());
+      } else {
+        localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+        statsRef.current.filled += 1;
+        finishCard();
+      }
+    }, 1000);
+  };
+
+  const toggleVoiceRecognition = () => {
+    if (isListening) {
+      setIsListening(false);
+      if (recognitionRef.current) {
+        recognitionRef.current.onend = null; 
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+      }
+      addLog("🎙️ 음성 인식 종료됨");
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다."); return; }
+    
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'ko-KR'; 
+    recognition.interimResults = false;
+    recognition.continuous = true; 
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => { 
+      setIsListening(true); 
+      addLog("🎙️ 음성 인식 활성화됨 (계속 듣는 중...)");
+    };
+    
+    recognition.onresult = (event: any) => {
+      const last = event.results.length - 1;
+      const transcript = event.results[last][0].transcript;
+      const cleanText = transcript.replace(/\s+/g, '').replace(/[.,!?]/g, '');
+      setAnswerInput(cleanText);
+      addLog(`🗣️ 인식: "${transcript}"`);
+      setTimeout(() => handleSequentialInput(cleanText), 300);
+    };
+    
+    recognition.onerror = (err: any) => { 
+      if (err.error !== 'no-speech') {
+        setIsListening(false);
+        recognitionRef.current = null;
+      }
+    };
+    
+    recognition.onend = () => { 
+      if (recognitionRef.current) {
+         try { recognitionRef.current.start(); } catch(e) {}
+      } else {
+         setIsListening(false); 
+      }
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
   };
 
   return (
-    <ErrorBoundary fallbackLog={addLog}>
-      <div className="min-h-screen bg-[#050505] text-white/90 font-sans selection:bg-amber-500/30 overflow-x-hidden">
-        
-        {/* 상단 네비게이션 */}
-        <header className="fixed top-0 w-full z-40 bg-black/60 backdrop-blur-md border-b border-white/5">
-          <div className="max-w-7xl mx-auto px-4 h-14 sm:h-16 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-xl sm:text-2xl tracking-tighter font-black bg-gradient-to-r from-white to-white/40 bg-clip-text text-transparent">
-                BD
-              </span>
-              <span className="hidden sm:inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20">BETA</span>
-            </div>
-            
-            <nav className="flex gap-1 sm:gap-2">
-              {[
-                { id: "dashboard", label: "대시보드" },
-                { id: "craft", label: "만들기" },
-                { id: "enhance", label: "채우기" },
-                { id: "exam", label: "모의고사" },
-                { id: "mypage", label: "마이페이지" }
-              ].map(t => (
-                <button 
-                  key={t.id} 
-                  onClick={() => setActiveTab(t.id)} 
-                  className={`px-3 sm:px-4 py-2 rounded-sm text-[11px] sm:text-[13px] font-bold transition-all ${activeTab === t.id ? 'bg-white text-black shadow-[0_0_15px_rgba(255,255,255,0.3)]' : 'text-white/50 hover:bg-white/10 hover:text-white'}`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </nav>
-          </div>
-        </header>
-
-        {/* 메인 콘텐츠 구역 */}
-        <main className="max-w-7xl mx-auto px-4 pt-20 sm:pt-24 pb-32">
-          {!safeAddress ? (
-            <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-6">
-               <div className="text-4xl sm:text-5xl font-black tracking-tighter mb-4 text-center leading-tight">
-                  <span className="text-white">빈칸</span><span className="text-white/20">의</span> <br/>
-                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-amber-500">제왕</span>
-               </div>
-               <p className="text-sm text-white/40 text-center max-w-md leading-relaxed">
-                  로그인하여 나만의 지식 추출기를 가동하세요.<br/>당신의 모든 학습 기록은 암호화되어 안전하게 보관됩니다.
-               </p>
-               <button 
-                 onClick={() => enokiFlow.createAuthorizationURL({ provider: 'google', network: 'testnet', clientId: '1074121226922-b5e02hft0i28m5en9e2v8e7b154lsk1a.apps.googleusercontent.com' }).then(url => { window.location.href = url; })} 
-                 className="px-8 py-4 bg-white text-black font-bold rounded shadow-[0_0_30px_rgba(255,255,255,0.2)] hover:scale-105 transition-all text-sm"
-               >
-                 Google 계정으로 시작하기
-               </button>
-            </div>
-          ) : (
-            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-              {activeTab === "dashboard" && <DashboardTab savedCards={savedCards} categories={categories} />}
-              {activeTab === "craft" && <CraftTab categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} addLog={addLog} handleDeleteCategory={handleDeleteCategory} loadAllData={loadAllData} expandedId={expandedId} setExpandedId={setExpandedId} />}
-              {activeTab === "enhance" && <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleDeleteCard={handleDeleteCard} />}
-              {activeTab === "exam" && <ExamTab safeAddress={safeAddress} addLog={addLog} />}
-              {activeTab === "mypage" && <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} colCount={colCount} setColCount={setColCount} viewMode={viewMode} setViewMode={setViewMode} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} timeLimit={totalTimeLimit} setTimeLimit={handleSetTimeLimit} />}
+    <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
+      <header className="max-w-6xl mx-auto border-b border-white/10 pb-4 sm:pb-6 mb-8 sm:mb-12 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center justify-between w-full sm:w-auto">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-widest text-white shrink-0">BlankD</h1>
+          {isLoggedIn && (
+            <div className="sm:hidden flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-full">
+              <span className="text-[12px] font-bold text-amber-400">{goalBalance.toFixed(2)} GOAL</span>
             </div>
           )}
-        </main>
+        </div>
+        
+        {isLoggedIn && (
+          <div className="flex items-center w-full sm:w-auto justify-between gap-4">
+            <nav className="flex gap-2 sm:gap-6 overflow-x-auto scrollbar-hide">
+              {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`text-[11px] sm:text-sm font-bold tracking-widest whitespace-nowrap px-2 py-1 transition-all ${activeTab === tab.id ? 'text-white border-b-2 border-white' : 'text-white/40 hover:text-white'}`}>{tab.label}</button>
+              ))}
+            </nav>
+            <div className="hidden sm:flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 px-4 py-1.5 rounded-full shadow-[0_0_10px_rgba(245,158,11,0.1)]">
+              <span className="text-sm font-bold text-amber-400">{goalBalance.toFixed(2)} GOAL</span>
+            </div>
+          </div>
+        )}
+      </header>
 
-        {/* 카드 학습 모달 */}
+      {!isLoggedIn ? (
+        <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
+          <h2 className="text-xl sm:text-2xl font-serif text-white mb-4 tracking-tight">빈칸개발 (BlankD)</h2>
+          <p className="text-xs sm:text-sm text-white/40 mb-10 sm:mb-12 text-center leading-relaxed">인지 부하 이론 기반의 학습 플랫폼<br/>압도적인 영구 기억을 형성합니다.</p>
+          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-white text-black text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
+        </main>
+      ) : (
+        <main className="max-w-6xl mx-auto w-full">
+          <ErrorBoundary fallbackLog={addLog}>
+            
+            <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
+              <DashboardTab 
+                categories={categories} 
+                savedCards={savedCards} 
+                setActiveTab={setActiveTab}
+                setExpandedId={setExpandedId}
+                setActiveCard={setActiveCard}
+              />
+            </div>
+            
+            <div className={activeTab === 'create' ? 'block' : 'hidden'}>
+              <CraftTab 
+                categories={categories} 
+                savedCards={savedCards} 
+                colCount={colCount} 
+                viewMode={viewMode} 
+                useAiRecommend={useAiRecommend} 
+                safeAddress={safeAddress} 
+                lawFile={lawFile} 
+                setLawFile={setLawFile} 
+                uploadLaw={uploadLaw} 
+                handleMakeBlankCard={handleMakeBlankCard} 
+                handleSplitCategory={handleSplitCategory} 
+                addLog={addLog} 
+                expandedId={expandedId}
+                setExpandedId={setExpandedId}
+                handleDeleteCategory={async (id: number) => {
+                  if(confirm('삭제하시겠습니까?')){
+                    await fetch("https://api.blankd.top/api/delete-category", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ wallet_address: safeAddress, id })
+                    });
+                    loadAllData();
+                  }
+                }} 
+              />
+            </div>
+            
+            <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
+              <EnhanceTab 
+                savedCards={savedCards} 
+                colCount={colCount} 
+                viewMode={viewMode} 
+                setActiveCard={setActiveCard} 
+                handleDeleteCard={async (id: number) => {
+                  if(confirm('삭제하시겠습니까?')){
+                    await fetch("https://api.blankd.top/api/delete-card", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ wallet_address: safeAddress, id })
+                    });
+                    setActiveCard(null);
+                    loadAllData();
+                  }
+                }} 
+              />
+            </div>
+            
+            <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
+              <ExamTab walletAddress={safeAddress} address={safeAddress} />
+            </div>
+            
+            <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
+              <MypageTab 
+                safeAddress={safeAddress} 
+                enokiFlow={enokiFlow} 
+                useAiRecommend={useAiRecommend} 
+                setUseAiRecommend={setUseAiRecommend} 
+                viewMode={viewMode} 
+                setViewMode={setViewMode} 
+                colCount={colCount} 
+                updateColCount={setColCount} 
+                handleDeleteAll={async () => { 
+                  if(confirm('전체 초기화하시겠습니까?')) { 
+                    await api.deleteAll(safeAddress);
+                    loadAllData(); 
+                  } 
+                }} 
+              />
+            </div>
+
+          </ErrorBoundary>
+        </main>
+      )}
+
+      <div className="fixed bottom-4 right-4 z-[999] flex flex-col items-end gap-2">
+        {isTerminalOpen && (
+          <div className="w-[85vw] max-w-lg h-64 bg-black/95 border border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto rounded shadow-2xl flex flex-col custom-scrollbar animate-in slide-in-from-bottom-5 fade-in">
+            <div className="flex justify-between items-center mb-2 border-b border-teal-500/10 pb-2 sticky top-0 bg-black/95">
+              <span className="uppercase tracking-widest text-teal-500/50 font-bold">Diagnostic Terminal</span>
+              <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2 py-0.5 bg-white/5 rounded transition-colors">Clear</button>
+            </div>
+            <div className="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
+              {systemLogs.map((l, i) => (
+                <div key={i} className={`leading-snug break-all ${l.includes('❌') ? 'text-red-400 font-bold' : l.includes('▶️') ? 'text-amber-300' : ''}`}>
+                  {l}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>
+          {isTerminalOpen ? 'Close Terminal' : 'Open Terminal'}
+        </button>
+      </div>
+
+      {activeCard && (
         <CardModal 
           activeCard={activeCard} 
           totalTimeLimit={totalTimeLimit} 
@@ -513,44 +615,18 @@ export default function App() {
           handleSequentialInput={handleSequentialInput}
           renderContent={() => {
             const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-            
-            // 💡 [수정] 모달창 내부 제목 정밀 복구 로직
-            let displayTitle = "";
-            try {
-              const rawTitle = activeCard.title || "";
-              const regex = /(제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?)\s*\(\s*([^)]+)\s*\)/;
-
-              let match = cleanContent.match(regex);
-              if (match && !match[2].includes("내용")) {
-                  displayTitle = `${match[1].replace(/\s+/g, '')} ${match[2].replace(/\[|\]/g, '').trim()}`;
-              } else {
-                  match = rawTitle.match(regex);
-                  if (match && !match[2].includes("내용")) {
-                      displayTitle = `${match[1].replace(/\s+/g, '')} ${match[2].replace(/\[|\]/g, '').trim()}`;
-                  } else {
-                      const firstLine = (cleanContent.split('\n')[0] || rawTitle).trim();
-                      displayTitle = firstLine.replace(/\[.*?\]/g, '').replace(/\(\s*내용\s*\)/g, '').trim() || "제목 없음";
-                  }
-              }
-            } catch (error) {
-              displayTitle = "제목 오류";
-            }
-
             const { body } = formatCardText(cleanContent);
             const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== ''); 
             
             let displayPage = 0; 
             let tempGlobalBlank = 0; 
             let tempPage = 0;
-            const currentBlankIdx = currentBlankIndex;
-
-            const blanks: any[] = [];
             for (let part of parts) {
                 if (part === '##PAGE_BREAK##') tempPage++;
                 else if (part.startsWith('[') && part.endsWith(']')) {
-                    blanks.push({ correct: tempGlobalBlank < currentBlankIdx });
                     if (tempGlobalBlank === currentBlankIdx) { 
                       displayPage = tempPage;
+                      break; 
                     }
                     tempGlobalBlank++;
                 }
@@ -611,7 +687,7 @@ export default function App() {
             return (
               <div className="flex flex-col gap-6 w-full">
                 <div className="flex justify-between items-center border-b border-white/10 pb-2">
-                    <span className="text-amber-400 font-bold text-[14px] leading-tight">{displayTitle}</span>
+                    <span className="text-amber-400 font-bold text-[14px] leading-tight">{cleanContent.split('\n')[0]}</span>
                     <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
                 </div>
                 
@@ -655,20 +731,11 @@ export default function App() {
               </div>
             );
           }} 
-          onClose={() => { setActiveCard(null); setIsListening(false); if (recognitionRef.current) recognitionRef.current.stop(); }} 
+          onClose={handleCloseModal} 
         />
-
-        {/* 시스템 로그 */}
-        {logs.length > 0 && (
-          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 flex flex-col gap-1.5 z-50 pointer-events-none w-full max-w-sm px-4">
-            {logs.map((log, i) => (
-              <div key={i} className="bg-black/80 backdrop-blur text-[10px] sm:text-[11px] text-white/70 px-3 py-2 rounded-sm border border-white/10 shadow-xl animate-in slide-in-from-bottom-2 whitespace-pre-wrap break-words">
-                {log}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </ErrorBoundary>
+      )}
+    </div>
   );
 }
+
+export default function App() { return <MainApp />; }
