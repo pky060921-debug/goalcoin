@@ -81,9 +81,9 @@ export const getStrictTitleOnly = (text?: string) => {
   if (!text) return "제목 없음";
   const { title } = formatCardText(text);
   return title
-  .replace(/\[(?:법|령|칙|규)\]/g, '')
-  .replace(/(제\s*\d+조(?:의\s*\d+)?)\(([^)]+)\)/, '$1 $2')
-  .trim();
+    .replace(/\[(?:법|령|칙|규)\]/g, '')
+    .replace(/(제\s*\d+조(?:의\s*\d+)?)[（(]([^)）]+)[)）]/, '$1 $2')
+    .trim();
 };
 
 export const getSortNumber = (text?: string) => {
