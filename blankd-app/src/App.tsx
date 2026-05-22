@@ -613,12 +613,36 @@ function MainApp() {
           setAnswerInput={setAnswerInput}
           inputStatus={inputStatus}
           handleSequentialInput={handleSequentialInput}
-          renderContent={() => {
+                    renderContent={() => {
             const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+            
+            // 💡 [추가] 모달창 내부 제목 정밀 복구 로직
+            let displayTitle = "";
+            try {
+              const rawTitle = activeCard.title || "";
+              const regex = /(제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?)\s*\(\s*([^)]+)\s*\)/;
+
+              let match = cleanContent.match(regex);
+              if (match && !match[2].includes("내용")) {
+                  displayTitle = `${match[1].replace(/\s+/g, '')} ${match[2].replace(/\[|\]/g, '').trim()}`;
+              } else {
+                  match = rawTitle.match(regex);
+                  if (match && !match[2].includes("내용")) {
+                      displayTitle = `${match[1].replace(/\s+/g, '')} ${match[2].replace(/\[|\]/g, '').trim()}`;
+                  } else {
+                      const firstLine = (cleanContent.split('\n')[0] || rawTitle).trim();
+                      displayTitle = firstLine.replace(/\[.*?\]/g, '').replace(/\(\s*내용\s*\)/g, '').trim() || "제목 없음";
+                  }
+              }
+            } catch (error) {
+              displayTitle = "제목 오류";
+            }
+
             const { body } = formatCardText(cleanContent);
             const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== ''); 
             
             let displayPage = 0; 
+
             let tempGlobalBlank = 0; 
             let tempPage = 0;
             for (let part of parts) {
