@@ -66,10 +66,10 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => {
                 const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
-                const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
+                                const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
                 return origIdA - origIdB;
-            // [수정 전후 교체할 로직]
-.map((card: any) => {
+            }).map((card: any) => {
+
     const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
     
     // 🩺 진단 코드: 제목 추출이 실패하면 콘솔에 카드의 ID와 내용을 로그로 남깁니다.
