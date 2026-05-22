@@ -70,7 +70,26 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 return origIdA - origIdB;
             }).map((card: any) => {
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-                const cleanTitle = getStrictTitleOnly(cleanContent);
+                
+                // 💡 [핵심 복구 로직] 오염된 "내용" 대신 본문 텍스트에서 진짜 조항명(예: 요양급여)을 구출합니다.
+                let displayTitle = "";
+                const bodyText = cleanContent.split('\n').slice(1).join('\n'); // 첫 줄(오염된 제목)은 제외하고 본문만 검색
+                const realMatch = bodyText.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
+
+                if (realMatch && realMatch[2] && realMatch[2].trim() !== "내용") {
+                    // 본문에서 찾은 진짜 이름 적용
+                    displayTitle = `${realMatch[1].replace(/\s+/g, '')} ${realMatch[2].trim()}`;
+                } else {
+                    // 본문에도 없으면 첫 줄에서 태그/괄호/'내용' 글자 삭제 후 표시
+                    const fallbackTitle = cleanContent.split('\n')[0] || "";
+                    const titleMatch = fallbackTitle.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?).*\((.*?)\)/);
+                    if (titleMatch && titleMatch[2].trim() !== "내용") {
+                        displayTitle = `${titleMatch[1].replace(/\s+/g, '')} ${titleMatch[2].trim()}`;
+                    } else {
+                        displayTitle = fallbackTitle.replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').replace(/내용/g, '').trim();
+                    }
+                }
+
                 const { body } = formatCardText(cleanContent);
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
                 const stats = parseCardStats(card.memo);
@@ -93,7 +112,8 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                   <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
                     <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
                       <div className="flex flex-row justify-between items-center w-full gap-2">
-                        <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{cleanTitle}</div>
+                        {/* 💡 cleanTitle 대신 displayTitle로 변경됨 */}
+                        <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{displayTitle}</div>
                         <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
                           <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
                           <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">반복:{stats.filled}</span>
