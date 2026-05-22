@@ -69,32 +69,26 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                                 const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
                 return origIdA - origIdB;
             }).map((card: any) => {
-
     const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
     
-    // 🩺 진단 코드: 제목 추출이 실패하면 콘솔에 카드의 ID와 내용을 로그로 남깁니다.
+    // 🩺 [진단/복구] 제목이 '내용'이거나 없으면 본문에서 강제로 추출
     let displayTitle = "";
-    try {
-        const rawTitle = (card.title || "").trim();
-        const firstLine = (cleanContent.split('\n')[0] || "").trim();
-        
-        // 정규식: "제 00조" 패턴 찾기
-        const articleRegex = /제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?/;
-        const match = firstLine.match(articleRegex) || rawTitle.match(articleRegex);
+    const rawTitle = (card.title || "").trim();
+    const bodyFirstLine = (cleanContent.split('\n')[0] || "").trim();
+    
+    // 조항 번호 찾기 (제 00조)
+    const match = bodyFirstLine.match(/제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?/) || rawTitle.match(/제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?/);
+    const article = match ? match[0] : "";
+    
+    // 제목 찾기 (괄호 안의 글자)
+    const titleMatch = bodyFirstLine.match(/\(([^)]+)\)/) || rawTitle.match(/\(([^)]+)\)/);
+    const titleName = titleMatch ? titleMatch[1].replace("내용", "").trim() : "";
+    
+    displayTitle = `${article} ${titleName}`.trim();
+    if (!displayTitle || displayTitle === "조") displayTitle = rawTitle.replace(/내용/g, '').trim() || "제목 없음";
 
-        if (match) {
-            displayTitle = match[0];
-        } else if (rawTitle && rawTitle !== "내용") {
-            displayTitle = rawTitle;
-        } else {
-            // 강제 복구: 첫 줄에서 [법] 등 태그 제거 후 시도
-            displayTitle = firstLine.replace(/\[.*?\]/g, '').trim() || "번호없음";
-        }
-    } catch (e) {
-        console.error("DEBUG_TITLE_ERROR:", card.id, card.content);
-        displayTitle = "추출오류";
-    }
-    // ... 이하 렌더링 동일
+    // ... 이후 코드 동일
+
 
 
 
