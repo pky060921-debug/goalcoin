@@ -80,7 +80,7 @@ export const extractLawTag = (title: string) => {
 export const getStrictTitleOnly = (text?: string) => {
   if (!text) return "제목 없음";
   const { title } = formatCardText(text);
-  return title.replace(/\[(?:법|령|칙|규)\]/g, '').trim();
+  return title.replace(/\s*\([^)]*\)/g, '').trim();
 };
 
 export const getSortNumber = (text?: string) => {
