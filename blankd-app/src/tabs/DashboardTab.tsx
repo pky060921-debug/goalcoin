@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { parseCardStats, formatCardText } from '../utils/constants';
+import { parseCardStats, formatCardText, getStrictTitleOnly } from '../utils/constants'; 
 
 export const DashboardTab = ({ categories, savedCards }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
