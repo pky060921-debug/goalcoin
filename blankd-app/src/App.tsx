@@ -88,11 +88,14 @@ function MainApp() {
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
+  
+  // 💡 음성 인식 무한 유지를 위한 Ref 및 상태
   const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
 
-  // 💡 만들기 탭의 확장 상태를 App 단으로 끌어올려 대시보드와 동기화합니다.
   const [expandedId, setExpandedId] = useState<number | null>(() => {
     const saved = localStorage.getItem('blankd_craft_expanded');
     return saved ? parseInt(saved, 10) : null;
@@ -118,7 +121,7 @@ function MainApp() {
         fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r=>r.json()),
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`).then(r=>r.json()),
         fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`).then(r=>r.json()),
-        api.getGoalCoinBalance(safeAddress)
+        api.getGoalCoinBalance(safeAddress).catch(()=>0)
       ]);
       setCategories(catRes.categories || []); 
       setSavedCards(cardRes.cards || []); 
@@ -144,7 +147,7 @@ function MainApp() {
       if (res.ok) {
         localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
         addLog(`🔄 백그라운드 동기화 완료 (M:${q.memos.length}, A:${q.answers.length})`);
-        const newBalance = await api.getGoalCoinBalance(safeAddress);
+        const newBalance = await api.getGoalCoinBalance(safeAddress).catch(()=>goalBalance);
         setGoalBalance(newBalance);
       }
     } catch (e) { 
@@ -168,18 +171,6 @@ function MainApp() {
     if (res.ok) { 
       setLawFile(null);
       addLog("✅ 업로드 완료. AI 아카이빙 중..."); 
-      setTimeout(() => loadAllData(), 2500); 
-    }
-  };
-
-  const uploadExam = async () => {
-    if (!examFile) return alert("파일을 선택해주세요.");
-    addLog("▶️ 모의고사 데이터 주입 시작...");
-    const fd = new FormData(); fd.append("file", examFile); fd.append("wallet_address", safeAddress);
-    const res = await fetch(`https://api.blankd.top/api/upload-exam`, { method: "POST", body: fd });
-    if (res.ok) { 
-      setExamFile(null); 
-      addLog("✅ 기출문제 분석 및 반영 완료"); 
       setTimeout(() => loadAllData(), 2500); 
     }
   };
@@ -217,6 +208,18 @@ function MainApp() {
     
     if (isBlanking) bodyContent += " ]";
     
+    // 💡 1. 덮어쓰기를 위해 기존 카드가 있는지 확인 후 삭제 요청
+    const cleanTitle = getStrictTitleOnly(cat.title || cat.content || "");
+    const existingCard = savedCards.find((c: any) => getStrictTitleOnly(c.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '')) === cleanTitle);
+    
+    if (existingCard) {
+      addLog("🔄 기존 채우기 카드를 삭제하고 새로운 빈칸으로 덮어씁니다...");
+      await fetch("https://api.blankd.top/api/delete-card", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, id: existingCard.id })
+      });
+    }
+
     const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n[[ORIG_ID:${cat.id}]]`;
     const initialMemo = stringifyCardStats(memo, 0, []);
     
@@ -226,10 +229,9 @@ function MainApp() {
     });
     
     if (res.ok) {
-      // 💡 진행상황 체크포인트를 위해 카드의 ID와 제목 정보를 정밀 동기화합니다.
       localStorage.setItem('blankd_last_crafted_id', cat.id.toString());
       localStorage.setItem('blankd_last_crafted_title', cat.title);
-      addLog("✅ 지식 추출 완료: 다음 조항을 바로 오픈합니다.");
+      addLog("✅ 지식 추출 완료: 수정된 내용이 채우기에 반영되었습니다.");
       await loadAllData(); 
       onComplete(); 
     }
@@ -267,12 +269,12 @@ function MainApp() {
       setInputStatus('idle');
       
       const stats = parseCardStats(activeCard.memo);
+      // 💡 [타이머 검증] 빈칸 1개당 10초 - (반복횟수 * 0.5초). 최소 3초 보장.
       const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
       
       setStartTime(Date.now()); 
       setElapsed(0);
-      setIsListening(false); 
       setIsMemoOpen(false); 
       
       let cleanText = stats.text;
@@ -281,10 +283,17 @@ function MainApp() {
       }
       statsRef.current = { text: cleanText, filled: stats.filled, wrongIndices: new Set(stats.wrongIndices) };
       
-      // 💡 진행상황 체크포인트를 위해 학습 카드의 ID와 제목 정보를 연동합니다.
       const cleanTitle = getStrictTitleOnly(cleanContent);
       localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
       localStorage.setItem('blankd_last_enhanced_title', cleanTitle || "이름 없는 카드");
+    } else {
+      // 💡 모달이 닫히면 음성 인식 강제 종료
+      if (recognitionRef.current) {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+        setIsListening(false);
+      }
     }
   }, [activeCard]);
 
@@ -359,7 +368,7 @@ function MainApp() {
       setInputStatus('correct');
       const nb = [...blanks]; nb[currentBlankIdx].correct = true; setBlanks(nb);
       statsRef.current.wrongIndices.delete(currentBlankIdx);
-      statsRef.current.filled += 1;
+      // 💡 여기서 반복 횟수를 증가시키지 않습니다. (완료 시 증가)
       
       setTimeout(() => { 
         setAnswerInput(""); 
@@ -370,6 +379,8 @@ function MainApp() {
             localStorage.setItem(`blankd_progress_${activeCard.id}`, (currentBlankIdx + 1).toString());
           } else { 
             localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+            // 💡 끝까지 다 맞췄을 때 비로소 반복 횟수 1 증가!
+            statsRef.current.filled += 1; 
             finishCard(); 
           }
         }, 130);
@@ -396,35 +407,66 @@ function MainApp() {
         localStorage.setItem(`blankd_progress_${activeCard.id}`, (currentBlankIdx + 1).toString());
       } else {
         localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+        // 💡 오답을 보면서 넘어갔더라도 끝까지 갔다면 1 증가
+        statsRef.current.filled += 1;
         finishCard();
       }
     }, 1000);
   };
 
-  const startVoiceRecognition = () => {
+  // 💡 음성 인식 무한 유지 (Continuous) 토글 함수
+  const toggleVoiceRecognition = () => {
+    if (isListening) {
+      setIsListening(false);
+      if (recognitionRef.current) {
+        recognitionRef.current.onend = null; // 강제 종료 시 재시작 방지
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+      }
+      addLog("🎙️ 음성 인식 종료됨");
+      return;
+    }
+
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다."); return; }
     
     const recognition = new SpeechRecognition();
     recognition.lang = 'ko-KR'; 
     recognition.interimResults = false;
+    recognition.continuous = true; // 💡 비활성화할 때까지 계속 듣기
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => { 
       setIsListening(true); 
-      addLog("🎙️ 음성 인식 대기 중...");
+      addLog("🎙️ 음성 인식 활성화됨 (계속 듣는 중...)");
     };
     
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
+      const last = event.results.length - 1;
+      const transcript = event.results[last][0].transcript;
       const cleanText = transcript.replace(/\s+/g, '').replace(/[.,!?]/g, '');
       setAnswerInput(cleanText);
       addLog(`🗣️ 인식: "${transcript}"`);
       setTimeout(() => handleSequentialInput(cleanText), 300);
     };
     
-    recognition.onerror = (err: any) => { setIsListening(false); };
-    recognition.onend = () => { setIsListening(false); };
+    recognition.onerror = (err: any) => { 
+      if (err.error !== 'no-speech') {
+        setIsListening(false);
+        recognitionRef.current = null;
+      }
+    };
+    
+    recognition.onend = () => { 
+      // 사용자가 끄지 않았는데 끊어졌다면 무한 재시작
+      if (recognitionRef.current) {
+         try { recognitionRef.current.start(); } catch(e) {}
+      } else {
+         setIsListening(false); 
+      }
+    };
+
+    recognitionRef.current = recognition;
     recognition.start();
   };
 
@@ -465,7 +507,6 @@ function MainApp() {
           <ErrorBoundary fallbackLog={addLog}>
             
             <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
-              {/* 💡 대시보드 탭에 네비게이션 및 핀셋 체크포인트 제어 상태를 넘깁니다. */}
               <DashboardTab 
                 categories={categories} 
                 savedCards={savedCards} 
@@ -666,15 +707,16 @@ function MainApp() {
                     {isMemoOpen ? '닫기 ✕' : '📝 메모 열기'}
                   </button>
                   
+                  {/* 💡 음성 인식 토글 버튼 */}
                   <button 
-                    onClick={startVoiceRecognition} 
+                    onClick={toggleVoiceRecognition} 
                     className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${
                       isListening 
                         ? 'bg-red-600/50 text-white border-red-500 animate-pulse' 
                         : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'
                     }`}
                   >
-                    {isListening ? '🎙️ 듣는 중... 말씀하세요' : '🎤 음성으로 입력'}
+                    {isListening ? '🎙️ 음성 인식 끄기 (활성화됨)' : '🎤 음성으로 입력 (계속 켜두기)'}
                   </button>
 
                   <button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
