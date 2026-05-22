@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { parseCardStats, formatCardText } from '../utils/constants';
 
 export const DashboardTab = ({ categories, savedCards }: any) => {
+  const safeCards = Array.isArray(savedCards) ? savedCards : [];
+  const safeCategories = Array.isArray(categories) ? categories : [];
+  
   let totalBlanks = 0;
   let totalFilled = 0;
   let totalWrong = 0;
 
-  const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const folderStats: Record<string, { total: number; filled: number; wrong: number }> = {};
   
   safeCards.forEach((card: any) => {
@@ -27,36 +29,60 @@ export const DashboardTab = ({ categories, savedCards }: any) => {
     folderStats[folder].wrong += stats.wrongIndices.length;
   });
 
-  const progressPercent = totalBlanks > 0 ? Math.round((totalFilled / totalBlanks) * 100) : 0;
+  const craftProgress = safeCategories.length > 0 ? Math.round((safeCards.length / safeCategories.length) * 100) : 0;
+  
+  const [recentCraft, setRecentCraft] = useState("");
+  const [recentEnhance, setRecentEnhance] = useState("");
+  
+  useEffect(() => {
+    setRecentCraft(localStorage.getItem('blankd_last_crafted') || "아직 생성된 카드가 없습니다");
+    setRecentEnhance(localStorage.getItem('blankd_last_enhanced') || "학습 기록이 없습니다");
+  }, [safeCards]);
+
   const sortedFolders = Object.keys(folderStats).sort();
 
   return (
-    <div className="space-y-4 animate-in fade-in max-w-full overflow-hidden w-full">
-      <div className="flex flex-wrap gap-2 sm:gap-3 items-end">
-        <div className="bg-[#0a0a0c] border border-white/5 px-3 sm:px-4 py-2 sm:py-3 rounded-sm flex flex-col gap-0.5 sm:gap-1 flex-1 min-w-[100px] sm:min-w-[120px]">
-          <span className="text-[9px] sm:text-[10px] text-white/30 font-bold uppercase tracking-widest whitespace-nowrap">전체 빈칸</span>
-          <span className="text-lg sm:text-xl font-light text-white">{totalBlanks} <span className="text-[9px] sm:text-[10px] text-white/20">EA</span></span>
-        </div>
-        <div className="bg-[#0a0a0c] border border-white/5 px-3 sm:px-4 py-2 sm:py-3 rounded-sm flex flex-col gap-0.5 sm:gap-1 flex-1 min-w-[100px] sm:min-w-[120px]">
-          <span className="text-[9px] sm:text-[10px] text-teal-500/40 font-bold uppercase tracking-widest whitespace-nowrap">누적 정답</span>
-          <span className="text-lg sm:text-xl font-light text-teal-400">{totalFilled} <span className="text-[9px] sm:text-[10px] text-white/20">EA</span></span>
-        </div>
-        <div className="bg-[#0a0a0c] border border-white/5 px-3 sm:px-4 py-2 sm:py-3 rounded-sm flex flex-col gap-0.5 sm:gap-1 flex-1 min-w-[100px] sm:min-w-[120px]">
-          <span className="text-[9px] sm:text-[10px] text-red-500/40 font-bold uppercase tracking-widest whitespace-nowrap">누적 오답</span>
-          <span className="text-lg sm:text-xl font-light text-red-400">{totalWrong} <span className="text-[9px] sm:text-[10px] text-white/20">EA</span></span>
-        </div>
-        
-        <div className="w-full sm:flex-1 sm:min-w-[200px] bg-[#0a0a0c] border border-indigo-500/20 px-3 sm:px-4 py-2 sm:py-3 rounded-sm mt-2 sm:mt-0">
-          <div className="flex justify-between items-center mb-1.5">
-            <span className="text-[9px] sm:text-[10px] text-indigo-400/50 font-bold tracking-widest uppercase">지식 동기화율</span>
-            <span className="text-[11px] sm:text-xs font-bold text-indigo-300">{progressPercent}%</span>
-          </div>
-          <div className="w-full bg-black/50 h-1 rounded-full overflow-hidden">
-            <div className="bg-indigo-500 h-full transition-all duration-1000" style={{ width: `${progressPercent}%` }}></div>
-          </div>
-        </div>
+    <div className="space-y-6 animate-in fade-in max-w-full pb-10">
+      
+      {/* 상단 통계 영역 */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+         <div className="bg-indigo-900/20 border border-indigo-500/30 p-4 rounded-sm flex flex-col justify-center">
+            <div className="text-indigo-400 font-bold text-sm mb-2">지식 추출(만들기) 진척도</div>
+            <div className="flex items-end gap-2 mb-2">
+               <span className="text-3xl font-bold text-white">{safeCards.length}</span>
+               <span className="text-white/50 mb-1">/ {safeCategories.length} 조항</span>
+            </div>
+            <div className="w-full bg-black/40 h-2 rounded-full overflow-hidden">
+               <div className="bg-indigo-500 h-full transition-all duration-1000" style={{width: `${craftProgress}%`}}></div>
+            </div>
+         </div>
+
+         <div className="bg-teal-900/20 border border-teal-500/30 p-4 rounded-sm flex flex-col justify-center">
+            <div className="text-teal-400 font-bold text-sm mb-2">총 누적 반복 횟수 (채우기)</div>
+            <div className="flex items-end gap-2 mb-2">
+               <span className="text-3xl font-bold text-white">{totalFilled}</span>
+               <span className="text-white/50 mb-1">회</span>
+            </div>
+            <div className="text-xs text-white/40">생성된 빈칸 수: {totalBlanks}개</div>
+         </div>
       </div>
 
+      {/* 💡 체크포인트(최근 활동) 영역 추가 */}
+      <div className="bg-black/40 border border-white/10 p-4 rounded-sm">
+         <div className="text-amber-400 font-bold text-sm mb-3">최근 활동 기록 (체크포인트)</div>
+         <div className="flex flex-col gap-2">
+            <div className="bg-white/5 p-3 rounded-sm border border-white/5 flex justify-between items-center">
+               <span className="text-xs text-white/50">마지막으로 만든 카드</span>
+               <span className="text-sm font-bold text-indigo-300 truncate max-w-[60%]">{recentCraft}</span>
+            </div>
+            <div className="bg-white/5 p-3 rounded-sm border border-white/5 flex justify-between items-center">
+               <span className="text-xs text-white/50">마지막으로 학습한 카드</span>
+               <span className="text-sm font-bold text-teal-300 truncate max-w-[60%]">{recentEnhance}</span>
+            </div>
+         </div>
+      </div>
+      
+      <div className="text-white/50 font-bold text-sm mb-2 mt-6">폴더별 학습(채우기) 진척도</div>
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 pt-2 border-t border-white/5 w-full">
         {sortedFolders.map(folder => {
           const fs = folderStats[folder];
@@ -68,13 +94,11 @@ export const DashboardTab = ({ categories, savedCards }: any) => {
                 <span className="text-[9px] sm:text-[10px] text-white/40 font-mono">{fp}%</span>
               </div>
               <div className="w-full bg-black/40 h-1 rounded-full overflow-hidden">
-                <div className="bg-amber-500/60 h-full transition-all duration-700" style={{ width: `${fp}%` }}></div>
+                <div className="bg-amber-500/60 h-full transition-all duration-700" style={{ width: `${Math.min(fp, 100)}%` }}></div>
               </div>
-              {/* 💡 [수정] 영문 약어 제거, 한국어로 변경 및 항상 표시 */}
               <div className="flex justify-between text-[8px] sm:text-[9px] font-mono tracking-tighter mt-0.5">
-                <span className="text-white/40">빈칸:{fs.total}</span>
-                <span className="text-teal-400">채움:{fs.filled}</span>
-                <span className={fs.wrong > 0 ? "text-red-400 font-bold animate-pulse" : "text-white/20"}>틀림:{fs.wrong}</span>
+                <span className="text-white/40">반복:{fs.filled}</span>
+                <span className="text-red-400/80">오답:{fs.wrong}</span>
               </div>
             </div>
           );
