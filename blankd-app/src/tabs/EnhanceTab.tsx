@@ -69,17 +69,16 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
                 return origIdA - origIdB;
             }).map((card: any) => {
+          
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
                 
-                // 💡 [수정] DB에 저장된 타이틀(card.title)을 최우선으로 사용, 없을 경우 패턴 추출
-                let displayTitle = card.title && card.title.trim() !== "" ? card.title : "";
-                if (!displayTitle) {
-                    const match = cleanContent.match(/제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?\s*[(\s].+?[)\s]/);
-                    if (match) displayTitle = match[0].replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
-                    else displayTitle = cleanContent.split('\n')[0].substring(0, 30).trim();
-                }
+                // 💡 [수정] 복잡한 추출 로직 전면 폐기. DB의 제목만 그대로 가져옵니다.
+                let displayTitle = card.title || "제목 없음";
+                displayTitle = displayTitle.replace(/\[.*?\]/g, '').replace(/\(\s*내용\s*\)/g, '').trim();
+                if (!displayTitle) displayTitle = "제목 없음";
 
                 const { body } = formatCardText(cleanContent);
+
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
