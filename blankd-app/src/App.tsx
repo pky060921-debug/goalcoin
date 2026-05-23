@@ -616,9 +616,13 @@ function MainApp() {
           renderContent={() => {
             const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
             
-            // 💡 [수정] 모달창 역시 DB의 제목만 그대로 가져옵니다.
-            let displayTitle = activeCard.title || "제목 없음";
-            displayTitle = displayTitle.replace(/\[.*?\]/g, '').replace(/\(\s*내용\s*\)/g, '').trim();
+            // 💡 [수정] 본문 첫 줄에서 '[법]' 태그만 지우고 제목으로 사용합니다!
+            let displayTitle = (cleanContent.split('\n')[0] || "")
+                .replace(/\[.*?\]/g, '')
+                .replace(/\(\s*내용\s*\)/g, '')
+                .replace(/내용/g, '')
+                .trim();
+            
             if (!displayTitle) displayTitle = "제목 없음";
 
             const { body } = formatCardText(cleanContent);
