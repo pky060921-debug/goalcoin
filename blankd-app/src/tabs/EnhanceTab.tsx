@@ -71,11 +71,13 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
             }).map((card: any) => {
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
                 
-                // 💡 [수정] 조항명만 깔끔하게 추출 (DB 의존성 삭제)
-                let displayTitle = (card.title || "").replace(/\[.*?\]/g, '').replace(/내용/g, '').trim();
-                const match = cleanContent.match(/제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?\s*[\(\s].+?[\)\s]/);
-                if (match) displayTitle = match[0].replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
-                if (!displayTitle || displayTitle === "조") displayTitle = cleanContent.split('\n')[0].substring(0, 20);
+                // 💡 [수정] DB에 저장된 타이틀(card.title)을 최우선으로 사용, 없을 경우 패턴 추출
+                let displayTitle = card.title && card.title.trim() !== "" ? card.title : "";
+                if (!displayTitle) {
+                    const match = cleanContent.match(/제\s*\d+\s*(?:조|장|편|관)(?:\s*의\s*\d+)?\s*[(\s].+?[)\s]/);
+                    if (match) displayTitle = match[0].replace(/[()]/g, ' ').replace(/\s+/g, ' ').trim();
+                    else displayTitle = cleanContent.split('\n')[0].substring(0, 30).trim();
+                }
 
                 const { body } = formatCardText(cleanContent);
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
@@ -85,9 +87,15 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 let colClass = "";
                 let titleColor = "text-teal-400";
                 
-                if (cleanContent.includes('[법]')) titleColor = "text-red-500";
-                else if (cleanContent.includes('[령]')) titleColor = "text-blue-400";
-                else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
+                if (viewMode === 'all' && colCount >= 3) {
+                  if (cleanContent.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
+                  else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
+                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
+                } else {
+                  if (cleanContent.includes('[법]')) titleColor = "text-red-500";
+                  else if (cleanContent.includes('[령]')) titleColor = "text-blue-400";
+                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
+                }
 
                 return (
                   <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
