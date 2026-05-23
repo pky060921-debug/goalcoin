@@ -72,9 +72,13 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
           
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
                 
-                // 💡 [수정] 복잡한 추출 로직 전면 폐기. DB의 제목만 그대로 가져옵니다.
-                let displayTitle = card.title || "제목 없음";
-                displayTitle = displayTitle.replace(/\[.*?\]/g, '').replace(/\(\s*내용\s*\)/g, '').trim();
+                // 💡 [수정] 본문 첫 줄에서 '[법]' 태그만 지우고 제목으로 사용합니다!
+                let displayTitle = (cleanContent.split('\n')[0] || "")
+                    .replace(/\[.*?\]/g, '')         // [법], [령] 태그 제거
+                    .replace(/\(\s*내용\s*\)/g, '')  // (내용) 오염 제거
+                    .replace(/내용/g, '')            // 내용 글자 제거
+                    .trim();
+                
                 if (!displayTitle) displayTitle = "제목 없음";
 
                 const { body } = formatCardText(cleanContent);
