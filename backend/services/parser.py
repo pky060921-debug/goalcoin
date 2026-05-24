@@ -1,4 +1,5 @@
 import re
+import sys
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 
@@ -11,19 +12,15 @@ def clean_korean_law_text(text):
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
-def normalize_text(text):
-    text = re.sub(r'(\s*)(제\s*\d+\s*조)', r'\n\n\2', text)
-    text = re.sub(r'(\s*)(①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩)', r'\n\2', text)
-    text = re.sub(r'([^\n다까요\.])\n(?!(제\s*\d+\s*조|①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩))', r'\1 ', text)
-    text = re.sub(r'[ \t]+', ' ', text)
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    return text.strip()
-
 def parse_html_3col_law(html_content):
     soup = BeautifulSoup(html_content, 'html.parser')
     table = soup.find('table', {'class': 'lsPtnThdCmpTable'})
     
     if table:
+        print("\n" + "="*60)
+        print("🚀 [진단 시작] 3단 비교표 파싱을 시작합니다.")
+        print("="*60)
+        
         categories = []
         current_chapter = "기본 폴더"
         
@@ -35,6 +32,8 @@ def parse_html_3col_law(html_content):
         link_id_order_map = {}
         
         rows = table.find_all('tr')
+        print(f"총 분석할 테이블 행(Row) 개수: {len(rows)}개\n")
+        
         for row_idx, row in enumerate(rows):
             tds = row.find_all('td', recursive=False)
             if not tds: continue
@@ -46,10 +45,15 @@ def parse_html_3col_law(html_content):
             for line in first_cell_lines:
                 chapter_match = re.match(r'^제\s*\d+\s*[장편절](?:\s+[^\n]+)?', line)
                 if chapter_match:
-                    current_chapter = chapter_match.group(0).strip()
+                    new_chapter = chapter_match.group(0).strip()
+                    if current_chapter != new_chapter:
+                        print(f"\n📁 [폴더 변경] 행 {row_idx}: '{current_chapter}' -> '{new_chapter}'")
+                        current_chapter = new_chapter
                     break
                 elif line.startswith("부칙") and "제" not in line:
-                    current_chapter = "부칙"
+                    if current_chapter != "부칙":
+                        print(f"\n📁 [폴더 변경] 행 {row_idx}: '{current_chapter}' -> '부칙'")
+                        current_chapter = "부칙"
                     break
             
             if len(tds) == 1:
@@ -58,8 +62,7 @@ def parse_html_3col_law(html_content):
             for col_idx, td in enumerate(tds):
                 groups = td.find_all('div', class_='lsptnThdCmpGroup')
                 for group in groups:
-                    
-                    # [가드레일 보강] 국민건강보험법 특정 규칙 예외 처리
+                    # 국민건강보험법 특정 규칙 예외 처리
                     is_yoyang_rule = False
                     parent_td = group.find_parent('td')
                     if parent_td:
@@ -69,14 +72,6 @@ def parse_html_3col_law(html_content):
                             
                     if is_yoyang_rule:
                         continue 
-                    
-                    label = group.find('label')
-                    if label:
-                        text = label.get_text(strip=True)
-                        label_match = re.match(r'^제\s*\d+\s*[장편절](?:\s+[^\n]+)?', text)
-                        if label_match:
-                            current_chapter = label_match.group(0).strip()
-                            continue
                     
                     lawcon = group.find('div', class_='lawcon')
                     if not lawcon: continue
@@ -114,19 +109,18 @@ def parse_html_3col_law(html_content):
                     
                     if article_match:
                         my_num = article_match.group(0).replace(" ", "")
-                        
-                        # 💡 [수정] 조항 번호 바로 뒤의 첫 줄 텍스트 전체를 제목으로 추출합니다.
                         first_line = content.split('\n')[0]
-                        raw_title = first_line.replace(my_num, "").strip()
-                        my_num_title = re.sub(r'[\(\)\[\]]', '', raw_title).strip()
-                        if not my_num_title: my_num_title = "세부내용"
+                        # 번호 추출 후 제목 다듬기
+                        raw_title = re.sub(r'^제\s*\d+\s*조(?:의\s*\d+)?', '', first_line).strip()
+                        my_title = re.sub(r'[\(\)\[\]]', '', raw_title).strip()
+                        if not my_title: my_title = "세부내용"
                         
                         if type_name == "법" and link_id:
-                            context_map[link_id] = {"num": my_num, "title": my_num_title, "folder": current_chapter}
+                            context_map[link_id] = {"num": my_num, "title": my_title, "folder": current_chapter}
                         
                         if type_name == "법":
                             last_num = my_num
-                            last_title = my_num_title # 💡 이전 코드의 버그(last_title 업데이트 누락) 해결
+                            last_title = my_title 
                     else:
                         if link_id and link_id in context_map:
                             my_num = context_map[link_id]["num"]
@@ -134,9 +128,8 @@ def parse_html_3col_law(html_content):
                             current_chapter = context_map[link_id]["folder"]
                         else:
                             my_num = last_num
-                            my_title = last_title
+                            my_title = "세부내용" # 이전 제목 오염 방지
                             
-                    # 💡 15글자 제한 삭제, 온전한 제목 사용
                     clean_title = f"[{type_name}] {my_num} {my_title}"
                     
                     if link_id:
@@ -151,6 +144,7 @@ def parse_html_3col_law(html_content):
                     else:
                         global_order += 10
                         sort_order = global_order
+                        print(f"⚠️ [경고] 행 {row_idx}: {clean_title} 의 link_id를 찾지 못했습니다! (정렬이 밀릴 수 있습니다)")
                     
                     categories.append({
                         "title": clean_title, 
@@ -159,13 +153,22 @@ def parse_html_3col_law(html_content):
                         "sort_order": sort_order
                     })
                     
+                    # 💡 4장 근처에서 문제가 발생한다고 하셨으므로, 4장일 때 집중 로그 출력
+                    if "제4장" in current_chapter or "제 4장" in current_chapter:
+                        print(f"  -> [추출] ID:{link_id if link_id else '없음'} | 정렬순서:{sort_order} | {clean_title}")
+                    
         categories.sort(key=lambda x: x["sort_order"])
         for cat in categories:
             del cat["sort_order"]
             
+        print("="*60)
+        print(f"✅ 파싱 완료! 총 {len(categories)}개의 조항(카드)이 추출되었습니다.")
+        print("="*60 + "\n")
         return categories
 
-    else: # 단순 텍스트/HTML 폴백 처리
+    else: 
+        # HTML 3단표가 아닌 텍스트 본문일 경우
+        print("\n⚠️ [진단] 3단 비교표(table)를 찾지 못해 일반 텍스트 모드로 파싱합니다.\n")
         categories = []
         current_chapter = "기본 폴더"
         current_law_num = "0"
@@ -192,23 +195,16 @@ def parse_html_3col_law(html_content):
                     article_num_str = f"제{main_n}조" + (f"의{ext_n}" if ext_n else "")
                     current_law_num = article_num_str
                 else: 
-                    article_num_str = ""
+                    article_num_str = current_law_num
                 
-                # 💡 [수정] 괄호 유무와 관계없이 첫 줄의 조항 번호 뒷부분을 전부 제목으로 가져옵니다.
                 first_line = clean_content.split('\n')[0]
                 raw_title = re.sub(r'^제\s*\d+\s*조(?:의\s*\d+)?', '', first_line).strip()
                 title_text = re.sub(r'[\(\)\[\]]', '', raw_title).strip()
-                if not title_text: title_text = "내용"
+                if not title_text: title_text = "세부내용"
                 
                 clean_title = f"[법] {article_num_str} {title_text}"
                 categories.append({"title": clean_title, "content": clean_content, "folder_name": current_chapter})
-            except Exception: 
+            except Exception as e: 
+                print(f"에러 발생: {e}")
                 continue
         return categories
-
-def get_next_review_time(level):
-    now = datetime.utcnow()
-    if level == 0: return now + timedelta(hours=12)
-    elif level == 1: return now + timedelta(days=1)
-    elif level == 2: return now + timedelta(days=3)
-    else: return now + timedelta(days=7)
