@@ -538,6 +538,7 @@ function MainApp() {
             
             <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
               <EnhanceTab 
+                categories={categories}
                 savedCards={savedCards} 
                 colCount={colCount} 
                 viewMode={viewMode} 
