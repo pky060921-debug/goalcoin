@@ -73,20 +73,27 @@ export const EnhanceTab = ({ categories, savedCards, colCount, viewMode, setActi
                 // 💡 [최종 수정] 복잡한 파싱 로직 다 지우고, 오직 DB 매칭만 사용합니다.
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
 
-                // 카드에 적힌 ORIG_ID를 확인합니다.
+                // 💡 [핵심 수정] DB의 title(예: "[법 ] 제 82조 과 태 료 ")을 조항번호와 제목으로 분리합니다.
                 const origMatch = card.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
                 const origId = origMatch ? parseInt(origMatch[1], 10) : null;
-
-                // 만들기 탭의 원본 DB(safeCategories)에서 ID가 일치하는 항목을 찾습니다.
                 const matchedCategory = safeCategories.find((c: any) => Number(c.id) === origId);
 
-                // 찾았다면 그 제목을 쓰고, 못 찾았다면 본문 첫 줄을 씁니다.
-                let displayTitle = matchedCategory 
-                    ? matchedCategory.title.replace(/\[.*?\]/g, '').trim() // 태그 제거 후 깔끔한 제목만!
-                    : cleanContent.split('\n')[0].replace(/\[.*?\]/g, '').trim();
+                let displayTitle = "제목 없음";
+                if (matchedCategory) {
+                    // 예: "[법 ] 제 82조 과 태 료 " -> "[법 ] 제 82조", "과 태 료" 분리
+                    const raw = matchedCategory.title.replace(/\[.*?\]/g, '').trim(); // "제 82조 과 태 료"
+                    const match = raw.match(/(제\s*\d+\s*조(?:의\s*\d+)?)\s*(.*)/); // 1번 그룹(제82조), 2번 그룹(과태료)
+    
+                    if (match) {
+                        displayTitle = `${match[1]} ${match[2]}`; // "제82조 과태료" 형태로 조합
+                    } else {
+                        displayTitle = raw;
+                    }
+                } else {
+                    // 매칭 실패 시 원본 첫 줄
+                    displayTitle = cleanContent.split('\n')[0].replace(/\[.*?\]/g, '').trim();
+                }
 
-                if (!displayTitle || displayTitle === "제목 없음") displayTitle = "제목 없음";
-          
                 const { body } = formatCardText(cleanContent);
 
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
