@@ -49,6 +49,7 @@ const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
 };
 
 function MainApp() {
+  
   const enokiFlow = useEnokiFlow();
   const zkLogin = useZkLogin();
   const suiWalletAccount = useCurrentAccount();
@@ -333,13 +334,12 @@ function MainApp() {
 
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     const isCorrect = wrongCount === 0;
-
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
         const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
         const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
         return origIdA - origIdB;
     });
-    const currentIdx = folderCards.findIndex(c => c.id === currentId);
+    const currentIdx = folderCards.findIndex(c => c.id === currentId);    
     const nextCard = folderCards[currentIdx + 1] || null;
 
     localStorage.removeItem(`blankd_progress_${currentId}`);
