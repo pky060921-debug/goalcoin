@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, parseCardStats } from '../utils/constants';
+import { getStrictTitleOnly, formatCardText, parseCardStats } from '../utils/constants';
 
 const getGridClass = (cols: number) => {
   if(cols === 1) return "md:grid-cols-1";
@@ -10,8 +10,7 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-export const EnhanceTab = ({ categories, savedCards, colCount, viewMode, setActiveCard, handleDeleteCard }: any) => {
-  const safeCategories = Array.isArray(categories) ? categories : [];
+export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
@@ -70,26 +69,9 @@ export const EnhanceTab = ({ categories, savedCards, colCount, viewMode, setActi
                 const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
                 return origIdA - origIdB;
             }).map((card: any) => {
-                // 💡 [최종 수정] 복잡한 파싱 로직 다 지우고, 오직 DB 매칭만 사용합니다.
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-
-                // 💡 [핵심 수정] DB의 title(예: "[법 ] 제 82조 과 태 료 ")을 조항번호와 제목으로 분리합니다.
-                const origMatch = card.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
-                const origId = origMatch ? parseInt(origMatch[1], 10) : null;
-                const matchedCategory = safeCategories.find((c: any) => Number(c.id) === origId);
-
-                // 💡 진단 코드: 브라우저 개발자 도구(F12) -> 콘솔 창을 보세요!
-                console.log(`[진단] 카드ID: ${card.id} | 추적중인ORIG_ID: ${origId} | 매칭성공여부: ${!!matchedCategory}`);
-                if (!matchedCategory && origId) {
-                    console.warn(`[범인] ID ${origId}는 categories DB에 존재하지 않습니다!`);
-                }
-
-                let displayTitle = matchedCategory 
-                    ? matchedCategory.title.replace(/\[.*?\]/g, '').trim() 
-                    : "제목 없음";
-
+                const cleanTitle = getStrictTitleOnly(cleanContent);
                 const { body } = formatCardText(cleanContent);
-
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
@@ -109,16 +91,16 @@ export const EnhanceTab = ({ categories, savedCards, colCount, viewMode, setActi
 
                 return (
                   <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
-                    <button {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
+                    <div {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={() => setActiveCard(card)} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
                       <div className="flex flex-row justify-between items-center w-full gap-2">
-                        <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{displayTitle}</div>
+                        <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{cleanTitle}</div>
                         <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
                           <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
                           <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">반복:{stats.filled}</span>
                           <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                         </div>
                       </div>
-                    </button>
+                    </div>
                   </div>
                 );
             })}
