@@ -54,7 +54,7 @@ function MainApp() {
   const suiWalletAccount = useCurrentAccount();
   const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
   const isLoggedIn = safeAddress.length > 0;
-  
+
   const [activeTab, setActiveTab] = useState(() => {
     return localStorage.getItem('blankd_active_tab') || 'progress';
   });
@@ -150,7 +150,7 @@ function MainApp() {
         setGoalBalance(newBalance);
       }
     } catch (e) { 
-      addLog("⚠️ 오프라인 감지: 데이터는 로컬에 안전하게 보관 중입니다."); 
+      addLog("⚠️ 오프라인 감지: 데이터는 로컬에 안전하게 보관 중입니다.");
     }
   };
 
@@ -170,7 +170,7 @@ function MainApp() {
     if (res.ok) { 
       setLawFile(null);
       addLog("✅ 업로드 완료. AI 아카이빙 중..."); 
-      setTimeout(() => loadAllData(), 2500); 
+      setTimeout(() => loadAllData(), 2500);
     }
   };
 
@@ -182,7 +182,7 @@ function MainApp() {
         });
         if (res.ok) { 
           addLog(`✂️ [${title1}] 분할 완료`); 
-          await loadAllData(); 
+          await loadAllData();
         }
     } catch (e: any) { 
       addLog(`❌ 분할 처리 통신 에러`);
@@ -204,10 +204,8 @@ function MainApp() {
         bodyContent += word; 
       }
     });
-    
     if (isBlanking) bodyContent += " ]";
     
-    // 💡 완벽한 덮어쓰기 로직: 조항의 고유 ID(ORIG_ID)를 기준으로 정확히 일치하는 기존 카드를 찾습니다.
     const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${cat.id}]]`));
     
     if (existingCard) {
@@ -220,12 +218,10 @@ function MainApp() {
 
     const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n[[ORIG_ID:${cat.id}]]`;
     const initialMemo = stringifyCardStats(memo, 0, []);
-    
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
       body: JSON.stringify({ wallet_address: safeAddress, card_id: cat.id, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo }) 
     });
-    
     if (res.ok) {
       localStorage.setItem('blankd_last_crafted_id', cat.id.toString());
       localStorage.setItem('blankd_last_crafted_title', cat.title);
@@ -272,7 +268,7 @@ function MainApp() {
       
       setStartTime(Date.now()); 
       setElapsed(0);
-      setIsMemoOpen(false); 
+      setIsMemoOpen(false);
       
       let cleanText = stats.text;
       if (cleanText) {
@@ -293,22 +289,56 @@ function MainApp() {
     }
   }, [activeCard]);
 
+  // 💡 [핵심 반영] 안키 스마트 복습 알고리즘
   const finishCard = () => {
     if (isClosingRef.current || !activeCard) return;
-    isClosingRef.current = true; 
+    isClosingRef.current = true;
     const currentId = activeCard.id;
     const currentFolder = activeCard.folder_name;
     const finalTime = elapsed;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
+    
+    const wrongCount = wrongArr.length;
+    const totalBlanks = blanksRef.current.length;
+
+    // E-Factor(쉽기 정도) 계산 점수
+    let quality = 5;
+    if (totalBlanks > 0 && wrongCount > 0) {
+      const wrongRatio = wrongCount / totalBlanks;
+      if (wrongRatio > 0.5) quality = 1;
+      else if (wrongRatio > 0.2) quality = 2;
+      else quality = 3;
+    }
+
+    let easiness = parseFloat(localStorage.getItem(`blankd_factor_${currentId}`) || "2.5");
+    easiness = easiness + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+    if (easiness < 1.3) easiness = 1.3;
+    localStorage.setItem(`blankd_factor_${currentId}`, easiness.toString());
+
+    let daysInterval = 1;
+    const currentRepetitions = statsRef.current.filled || 1;
+
+    if (quality < 3) {
+      daysInterval = 1;
+    } else {
+      if (currentRepetitions === 1) daysInterval = 1;
+      else if (currentRepetitions === 2) daysInterval = 4;
+      else daysInterval = Math.ceil((currentRepetitions - 1) * easiness);
+    }
+
+    const nextReviewDate = new Date();
+    nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
+    
+    addLog(`📝 [안키 진단] 완독! 오답:${wrongCount}/${totalBlanks} | 쉽기:${easiness.toFixed(2)} | 복습:${daysInterval}일후`);
+
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
-    const isCorrect = wrongArr.length === 0;
+    const isCorrect = wrongCount === 0;
 
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
         const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
         const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
         return origIdA - origIdB;
     });
-    
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
     const nextCard = folderCards[currentIdx + 1] || null;
 
@@ -316,8 +346,10 @@ function MainApp() {
 
     setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
+    
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
-    pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime });
+    // 서버에 다음 복습 일자를 포함하여 동기화 큐에 푸시
+    pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
     addLog(`✅ 학습 완료 (ID:${currentId})`);
     flushQueue();
   };
@@ -420,7 +452,9 @@ function MainApp() {
     }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다."); return; }
+    if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다.");
+      return; 
+    }
     
     const recognition = new SpeechRecognition();
     recognition.lang = 'ko-KR'; 
@@ -429,7 +463,7 @@ function MainApp() {
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => { 
-      setIsListening(true); 
+      setIsListening(true);
       addLog("🎙️ 음성 인식 활성화됨 (계속 듣는 중...)");
     };
     
@@ -451,9 +485,10 @@ function MainApp() {
     
     recognition.onend = () => { 
       if (recognitionRef.current) {
-         try { recognitionRef.current.start(); } catch(e) {}
+         try { recognitionRef.current.start();
+         } catch(e) {}
       } else {
-         setIsListening(false); 
+         setIsListening(false);
       }
     };
 
@@ -461,14 +496,28 @@ function MainApp() {
     recognition.start();
   };
 
+  // 💡 [핵심 반영] 전체 회독수 및 합격 확률 계산 (렌더링 직전 수행)
+  const totalFilledCount = savedCards.reduce((acc: number, card: any) => {
+    const stats = parseCardStats(card.memo || "");
+    return acc + (stats.filled || 0);
+  }, 0);
+  const passProbability = Math.min(totalFilledCount * 3, 100);
+
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
       <header className="max-w-6xl mx-auto border-b border-white/10 pb-4 sm:pb-6 mb-8 sm:mb-12 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center justify-between w-full sm:w-auto">
           <h1 className="text-xl sm:text-2xl font-bold tracking-widest text-white shrink-0">BlankD</h1>
           {isLoggedIn && (
-            <div className="sm:hidden flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-full">
-              <span className="text-[12px] font-bold text-amber-400">{goalBalance.toFixed(2)} GOAL</span>
+            <div className="sm:hidden flex items-center gap-2 font-mono">
+              <div className="bg-teal-950/40 border border-teal-500/30 px-2 py-1 rounded-sm flex flex-col items-end">
+                <span className="text-[8px] text-teal-400/70">Total Rounds</span>
+                <span className="text-xs font-bold text-teal-300">{totalFilledCount}</span>
+              </div>
+              <div className="bg-indigo-900/40 border border-indigo-500/30 px-2 py-1 rounded-sm flex flex-col items-end">
+                <span className="text-[8px] text-indigo-400/70">Pass Rate</span>
+                <span className="text-xs font-bold text-indigo-300">{passProbability}%</span>
+              </div>
             </div>
           )}
         </div>
@@ -480,8 +529,15 @@ function MainApp() {
                 <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`text-[11px] sm:text-sm font-bold tracking-widest whitespace-nowrap px-2 py-1 transition-all ${activeTab === tab.id ? 'text-white border-b-2 border-white' : 'text-white/40 hover:text-white'}`}>{tab.label}</button>
               ))}
             </nav>
-            <div className="hidden sm:flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 px-4 py-1.5 rounded-full shadow-[0_0_10px_rgba(245,158,11,0.1)]">
-              <span className="text-sm font-bold text-amber-400">{goalBalance.toFixed(2)} GOAL</span>
+            <div className="hidden sm:flex items-center gap-3 font-mono">
+              <div className="border border-teal-500/30 bg-teal-950/20 px-3 py-1.5 rounded-sm flex flex-col items-end">
+                <span className="text-[9px] text-teal-400/70 uppercase tracking-wider">Total Rounds</span>
+                <span className="text-[14px] font-bold text-teal-300">{totalFilledCount} 회독</span>
+              </div>
+              <div className="border border-indigo-500/30 bg-indigo-900/20 px-3 py-1.5 rounded-sm flex flex-col items-end">
+                <span className="text-[9px] text-indigo-400/70 uppercase tracking-wider">Pass Rate</span>
+                <span className="text-[14px] font-bold text-indigo-300">{passProbability}%</span>
+              </div>
             </div>
           </div>
         )}
@@ -574,7 +630,7 @@ function MainApp() {
                 handleDeleteAll={async () => { 
                   if(confirm('전체 초기화하시겠습니까?')) { 
                     await api.deleteAll(safeAddress);
-                    loadAllData(); 
+                    loadAllData();
                   } 
                 }} 
               />
@@ -617,7 +673,6 @@ function MainApp() {
           renderContent={() => {
             const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
             
-            // 💡 [수정] 본문 첫 줄에서 '[법]' 태그만 지우고 제목으로 사용합니다!
             let displayTitle = (cleanContent.split('\n')[0] || "")
                 .replace(/\[.*?\]/g, '')
                 .replace(/\(\s*내용\s*\)/g, '')
@@ -627,8 +682,7 @@ function MainApp() {
             if (!displayTitle) displayTitle = "제목 없음";
 
             const { body } = formatCardText(cleanContent);
-            const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== ''); 
-            
+            const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== '');
             let displayPage = 0; 
             let tempGlobalBlank = 0; 
             let tempPage = 0;
@@ -694,7 +748,6 @@ function MainApp() {
                 bIdx++;
               }
             });
-
             return (
               <div className="flex flex-col gap-6 w-full">
                 <div className="flex justify-between items-center border-b border-white/10 pb-2">
