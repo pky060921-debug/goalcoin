@@ -358,22 +358,35 @@ function MainApp() {
   };
 
   const handleCloseModal = () => {
-    if (isClosingRef.current || !activeCard) return;
+    // 💡 [수정] 종료 강제화: 어떤 경우에도 일단 모달을 닫고 봅니다.
     isClosingRef.current = true;
-    const currentId = activeCard.id;
-    const wrongArr = Array.from(statsRef.current.wrongIndices);
-    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+    
+    if (activeCard) {
+      const currentId = activeCard.id;
+      const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices));
+      setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
+      pushToQueue('MEMO', { id: currentId, memo: newMemo });
+      flushQueue();
+    }
+    
+    // 상태 초기화
     setActiveCard(null);
-    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
-    pushToQueue('MEMO', { id: currentId, memo: newMemo });
-    flushQueue();
+    setCurrentBlankIdx(0);
+    setAnswerInput("");
+    setInputStatus('idle');
   };
 
   useEffect(() => {
     if (activeCard && currentBlankIdx < blanks.length) {
       const interval = setInterval(() => {
-        const diff = (Date.now() - startTime) / 1000; setElapsed(diff);
-        if (diff >= totalTimeLimit) { clearInterval(interval); alert("집중 시간 초과! 현재 기록을 저장합니다."); finishCard(); }
+        const diff = (Date.now() - startTime) / 1000; 
+        setElapsed(diff);
+        if (diff >= totalTimeLimit) { 
+          clearInterval(interval); 
+          addLog("⏰ 시간 초과! 강제 종료를 실행합니다.");
+          // 💡 [수정] finishCard() 호출 대신 강제 초기화 후 닫기
+          setActiveCard(null); 
+        }
       }, 100);
       return () => clearInterval(interval);
     }
@@ -798,7 +811,10 @@ function MainApp() {
               </div>
             );
           }} 
-          onClose={handleCloseModal} 
+          onClose={() => {
+             addLog("사용자 요청에 의한 강제 종료");
+             handleCloseModal();
+          }}  
         />
       )}
     </div>
