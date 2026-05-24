@@ -33,29 +33,13 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   // 💡 [오류 진단 코드 포함] 조항명 정밀 복구 로직
   const getDisplayTitle = (cat: any) => {
     try {
-      const raw = cat.title || cat.content || "";
+      // 💡 백엔드에서 넘어온 제목(cat.title)을 그대로 가져오고, [법] 같은 태그만 살짝 지웁니다.
+      const rawTitle = cat.title || cat.category_name || (cat.content && cat.content.split('\n')[0]);
+      if (!rawTitle) return "제목 없음";
       
-      // 1순위: 전체 텍스트에서 '제X조(이름)' 패턴 탐색
-      const match = raw.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
-      if (match && match[2].trim() !== "내용") {
-        return `${match[1].replace(/\s+/g, '')} ${match[2].trim()}`;
-      }
-      
-      // 2순위: 본문(content)이 따로 있다면 거기서 탐색
-      if (cat.content) {
-        const bodyMatch = cat.content.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
-        if (bodyMatch && bodyMatch[2].trim() !== "내용") {
-          return `${bodyMatch[1].replace(/\s+/g, '')} ${bodyMatch[2].trim()}`;
-        }
-      }
-
-      // 3순위: 다 없으면 기존처럼 태그와 '내용' 글자 제거 후 렌더링
-      const fallbackTitle = raw.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').replace(/내용/g, '').trim();
-      return fallbackTitle || "제목 없음";
-      
+      return rawTitle.replace(/\[.*?\]/g, '').trim() || "제목 없음";
     } catch (error) {
-      // 🩺 진단 코드: 제목 추출 중 문제 발생 시 콘솔에 원인 출력
-      console.error("[진단 오류] CraftTab 제목 추출 실패:", error, "데이터 원본:", cat);
+      console.error("[진단 오류] CraftTab 제목 추출 실패:", error, cat);
       return "제목 추출 에러";
     }
   };
