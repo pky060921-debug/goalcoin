@@ -2,7 +2,7 @@ import React, { useState, useEffect, Component, ReactNode, useRef } from "react"
 import { useCurrentAccount } from "@mysten/dapp-kit";
 import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 import { api } from "./services/api";
-import { SPLIT_REGEX, formatCardText, parseCardStats, stringifyCardStats } from "./utils/constants";
+import { SPLIT_REGEX, formatCardText, parseCardStats, stringifyCardStats, getStrictTitleOnly } from "./utils/constants";
 import { CardModal } from "./components/CardModal";
 import { DashboardTab } from "./tabs/DashboardTab";
 import { CraftTab } from "./tabs/CraftTab";
@@ -11,9 +11,16 @@ import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
 class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
-  constructor(props: any) { super(props); this.state = { hasError: false, errorMessage: "" }; }
-  static getDerivedStateFromError(error: any) { return { hasError: true, errorMessage: error.message }; }
-  componentDidCatch(error: any, errorInfo: any) { this.props.fallbackLog(`❌ 런타임 에러: ${error.message}`); }
+  constructor(props: any) { 
+    super(props);
+    this.state = { hasError: false, errorMessage: "" }; 
+  }
+  static getDerivedStateFromError(error: any) { 
+    return { hasError: true, errorMessage: error.message };
+  }
+  componentDidCatch(error: any, errorInfo: any) { 
+    this.props.fallbackLog(`❌ 런타임 에러: ${error.message}`);
+  }
   render() {
     if (this.state.hasError) return (
       <div className="p-6 text-red-400 font-mono border border-red-500/30 bg-red-900/10 rounded-sm shadow-xl">
@@ -36,7 +43,9 @@ const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
       q.answers.push(payload);
     }
     localStorage.setItem('blankd_sync_queue', JSON.stringify(q));
-  } catch (e) { console.error("큐 저장 실패", e); }
+  } catch (e) { 
+    console.error("큐 저장 실패", e); 
+  }
 };
 
 function MainApp() {
@@ -79,10 +88,17 @@ function MainApp() {
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
+  
   const [isListening, setIsListening] = useState(false);
-
+  const recognitionRef = useRef<any>(null);
+  
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
+
+  const [expandedId, setExpandedId] = useState<number | null>(() => {
+    const saved = localStorage.getItem('blankd_craft_expanded');
+    return saved ? parseInt(saved, 10) : null;
+  });
 
   const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-40));
 
@@ -104,13 +120,15 @@ function MainApp() {
         fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r=>r.json()),
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`).then(r=>r.json()),
         fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`).then(r=>r.json()),
-        api.getGoalCoinBalance(safeAddress)
+        api.getGoalCoinBalance(safeAddress).catch(()=>0)
       ]);
       setCategories(catRes.categories || []); 
       setSavedCards(cardRes.cards || []); 
       setExams(examRes.exams || []);
       setGoalBalance(balance);
-    } catch (e: any) { addLog(`❌ 데이터 동기화 실패: ${e.message}`); }
+    } catch (e: any) { 
+      addLog(`❌ 데이터 동기화 실패: ${e.message}`);
+    }
   };
 
   const flushQueue = async () => {
@@ -128,10 +146,12 @@ function MainApp() {
       if (res.ok) {
         localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
         addLog(`🔄 백그라운드 동기화 완료 (M:${q.memos.length}, A:${q.answers.length})`);
-        const newBalance = await api.getGoalCoinBalance(safeAddress);
+        const newBalance = await api.getGoalCoinBalance(safeAddress).catch(()=>goalBalance);
         setGoalBalance(newBalance);
       }
-    } catch (e) { addLog("⚠️ 오프라인 감지: 데이터는 로컬에 안전하게 보관 중입니다."); }
+    } catch (e) { 
+      addLog("⚠️ 오프라인 감지: 데이터는 로컬에 안전하게 보관 중입니다."); 
+    }
   };
 
   useEffect(() => {
@@ -147,15 +167,11 @@ function MainApp() {
     addLog("▶️ 법령 텍스트 분석 업로드 시작...");
     const fd = new FormData(); fd.append("file", lawFile); fd.append("wallet_address", safeAddress);
     const res = await fetch(`https://api.blankd.top/api/upload-pdf`, { method: "POST", body: fd });
-    if (res.ok) { setLawFile(null); addLog("✅ 업로드 완료. AI 아카이빙 중..."); setTimeout(() => loadAllData(), 2500); }
-  };
-
-  const uploadExam = async () => {
-    if (!examFile) return alert("파일을 선택해주세요.");
-    addLog("▶️ 모의고사 데이터 주입 시작...");
-    const fd = new FormData(); fd.append("file", examFile); fd.append("wallet_address", safeAddress);
-    const res = await fetch(`https://api.blankd.top/api/upload-exam`, { method: "POST", body: fd });
-    if (res.ok) { setExamFile(null); addLog("✅ 기출문제 분석 및 반영 완료"); setTimeout(() => loadAllData(), 2500); }
+    if (res.ok) { 
+      setLawFile(null);
+      addLog("✅ 업로드 완료. AI 아카이빙 중..."); 
+      setTimeout(() => loadAllData(), 2500); 
+    }
   };
 
   const handleSplitCategory = async (cat: any, text1: string, text2: string, title1: string, title2: string) => {
@@ -164,12 +180,20 @@ function MainApp() {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ wallet_address: safeAddress, id: cat.id, text1, text2, title1, title2, folder_name: cat.folder_name })
         });
-        if (res.ok) { addLog(`✂️ [${title1}] 분할 완료`); await loadAllData(); }
-    } catch (e: any) { addLog(`❌ 분할 처리 통신 에러`); }
+        if (res.ok) { 
+          addLog(`✂️ [${title1}] 분할 완료`); 
+          await loadAllData(); 
+        }
+    } catch (e: any) { 
+      addLog(`❌ 분할 처리 통신 에러`);
+    }
   };
 
   const handleMakeBlankCard = async (cat: any, wordsArray: string[], selectedIndices: Set<number>, pageBreaks: Set<number>, memo: string, onComplete: () => void) => {
-    let bodyContent = ""; let answerText = ""; let isBlanking = false;
+    let bodyContent = "";
+    let answerText = ""; 
+    let isBlanking = false;
+    
     wordsArray.forEach((word, index) => {
       if (pageBreaks.has(index)) { bodyContent += " ##PAGE_BREAK## "; }
       if (selectedIndices.has(index)) {
@@ -180,21 +204,34 @@ function MainApp() {
         bodyContent += word; 
       }
     });
+    
     if (isBlanking) bodyContent += " ]";
     
+    // 💡 완벽한 덮어쓰기 로직: 조항의 고유 ID(ORIG_ID)를 기준으로 정확히 일치하는 기존 카드를 찾습니다.
+    const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${cat.id}]]`));
+    
+    if (existingCard) {
+      addLog("🔄 기존 채우기 카드를 찾아 삭제 후 덮어씁니다...");
+      await fetch("https://api.blankd.top/api/delete-card", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, id: existingCard.id })
+      });
+    }
+
     const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n[[ORIG_ID:${cat.id}]]`;
     const initialMemo = stringifyCardStats(memo, 0, []);
-
+    
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
       body: JSON.stringify({ wallet_address: safeAddress, card_id: cat.id, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo }) 
     });
+    
     if (res.ok) {
-      await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: cat.id }) });
-      addLog("✅ 지식 추출 완료: 다음 조항을 바로 오픈합니다.");
+      localStorage.setItem('blankd_last_crafted_id', cat.id.toString());
+      localStorage.setItem('blankd_last_crafted_title', cat.title);
+      addLog("✅ 만들기 완료: 수정된 내용이 채우기에 완벽하게 반영되었습니다.");
       await loadAllData(); 
       onComplete(); 
-      // 💡 setActiveTab('enhance'); 제거하여 만들기 탭에 그대로 남아있음.
     }
   };
 
@@ -215,21 +252,47 @@ function MainApp() {
           foundBlanks.push({ answer: part.replace(/\[|\]/g, '').trim(), correct: false });
         }
       });
-      setBlanks(foundBlanks); setCurrentBlankIdx(0); setAnswerInput(""); setInputStatus('idle');
-      setTotalTimeLimit(5.0 * foundBlanks.length); setStartTime(Date.now()); setElapsed(0);
-      setIsListening(false); 
-      setIsMemoOpen(false); 
+      
+      const savedProgress = localStorage.getItem(`blankd_progress_${activeCard.id}`);
+      const lastIdx = savedProgress ? parseInt(savedProgress, 10) : 0;
+      
+      const restoredBlanks = foundBlanks.map((b, i) => ({
+          ...b,
+          correct: i < lastIdx 
+      }));
+
+      setBlanks(restoredBlanks); 
+      setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); 
+      setAnswerInput(""); 
+      setInputStatus('idle');
       
       const stats = parseCardStats(activeCard.memo);
+      const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
+      setTotalTimeLimit(timePerBlank * foundBlanks.length); 
+      
+      setStartTime(Date.now()); 
+      setElapsed(0);
+      setIsMemoOpen(false); 
+      
       let cleanText = stats.text;
       if (cleanText) {
          cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim();
       }
       statsRef.current = { text: cleanText, filled: stats.filled, wrongIndices: new Set(stats.wrongIndices) };
+      
+      const cleanTitle = getStrictTitleOnly(cleanContent);
+      localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
+      localStorage.setItem('blankd_last_enhanced_title', cleanTitle || "이름 없는 카드");
+    } else {
+      if (recognitionRef.current) {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+        setIsListening(false);
+      }
     }
   }, [activeCard]);
 
-  // 💡 [핵심 보존] 강화 탭에서 학습 완료 시 원본 순서(ORIG_ID)대로 다음 카드 바로 띄우기
   const finishCard = () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true; 
@@ -240,7 +303,6 @@ function MainApp() {
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     const isCorrect = wrongArr.length === 0;
 
-    // 아키님의 UI 코드처럼 원본 ID 기반으로 정렬하여 다음 카드를 정확히 찾아냅니다.
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
         const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
         const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
@@ -250,8 +312,9 @@ function MainApp() {
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
     const nextCard = folderCards[currentIdx + 1] || null;
 
-    setActiveCard(nextCard); // 다음 카드가 있으면 교체, 없으면 null(팝업 닫힘)
+    localStorage.removeItem(`blankd_progress_${currentId}`);
 
+    setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime });
@@ -301,14 +364,19 @@ function MainApp() {
       setInputStatus('correct');
       const nb = [...blanks]; nb[currentBlankIdx].correct = true; setBlanks(nb);
       statsRef.current.wrongIndices.delete(currentBlankIdx);
-      statsRef.current.filled += 1; 
-
+      
       setTimeout(() => { 
         setAnswerInput(""); 
         setTimeout(() => {
           setInputStatus('idle'); 
-          if (currentBlankIdx + 1 < nb.length) setCurrentBlankIdx(currentBlankIdx + 1); 
-          else finishCard(); 
+          if (currentBlankIdx + 1 < nb.length) {
+            setCurrentBlankIdx(currentBlankIdx + 1); 
+            localStorage.setItem(`blankd_progress_${activeCard.id}`, (currentBlankIdx + 1).toString());
+          } else { 
+            localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+            statsRef.current.filled += 1; 
+            finishCard(); 
+          }
         }, 130);
       }, 20);
     } else { 
@@ -320,34 +388,76 @@ function MainApp() {
 
   const handleShowAnswer = () => {
     if (!blanks[currentBlankIdx]) return;
-    setInputStatus('wrong'); statsRef.current.wrongIndices.add(currentBlankIdx); 
-    const nb = [...blanks]; nb[currentBlankIdx].correct = true; setBlanks(nb);
+    setInputStatus('wrong'); 
+    statsRef.current.wrongIndices.add(currentBlankIdx); 
+    const nb = [...blanks];
+    nb[currentBlankIdx].correct = true; 
+    setBlanks(nb);
     setTimeout(() => {
-      setAnswerInput(""); setInputStatus('idle');
-      if (currentBlankIdx + 1 < nb.length) setCurrentBlankIdx(currentBlankIdx + 1);
-      else finishCard();
-    }, 1000); 
+      setAnswerInput(""); 
+      setInputStatus('idle');
+      if (currentBlankIdx + 1 < nb.length) {
+        setCurrentBlankIdx(currentBlankIdx + 1);
+        localStorage.setItem(`blankd_progress_${activeCard.id}`, (currentBlankIdx + 1).toString());
+      } else {
+        localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+        statsRef.current.filled += 1;
+        finishCard();
+      }
+    }, 1000);
   };
 
-  const startVoiceRecognition = () => {
+  const toggleVoiceRecognition = () => {
+    if (isListening) {
+      setIsListening(false);
+      if (recognitionRef.current) {
+        recognitionRef.current.onend = null; 
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+      }
+      addLog("🎙️ 음성 인식 종료됨");
+      return;
+    }
+
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다."); return; }
     
     const recognition = new SpeechRecognition();
     recognition.lang = 'ko-KR'; 
     recognition.interimResults = false;
+    recognition.continuous = true; 
     recognition.maxAlternatives = 1;
 
-    recognition.onstart = () => { setIsListening(true); addLog("🎙️ 음성 인식 대기 중..."); };
+    recognition.onstart = () => { 
+      setIsListening(true); 
+      addLog("🎙️ 음성 인식 활성화됨 (계속 듣는 중...)");
+    };
+    
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
+      const last = event.results.length - 1;
+      const transcript = event.results[last][0].transcript;
       const cleanText = transcript.replace(/\s+/g, '').replace(/[.,!?]/g, '');
       setAnswerInput(cleanText);
       addLog(`🗣️ 인식: "${transcript}"`);
       setTimeout(() => handleSequentialInput(cleanText), 300);
     };
-    recognition.onerror = (err: any) => { setIsListening(false); };
-    recognition.onend = () => { setIsListening(false); };
+    
+    recognition.onerror = (err: any) => { 
+      if (err.error !== 'no-speech') {
+        setIsListening(false);
+        recognitionRef.current = null;
+      }
+    };
+    
+    recognition.onend = () => { 
+      if (recognitionRef.current) {
+         try { recognitionRef.current.start(); } catch(e) {}
+      } else {
+         setIsListening(false); 
+      }
+    };
+
+    recognitionRef.current = recognition;
     recognition.start();
   };
 
@@ -366,7 +476,7 @@ function MainApp() {
         {isLoggedIn && (
           <div className="flex items-center w-full sm:w-auto justify-between gap-4">
             <nav className="flex gap-2 sm:gap-6 overflow-x-auto scrollbar-hide">
-              {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '강화' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
+              {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
                 <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`text-[11px] sm:text-sm font-bold tracking-widest whitespace-nowrap px-2 py-1 transition-all ${activeTab === tab.id ? 'text-white border-b-2 border-white' : 'text-white/40 hover:text-white'}`}>{tab.label}</button>
               ))}
             </nav>
@@ -388,15 +498,63 @@ function MainApp() {
           <ErrorBoundary fallbackLog={addLog}>
             
             <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
-              <DashboardTab categories={categories} savedCards={savedCards} />
+              <DashboardTab 
+                categories={categories} 
+                savedCards={savedCards} 
+                setActiveTab={setActiveTab}
+                setExpandedId={setExpandedId}
+                setActiveCard={setActiveCard}
+              />
             </div>
             
             <div className={activeTab === 'create' ? 'block' : 'hidden'}>
-              <CraftTab categories={categories} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} handleDeleteCategory={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-category",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});loadAllData();}}} />
+              <CraftTab 
+                categories={categories} 
+                savedCards={savedCards} 
+                colCount={colCount} 
+                viewMode={viewMode} 
+                useAiRecommend={useAiRecommend} 
+                safeAddress={safeAddress} 
+                lawFile={lawFile} 
+                setLawFile={setLawFile} 
+                uploadLaw={uploadLaw} 
+                handleMakeBlankCard={handleMakeBlankCard} 
+                handleSplitCategory={handleSplitCategory} 
+                addLog={addLog} 
+                expandedId={expandedId}
+                setExpandedId={setExpandedId}
+                handleDeleteCategory={async (id: number) => {
+                  if(confirm('삭제하시겠습니까?')){
+                    await fetch("https://api.blankd.top/api/delete-category", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ wallet_address: safeAddress, id })
+                    });
+                    loadAllData();
+                  }
+                }} 
+              />
             </div>
             
             <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
-              <EnhanceTab savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} handleDeleteCard={async (id:number)=>{if(confirm('삭제하시겠습니까?')){await fetch("https://api.blankd.top/api/delete-card",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({wallet_address:safeAddress,id})});setActiveCard(null);loadAllData();}}} />
+              <EnhanceTab 
+                categories={categories}
+                savedCards={savedCards} 
+                colCount={colCount} 
+                viewMode={viewMode} 
+                setActiveCard={setActiveCard} 
+                handleDeleteCard={async (id: number) => {
+                  if(confirm('삭제하시겠습니까?')){
+                    await fetch("https://api.blankd.top/api/delete-card", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ wallet_address: safeAddress, id })
+                    });
+                    setActiveCard(null);
+                    loadAllData();
+                  }
+                }} 
+              />
             </div>
             
             <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
@@ -404,7 +562,22 @@ function MainApp() {
             </div>
             
             <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
-              <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화하시겠습니까?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />
+              <MypageTab 
+                safeAddress={safeAddress} 
+                enokiFlow={enokiFlow} 
+                useAiRecommend={useAiRecommend} 
+                setUseAiRecommend={setUseAiRecommend} 
+                viewMode={viewMode} 
+                setViewMode={setViewMode} 
+                colCount={colCount} 
+                updateColCount={setColCount} 
+                handleDeleteAll={async () => { 
+                  if(confirm('전체 초기화하시겠습니까?')) { 
+                    await api.deleteAll(safeAddress);
+                    loadAllData(); 
+                  } 
+                }} 
+              />
             </div>
 
           </ErrorBoundary>
@@ -419,11 +592,17 @@ function MainApp() {
               <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2 py-0.5 bg-white/5 rounded transition-colors">Clear</button>
             </div>
             <div className="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
-              {systemLogs.map((l, i) => <div key={i} className={`leading-snug break-all ${l.includes('❌') ? 'text-red-400 font-bold' : l.includes('▶️') ? 'text-amber-300' : ''}`}>{l}</div>)}
+              {systemLogs.map((l, i) => (
+                <div key={i} className={`leading-snug break-all ${l.includes('❌') ? 'text-red-400 font-bold' : l.includes('▶️') ? 'text-amber-300' : ''}`}>
+                  {l}
+                </div>
+              ))}
             </div>
           </div>
         )}
-        <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>{isTerminalOpen ? 'Close Terminal' : 'Open Terminal'}</button>
+        <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>
+          {isTerminalOpen ? 'Close Terminal' : 'Open Terminal'}
+        </button>
       </div>
 
       {activeCard && (
@@ -437,19 +616,35 @@ function MainApp() {
           handleSequentialInput={handleSequentialInput}
           renderContent={() => {
             const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+            
+            // 💡 [수정] 본문 첫 줄에서 '[법]' 태그만 지우고 제목으로 사용합니다!
+            let displayTitle = (cleanContent.split('\n')[0] || "")
+                .replace(/\[.*?\]/g, '')
+                .replace(/\(\s*내용\s*\)/g, '')
+                .replace(/내용/g, '')
+                .trim();
+            
+            if (!displayTitle) displayTitle = "제목 없음";
+
             const { body } = formatCardText(cleanContent);
             const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== ''); 
             
-            let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
+            let displayPage = 0; 
+            let tempGlobalBlank = 0; 
+            let tempPage = 0;
             for (let part of parts) {
                 if (part === '##PAGE_BREAK##') tempPage++;
                 else if (part.startsWith('[') && part.endsWith(']')) {
-                    if (tempGlobalBlank === currentBlankIdx) { displayPage = tempPage; break; }
+                    if (tempGlobalBlank === currentBlankIdx) { 
+                      displayPage = tempPage;
+                      break; 
+                    }
                     tempGlobalBlank++;
                 }
             }
 
-            let renderPage = 0; let bIdx = 0;
+            let renderPage = 0;
+            let bIdx = 0;
             const contentToRender: any[] = [];
             parts.forEach((part: string, i: number) => {
               if (part === '##PAGE_BREAK##') { renderPage++; return; }
@@ -460,7 +655,11 @@ function MainApp() {
                     const isWrong = statsRef.current.wrongIndices.has(bIdx); 
                     
                     if (isCorrect) {
-                      contentToRender.push(<span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>);
+                      contentToRender.push(
+                        <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>
+                          {part.replace(/\[|\]/g, '')}
+                        </span>
+                      );
                     }
                     else if (isCurrent) {
                       contentToRender.push(
@@ -483,13 +682,17 @@ function MainApp() {
                       );
                     }
                     else {
-                      contentToRender.push(<span key={i} className="inline-block min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
+                      contentToRender.push(
+                        <span key={i} className="inline-block min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>
+                      );
                     }
                     bIdx++;
                   } else {
                     contentToRender.push(<span key={i}>{part}</span>);
                   }
-              } else if (part.startsWith('[') && part.endsWith(']')) bIdx++;
+              } else if (part.startsWith('[') && part.endsWith(']')) {
+                bIdx++;
+              }
             });
 
             return (
@@ -507,14 +710,14 @@ function MainApp() {
                   </button>
                   
                   <button 
-                    onClick={startVoiceRecognition} 
+                    onClick={toggleVoiceRecognition} 
                     className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${
                       isListening 
                         ? 'bg-red-600/50 text-white border-red-500 animate-pulse' 
                         : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'
                     }`}
                   >
-                    {isListening ? '🎙️ 듣는 중... 말씀하세요' : '🎤 음성으로 입력'}
+                    {isListening ? '🎙️ 음성 인식 끄기 (활성화됨)' : '🎤 음성으로 입력 (계속 켜두기)'}
                   </button>
 
                   <button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
