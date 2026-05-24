@@ -421,9 +421,18 @@ function MainApp() {
             setCurrentBlankIdx(currentBlankIdx + 1); 
             localStorage.setItem(`blankd_progress_${activeCard.id}`, (currentBlankIdx + 1).toString());
           } else { 
+            // 💡 [수정] 성공적으로 마지막 빈칸을 채운 경우
             localStorage.removeItem(`blankd_progress_${activeCard.id}`);
-            statsRef.current.filled += 1; 
-            finishCard(); 
+            statsRef.current.filled += 1;
+            
+            // 💡 [보안] finishCard() 호출 후 에러가 나더라도 모달을 강제로 닫는 로직 추가
+            try {
+              finishCard();
+            } catch (err) {
+              console.error("finishCard 실행 중 에러 발생, 강제 종료 수행:", err);
+              setActiveCard(null); // 에러가 나도 무조건 닫기
+              isClosingRef.current = false;
+            }
           }
         }, 130);
       }, 20);
