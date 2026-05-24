@@ -10,6 +10,23 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
+// 💡 [오류 진단 및 제목 추출 함수] 채우기 탭에서도 앱이 멈추지 않게 방어하며, 조항명만 깔끔하게 빼냅니다.
+const renderEnhanceTitle = (cardObj: any) => {
+    try {
+        const cleanContent = cardObj.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+        // 본문 첫 줄을 기준으로 [법], (내용) 등의 군더더기 완전 제거
+        let t = (cleanContent.split('\n')[0] || "")
+                  .replace(/\[.*?\]/g, '')
+                  .replace(/\(\s*내용\s*\)/g, '')
+                  .replace(/내용/g, '')
+                  .trim();
+        return t || "제목 없음";
+    } catch(err) {
+        console.error("[EnhanceTab] 조항명 진단 에러:", err, cardObj);
+        return "제목 렌더링 오류";
+    }
+};
+
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
@@ -69,20 +86,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
                 return origIdA - origIdB;
             }).map((card: any) => {
-          
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
                 
-                // 💡 [수정] 본문 첫 줄에서 '[법]' 태그만 지우고 제목으로 사용합니다!
-                let displayTitle = (cleanContent.split('\n')[0] || "")
-                    .replace(/\[.*?\]/g, '')         // [법], [령] 태그 제거
-                    .replace(/\(\s*내용\s*\)/g, '')  // (내용) 오염 제거
-                    .replace(/내용/g, '')            // 내용 글자 제거
-                    .trim();
-                
-                if (!displayTitle) displayTitle = "제목 없음";
+                // 💡 수정한 부분: 분리한 예외처리 함수 적용
+                let displayTitle = renderEnhanceTitle(card);
 
                 const { body } = formatCardText(cleanContent);
-
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
