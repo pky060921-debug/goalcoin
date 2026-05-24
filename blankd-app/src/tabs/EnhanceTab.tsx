@@ -10,7 +10,8 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleDeleteCard }: any) => {
+export const EnhanceTab = ({ categories, savedCards, colCount, viewMode, setActiveCard, handleDeleteCard }: any) => {
+  const safeCategories = Array.isArray(categories) ? categories : [];
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
@@ -69,18 +70,21 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, hand
                 const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
                 return origIdA - origIdB;
             }).map((card: any) => {
-          
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
                 
-                // 💡 [수정] 본문 첫 줄에서 '[법]' 태그만 지우고 제목으로 사용합니다!
-                let displayTitle = (cleanContent.split('\n')[0] || "")
-                    .replace(/\[.*?\]/g, '')         // [법], [령] 태그 제거
-                    .replace(/\(\s*내용\s*\)/g, '')  // (내용) 오염 제거
-                    .replace(/내용/g, '')            // 내용 글자 제거
-                    .trim();
+                // 💡 만들기 탭의 DB(categories)에서 원본 제목을 100% 동일하게 가져옵니다!
+                const origMatch = card.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
+                const origId = origMatch ? parseInt(origMatch[1], 10) : null;
+                const matchedCategory = safeCategories.find((c: any) => c.id === origId);
                 
-                if (!displayTitle) displayTitle = "제목 없음";
-
+                let displayTitle = "제목 없음";
+                if (matchedCategory) {
+                    const rawTitle = matchedCategory.title || matchedCategory.category_name || (matchedCategory.content && matchedCategory.content.split('\n')[0]) || "";
+                    displayTitle = rawTitle.replace(/\[.*?\]/g, '').trim() || "제목 없음";
+                } else {
+                    // 원본 DB를 못 찾았을 때의 안전장치
+                    displayTitle = cleanContent.split('\n')[0].replace(/\[.*?\]/g, '').trim() || "제목 없음";
+                }
                 const { body } = formatCardText(cleanContent);
 
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
