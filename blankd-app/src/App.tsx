@@ -355,42 +355,6 @@ function MainApp() {
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
     addLog(`✅ 학습 완료 (ID:${currentId})`);
     flushQueue();
-      const finishCard = () => {
-    // ... (기존 안키 알고리즘 로직 동일) ...
-
-    // 💡 [수정] 강제 종료 로직 강화
-    const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
-        const contentA = a.card_content || a.content || "";
-        const contentB = b.card_content || b.content || "";
-        const origIdA = parseInt((contentA.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
-        const origIdB = parseInt((contentB.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
-        return origIdA - origIdB;
-    });
-    
-    const currentIdx = folderCards.findIndex(c => Number(c.id) === Number(currentId));
-    const nextCard = folderCards[currentIdx + 1] || null;
-
-    localStorage.removeItem(`blankd_progress_${currentId}`);
-
-    // [핵심] 상태 업데이트 후 카드 모달을 비우는 과정의 안전장치
-    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
-    
-    pushToQueue('MEMO', { id: currentId, memo: newMemo });
-    pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
-    
-    addLog(`✅ 학습 완료 (ID:${currentId})`);
-    flushQueue();
-
-    // 💡 [수정] 다음 카드가 있으면 띄우고, 없으면 확실히 null로 지정하여 모달을 닫음
-    if (nextCard) {
-      setActiveCard(nextCard);
-    } else {
-      setActiveCard(null);
-      setCurrentBlankIdx(0);
-      setAnswerInput("");
-      setInputStatus('idle');
-      isClosingRef.current = false; // 종료 후 플래그 초기화
-    }
   };
 
   const handleCloseModal = () => {
