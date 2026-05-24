@@ -75,8 +75,8 @@ export const EnhanceTab = ({ categories, savedCards, colCount, viewMode, setActi
 
                 // [핵심] 카드 본문 첫 줄을 그대로 읽어와서 [법] 태그만 지우고 띄웁니다.
                 // DB 데이터가 이미 완벽하므로, 다른 로직은 다 무시합니다.
-                let firstLine = cleanContent.split('\n')[0] || "제목 없음";
-                let displayTitle = firstLine.replace(/\[.*?\]/g, '').trim(); 
+                const firstLine = card.content.split('\n')[0] || "제목 없음"
+                let displayTitle = firstLine.replace(/\[.*?\]/g, '').trim();
 
                 const { body } = formatCardText(cleanContent);
 
