@@ -79,8 +79,10 @@ export const EnhanceTab = ({ categories, savedCards, colCount, viewMode, setActi
                 const matchedCategory = safeCategories.find((c: any) => Number(c.id) === origId);
 
                 let displayTitle = matchedCategory 
-                    ? matchedCategory.title.replace(/\[.*?\]/g, '').trim() 
-                    : "제목 없음";
+                  ? matchedCategory.title.replace(/\[.*?\]/g, '').trim() 
+                    : card.content.match(/제\s*\d+\s*조.*?/)?.[0]?.replace(/[\[\]]/g, '') || "제목 없음"; 
+                    // 💡 ID 매칭이 안 되면 본문에서 제XX조 패턴을 찾아 제목으로 띄움
+
 
                 const { body } = formatCardText(cleanContent);
 
