@@ -39,7 +39,7 @@ def parse_html_3col_law(html_content):
             tds = row.find_all('td', recursive=False)
             if not tds: continue
             
-            # 💡 첫 번째 칸에서 장/절의 전체 이름을 유연하게 추출
+            # 첫 번째 칸에서 장/절의 전체 이름을 유연하게 추출
             first_cell_clean = clean_korean_law_text(tds[0].get_text(separator="\n", strip=True))
             first_cell_lines = [l.strip() for l in first_cell_clean.split('\n') if l.strip()]
             
@@ -59,7 +59,7 @@ def parse_html_3col_law(html_content):
                 groups = td.find_all('div', class_='lsptnThdCmpGroup')
                 for group in groups:
                     
-                    # 💡 [가드레일 보강] 칸 인덱스를 보지 않고, 텍스트 레이아웃 구조 내에 '요양급여의 기준에 관한 규칙' 소속 명칭이 포함되면 명확히 걸러냅니다.
+                    # [가드레일 보강] 국민건강보험법 특정 규칙 예외 처리
                     is_yoyang_rule = False
                     parent_td = group.find_parent('td')
                     if parent_td:
@@ -68,7 +68,7 @@ def parse_html_3col_law(html_content):
                             is_yoyang_rule = True
                             
                     if is_yoyang_rule:
-                        continue # 국민건강보험법, 시행령 본문은 살리고 해당 규칙 조항만 핀셋 제거
+                        continue 
                     
                     label = group.find('label')
                     if label:
@@ -114,15 +114,19 @@ def parse_html_3col_law(html_content):
                     
                     if article_match:
                         my_num = article_match.group(0).replace(" ", "")
-                        title_match = re.search(r'\(([^()]+)\)', content)
-                        my_num_title = title_match.group(1).strip() if title_match else "세부내용"
+                        
+                        # 💡 [수정] 조항 번호 바로 뒤의 첫 줄 텍스트 전체를 제목으로 추출합니다.
+                        first_line = content.split('\n')[0]
+                        raw_title = first_line.replace(my_num, "").strip()
+                        my_num_title = re.sub(r'[\(\)\[\]]', '', raw_title).strip()
+                        if not my_num_title: my_num_title = "세부내용"
                         
                         if type_name == "법" and link_id:
                             context_map[link_id] = {"num": my_num, "title": my_num_title, "folder": current_chapter}
                         
                         if type_name == "법":
                             last_num = my_num
-                            last_title = my_title
+                            last_title = my_num_title # 💡 이전 코드의 버그(last_title 업데이트 누락) 해결
                     else:
                         if link_id and link_id in context_map:
                             my_num = context_map[link_id]["num"]
@@ -132,7 +136,8 @@ def parse_html_3col_law(html_content):
                             my_num = last_num
                             my_title = last_title
                             
-                    clean_title = f"[{type_name}] {my_num} ({my_title[:15]})"
+                    # 💡 15글자 제한 삭제, 온전한 제목 사용
+                    clean_title = f"[{type_name}] {my_num} {my_title}"
                     
                     if link_id:
                         if link_id not in link_id_order_map:
@@ -160,7 +165,7 @@ def parse_html_3col_law(html_content):
             
         return categories
 
-    else:
+    else: # 단순 텍스트/HTML 폴백 처리
         categories = []
         current_chapter = "기본 폴더"
         current_law_num = "0"
@@ -189,9 +194,11 @@ def parse_html_3col_law(html_content):
                 else: 
                     article_num_str = current_law_num
                 
-                title_match = re.search(r'\((.*?)\)', clean_content)
-                if title_match: title_text = title_match.group(1).strip()
-                else: title_text = clean_content.replace(article_num_str, "").strip().split('\n')[0][:15]
+                # 💡 [수정] 괄호 유무와 관계없이 첫 줄의 조항 번호 뒷부분을 전부 제목으로 가져옵니다.
+                first_line = clean_content.split('\n')[0]
+                raw_title = re.sub(r'^제\s*\d+\s*조(?:의\s*\d+)?', '', first_line).strip()
+                title_text = re.sub(r'[\(\)\[\]]', '', raw_title).strip()
+                if not title_text: title_text = "내용"
                 
                 clean_title = f"[법] {article_num_str} {title_text}"
                 categories.append({"title": clean_title, "content": clean_content, "folder_name": current_chapter})
