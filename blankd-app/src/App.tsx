@@ -290,19 +290,20 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // 💡 [핵심 반영] 안키 스마트 복습 알고리즘
   const finishCard = () => {
-    if (isClosingRef.current || !activeCard) return;
-    isClosingRef.current = true;
+    if (!activeCard) return;
+
+    // 1. [선제적 카운트 증가] 가장 먼저 수행
+    statsRef.current.filled = (statsRef.current.filled || 0) + 1;
+    
     const currentId = activeCard.id;
     const currentFolder = activeCard.folder_name;
     const finalTime = elapsed;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     
-    const wrongCount = wrongArr.length;
+    // 2. 안키 알고리즘 계산
     const totalBlanks = blanksRef.current.length;
-
-    // E-Factor(쉽기 정도) 계산 점수
+    const wrongCount = wrongArr.length;
     let quality = 5;
     if (totalBlanks > 0 && wrongCount > 0) {
       const wrongRatio = wrongCount / totalBlanks;
@@ -312,93 +313,46 @@ function MainApp() {
     }
 
     let easiness = parseFloat(localStorage.getItem(`blankd_factor_${currentId}`) || "2.5");
-    easiness = easiness + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
-    if (easiness < 1.3) easiness = 1.3;
+    easiness = Math.max(1.3, easiness + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02)));
     localStorage.setItem(`blankd_factor_${currentId}`, easiness.toString());
 
-    let daysInterval = 1;
-    const currentRepetitions = statsRef.current.filled || 1;
-
-    if (quality < 3) {
-      daysInterval = 1;
-    } else {
-      if (currentRepetitions === 1) daysInterval = 1;
-      else if (currentRepetitions === 2) daysInterval = 4;
-      else daysInterval = Math.ceil((currentRepetitions - 1) * easiness);
-    }
-
+    let daysInterval = quality < 3 ? 1 : (statsRef.current.filled === 1 ? 1 : (statsRef.current.filled === 2 ? 4 : Math.ceil((statsRef.current.filled - 1) * easiness)));
     const nextReviewDate = new Date();
     nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
     
-    addLog(`📝 [안키 진단] 완독! 오답:${wrongCount}/${totalBlanks} | 쉽기:${easiness.toFixed(2)} | 복습:${daysInterval}일후`);
+    addLog(`✅ 학습 완료 [${statsRef.current.filled}회독] (ID:${currentId})`);
 
+    // 3. 상태 업데이트 및 DB 동기화
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
-    const isCorrect = wrongCount === 0;
-    // 💡 [수정] DB 규격인 card_content를 안전하게 읽어오고, ID 비교 시 숫자형으로 강제 변환하여 매칭합니다.
-    const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
-        const contentA = a.card_content || a.content || "";
-        const contentB = b.card_content || b.content || "";
-        const origIdA = parseInt((contentA.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
-        const origIdB = parseInt((contentB.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
-        return origIdA - origIdB;
-    });
-    const currentIdx = folderCards.findIndex(c => Number(c.id) === Number(currentId));
-    const nextCard = folderCards[currentIdx + 1] || null;
-
-    localStorage.removeItem(`blankd_progress_${currentId}`);
-
-    setActiveCard(nextCard);
+    
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
-    
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
-    // 서버에 다음 복습 일자를 포함하여 동기화 큐에 푸시
-    pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
-    addLog(`✅ 학습 완료 (ID:${currentId})`);
+    pushToQueue('ANSWER', { 
+        card_id: currentId, 
+        is_correct: wrongCount === 0, 
+        clear_time: finalTime, 
+        next_review: nextReviewDate.toISOString() 
+    });
     flushQueue();
-  };
 
-  const handleCloseModal = () => {
-    // 💡 [수정] 종료 강제화: 어떤 경우에도 일단 모달을 닫고 봅니다.
-    isClosingRef.current = true;
+    // 4. 모달 종료 로직 (강제 언마운트)
+    localStorage.removeItem(`blankd_progress_${currentId}`);
+    isClosingRef.current = false; // 플래그 초기화
     
-    if (activeCard) {
-      const currentId = activeCard.id;
-      const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices));
-      setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
-      pushToQueue('MEMO', { id: currentId, memo: newMemo });
-      flushQueue();
-    }
+    const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
+        const cA = a.card_content || ""; const cB = b.card_content || "";
+        return parseInt((cA.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10) - parseInt((cB.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
+    });
     
-    // 상태 초기화
-    setActiveCard(null);
-    setCurrentBlankIdx(0);
-    setAnswerInput("");
-    setInputStatus('idle');
+    const nextCard = folderCards[folderCards.findIndex(c => Number(c.id) === Number(currentId)) + 1] || null;
+    
+    setActiveCard(nextCard);
+    if (!nextCard) {
+        setCurrentBlankIdx(0);
+        setAnswerInput("");
+        setInputStatus('idle');
+    }
   };
-
-  useEffect(() => {
-    if (activeCard && currentBlankIdx < blanks.length) {
-      const interval = setInterval(() => {
-        const diff = (Date.now() - startTime) / 1000; 
-        setElapsed(diff);
-        if (diff >= totalTimeLimit) { 
-          clearInterval(interval); 
-          addLog("⏰ 시간 초과! 강제 종료를 실행합니다.");
-          // 💡 [수정] finishCard() 호출 대신 강제 초기화 후 닫기
-          setActiveCard(null); 
-        }
-      }, 100);
-      return () => clearInterval(interval);
-    }
-  }, [activeCard, currentBlankIdx, blanks.length, startTime, totalTimeLimit]);
-
-  useEffect(() => {
-    if (inputStatus === 'idle' && blanks[currentBlankIdx] && answerInput) {
-      const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
-      const actual = answerInput.replace(/\s+/g, '').toLowerCase();
-      if (expected === actual) handleSequentialInput(actual); 
-    }
-  }, [answerInput, inputStatus, blanks, currentBlankIdx]);
 
   const handleSequentialInput = (overrideInput?: string | any) => {
     if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
