@@ -70,24 +70,13 @@ export const EnhanceTab = ({ categories, savedCards, colCount, viewMode, setActi
                 const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
                 return origIdA - origIdB;
             }).map((card: any) => {
+                // 💡 EnhanceTab.tsx 내부의 .map() 함수 안
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-                // 💡 [핵심 수정] 1. 본문에서 ORIG_ID를 정확히 추출합니다.
-                const origMatch = card.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
-                const origId = origMatch ? parseInt(origMatch[1], 10) : null;
-                // 💡 [핵심 수정] 2. categories DB에서 해당 ID와 정확히 일치하는 데이터만 가져옵니다.
-                // (이전 조항의 정보를 가져오지 못하도록 강제합니다)
-                const matchedCategory = safeCategories.find((c: any) => Number(c.id) === origId);
-                let displayTitle = "제목 없음";
-                
-                if (matchedCategory) {
-                    // 만들기 탭에서 사용하는 것과 동일한 방식으로 제목 추출
-                    const rawTitle = matchedCategory.title || "";
-                    // [법] 등의 태그 제거 및 깔끔하게 정리
-                    displayTitle = rawTitle.replace(/\[.*?\]/g, '').trim();
-                } else {
-                    // ID 매칭 실패 시 방어 코드
-                    displayTitle = cleanContent.split('\n')[0].replace(/\[.*?\]/g, '').trim();
-                }
+
+                // [핵심] 카드 본문 첫 줄을 그대로 읽어와서 [법] 태그만 지우고 띄웁니다.
+                // DB 데이터가 이미 완벽하므로, 다른 로직은 다 무시합니다.
+                let firstLine = cleanContent.split('\n')[0] || "제목 없음";
+                let displayTitle = firstLine.replace(/\[.*?\]/g, '').trim(); 
 
                 const { body } = formatCardText(cleanContent);
 
