@@ -1,3 +1,29 @@
+@api_bp.route('/save-card', methods=['POST'])
+def save_card():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        # 💡 프론트엔드에서 넘어오는 title을 받습니다. (없으면 본문 첫 줄을 기본값으로)
+        title = data.get('title', '제목 없음') 
+        card_content = data.get('card_content')
+        answer_text = data.get('answer_text')
+        folder_name = data.get('folder_name', '기본 폴더')
+        memo = data.get('memo', '')
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 💡 스키마에 title 컬럼이 추가되어 있다고 가정하고 INSERT문을 수정했습니다.
+        # 만약 스키마에 title이 없다면 ALTER TABLE cards ADD COLUMN title TEXT; 를 먼저 실행하세요.
+        cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo, title) 
+                          VALUES (?, ?, ?, ?, ?, 0, ?, 'OWNED', NULL, ?, ?, ?)''', 
+                          (wallet_address, 0, card_content, answer_text, '[]', get_next_review_time(0), folder_name, memo, title))
+        
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "카드 저장 완료"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 from flask import Blueprint, request, jsonify
 import sqlite3
 import threading
@@ -821,6 +847,8 @@ def save_card():
     try:
         data = request.json
         wallet_address = data.get('wallet_address')
+        # 💡 프론트엔드에서 넘어오는 title을 받습니다. (없으면 본문 첫 줄을 기본값으로)
+        title = data.get('title', '제목 없음') 
         card_content = data.get('card_content')
         answer_text = data.get('answer_text')
         folder_name = data.get('folder_name', '기본 폴더')
@@ -828,14 +856,18 @@ def save_card():
         
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo) 
-                          VALUES (?, ?, ?, ?, ?, 0, ?, 'OWNED', NULL, ?, ?)''', 
-                          (wallet_address, 0, card_content, answer_text, '[]', get_next_review_time(0), folder_name, memo))
+        
+        # 💡 스키마에 title 컬럼이 추가되어 있다고 가정하고 INSERT문을 수정했습니다.
+        # 만약 스키마에 title이 없다면 ALTER TABLE cards ADD COLUMN title TEXT; 를 먼저 실행하세요.
+        cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo, title) 
+                          VALUES (?, ?, ?, ?, ?, 0, ?, 'OWNED', NULL, ?, ?, ?)''', 
+                          (wallet_address, 0, card_content, answer_text, '[]', get_next_review_time(0), folder_name, memo, title))
+        
         conn.commit()
         conn.close()
         return jsonify({"message": "카드 저장 완료"}), 200
     except Exception as e:
-        return jsonify({"error": "저장 실패"}), 500
+        return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/my-cards')
 def get_my_cards():
