@@ -289,22 +289,20 @@ function MainApp() {
       }
     }
   }, [activeCard]);
+
+  // 💡 [핵심 반영] 안키 스마트 복습 알고리즘
   const finishCard = () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
-    
-    // 1. [핵심] 통계 상태 업데이트를 가장 먼저 수행
-    statsRef.current.filled = (statsRef.current.filled || 0) + 1;
-    const wrongArr = Array.from(statsRef.current.wrongIndices);
-    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
-
-    // 2. 안키 알고리즘 계산 (상태 업데이트 반영)
     const currentId = activeCard.id;
     const currentFolder = activeCard.folder_name;
     const finalTime = elapsed;
-    const totalBlanks = blanksRef.current.length;
-    const wrongCount = wrongArr.length;
+    const wrongArr = Array.from(statsRef.current.wrongIndices);
     
+    const wrongCount = wrongArr.length;
+    const totalBlanks = blanksRef.current.length;
+
+    // E-Factor(쉽기 정도) 계산 점수
     let quality = 5;
     if (totalBlanks > 0 && wrongCount > 0) {
       const wrongRatio = wrongCount / totalBlanks;
@@ -318,37 +316,64 @@ function MainApp() {
     if (easiness < 1.3) easiness = 1.3;
     localStorage.setItem(`blankd_factor_${currentId}`, easiness.toString());
 
-    let daysInterval = quality < 3 ? 1 : (statsRef.current.filled === 1 ? 1 : (statsRef.current.filled === 2 ? 4 : Math.ceil((statsRef.current.filled - 1) * easiness)));
+    let daysInterval = 1;
+    const currentRepetitions = statsRef.current.filled || 1;
+
+    if (quality < 3) {
+      daysInterval = 1;
+    } else {
+      if (currentRepetitions === 1) daysInterval = 1;
+      else if (currentRepetitions === 2) daysInterval = 4;
+      else daysInterval = Math.ceil((currentRepetitions - 1) * easiness);
+    }
+
     const nextReviewDate = new Date();
     nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
     
-    // 3. DB 및 상태 저장 (강제 동기화)
-    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
-    pushToQueue('MEMO', { id: currentId, memo: newMemo });
-    pushToQueue('ANSWER', { card_id: currentId, is_correct: wrongCount === 0, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
-    addLog(`✅ 학습 완료 [${statsRef.current.filled}회독] (ID:${currentId})`);
-    flushQueue();
+    addLog(`📝 [안키 진단] 완독! 오답:${wrongCount}/${totalBlanks} | 쉽기:${easiness.toFixed(2)} | 복습:${daysInterval}일후`);
 
-    // 4. 모달 종료 로직 (안전장치)
-    localStorage.removeItem(`blankd_progress_${currentId}`);
-    
+    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+    const isCorrect = wrongCount === 0;
+    // 💡 [수정] DB 규격인 card_content를 안전하게 읽어오고, ID 비교 시 숫자형으로 강제 변환하여 매칭합니다.
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
         const contentA = a.card_content || a.content || "";
         const contentB = b.card_content || b.content || "";
-        return parseInt((contentA.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10) - parseInt((contentB.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
+        const origIdA = parseInt((contentA.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
+        const origIdB = parseInt((contentB.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
+        return origIdA - origIdB;
     });
-    
     const currentIdx = folderCards.findIndex(c => Number(c.id) === Number(currentId));
-    if (folderCards[currentIdx + 1]) {
-      setActiveCard(folderCards[currentIdx + 1]);
-      isClosingRef.current = false;
-    } else {
-      setActiveCard(null);
-      setCurrentBlankIdx(0);
-      setAnswerInput("");
-      setInputStatus('idle');
-      isClosingRef.current = false;
+    const nextCard = folderCards[currentIdx + 1] || null;
+
+    localStorage.removeItem(`blankd_progress_${currentId}`);
+
+    setActiveCard(nextCard);
+    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
+    
+    pushToQueue('MEMO', { id: currentId, memo: newMemo });
+    // 서버에 다음 복습 일자를 포함하여 동기화 큐에 푸시
+    pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
+    addLog(`✅ 학습 완료 (ID:${currentId})`);
+    flushQueue();
+  };
+
+  const handleCloseModal = () => {
+    // 💡 [수정] 종료 강제화: 어떤 경우에도 일단 모달을 닫고 봅니다.
+    isClosingRef.current = true;
+    
+    if (activeCard) {
+      const currentId = activeCard.id;
+      const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices));
+      setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
+      pushToQueue('MEMO', { id: currentId, memo: newMemo });
+      flushQueue();
     }
+    
+    // 상태 초기화
+    setActiveCard(null);
+    setCurrentBlankIdx(0);
+    setAnswerInput("");
+    setInputStatus('idle');
   };
 
   useEffect(() => {
