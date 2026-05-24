@@ -78,11 +78,15 @@ export const EnhanceTab = ({ categories, savedCards, colCount, viewMode, setActi
                 const origId = origMatch ? parseInt(origMatch[1], 10) : null;
                 const matchedCategory = safeCategories.find((c: any) => Number(c.id) === origId);
 
-                let displayTitle = matchedCategory 
-                  ? matchedCategory.title.replace(/\[.*?\]/g, '').trim() 
-                    : card.content.match(/제\s*\d+\s*조.*?/)?.[0]?.replace(/[\[\]]/g, '') || "제목 없음"; 
-                    // 💡 ID 매칭이 안 되면 본문에서 제XX조 패턴을 찾아 제목으로 띄움
+                // 💡 진단 코드: 브라우저 개발자 도구(F12) -> 콘솔 창을 보세요!
+                console.log(`[진단] 카드ID: ${card.id} | 추적중인ORIG_ID: ${origId} | 매칭성공여부: ${!!matchedCategory}`);
+                if (!matchedCategory && origId) {
+                    console.warn(`[범인] ID ${origId}는 categories DB에 존재하지 않습니다!`);
+                }
 
+                let displayTitle = matchedCategory 
+                    ? matchedCategory.title.replace(/\[.*?\]/g, '').trim() 
+                    : "제목 없음";
 
                 const { body } = formatCardText(cleanContent);
 
