@@ -334,12 +334,15 @@ function MainApp() {
 
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     const isCorrect = wrongCount === 0;
+    // 💡 [수정] DB 규격인 card_content를 안전하게 읽어오고, ID 비교 시 숫자형으로 강제 변환하여 매칭합니다.
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
-        const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
-        const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
+        const contentA = a.card_content || a.content || "";
+        const contentB = b.card_content || b.content || "";
+        const origIdA = parseInt((contentA.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
+        const origIdB = parseInt((contentB.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
         return origIdA - origIdB;
     });
-    const currentIdx = folderCards.findIndex(c => c.id === currentId);    
+    const currentIdx = folderCards.findIndex(c => Number(c.id) === Number(currentId));
     const nextCard = folderCards[currentIdx + 1] || null;
 
     localStorage.removeItem(`blankd_progress_${currentId}`);
