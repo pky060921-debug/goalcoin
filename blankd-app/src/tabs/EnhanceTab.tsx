@@ -78,21 +78,9 @@ export const EnhanceTab = ({ categories, savedCards, colCount, viewMode, setActi
                 const origId = origMatch ? parseInt(origMatch[1], 10) : null;
                 const matchedCategory = safeCategories.find((c: any) => Number(c.id) === origId);
 
-                let displayTitle = "제목 없음";
-                if (matchedCategory) {
-                    // 예: "[법 ] 제 82조 과 태 료 " -> "[법 ] 제 82조", "과 태 료" 분리
-                    const raw = matchedCategory.title.replace(/\[.*?\]/g, '').trim(); // "제 82조 과 태 료"
-                    const match = raw.match(/(제\s*\d+\s*조(?:의\s*\d+)?)\s*(.*)/); // 1번 그룹(제82조), 2번 그룹(과태료)
-    
-                    if (match) {
-                        displayTitle = `${match[1]} ${match[2]}`; // "제82조 과태료" 형태로 조합
-                    } else {
-                        displayTitle = raw;
-                    }
-                } else {
-                    // 매칭 실패 시 원본 첫 줄
-                    displayTitle = cleanContent.split('\n')[0].replace(/\[.*?\]/g, '').trim();
-                }
+                let displayTitle = matchedCategory 
+                    ? matchedCategory.title.replace(/\[.*?\]/g, '').trim() 
+                    : "제목 없음";
 
                 const { body } = formatCardText(cleanContent);
 
