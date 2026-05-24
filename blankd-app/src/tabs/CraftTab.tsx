@@ -319,8 +319,10 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           </svg>
         </div>
         
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 relative z-10">
-          <div>
+        <div className="flex flex-row justify-between items-start w-full gap-2">
+          <div className={`${titleColor} font-bold text-[12px] sm:text-[14px] leading-snug flex-1`}>
+            {cat.title || cat.category_name || "제목 없음"}
+          </div>
             <h2 className="text-xl sm:text-2xl font-black mb-1 sm:mb-2 text-white drop-shadow-md flex items-center gap-2">
               법령 자동 분리 엔진
               {isAiLoading && <span className="animate-spin text-amber-500">⚙️</span>}
