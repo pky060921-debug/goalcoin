@@ -10,8 +10,7 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-export const EnhanceTab = ({ categories, savedCards, colCount, viewMode, setActiveCard, handleDeleteCard }: any) => {
-  const safeCategories = Array.isArray(categories) ? categories : [];
+export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
@@ -70,17 +69,17 @@ export const EnhanceTab = ({ categories, savedCards, colCount, viewMode, setActi
                 const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
                 return origIdA - origIdB;
             }).map((card: any) => {
-                // 💡 [최종 수정] 복잡한 파싱 로직 다 지우고, 오직 DB 매칭만 사용합니다.
+          
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-
-                // 💡 [핵심 수정] DB의 title(예: "[법 ] 제 82조 과 태 료 ")을 조항번호와 제목으로 분리합니다.
-                const origMatch = card.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
-                const origId = origMatch ? parseInt(origMatch[1], 10) : null;
-                const matchedCategory = safeCategories.find((c: any) => Number(c.id) === origId);
-
-                let displayTitle = matchedCategory 
-                    ? matchedCategory.title.replace(/\[.*?\]/g, '').trim() 
-                    : "제목 없음";
+                
+                // 💡 [수정] 본문 첫 줄에서 '[법]' 태그만 지우고 제목으로 사용합니다!
+                let displayTitle = (cleanContent.split('\n')[0] || "")
+                    .replace(/\[.*?\]/g, '')         // [법], [령] 태그 제거
+                    .replace(/\(\s*내용\s*\)/g, '')  // (내용) 오염 제거
+                    .replace(/내용/g, '')            // 내용 글자 제거
+                    .trim();
+                
+                if (!displayTitle) displayTitle = "제목 없음";
 
                 const { body } = formatCardText(cleanContent);
 
