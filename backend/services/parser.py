@@ -192,7 +192,7 @@ def parse_html_3col_law(html_content):
                     article_num_str = f"제{main_n}조" + (f"의{ext_n}" if ext_n else "")
                     current_law_num = article_num_str
                 else: 
-                    article_num_str = current_law_num
+                    article_num_str = ""
                 
                 # 💡 [수정] 괄호 유무와 관계없이 첫 줄의 조항 번호 뒷부분을 전부 제목으로 가져옵니다.
                 first_line = clean_content.split('\n')[0]
