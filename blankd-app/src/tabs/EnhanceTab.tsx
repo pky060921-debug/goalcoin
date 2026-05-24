@@ -71,20 +71,24 @@ export const EnhanceTab = ({ categories, savedCards, colCount, viewMode, setActi
                 return origIdA - origIdB;
             }).map((card: any) => {
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-                
-                // 💡 만들기 탭의 DB(categories)에서 원본 제목을 100% 동일하게 가져옵니다!
+                // 💡 [핵심 수정] 1. 본문에서 ORIG_ID를 정확히 추출합니다.
                 const origMatch = card.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
                 const origId = origMatch ? parseInt(origMatch[1], 10) : null;
-                const matchedCategory = safeCategories.find((c: any) => c.id === origId);
-                
+                // 💡 [핵심 수정] 2. categories DB에서 해당 ID와 정확히 일치하는 데이터만 가져옵니다.
+                // (이전 조항의 정보를 가져오지 못하도록 강제합니다)
+                const matchedCategory = safeCategories.find((c: any) => Number(c.id) === origId);
                 let displayTitle = "제목 없음";
+                
                 if (matchedCategory) {
-                    const rawTitle = matchedCategory.title || matchedCategory.category_name || (matchedCategory.content && matchedCategory.content.split('\n')[0]) || "";
-                    displayTitle = rawTitle.replace(/\[.*?\]/g, '').trim() || "제목 없음";
+                    // 만들기 탭에서 사용하는 것과 동일한 방식으로 제목 추출
+                    const rawTitle = matchedCategory.title || "";
+                    // [법] 등의 태그 제거 및 깔끔하게 정리
+                    displayTitle = rawTitle.replace(/\[.*?\]/g, '').trim();
                 } else {
-                    // 원본 DB를 못 찾았을 때의 안전장치
-                    displayTitle = cleanContent.split('\n')[0].replace(/\[.*?\]/g, '').trim() || "제목 없음";
+                    // ID 매칭 실패 시 방어 코드
+                    displayTitle = cleanContent.split('\n')[0].replace(/\[.*?\]/g, '').trim();
                 }
+
                 const { body } = formatCardText(cleanContent);
 
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
