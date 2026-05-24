@@ -70,14 +70,23 @@ export const EnhanceTab = ({ categories, savedCards, colCount, viewMode, setActi
                 const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
                 return origIdA - origIdB;
             }).map((card: any) => {
-                // 💡 EnhanceTab.tsx 내부의 .map() 함수 안
+                // 💡 [최종 수정] 복잡한 파싱 로직 다 지우고, 오직 DB 매칭만 사용합니다.
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
 
-                // [핵심] 카드 본문 첫 줄을 그대로 읽어와서 [법] 태그만 지우고 띄웁니다.
-                // DB 데이터가 이미 완벽하므로, 다른 로직은 다 무시합니다.
-                const firstLine = card.content.split('\n')[0] || "제목 없음"
-                let displayTitle = firstLine.replace(/\[.*?\]/g, '').trim();
+                // 카드에 적힌 ORIG_ID를 확인합니다.
+                const origMatch = card.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
+                const origId = origMatch ? parseInt(origMatch[1], 10) : null;
 
+                // 만들기 탭의 원본 DB(safeCategories)에서 ID가 일치하는 항목을 찾습니다.
+                const matchedCategory = safeCategories.find((c: any) => Number(c.id) === origId);
+
+                // 찾았다면 그 제목을 쓰고, 못 찾았다면 본문 첫 줄을 씁니다.
+                let displayTitle = matchedCategory 
+                    ? matchedCategory.title.replace(/\[.*?\]/g, '').trim() // 태그 제거 후 깔끔한 제목만!
+                    : cleanContent.split('\n')[0].replace(/\[.*?\]/g, '').trim();
+
+                if (!displayTitle || displayTitle === "제목 없음") displayTitle = "제목 없음";
+          
                 const { body } = formatCardText(cleanContent);
 
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
