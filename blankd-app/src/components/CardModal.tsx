@@ -10,8 +10,7 @@ export const CardModal = ({
   inputStatus, 
   handleSequentialInput, 
   renderContent, 
-  onClose,
-  handleReviewSelect // 💡 [추가] 복습 선택 기능 추가
+  onClose
 }: any) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -31,16 +30,12 @@ export const CardModal = ({
           <div className={`h-full transition-all duration-100 ease-linear ${progressPercent > 80 ? 'bg-red-500' : 'bg-teal-500'}`} style={{ width: `${progressPercent}%` }} />
         </div>
         
-        {/* 💡 [수정] 모달 상단의 중복 제목을 삭제하고, 안키 복습 선택 UI(다시/어려움/보통/쉬움)를 삽입했습니다. */}
-        <div className="flex justify-between items-center border-b border-white/10 p-3 bg-black/40">
-            <div className="flex gap-2 items-center">
-                <span className="text-[10px] text-white/40 flex items-center mr-2 uppercase tracking-widest font-bold">복습 선택:</span>
-                <button onClick={() => handleReviewSelect(1)} className="px-3 py-1 text-[11px] font-bold bg-red-900/30 text-red-400 border border-red-500/30 hover:bg-red-900/60 transition-all rounded-sm shadow-sm">다시 (1일)</button>
-                <button onClick={() => handleReviewSelect(4)} className="px-3 py-1 text-[11px] font-bold bg-orange-900/30 text-orange-400 border border-orange-500/30 hover:bg-orange-900/60 transition-all rounded-sm shadow-sm">어려움 (4일)</button>
-                <button onClick={() => handleReviewSelect(7)} className="px-3 py-1 text-[11px] font-bold bg-teal-900/30 text-teal-400 border border-teal-500/30 hover:bg-teal-900/60 transition-all rounded-sm shadow-sm">보통 (7일)</button>
-                <button onClick={() => handleReviewSelect(14)} className="px-3 py-1 text-[11px] font-bold bg-blue-900/30 text-blue-400 border border-blue-500/30 hover:bg-blue-900/60 transition-all rounded-sm shadow-sm">쉬움 (14일)</button>
-            </div>
-            <button onClick={onClose} className="text-white/50 hover:text-white px-2 font-bold transition-colors">✕</button>
+        {/* 💡 [수정] 복습 UI를 삭제하고 조항 제목만 깔끔하게 표시 */}
+        <div className="flex justify-between items-center border-b border-white/10 p-4 bg-black/40">
+            <span className="text-amber-400 font-bold text-[14px] leading-tight truncate">
+                {activeCard.title || "제목 없음"}
+            </span>
+            <button onClick={onClose} className="text-white/50 hover:text-white px-2 font-bold transition-colors text-lg">✕</button>
         </div>
         
         <div className="flex-1 overflow-y-auto p-4">
