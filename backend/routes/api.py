@@ -729,7 +729,10 @@ def upload_pdf():
                 doc = fitz.open(stream=file.read(), filetype="pdf")
                 for page in doc: raw_text += page.get_text()
             
-            raw_text = re.sub(r'[<〈]\s*(?:신설|개정|삭제|단서신설|전문개정|본조신설|일부개정)[\s\S]*?[>〉]', '', raw_text)
+            # 💡 [초강력 정규식 적용] 모든 종류의 괄호(<, 〈, ＜, [)와 줄바꿈을 완벽하게 추적해서 삭제합니다.
+            raw_text = re.sub(r'[<〈＜\[]\s*(?:신설|개정|삭제|단서신설|전문개정|본조신설|일부개정)[\s\S]*?[>〉＞\]]', '', raw_text)
+        
+        # 종전제00조 등 다른 불필요한 메타데이터 삭제 (기존 유지)
             raw_text = re.sub(r'[\[［【]\s*(?:전문개정|본조신설|제목개정|종전제\d+조는|제\d+조에서 이동)[\s\S]*?[\]］】]', '', raw_text)
         
             cleaned_text = clean_korean_law_text(raw_text)
