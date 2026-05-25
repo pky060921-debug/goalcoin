@@ -530,11 +530,11 @@ function MainApp() {
           {isLoggedIn && (
             <div className="sm:hidden flex items-center gap-2 font-mono">
               <div className="bg-teal-950/40 border border-teal-500/30 px-2 py-1 rounded-sm flex flex-col items-end">
-                <span className="text-[8px] text-teal-400/70">Total Rounds</span>
+                <span className="text-[8px] text-teal-400/70">전체회독</span>
                 <span className="text-xs font-bold text-teal-300">{minFilledCount}</span>
               </div>
               <div className="bg-indigo-900/40 border border-indigo-500/30 px-2 py-1 rounded-sm flex flex-col items-end">
-                <span className="text-[8px] text-indigo-400/70">Pass Rate</span>
+                <span className="text-[8px] text-indigo-400/70">합격률</span>
                 <span className="text-xs font-bold text-indigo-300">{passProbability}%</span>
               </div>
             </div>
@@ -550,11 +550,11 @@ function MainApp() {
             </nav>
             <div className="hidden sm:flex items-center gap-3 font-mono">
               <div className="border border-teal-500/30 bg-teal-950/20 px-3 py-1.5 rounded-sm flex flex-col items-end">
-                <span className="text-[9px] text-teal-400/70 uppercase tracking-wider">Total Rounds</span>
+                <span className="text-[9px] text-teal-400/70 tracking-wider">전체회독</span>
                 <span className="text-[14px] font-bold text-teal-300">{minFilledCount} 회독</span>
               </div>
               <div className="border border-indigo-500/30 bg-indigo-900/20 px-3 py-1.5 rounded-sm flex flex-col items-end">
-                <span className="text-[9px] text-indigo-400/70 uppercase tracking-wider">Pass Rate</span>
+                <span className="text-[9px] text-indigo-400/70 tracking-wider">합격률</span>
                 <span className="text-[14px] font-bold text-indigo-300">{passProbability}%</span>
               </div>
             </div>
