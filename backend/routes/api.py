@@ -729,9 +729,9 @@ def upload_pdf():
                 doc = fitz.open(stream=file.read(), filetype="pdf")
                 for page in doc: raw_text += page.get_text()
             
-            raw_text = re.sub(r'<(?:신설|개정|삭제|단서신설|전문개정|본조신설)[^>]*>', '', raw_text)
-            raw_text = re.sub(r'\[(?:전문개정|본조신설|제목개정|종전제\d+조는|제\d+조에서 이동)[^\]]*\]', '', raw_text)
-            
+            raw_text = re.sub(r'[<〈]\s*(?:신설|개정|삭제|단서신설|전문개정|본조신설|일부개정)[\s\S]*?[>〉]', '', raw_text)
+            raw_text = re.sub(r'[\[［【]\s*(?:전문개정|본조신설|제목개정|종전제\d+조는|제\d+조에서 이동)[\s\S]*?[\]］】]', '', raw_text)
+        
             cleaned_text = clean_korean_law_text(raw_text)
             blocks = parse_html_3col_law(cleaned_text)
             
