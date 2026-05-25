@@ -10,7 +10,8 @@ export const CardModal = ({
   inputStatus, 
   handleSequentialInput, 
   renderContent, 
-  onClose
+  onClose,
+  handleReviewSelect // 💡 [추가] 복습 선택 기능 추가
 }: any) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -30,10 +31,10 @@ export const CardModal = ({
           <div className={`h-full transition-all duration-100 ease-linear ${progressPercent > 80 ? 'bg-red-500' : 'bg-teal-500'}`} style={{ width: `${progressPercent}%` }} />
         </div>
         
-        {/* 💡 [수정] 복습 UI를 삭제하고 조항 제목만 깔끔하게 표시 */}
+        {/* 💡 단 하나만 출력되는 제목 영역 */}
         <div className="flex justify-between items-center border-b border-white/10 p-4 bg-black/40">
             <span className="text-amber-400 font-bold text-[14px] leading-tight truncate">
-                {activeCard.title || "제목 없음"}
+                {displayTitle}
             </span>
             <button onClick={onClose} className="text-white/50 hover:text-white px-2 font-bold transition-colors text-lg">✕</button>
         </div>
