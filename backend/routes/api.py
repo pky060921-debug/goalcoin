@@ -831,6 +831,17 @@ def save_card():
         
         conn = get_db_connection()
         cursor = conn.cursor()
+        if card_id:
+            # 💡 card_id가 있으면 기존 데이터를 수정(UPDATE)
+            cursor.execute('''UPDATE cards SET card_content=?, answer_text=?, folder_name=?, memo=? 
+                              WHERE id=? AND wallet_address=?''', 
+                              (card_content, answer_text, folder_name, memo, card_id, wallet_address))
+        else:
+            # 💡 card_id가 없으면 신규 생성(INSERT)
+            cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo) 
+                              VALUES (?, 0, ?, ?, '[]', ?, 'OWNED', NULL, ?, ?)''', 
+                              (wallet_address, card_content, answer_text, get_next_review_time(0), folder_name, memo))
+        
         # 💡 title 컬럼 없이 기본 데이터만 INSERT 합니다.
         cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo) 
                           VALUES (?, ?, ?, ?, ?, 0, ?, 'OWNED', NULL, ?, ?)''', 
