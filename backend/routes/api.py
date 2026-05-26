@@ -820,25 +820,31 @@ def split_category():
         return jsonify({"error": "분할 실패"}), 500
 
 @api_bp.route('/save-card', methods=['POST'])
+@api_bp.route('/save-card', methods=['POST'])
 def save_card():
     try:
         data = request.json
         wallet_address = data.get('wallet_address')
+        card_id = data.get('card_id')
         card_content = data.get('card_content')
         answer_text = data.get('answer_text')
         folder_name = data.get('folder_name', '기본 폴더')
         memo = data.get('memo', '')
         
+        # 지갑 주소 누락 방지
+        if not wallet_address:
+            return jsonify({"error": "지갑 주소가 없습니다."}), 400
+
         conn = get_db_connection()
         cursor = conn.cursor()
+        
         if card_id:
-            # 💡 card_id가 있으면 기존 데이터를 수정(UPDATE)
+            # 💡 기존 ID가 있으면 덮어쓰기(UPDATE)
             cursor.execute('''UPDATE cards SET card_content=?, answer_text=?, folder_name=?, memo=? 
                               WHERE id=? AND wallet_address=?''', 
                               (card_content, answer_text, folder_name, memo, card_id, wallet_address))
-
-        # 💡 [수정됨] 11개의 컬럼과 11개의 값이 정확히 일치하도록 복구
         else:
+            # 💡 기존 ID가 없으면 신규 생성(INSERT)
             cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo) 
                               VALUES (?, 0, ?, ?, '[]', 0, ?, 'OWNED', NULL, ?, ?)''', 
                               (wallet_address, card_content, answer_text, get_next_review_time(0), folder_name, memo))
@@ -846,9 +852,12 @@ def save_card():
         conn.commit()
         conn.close()
         return jsonify({"message": "카드 저장 완료"}), 200
+        
     except Exception as e:
-        return jsonify({"error": "저장 실패"}), 500
-
+        # 💡 [핵심] "저장 실패"라고 숨기지 않고, 데이터베이스의 진짜 에러를 터미널과 프론트로 보냅니다.
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"DB 에러: {str(e)}"}), 500
 @api_bp.route('/my-cards')
 def get_my_cards():
     try:
