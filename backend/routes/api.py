@@ -836,16 +836,13 @@ def save_card():
             cursor.execute('''UPDATE cards SET card_content=?, answer_text=?, folder_name=?, memo=? 
                               WHERE id=? AND wallet_address=?''', 
                               (card_content, answer_text, folder_name, memo, card_id, wallet_address))
+
+        # 💡 [수정됨] 11개의 컬럼과 11개의 값이 정확히 일치하도록 복구
         else:
-            # 💡 card_id가 없으면 신규 생성(INSERT)
             cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo) 
-                              VALUES (?, 0, ?, ?, '[]', ?, 'OWNED', NULL, ?, ?)''', 
+                              VALUES (?, 0, ?, ?, '[]', 0, ?, 'OWNED', NULL, ?, ?)''', 
                               (wallet_address, card_content, answer_text, get_next_review_time(0), folder_name, memo))
         
-        # 💡 title 컬럼 없이 기본 데이터만 INSERT 합니다.
-        cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo) 
-                          VALUES (?, ?, ?, ?, ?, 0, ?, 'OWNED', NULL, ?, ?)''', 
-                          (wallet_address, 0, card_content, answer_text, '[]', get_next_review_time(0), folder_name, memo))
         conn.commit()
         conn.close()
         return jsonify({"message": "카드 저장 완료"}), 200
