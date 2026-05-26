@@ -36,16 +36,34 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
   const [recentEnhanceId, setRecentEnhanceId] = useState<number | null>(null);
   const [recentEnhanceTitle, setRecentEnhanceTitle] = useState("");
   
+// 💡 [수정할 useEffect 부분]
   useEffect(() => {
-    const cId = localStorage.getItem('blankd_last_crafted_id');
-    const cTitle = localStorage.getItem('blankd_last_crafted_title');
-    const eId = localStorage.getItem('blankd_last_enhanced_id');
-    const eTitle = localStorage.getItem('blankd_last_enhanced_title');
+    // 함수로 분리하여 데이터를 가져오게 합니다.
+    const loadResumeData = () => {
+      const cId = localStorage.getItem('blankd_last_crafted_id');
+      const cTitle = localStorage.getItem('blankd_last_crafted_title');
+      const eId = localStorage.getItem('blankd_last_enhanced_id');
+      const eTitle = localStorage.getItem('blankd_last_enhanced_title');
 
-    if (cId) setRecentCraftId(parseInt(cId, 10));
-    setRecentCraftTitle(cTitle || "");
-    if (eId) setRecentEnhanceId(parseInt(eId, 10));
-    setRecentEnhanceTitle(eTitle || "");
+      if (cId) setRecentCraftId(parseInt(cId, 10));
+      setRecentCraftTitle(cTitle || "");
+      if (eId) setRecentEnhanceId(parseInt(eId, 10));
+      setRecentEnhanceTitle(eTitle || "");
+    };
+
+    // 1. 처음 렌더링 될 때 실행
+    loadResumeData();
+
+    // 2. 다른 탭이나 창에서 로컬스토리지가 변할 때 즉시 감지해서 화면 업데이트
+    window.addEventListener('storage', loadResumeData);
+    
+    // 3. 카드 데이터(savedCards) 갱신이 완료되었을 때 한 번 더 확실하게 체크
+    const timeoutId = setTimeout(() => loadResumeData(), 500);
+
+    return () => {
+      window.removeEventListener('storage', loadResumeData);
+      clearTimeout(timeoutId);
+    };
   }, [savedCards]);
 
   const sortedFolders = Object.keys(folderStats).sort();
