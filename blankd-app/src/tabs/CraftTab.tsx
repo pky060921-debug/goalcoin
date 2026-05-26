@@ -96,6 +96,18 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [isEraserMode, setIsEraserMode] = useState(false);
   const [isEditingText, setIsEditingText] = useState(false);
   const [editingContent, setEditingContent] = useState("");
+  useEffect(() => {
+    if (expandedId) {
+      const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${expandedId}]]`));
+      if (existingCard) {
+        const parsed = parseCardStats(existingCard.memo);
+        setMemoInput(parsed.text);
+      } else {
+        const targetCat = safeCategories.find((c: any) => c.id === expandedId);
+        setMemoInput(targetCat ? (targetCat.memo || "") : "");
+      }
+    }
+  }, [expandedId, savedCards, safeCategories]);
   const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
   
   const [customStopWords, setCustomStopWords] = useState<string[]>([]);
