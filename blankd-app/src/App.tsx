@@ -189,6 +189,7 @@ function MainApp() {
     }
   };
 
+// 💡 [수정] App.tsx 내부의 handleMakeBlankCard 함수
   const handleMakeBlankCard = async (cat: any, wordsArray: string[], selectedIndices: Set<number>, pageBreaks: Set<number>, memo: string, onComplete: () => void) => {
     let bodyContent = "";
     let answerText = ""; 
@@ -206,27 +207,29 @@ function MainApp() {
     });
     if (isBlanking) bodyContent += " ]";
     
-    // 💡 완벽한 덮어쓰기 로직: 조항의 고유 ID(ORIG_ID)를 기준으로 정확히 일치하는 기존 카드를 찾습니다.
+    // 💡 [핵심] 현재 조항(cat.id)과 연결된 기존 카드가 있는지 찾아서 그 카드 ID를 덮어쓰기용으로 추출합니다!
     const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${cat.id}]]`));
-    
-    if (existingCard) {
-      addLog("🔄 기존 채우기 카드를 찾아 삭제 후 덮어씁니다...");
-      await fetch("https://api.blankd.top/api/delete-card", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: safeAddress, id: existingCard.id })
-      });
-    }
+    const targetCardId = existingCard ? existingCard.id : null; 
 
     const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n[[ORIG_ID:${cat.id}]]`;
     const initialMemo = stringifyCardStats(memo, 0, []);
+    
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
-      body: JSON.stringify({ wallet_address: safeAddress, card_id: cat.id, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo }) 
+      body: JSON.stringify({ 
+          wallet_address: safeAddress, 
+          card_id: targetCardId, // 💡 여기에 카테고리 ID가 아닌 "진짜 카드 ID"가 들어가야 완벽하게 덮어써집니다!
+          card_content: finalCardContent, 
+          answer_text: answerText, 
+          folder_name: cat.folder_name, 
+          memo: initialMemo 
+      }) 
     });
+    
     if (res.ok) {
       localStorage.setItem('blankd_last_crafted_id', cat.id.toString());
       localStorage.setItem('blankd_last_crafted_title', cat.title);
-      addLog("✅ 만들기 완료: 수정된 내용이 채우기에 완벽하게 반영되었습니다.");
+      addLog(targetCardId ? "✅ 덮어쓰기 완료" : "✅ 신규 생성 완료");
       await loadAllData(); 
       onComplete(); 
     }
@@ -618,6 +621,8 @@ function MainApp() {
                 colCount={colCount} 
                 viewMode={viewMode} 
                 setActiveCard={setActiveCard} 
+                setActiveTab={setActiveTab}       {/* 💡 이 줄 추가 */}
+                setExpandedId={setExpandedId}     {/* 💡 이 줄 추가 */}
                 handleDeleteCard={async (id: number) => {
                   if(confirm('삭제하시겠습니까?')){
                     await fetch("https://api.blankd.top/api/delete-card", {
