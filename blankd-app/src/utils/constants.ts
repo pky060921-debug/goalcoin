@@ -98,16 +98,21 @@ export const getStrictTitleOnly = (text: string) => {
 export const getSortNumber = (text?: string) => {
   if (!text) return 999999;
   const str = String(text);
+  
+  // 1. 조항 번호 추출
   const articleMatch = str.match(/제\s*(\d+)\s*조(?:의\s*(\d+))?/);
   let base = 999999;
   if (articleMatch) {
-    base = parseInt(articleMatch[1]);
-    if (articleMatch[2]) base += parseInt(articleMatch[2]) / 1000;
+    base = parseInt(articleMatch[1]) * 1000; // 조항 번호에 가중치
+    if (articleMatch[2]) base += parseInt(articleMatch[2]);
   }
-  let typeScore = 0.0004;
-  if (str.includes('[법]')) typeScore = 0.0001;
-  else if (str.includes('[령]')) typeScore = 0.0002;
-  else if (str.includes('[칙]') || str.includes('[규]')) typeScore = 0.0003;
+
+  // 2. 법/령/칙 점수 (법=0.1, 령=0.2, 칙=0.3) -> 작은 게 앞에 옴
+  let typeScore = 0.4; // 나머지
+  if (str.includes('[법]')) typeScore = 0.1;
+  else if (str.includes('[령]')) typeScore = 0.2;
+  else if (str.includes('[칙]') || str.includes('[규]')) typeScore = 0.3;
+  
   return base + typeScore; 
 };
 
