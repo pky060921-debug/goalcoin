@@ -189,13 +189,14 @@ function MainApp() {
     }
   };
 
-// 💡 [교체] 빈칸 카드 생성 및 덮어쓰기 (인자 개수를 맞춤!)
+// 💡 [수정] 7개의 파라미터로 다시 정확히 맞춥니다!
   const handleMakeBlankCard = async (
     cat: any, 
     wordsArray: string[], 
     selectedIndices: Set<number>, 
     pageBreaks: Set<number>, 
     memo: string, 
+    cardId: any, // 💡 CraftTab에서 넘겨줄 조항 ID를 받습니다.
     onComplete: () => void
   ) => {
     let bodyContent = "";
@@ -214,7 +215,8 @@ function MainApp() {
     });
     if (isBlanking) bodyContent += " ]";
     
-    const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${cat.id}]]`));
+    // 💡 [핵심] 전달받은 cardId(cat.id)를 이용해 기존 카드를 찾아 덮어쓰기!
+    const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${cardId || cat.id}]]`));
     const targetCardId = existingCard ? existingCard.id : null; 
 
     const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n[[ORIG_ID:${cat.id}]]`;
@@ -224,7 +226,7 @@ function MainApp() {
       method: "POST", headers: { "Content-Type": "application/json" }, 
       body: JSON.stringify({ 
           wallet_address: safeAddress, 
-          card_id: targetCardId, // UPDATE용 ID
+          card_id: targetCardId, // 💡 기존 카드 ID가 있으면 UPDATE(덮어쓰기)가 작동합니다!
           card_content: finalCardContent, 
           answer_text: answerText, 
           folder_name: cat.folder_name, 
@@ -240,7 +242,6 @@ function MainApp() {
       onComplete(); 
     }
   };
-
   const handleUpdateMemoBackground = (id: number, memo: string) => {
     setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
     pushToQueue('MEMO', { id, memo });
