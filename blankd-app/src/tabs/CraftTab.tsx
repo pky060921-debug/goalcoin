@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, getStrictTitleOnly, SPLIT_REGEX } from '../utils/constants';
+import { formatCardText, getStrictTitleOnly, SPLIT_REGEX, parseCardStats } from '../utils/constants';
 import { api } from '../services/api';
 
 const getGridClass = (cols: number) => {
