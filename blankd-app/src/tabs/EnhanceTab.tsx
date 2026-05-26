@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, parseCardStats } from '../utils/constants';
+import { formatCardText, parseCardStats, getSortNumber } from '../utils/constants';
 
 const getGridClass = (cols: number) => {
   if(cols === 1) return "md:grid-cols-1";
