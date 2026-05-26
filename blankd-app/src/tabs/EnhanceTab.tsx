@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { formatCardText, parseCardStats } from '../utils/constants';
+import { formatCardText, parseCardStats, getSortNumber } from '../utils/constants';
 
 const getGridClass = (cols: number) => {
   if(cols === 1) return "md:grid-cols-1";
@@ -64,9 +64,17 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
-{safeCards
+            {safeCards
               .filter((c:any) => c && c.content && c.folder_name === folder) // 💡 방어막: 데이터가 확실히 있는 카드만 통과시킵니다.
-              .sort((a:any, b:any) => a.id - b.id)
+              .sort((a:any, b:any) => {
+                // 💡 1차: 내용을 읽고 "제 O 조" 순서대로 똑똑하게 정렬합니다.
+                const numA = getSortNumber(a?.content);
+                const numB = getSortNumber(b?.content);
+                if (numA !== numB) return numA - numB;
+                
+                // 💡 2차: 만약 조항 번호가 없는 일반 카드라면, 그때만 생성 순서(id)를 따릅니다.
+                return (a?.id || 0) - (b?.id || 0);
+              })
               .map((card: any) => {
                 
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
