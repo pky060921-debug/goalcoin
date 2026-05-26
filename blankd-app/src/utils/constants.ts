@@ -124,3 +124,9 @@ export const getGridStyle = (text: string, currentViewMode: string, isExpanded: 
   }
   return {};
 };
+// 💡 조항 번호(제 1조, 제 2조...)를 추출하는 함수를 추가합니다.
+export const getSortNumber = (content: string) => {
+  if (!content) return 9999;
+  const match = content.match(/제\s*(\d+)\s*조/);
+  return match ? parseInt(match[1], 10) : 9999; 
+};
