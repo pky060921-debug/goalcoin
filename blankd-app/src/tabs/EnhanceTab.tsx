@@ -64,9 +64,11 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
-            {safeCards.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((card: any) => {
-            }).map((card: any) => {
-          
+{safeCards
+              .filter((c:any) => c && c.content && c.folder_name === folder) // 💡 방어막: 데이터가 확실히 있는 카드만 통과시킵니다.
+              .sort((a:any, b:any) => a.id - b.id)
+              .map((card: any) => {
+                
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
                 
                 // 💡 [수정] 본문 첫 줄에서 '[법]' 태그만 지우고 제목으로 사용합니다!
@@ -124,8 +126,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                     </button>
                   </div>
                 );
-            })}
-          </div>
+            })}          </div>
         </div>
       ))}
     </div>
