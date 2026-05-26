@@ -196,7 +196,6 @@ function MainApp() {
     selectedIndices: Set<number>, 
     pageBreaks: Set<number>, 
     memo: string, 
-    cardId: any, // 💡 CraftTab이 보내는 cat.id를 받습니다
     onComplete: () => void
   ) => {
     let bodyContent = "";
