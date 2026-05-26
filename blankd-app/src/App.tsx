@@ -189,8 +189,16 @@ function MainApp() {
     }
   };
 
-// 💡 [수정] App.tsx 내부의 handleMakeBlankCard 함수
-  const handleMakeBlankCard = async (cat: any, wordsArray: string[], selectedIndices: Set<number>, pageBreaks: Set<number>, memo: string, onComplete: () => void) => {
+// 💡 [교체] 빈칸 카드 생성 및 덮어쓰기 (인자 개수를 맞춤!)
+  const handleMakeBlankCard = async (
+    cat: any, 
+    wordsArray: string[], 
+    selectedIndices: Set<number>, 
+    pageBreaks: Set<number>, 
+    memo: string, 
+    cardId: any, // 💡 CraftTab이 보내는 cat.id를 받습니다
+    onComplete: () => void
+  ) => {
     let bodyContent = "";
     let answerText = ""; 
     let isBlanking = false;
@@ -207,7 +215,6 @@ function MainApp() {
     });
     if (isBlanking) bodyContent += " ]";
     
-    // 💡 [핵심] 현재 조항(cat.id)과 연결된 기존 카드가 있는지 찾아서 그 카드 ID를 덮어쓰기용으로 추출합니다!
     const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${cat.id}]]`));
     const targetCardId = existingCard ? existingCard.id : null; 
 
@@ -218,7 +225,7 @@ function MainApp() {
       method: "POST", headers: { "Content-Type": "application/json" }, 
       body: JSON.stringify({ 
           wallet_address: safeAddress, 
-          card_id: targetCardId, // 💡 여기에 카테고리 ID가 아닌 "진짜 카드 ID"가 들어가야 완벽하게 덮어써집니다!
+          card_id: targetCardId, // UPDATE용 ID
           card_content: finalCardContent, 
           answer_text: answerText, 
           folder_name: cat.folder_name, 
