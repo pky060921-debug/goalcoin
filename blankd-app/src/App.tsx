@@ -217,8 +217,10 @@ function MainApp() {
     
     // 💡 [핵심 원인 해결] 꼬리표(ORIG_ID)가 없어도, 카드의 첫 시작이 '조항 제목'과 똑같으면 같은 카드로 인식합니다!
     const existingCard = savedCards.find((c: any) => 
-      c.content.includes(`[[ORIG_ID:${cat.id}]]`) || 
-      c.content.trim().startsWith(cat.title.trim())
+      c && c.content && (
+        c.content.includes(`[[ORIG_ID:${cat.id}]]`) || 
+        c.content.trim().startsWith(cat.title.trim())
+      )
     );
     
     // 찾아낸 기존 카드의 ID를 타겟으로 설정합니다.
