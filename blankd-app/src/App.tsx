@@ -189,14 +189,14 @@ function MainApp() {
     }
   };
 
-// 💡 [수정] 7개의 파라미터로 다시 정확히 맞춥니다!
+// 💡 [수정] 옛날에 만든 카드도 완벽하게 찾아서 덮어쓰기!
   const handleMakeBlankCard = async (
     cat: any, 
     wordsArray: string[], 
     selectedIndices: Set<number>, 
     pageBreaks: Set<number>, 
     memo: string, 
-    cardId: any, // 💡 CraftTab에서 넘겨줄 조항 ID를 받습니다.
+    cardId: any, 
     onComplete: () => void
   ) => {
     let bodyContent = "";
@@ -215,8 +215,13 @@ function MainApp() {
     });
     if (isBlanking) bodyContent += " ]";
     
-    // 💡 [핵심] 전달받은 cardId(cat.id)를 이용해 기존 카드를 찾아 덮어쓰기!
-    const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${cardId || cat.id}]]`));
+    // 💡 [핵심 원인 해결] 꼬리표(ORIG_ID)가 없어도, 카드의 첫 시작이 '조항 제목'과 똑같으면 같은 카드로 인식합니다!
+    const existingCard = savedCards.find((c: any) => 
+      c.content.includes(`[[ORIG_ID:${cat.id}]]`) || 
+      c.content.trim().startsWith(cat.title.trim())
+    );
+    
+    // 찾아낸 기존 카드의 ID를 타겟으로 설정합니다.
     const targetCardId = existingCard ? existingCard.id : null; 
 
     const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n[[ORIG_ID:${cat.id}]]`;
@@ -226,7 +231,7 @@ function MainApp() {
       method: "POST", headers: { "Content-Type": "application/json" }, 
       body: JSON.stringify({ 
           wallet_address: safeAddress, 
-          card_id: targetCardId, // 💡 기존 카드 ID가 있으면 UPDATE(덮어쓰기)가 작동합니다!
+          card_id: targetCardId, // 💡 이제 진짜 카드 ID가 전달되어 완벽한 덮어쓰기(UPDATE)가 실행됩니다!
           card_content: finalCardContent, 
           answer_text: answerText, 
           folder_name: cat.folder_name, 
