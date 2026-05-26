@@ -606,7 +606,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                               const currentIdx = folderCats.findIndex(c => c.id === cat.id);
                               const nextCat = folderCats[currentIdx + 1];
                               
-                              handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, cat.id, () => {
+                              handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, () => {
                                   if (nextCat) {
                                       setExpandedId(nextCat.id);
                                   } else {
