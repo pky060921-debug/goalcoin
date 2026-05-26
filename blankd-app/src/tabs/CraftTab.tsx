@@ -331,11 +331,24 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     setSelectedWords(initialSelected);
   };
 
+// 💡 [수정] 조항 아코디언이 열릴 때(수정 모드 등) 기존 카드의 메모와 데이터를 불러옵니다.
   const openCategory = (targetCat: any, bypassToggle = false) => {
     if (isSelectMode) { handleToggleCheck(targetCat.id); return; }
     if (!bypassToggle) setExpandedId(targetCat.id);
+    
+    // 💡 1. 현재 조항과 연결된 기존 생성 카드가 있는지 백엔드 데이터(savedCards)에서 찾습니다.
+    const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${targetCat.id}]]`));
+    
     setPageBreaks(new Set());
-    setMemoInput(targetCat.memo || "");
+    
+    // 💡 2. 기존 카드가 있다면 메모 내용을 추출해서 화면에 세팅합니다.
+    if (existingCard) {
+      const parsed = parseCardStats(existingCard.memo);
+      setMemoInput(parsed.text);
+    } else {
+      setMemoInput(targetCat.memo || "");
+    }
+    
     setIsEraserMode(false);
     
     const { body } = formatCardText(targetCat.content || targetCat.title || "");
