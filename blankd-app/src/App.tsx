@@ -621,8 +621,8 @@ function MainApp() {
                 colCount={colCount} 
                 viewMode={viewMode} 
                 setActiveCard={setActiveCard} 
-                setActiveTab={setActiveTab}       {/* 💡 이 줄 추가 */}
-                setExpandedId={setExpandedId}     {/* 💡 이 줄 추가 */}
+                setActiveTab={setActiveTab}
+                setExpandedId={setExpandedId}
                 handleDeleteCard={async (id: number) => {
                   if(confirm('삭제하시겠습니까?')){
                     await fetch("https://api.blankd.top/api/delete-card", {
