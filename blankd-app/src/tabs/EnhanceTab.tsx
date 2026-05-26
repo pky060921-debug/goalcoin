@@ -66,15 +66,26 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             {safeCards
               .filter((c:any) => c && c.content && c.folder_name === folder) // 💡 방어막: 데이터가 확실히 있는 카드만 통과시킵니다.
+              // 💡 [수정] EnhanceTab.tsx의 정렬 로직을 이렇게 교체하세요
               .sort((a:any, b:any) => {
-                // 💡 1차: 내용을 읽고 "제 O 조" 순서대로 똑똑하게 정렬합니다.
-                const numA = getSortNumber(a?.content);
-                const numB = getSortNumber(b?.content);
-                if (numA !== numB) return numA - numB;
-                
-                // 💡 2차: 만약 조항 번호가 없는 일반 카드라면, 그때만 생성 순서(id)를 따릅니다.
-                return (a?.id || 0) - (b?.id || 0);
+                  // 1. 조항 번호 추출 (제 1조, 제 2조 등)
+                  const numA = getSortNumber(a.content);
+                  const numB = getSortNumber(b.content);
+                  
+                  // 조항 번호가 다르면 번호순으로 먼저 정렬
+                  if (numA !== numB) return numA - numB;
+                  
+                  // 2. 조항 번호가 같다면 (ex. 둘 다 제 5조), [법] < [령] < [칙] 순으로 정렬
+                  const getTypeScore = (content: string) => {
+                      if (content.includes('[법]')) return 1;
+                      if (content.includes('[령]')) return 2;
+                      if (content.includes('[칙]') || content.includes('[규]')) return 3;
+                      return 4;
+                  };
+                  
+                  return getTypeScore(a.content) - getTypeScore(b.content);
               })
+
               .map((card: any) => {
                 
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
