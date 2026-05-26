@@ -65,26 +65,10 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             {safeCards
-              .filter((c:any) => c && c.content && c.folder_name === folder) // 💡 방어막: 데이터가 확실히 있는 카드만 통과시킵니다.
-              .sort((a: any, b: any) => {
-                // 1. 조항 번호 추출 (제 1조, 제 2조 등)
-                // getSortNumber 함수를 사용하여 내용을 분석합니다.
-                const numA = getSortNumber(a.content);
-                const numB = getSortNumber(b.content);
-                
-                // 조항 번호가 다르면 번호순으로 먼저 정렬
-                if (numA !== numB) return numA - numB;
-                
-                // 2. 조항 번호가 같다면 [법] < [령] < [칙/규] 순으로 정렬
-                const getTypeScore = (content: string) => {
-                  if (content.includes('[법]')) return 1;
-                  if (content.includes('[령]')) return 2;
-                  if (content.includes('[칙]') || content.includes('[규]')) return 3;
-                  return 4;
-                };
-                
-                return getTypeScore(a.content) - getTypeScore(b.content);
-              })
+              .filter((c:any) => c && c.content && c.folder_name === folder)
+              // 💡 [최종 수정] 아키님의 똑똑한 정렬 함수를 그대로 호출합니다. 
+              // 이 함수가 조항번호와 법령타입을 모두 고려해 숫자를 반환하므로 이것만 쓰면 됩니다.
+              .sort((a: any, b: any) => getSortNumber(a.content) - getSortNumber(b.content))
               .map((card: any) => {
                 
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
