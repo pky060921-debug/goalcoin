@@ -495,10 +495,10 @@ def analyze_chunk():
         # 프롬프트는 최대한 단순하게
         prompt = (
             "다음 시험 문제를 읽고 질문에 한국어로 간결하게 답하세요.\n\n"
-            f"[문제]\n{chunk_text}\n\n"
-            + (f"[대화 이력]\n{history_str}\n\n" if history_str else "")
-            + f"[질문]\n{user_feedback}\n\n"
-            "답변:"
+            f"=== 시험 문제 ===\n{chunk_text}\n\n"
+            + (f"=== 대화 이력 ===\n{history_str}\n\n" if history_str else "")
+            + f"=== 질문 ===\n{user_feedback}\n\n"
+            "=== 답변 ===\n"
         )
 
         print(f"🤖 [gemma4:26b] 응답 생성 중...", file=sys.stderr, flush=True)
@@ -517,7 +517,6 @@ def analyze_chunk():
                     "repeat_last_n": 128,
                     "top_k": 40,
                     "top_p": 0.9,
-                    "stop": ["사용자:", "질문:", "[문제]", "###"]
                 }
             }
             resp = requests.post(url, json=payload, timeout=300)
