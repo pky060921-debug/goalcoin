@@ -423,21 +423,37 @@ function MainApp() {
       if (activeEl) activeEl.blur(); 
 
       setInputStatus('correct');
-      const nb = [...blanks]; nb[currentBlankIdx].correct = true; setBlanks(nb);
+      
+      // 💡 [핵심] 과거의 blanks를 쓰지 않고, 무조건 가장 최신의 prev 상태를 가져와서 덮어씁니다!
+      setBlanks(prev => {
+        const nb = [...prev]; 
+        if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; 
+        return nb;
+      });
+      
       statsRef.current.wrongIndices.delete(currentBlankIdx);
       
       setTimeout(() => { 
         setAnswerInput(""); 
         setTimeout(() => {
           setInputStatus('idle'); 
-          if (currentBlankIdx + 1 < nb.length) {
-            setCurrentBlankIdx(currentBlankIdx + 1); 
-            localStorage.setItem(`blankd_progress_${activeCard.id}`, (currentBlankIdx + 1).toString());
-          } else { 
-            localStorage.removeItem(`blankd_progress_${activeCard.id}`);
-            statsRef.current.filled += 1; 
-            finishCard(); 
-          }
+          
+          setBlanks(currentBlanks => {
+              if (currentBlankIdx + 1 < currentBlanks.length) {
+                // 다음 빈칸으로 안전하게 이동
+                setCurrentBlankIdx(prevIdx => {
+                    const nextIdx = prevIdx + 1;
+                    localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
+                    return nextIdx;
+                });
+              } else { 
+                // 모든 빈칸 완료
+                localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+                statsRef.current.filled += 1; 
+                finishCard(); 
+              }
+              return currentBlanks;
+          });
         }, 130);
       }, 20);
     } else { 
@@ -451,21 +467,33 @@ function MainApp() {
     if (!blanks[currentBlankIdx]) return;
     setInputStatus('wrong'); 
     statsRef.current.wrongIndices.add(currentBlankIdx); 
-    const nb = [...blanks];
-    nb[currentBlankIdx].correct = true; 
-    setBlanks(nb);
+    
+    // 💡 정답 보기(오답 처리)도 가장 최신의 prev 상태를 사용하도록 변경!
+    setBlanks(prev => {
+      const nb = [...prev];
+      if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; 
+      return nb;
+    });
+
     setTimeout(() => {
       setAnswerInput(""); 
       setInputStatus('idle');
-      if (currentBlankIdx + 1 < nb.length) {
-        setCurrentBlankIdx(currentBlankIdx + 1);
-        localStorage.setItem(`blankd_progress_${activeCard.id}`, (currentBlankIdx + 1).toString());
-      } else {
-        localStorage.removeItem(`blankd_progress_${activeCard.id}`);
-        statsRef.current.filled += 1;
-        finishCard();
-      }
-    }, 1000);
+      
+      setBlanks(currentBlanks => {
+          if (currentBlankIdx + 1 < currentBlanks.length) {
+            setCurrentBlankIdx(prevIdx => {
+                const nextIdx = prevIdx + 1;
+                localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
+                return nextIdx;
+            });
+          } else {
+            localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+            statsRef.current.filled += 1;
+            finishCard();
+          }
+          return currentBlanks;
+      });
+    }, 800);
   };
 
   const toggleVoiceRecognition = () => {
