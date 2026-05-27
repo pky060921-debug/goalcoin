@@ -77,11 +77,11 @@ def generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1):
             "format": "json",
             "options": {
                 "temperature": temperature,
-                "num_ctx": 16384,      # 16K Context Window
+                "num_ctx": 16384,
                 "num_predict": 1024,
-                "top_k": 40,           
+                "top_k": 40,
                 "top_p": 0.9,
-                "repeat_penalty": 1.15 
+                "repeat_penalty": 1.15
             }
         }
         response = requests.post(url, json=payload, timeout=300)
@@ -89,6 +89,30 @@ def generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1):
         return response.json().get("response", "{}")
     except Exception as e:
         print(f"\n[🔥 로컬 AI (Ollama) 통신 에러]\n{e}\n", file=sys.stderr, flush=True)
+        raise e
+
+def generate_ollama_text(prompt, model="gemma4:26b", temperature=0.1):
+    """JSON 형식 강제 없이 자유 텍스트 응답을 받는 함수."""
+    try:
+        url = "http://localhost:11434/api/generate"
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_ctx": 16384,
+                "num_predict": 1024,
+                "top_k": 40,
+                "top_p": 0.9,
+                "repeat_penalty": 1.15
+            }
+        }
+        response = requests.post(url, json=payload, timeout=300)
+        response.raise_for_status()
+        return response.json().get("response", "")
+    except Exception as e:
+        print(f"\n[🔥 로컬 AI (Ollama) 텍스트 통신 에러]\n{e}\n", file=sys.stderr, flush=True)
         raise e
 
 # ==========================================
@@ -457,7 +481,7 @@ def get_pending_exams():
 def analyze_chunk():
     """
     gemma4:26b가 자체 지식으로 시험 문항을 직접 판단.
-    DB 참조 없음. chat_history를 context로 활용.
+    JSON 형식 강제 없이 자유 텍스트로 받아서 안정적으로 처리.
     """
     try:
         data = request.json
@@ -465,55 +489,58 @@ def analyze_chunk():
         user_feedback = data.get('user_feedback', '')
         chat_history = data.get('chat_history', [])
 
-        # 최근 6턴 대화 이력을 문자열로 변환
+        # 최근 6턴 대화 이력
         history_str = ""
         for msg in chat_history[-6:]:
             sender_name = "사용자" if msg['sender'] == 'user' else "AI"
             history_str += f"\n[{sender_name}]: {msg['text']}"
 
-        prompt = f"""당신은 시험 문제 전문 해설 AI입니다.
-아래 [시험 지문]을 읽고, 사용자의 질문에 대해 당신의 지식으로 직접 판단하여 답변하세요.
-외부 DB나 참고 자료는 없습니다. 당신이 알고 있는 지식만으로 정확하게 분석하세요.
+        prompt = f"""당신은 시험 문제 전문 해설 AI입니다. 한국어로 답변하세요.
 
 [시험 지문]
 {chunk_text}
 
 [이전 대화]
-{history_str}
+{history_str if history_str else "없음"}
 
 [사용자 질문]
 {user_feedback}
 
-[답변 규칙]
-- chat_message: 사용자 질문에 대한 명확한 답변. O/X 판별 시 첫 줄에 "[O]" 또는 "[X]"를 표시하고 근거를 설명.
-- answer: 이 문제의 정답 번호 (모르면 "확인 필요")
-- explanation: 정답 근거 요약 (2~3문장)
+위 질문에 대해 아래 형식으로 정확히 답변하세요:
 
-[출력형식] 반드시 JSON 단일 객체로만 반환 (줄바꿈은 \\n 사용)
-{{
-  "chat_message": "AI 판단 및 해설...",
-  "answer": "정답 번호 또는 확인 필요",
-  "explanation": "해설 요약"
-}}"""
+정답: (정답 번호, 모르면 "확인 필요")
+해설: (2~3문장으로 근거 설명)
+판단: (O/X 판별 요청이면 [O] 또는 [X]로 시작해서 이유 설명, 아니면 일반 답변)"""
 
-        print(f"🤖 [gemma4:26b 직접 판단] 응답 생성 중...", file=sys.stderr, flush=True)
+        print(f"🤖 [gemma4:26b 텍스트 응답] 생성 중...", file=sys.stderr, flush=True)
 
-        response_text = generate_ollama_json(prompt, temperature=0.1)
+        raw_text = generate_ollama_text(prompt, temperature=0.1)
+        raw_text = raw_text.strip()
 
-        try:
-            result_data = clean_and_parse_json(response_text)
-            if isinstance(result_data, list) and len(result_data) > 0:
-                result_data = result_data[0]
-        except Exception:
-            # JSON 파싱이 완전히 실패하면 raw 텍스트를 chat_message로 반환
-            print(f"[⚠️ JSON 파싱 실패, raw 텍스트로 fallback]\n{response_text[:300]}", file=sys.stderr)
-            result_data = {
-                "chat_message": response_text.strip()[:1000],
-                "answer": "확인 필요",
-                "explanation": ""
-            }
+        print(f"[AI 응답 원문]\n{raw_text[:300]}", file=sys.stderr)
 
-        return jsonify({"result": result_data})
+        # 정답/해설 추출 (정규식)
+        answer_match = re.search(r'정답\s*[:\：]\s*(.+?)(?:\n|$)', raw_text)
+        explanation_match = re.search(r'해설\s*[:\：]\s*(.+?)(?=\n판단|\n정답|$)', raw_text, re.DOTALL)
+        judgment_match = re.search(r'판단\s*[:\：]\s*(.+?)$', raw_text, re.DOTALL)
+
+        answer = answer_match.group(1).strip() if answer_match else "확인 필요"
+        explanation = explanation_match.group(1).strip() if explanation_match else ""
+        chat_message = judgment_match.group(1).strip() if judgment_match else raw_text
+
+        # 해설이 chat_message보다 나은 경우 우선 사용
+        if not chat_message or len(chat_message) < 5:
+            chat_message = raw_text
+
+        return jsonify({"result": {
+            "chat_message": chat_message,
+            "answer": answer,
+            "explanation": explanation
+        }})
+
+    except Exception as e:
+        print(f"\n[🔥 문단 분석 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        return jsonify({"error": str(e)}), 500
     except Exception as e:
         print(f"\n[🔥 문단 분석 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
