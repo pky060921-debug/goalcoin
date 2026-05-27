@@ -512,21 +512,26 @@ def analyze_chunk():
                 "options": {
                     "temperature": 0.2,
                     "num_ctx": 8192,
-                    "num_predict": 400,       # 짧게 제한
-                    "repeat_penalty": 1.4,    # 반복 루프 강하게 차단
+                    "num_predict": 400,
+                    "repeat_penalty": 1.4,
                     "repeat_last_n": 128,
                     "top_k": 40,
                     "top_p": 0.9,
-                    "stop": ["사용자:", "질문:", "[문제]", "###"]  # 반복 탈출용
+                    "stop": ["사용자:", "질문:", "[문제]", "###"]
                 }
             }
             resp = requests.post(url, json=payload, timeout=300)
             resp.raise_for_status()
-            raw_text = resp.json().get("response", "").strip()
+            ollama_resp = resp.json()
+            raw_text = ollama_resp.get("response", "").strip()
+            print(f"[Ollama 전체 응답] done={ollama_resp.get('done')} | 응답길이={len(raw_text)}", file=sys.stderr)
         except Exception as e:
             return jsonify({"error": f"AI 통신 오류: {str(e)}"}), 500
 
-        print(f"[AI 응답]\n{raw_text[:300]}", file=sys.stderr)
+        print(f"[AI 응답]\n{raw_text[:500]}", file=sys.stderr)
+
+        if not raw_text:
+            return jsonify({"error": "AI가 빈 응답을 반환했습니다. Ollama가 실행 중인지, gemma4:26b 모델이 로드됐는지 확인하세요."}), 500
 
         # 반복 루프 감지 (같은 단어가 5번 이상 연속이면 비정상)
         if re.search(r'(\b\w+\b)(?:\s+\1){4,}', raw_text):

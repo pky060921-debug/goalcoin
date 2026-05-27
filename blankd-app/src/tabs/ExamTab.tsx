@@ -113,7 +113,10 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         const r = data.result;
         if (r.answer && r.answer !== '확인 필요') setAnswer(r.answer);
         if (r.explanation) setExplanation(r.explanation);
-        setChatMessages(prev => [...prev, { sender: 'ai', text: r.chat_message || '분석 완료' }]);
+        const msg = r.chat_message && r.chat_message.trim()
+          ? r.chat_message
+          : '[AI 응답이 비어있습니다. 서버 로그를 확인해주세요.]';
+        setChatMessages(prev => [...prev, { sender: 'ai', text: msg }]);
       } else {
         setChatMessages(prev => [...prev, { sender: 'ai', text: `오류: ${data.error || 'AI 응답 실패'}` }]);
       }
