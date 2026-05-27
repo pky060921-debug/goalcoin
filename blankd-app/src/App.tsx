@@ -757,9 +757,22 @@ function MainApp() {
                           key={i}
                           autoFocus
                           value={answerInput}
+                          // 💡 1. 키보드의 쓸데없는 개입 완벽 차단!
+                          autoComplete="off"
+                          autoCorrect="off"
+                          spellCheck="false"
+                          autoCapitalize="none"
+                          
+                          // 💡 2. 한글 조합 중(글자 아래 밑줄)일 때는 정답 제출이나 렌더링이 꼬이지 않게 방어!
+                          onCompositionStart={(e) => { e.currentTarget.dataset.composing = "true"; }}
+                          onCompositionEnd={(e) => { e.currentTarget.dataset.composing = "false"; }}
+                          
                           onChange={(e) => setAnswerInput(e.target.value)}
                           onKeyDown={(e) => {
-                            if(e.key === 'Enter') handleSequentialInput(e.currentTarget.value);
+                            // 조합 중이 아닐 때만 엔터키 허용
+                            if(e.key === 'Enter' && e.currentTarget.dataset.composing !== "true") {
+                               handleSequentialInput(e.currentTarget.value);
+                            }
                           }}
                           placeholder="입력..."
                           style={{ width: `${Math.max(60, answerInput.length * 15 + 40)}px` }}
