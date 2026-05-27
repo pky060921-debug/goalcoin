@@ -135,37 +135,88 @@ def generate_gemini_json(prompt_or_contents, temperature=0.1):
                 
     raise Exception("🚨 구글 서버 불안정 또는 모든 API 키 한도 초과입니다.")
 
+def sanitize_json_string_values(text):
+    """JSON 문자열 값 안의 raw 개행/탭을 이스케이프 처리."""
+    result = []
+    in_string = False
+    escape_next = False
+    for ch in text:
+        if escape_next:
+            result.append(ch)
+            escape_next = False
+            continue
+        if ch == '\\':
+            result.append(ch)
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            result.append(ch)
+            continue
+        if in_string:
+            if ch == '\n':
+                result.append('\\n')
+            elif ch == '\r':
+                result.append('\\r')
+            elif ch == '\t':
+                result.append('\\t')
+            else:
+                result.append(ch)
+        else:
+            result.append(ch)
+    return ''.join(result)
+
 def clean_and_parse_json(response_text):
     try:
         text = response_text.strip()
-        text = re.sub(r'^```json', '', text, flags=re.MULTILINE)
-        text = re.sub(r'^```', '', text, flags=re.MULTILINE).strip()
-        
+        # 마크다운 코드블록 제거
+        text = re.sub(r'```json\s*', '', text)
+        text = re.sub(r'```\s*', '', text).strip()
+
+        # JSON 객체/배열 범위 추출
         start_idx_arr = text.find('[')
         end_idx_arr = text.rfind(']')
         start_idx_obj = text.find('{')
         end_idx_obj = text.rfind('}')
-        
+
         if start_idx_arr != -1 and end_idx_arr != -1 and (start_idx_obj == -1 or start_idx_arr < start_idx_obj):
             clean_text = text[start_idx_arr:end_idx_arr+1]
         elif start_idx_obj != -1 and end_idx_obj != -1:
             clean_text = text[start_idx_obj:end_idx_obj+1]
         else:
             clean_text = text
-            
-        clean_text = clean_text.replace('\n', '\\n').replace('\r', '')
-        
+
+        # 1차 시도: 그대로 파싱
         try:
             return json.loads(clean_text)
         except json.decoder.JSONDecodeError:
-            try:
-                python_dict = ast.literal_eval(clean_text.replace('\\n', '\n'))
-                return json.loads(json.dumps(python_dict))
-            except Exception as ast_e:
-                fixed_text = re.sub(r"([{,]\s*)'([^']+)'(\s*:)", r'\1"\2"\3', clean_text)
-                return json.loads(fixed_text)
+            pass
+
+        # 2차 시도: 문자열 값 안의 raw 개행만 이스케이프
+        try:
+            sanitized = sanitize_json_string_values(clean_text)
+            return json.loads(sanitized)
+        except json.decoder.JSONDecodeError:
+            pass
+
+        # 3차 시도: 작은따옴표 → 큰따옴표 변환
+        try:
+            fixed = re.sub(r"([{,]\s*)'([^']+)'(\s*:)", r'\1"\2"\3', clean_text)
+            sanitized = sanitize_json_string_values(fixed)
+            return json.loads(sanitized)
+        except Exception:
+            pass
+
+        # 4차 시도: ast.literal_eval
+        try:
+            python_dict = ast.literal_eval(clean_text)
+            return json.loads(json.dumps(python_dict, ensure_ascii=False))
+        except Exception:
+            pass
+
+        raise ValueError(f"JSON 파싱 실패. Raw: {response_text[:200]}")
     except Exception as e:
-        print(f"JSON Parsing Error. Raw Text: {response_text}", file=sys.stderr)
+        print(f"JSON Parsing Error. Raw Text: {response_text[:300]}", file=sys.stderr)
         raise e
 
 # ==========================================
@@ -448,10 +499,19 @@ def analyze_chunk():
         print(f"🤖 [gemma4:26b 직접 판단] 응답 생성 중...", file=sys.stderr, flush=True)
 
         response_text = generate_ollama_json(prompt, temperature=0.1)
-        result_data = clean_and_parse_json(response_text)
 
-        if isinstance(result_data, list) and len(result_data) > 0:
-            result_data = result_data[0]
+        try:
+            result_data = clean_and_parse_json(response_text)
+            if isinstance(result_data, list) and len(result_data) > 0:
+                result_data = result_data[0]
+        except Exception:
+            # JSON 파싱이 완전히 실패하면 raw 텍스트를 chat_message로 반환
+            print(f"[⚠️ JSON 파싱 실패, raw 텍스트로 fallback]\n{response_text[:300]}", file=sys.stderr)
+            result_data = {
+                "chat_message": response_text.strip()[:1000],
+                "answer": "확인 필요",
+                "explanation": ""
+            }
 
         return jsonify({"result": result_data})
     except Exception as e:
