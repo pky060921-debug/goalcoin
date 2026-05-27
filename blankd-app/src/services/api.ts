@@ -29,9 +29,10 @@ export const api = {
     if (!res.ok) throw new Error("스타일 샘플 생성 실패");
     return res.json();
   },
-  async uploadExamCoop(file: File, address: string) {
+  async uploadExamCoop(file: File, address: string, answerFile?: File) {
     const fd = new FormData();
-    fd.append("file", file);
+    fd.append("exam_file", file);
+    if (answerFile) fd.append("answer_file", answerFile);
     fd.append("wallet_address", address);
     const res = await fetch(`${BASE_URL}/upload-exam-coop`, { method: "POST", body: fd });
     const data = await res.json();
@@ -50,10 +51,10 @@ export const api = {
       body: JSON.stringify({ wallet_address: address, id })
     });
   },
-  async analyzeChunk(chunkText: string, address: string, feedback: string = "", selectedLaws: string[] = []) {
+  async analyzeChunk(chunkText: string, userFeedback: string, chatHistory: Array<{ sender: string; text: string }> = []) {
     const res = await fetch(`${BASE_URL}/analyze-chunk`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chunk_text: chunkText, wallet_address: address, user_feedback: feedback, selected_laws: selectedLaws })
+      body: JSON.stringify({ chunk_text: chunkText, user_feedback: userFeedback, chat_history: chatHistory })
     });
     return res.json();
   },

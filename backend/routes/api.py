@@ -336,163 +336,8 @@ def extract_exam_text_with_color(file_obj, is_answer=False):
     else:
         return file_obj.read().decode('utf-8', errors='ignore')
 
-# ==========================================
-# 💡 파이썬 스나이퍼 DB 검색 엔진
-# ==========================================
-def get_top_k_relevant_laws(query_text, laws, top_k=5):
-    try:
-        article_matches = set(re.findall(r'(?:제)?\s*\d+\s*조(?:의\s*\d+)?', query_text))
-        clean_article_matches = [re.sub(r'[제\s]', '', a) for a in article_matches] 
-        
-        scored_laws = []
-        for folder, title, content in laws:
-            score = 0
-            clean_title = re.sub(r'[제\s]', '', title) 
-            
-            if clean_title in clean_article_matches:
-                score += 1000
-                if '정관' in query_text and '정관' in folder:
-                    score += 500
-                elif '법' in query_text and '건강보험법' in folder:
-                    score += 500
 
-            content_words = set(re.findall(r'\b[가-힣]{2,}\b', content))
-            query_words = set(re.findall(r'\b[가-힣]{2,}\b', query_text))
-            overlap = query_words.intersection(content_words)
-            score += len(overlap)
-            
-            if score > 0:
-                scored_laws.append((score, folder, title, content))
-            
-        scored_laws.sort(key=lambda x: x[0], reverse=True)
-        top_laws = scored_laws[:top_k]
-        
-        if not top_laws:
-            return "\n\n".join([f"📖 [문서명: {r[0]} | 조항명: {r[1]}]\n{r[2]}" for r in laws[:top_k]])
-        return "\n\n".join([f"📖 [문서명: {law[1]} | 조항명: {law[2]}]\n{law[3]}" for law in top_laws])
-    except Exception as e:
-        print(f"[🔥 RAG 검색 엔진 에러]\n{traceback.format_exc()}", file=sys.stderr)
-        return ""
 
-# ==========================================
-# 💡 RAG 시스템 및 모의고사 분석
-# ==========================================
-@api_bp.route('/generate-rag-from-pending', methods=['POST'])
-def generate_rag_from_pending():
-    try:
-        data = request.json or {}
-        pending_id = data.get('id')
-        wallet_address = data.get('wallet_address')
-        selected_laws = data.get('selected_laws', [])
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT filename, chunks_json FROM pending_exams WHERE id = ? AND wallet_address = ?", (pending_id, wallet_address))
-        row = cursor.fetchone()
-        if not row:
-            conn.close()
-            return jsonify({"error": "대기열에서 모의고사를 찾을 수 없습니다."}), 404
-
-        filename = row[0]
-        chunks = json.loads(row[1])
-        raw_text = "\n\n".join(chunks)
-
-        if selected_laws and len(selected_laws) > 0:
-            placeholders = ','.join('?' for _ in selected_laws)
-            query = f"SELECT folder_name, title, content FROM categories WHERE wallet_address = ? AND folder_name IN ({placeholders})"
-            cursor.execute(query, [wallet_address] + selected_laws)
-        else:
-            cursor.execute("SELECT folder_name, title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
-        
-        laws = cursor.fetchall()
-        conn.close()
-
-        law_context = "저장된 참고 DB 자료가 없습니다."
-        if laws:
-            full_context = "\n\n".join([f"[{r[0]} - {r[1]}]\n{r[2]}" for r in laws])
-            law_context = full_context[:12000]
-
-        print(f"\n🔍 [RAG 시스템] '{filename}' 자동생성 시작!\n", file=sys.stderr, flush=True)
-
-        task_id = str(uuid.uuid4())
-        TASK_STATUS[task_id] = {"status": "running", "progress": 20, "message": "AI가 문제를 법령과 대조하여 분석 중..."}
-
-        def process_rag_pending():
-            try:
-                prompt = f'''당신은 승진시험 출제위원이자 사용자와 대화하는 보조 학습 AI입니다.
-                아래 [참고 자료 DB]를 철저히 검색하여 사용자의 [시험지 텍스트]를 분석하세요.
-
-                [절대 규칙]
-                1. 오직 제공된 [참고 자료 DB] 안의 텍스트만 근거로 삼으세요.
-                2. DB에서 내용이 부족하다면 억지로 지어내지 마세요.
-                3. 반드시 아래 JSON 규격에 맞게 배열(Array) 형식으로 출력하세요.
-
-                [참고 자료 DB]
-                {law_context}
-
-                [시험지 텍스트]
-                {raw_text[:3000]}
-
-                [출력 JSON 규격]
-                [
-                  {{ 
-                      "question": "문제 1 내용", 
-                      "answer": "정답 1 번호", 
-                      "explanation": "해설 1 내용",
-                      "search_process": "논리적 과정 1",
-                      "referenced_laws": "참고 조항 1"
-                  }}
-                ]'''
-
-                response_text = generate_gemini_json(prompt)
-                exam_data = clean_and_parse_json(response_text)
-
-                conn2 = get_db_connection()
-                cursor2 = conn2.cursor()
-                for item in exam_data:
-                    cursor2.execute('''INSERT INTO golden_exams 
-                        (wallet_address, title, question, answer, explanation, search_process, referenced_laws) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                        (wallet_address, filename, item.get('question', ''), item.get('answer', ''), item.get('explanation', ''), 
-                         item.get('search_process', ''), item.get('referenced_laws', '')))
-                
-                cursor2.execute("DELETE FROM pending_exams WHERE id = ? AND wallet_address = ?", (pending_id, wallet_address))
-                conn2.commit()
-                conn2.close()
-
-                TASK_STATUS[task_id].update({"progress": 100, "status": "completed", "message": f"{len(exam_data)}개의 문항 분석 완료."})
-            except Exception as e:
-                print(f"\n[🔥 지능형 해설 스레드 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
-                TASK_STATUS[task_id].update({"status": "error", "message": "JSON 파싱 에러 (AI 응답 형식 오류)"})
-
-        threading.Thread(target=process_rag_pending).start()
-        return jsonify({"task_id": task_id, "message": "분석 시작"})
-
-    except Exception as e:
-        print(f"\n[🔥 라우터 진입 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
-        return jsonify({"error": str(e)}), 500
-
-@api_bp.route('/upload-exam', methods=['POST'])
-def upload_exam():
-    return jsonify({"error": "이 라우터는 더 이상 사용되지 않습니다."}), 400
-
-@api_bp.route('/delete-exam', methods=['POST'])
-def delete_exam():
-    try:
-        data = request.json or {}
-        exam_id = data.get('id')
-        wallet_address = data.get('wallet_address')
-        
-        if not exam_id or not wallet_address: return jsonify({"error": "삭제 권한이 없습니다."}), 400
-            
-        conn = get_db_connection()
-        conn.execute("DELETE FROM exams WHERE id = ? AND wallet_address = ?", (exam_id, wallet_address))
-        conn.execute("DELETE FROM golden_exams WHERE id = ? AND wallet_address = ?", (exam_id, wallet_address))
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "해당 문제가 삭제되었습니다."})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/delete-pending-exam', methods=['POST'])
 def delete_pending_exam():
@@ -559,82 +404,58 @@ def get_pending_exams():
 
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
+    """
+    gemma4:26b가 자체 지식으로 시험 문항을 직접 판단.
+    DB 참조 없음. chat_history를 context로 활용.
+    """
     try:
         data = request.json
         chunk_text = data.get('chunk_text', '')
-        wallet_address = data.get('wallet_address')
-        user_feedback = data.get('user_feedback', '') 
-        chat_history = data.get('chat_history', []) 
+        user_feedback = data.get('user_feedback', '')
+        chat_history = data.get('chat_history', [])
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # 1. 💡 장기기억(판별 규칙) 불러오기
-        cursor.execute("SELECT ai_rules FROM user_settings WHERE wallet_address = ?", (wallet_address,))
-        rule_row = cursor.fetchone()
-        ai_memory = rule_row[0] if rule_row and rule_row[0] else "아직 저장된 특별한 판별 규칙이 없습니다."
-
-        # 2. 💡 전체 법령 DB(categories) 무조건 검색
-        cursor.execute("SELECT folder_name, title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
-        laws = cursor.fetchall()
-        conn.close()
-
-        # 사용자가 질문한 내용(예: "제1조 검색해줘")을 기반으로 스나이퍼 검색
-        search_query = chunk_text + " " + user_feedback
-        law_context = get_top_k_relevant_laws(search_query, laws, top_k=3) if laws else "참고 자료가 없습니다."
-        
+        # 최근 6턴 대화 이력을 문자열로 변환
         history_str = ""
-        for msg in chat_history[-6:]:  
+        for msg in chat_history[-6:]:
             sender_name = "사용자" if msg['sender'] == 'user' else "AI"
             history_str += f"\n[{sender_name}]: {msg['text']}"
 
-        # 3. 💡 O/X 판별 특화 프롬프트
-        prompt = f"""당신은 출제위원이자 법령 대조 전문 AI입니다.
+        prompt = f"""당신은 시험 문제 전문 해설 AI입니다.
+아래 [시험 지문]을 읽고, 사용자의 질문에 대해 당신의 지식으로 직접 판단하여 답변하세요.
+외부 DB나 참고 자료는 없습니다. 당신이 알고 있는 지식만으로 정확하게 분석하세요.
 
-        [대화형 튜터 절대 규칙 🚨]
-        1. 사용자가 특정 법조항명(예: "법 제1조")을 언급하면 [참고 자료 DB]에서 해당 원문을 정확히 찾으세요.
-        2. 원문과 [현재 지문]을 대조하여 내용이 일치하는지, 혹은 교묘하게 틀리게 출제되었는지 분석하세요.
-        3. `chat_message` 필드에는 반드시 아래 형식을 지켜서 답변하세요:
-           - 첫 줄: "[대조 결과: O]" 또는 "[대조 결과: X]"
-           - 둘째 줄부터: "원문은 [~~]라고 되어 있으나, 지문은 [~~]라고 되어 있어 일치합니다/틀립니다."
-        4. 아래 [AI 장기기억]에 사용자가 주입한 팁이나 규칙이 있다면 무조건 우선 적용하여 판단하세요.
+[시험 지문]
+{chunk_text}
 
-        [AI 장기기억 (사용자 주입 규칙)]
-        {ai_memory}
+[이전 대화]
+{history_str}
 
-        [참고 자료 DB]
-        {law_context}
+[사용자 질문]
+{user_feedback}
 
-        [현재 지문]
-        {chunk_text}
-        
-        [이전 대화]
-        {history_str}
-        
-        [사용자 질문]
-        {user_feedback}
+[답변 규칙]
+- chat_message: 사용자 질문에 대한 명확한 답변. O/X 판별 시 첫 줄에 "[O]" 또는 "[X]"를 표시하고 근거를 설명.
+- answer: 이 문제의 정답 번호 (모르면 "확인 필요")
+- explanation: 정답 근거 요약 (2~3문장)
 
-        [출력형식] 반드시 JSON 단일 객체로 반환. (줄바꿈은 \\n 사용)
-        {{
-          "question": "시험지 원문 텍스트 유지",
-          "options": ["1. 보기", "2. 보기", "3. 보기", "4. 보기", "5. 보기"],
-          "answer": "정답 번호 (모르면 '확인 필요')",
-          "chat_message": "[대조 결과: O/X]\\n상세 대조 브리핑...",
-          "explanation": "해설 요약"
-        }}"""
-        
-        print(f"🤖 [초고속 대화형 AI 가동] 응답 생성 중...", file=sys.stderr, flush=True)
-        
-        # 이전 답변에서 안내해 드린 '무적의 JSON 파서' 사용
+[출력형식] 반드시 JSON 단일 객체로만 반환 (줄바꿈은 \\n 사용)
+{{
+  "chat_message": "AI 판단 및 해설...",
+  "answer": "정답 번호 또는 확인 필요",
+  "explanation": "해설 요약"
+}}"""
+
+        print(f"🤖 [gemma4:26b 직접 판단] 응답 생성 중...", file=sys.stderr, flush=True)
+
         response_text = generate_ollama_json(prompt, temperature=0.1)
         result_data = clean_and_parse_json(response_text)
-            
+
         if isinstance(result_data, list) and len(result_data) > 0:
             result_data = result_data[0]
-            
+
         return jsonify({"result": result_data})
     except Exception as e:
-        print(f"\n[🔥 문단 분석 에러 진단]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        print(f"\n[🔥 문단 분석 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/save-golden-exam', methods=['POST'])
@@ -1100,33 +921,4 @@ def get_checkpoint():
         return jsonify({"last_id": last_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-        
-# ==========================================
-# 💡 [신규] AI 장기기억 (판별 규칙) 관리
-# ==========================================
-@api_bp.route('/save-ai-memory', methods=['POST'])
-def save_ai_memory():
-    try:
-        data = request.json
-        wallet_address = data.get('wallet_address')
-        new_rule = data.get('rule', '').strip()
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT ai_rules FROM user_settings WHERE wallet_address = ?", (wallet_address,))
-        row = cursor.fetchone()
-        
-        if row:
-            current_rules = row[0] or ""
-            updated_rules = current_rules + f"\n- {new_rule}"
-            cursor.execute("UPDATE user_settings SET ai_rules = ? WHERE wallet_address = ?", (updated_rules, wallet_address))
-        else:
-            updated_rules = f"- {new_rule}"
-            cursor.execute("INSERT INTO user_settings (wallet_address, ai_rules) VALUES (?, ?)", (wallet_address, updated_rules))
-            
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "장기기억 저장 완료", "ai_rules": updated_rules})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+

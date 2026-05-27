@@ -65,7 +65,6 @@ function MainApp() {
 
   const [categories, setCategories] = useState<any[]>([]);
   const [savedCards, setSavedCards] = useState<any[]>([]);
-  const [exams, setExams] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
   
   const [viewMode, setViewMode] = useState('all');
@@ -73,7 +72,6 @@ function MainApp() {
   const [useAiRecommend, setUseAiRecommend] = useState(true);
   
   const [lawFile, setLawFile] = useState<File | null>(null);
-  const [examFile, setExamFile] = useState<File | null>(null);
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   
@@ -116,15 +114,13 @@ function MainApp() {
 
   const loadAllData = async () => {
     try {
-      const [catRes, cardRes, examRes, balance] = await Promise.all([
+      const [catRes, cardRes, balance] = await Promise.all([
         fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r=>r.json()),
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`).then(r=>r.json()),
-        fetch(`https://api.blankd.top/api/get-all-exams?wallet_address=${safeAddress}`).then(r=>r.json()),
         api.getGoalCoinBalance(safeAddress).catch(()=>0)
       ]);
       setCategories(catRes.categories || []); 
       setSavedCards(cardRes.cards || []); 
-      setExams(examRes.exams || []);
       setGoalBalance(balance);
     } catch (e: any) { 
       addLog(`❌ 데이터 동기화 실패: ${e.message}`);
