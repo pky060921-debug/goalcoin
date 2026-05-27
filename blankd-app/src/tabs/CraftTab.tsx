@@ -245,69 +245,83 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     }
   }, [expandedId, categories]);
 
-  const applyTextToState = (textBody: string) => {
+const applyTextToState = (textBody: string) => {
     const initialWords = textBody.split(SPLIT_REGEX).filter(w => w !== "");
-    setWordArray(initialWords.map(w => ({ text: w, subWords: [w] })));
+    let currentWordArray = initialWords.map(w => ({ text: w, subWords: [w] }));
 
-    const initialSelected = new Set<number>();
     const currentCustomStopWords = customStopWords;
     const currentCustomIncludeWords = customIncludeWords;
 
-    const wordRanges: {start: number, end: number, wordIdx: number}[] = [];
-    let currentPos = 0;
-    initialWords.forEach((w, idx) => {
-       wordRanges.push({ start: currentPos, end: currentPos + w.length, wordIdx: idx });
-       currentPos += w.length;
-    });
-
-    const fullText = initialWords.join("");
-    const protectedIndices = new Set<number>();
-
-    const includePatterns: RegExp[] = [];
+    // 💡 1. [핵심 기능] 필수 포함 단어를 찾아서 '하나의 덩어리(단일 빈칸)'로 미리 병합합니다!
     currentCustomIncludeWords.forEach(cw => {
        const trimmedCw = cw.trim();
        if (!trimmedCw) return;
-       const regexStr = trimmedCw.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
-       includePatterns.push(new RegExp(regexStr, 'g'));
-    });
+       const cwNoSpace = trimmedCw.replace(/\s+/g, ''); // 띄어쓰기 무시하고 검색
 
-    includePatterns.forEach(regex => {
-       let match;
-       while ((match = regex.exec(fullText)) !== null) {
-          const matchStart = match.index;
-          const matchEnd = matchStart + match[0].length;
-          wordRanges.forEach(wr => {
-             if (wr.start < matchEnd && wr.end > matchStart) {
-                protectedIndices.add(wr.wordIdx);
+       let i = 0;
+       while (i < currentWordArray.length) {
+          let tempStr = "";
+          let matchCount = 0;
+          for (let j = i; j < currentWordArray.length; j++) {
+             tempStr += currentWordArray[j].text.replace(/\s+/g, '');
+             matchCount++;
+             
+             if (tempStr === cwNoSpace) {
+                if (matchCount > 1) {
+                   const mergedText = currentWordArray.slice(i, j + 1).map(w => w.text).join("");
+                   const mergedSubWords = currentWordArray.slice(i, j + 1).flatMap(w => w.subWords);
+                   currentWordArray.splice(i, matchCount, { text: mergedText, subWords: mergedSubWords });
+                }
+                break;
+             } else if (tempStr.length > cwNoSpace.length) {
+                break;
              }
-          });
+          }
+          i++;
        }
     });
 
-    initialWords.forEach((word, idx) => {
-        const trimmed = word.trim();
-        if (currentCustomIncludeWords.some(cw => trimmed === cw || trimmed.includes(cw))) {
+    setWordArray(currentWordArray);
+
+    const initialSelected = new Set<number>();
+    const protectedIndices = new Set<number>();
+
+    // 💡 2. 병합된 덩어리들이 필수 단어라면 무조건 빈칸으로 선택되게 보호합니다.
+    currentWordArray.forEach((wordObj, idx) => {
+        const trimmed = wordObj.text.trim();
+        if (currentCustomIncludeWords.some(cw => trimmed.replace(/\s+/g, '') === cw.replace(/\s+/g, ''))) {
             protectedIndices.add(idx);
+            initialSelected.add(idx);
         }
     });
 
-    initialWords.forEach((word, idx) => {
-      const trimmed = word.trim();
-      if (protectedIndices.has(idx)) {
-         if (trimmed.length > 0) initialSelected.add(idx);
-         return;
-      }
+    // 3. 일반 단어 자동 선택 로직
+    currentWordArray.forEach((wordObj, idx) => {
+      if (protectedIndices.has(idx)) return; // 이미 필수단어로 지정된 덩어리는 건너뜀
+
+      const trimmed = wordObj.text.trim();
       const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(trimmed) && trimmed !== "";
       const isArticleOrNum = /^(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조)(?:의\s*\d+)?/.test(trimmed) || 
                              /^\(?\d+(?:항|호|목)?\)?$/.test(trimmed) || 
                              /^\(?(?:①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)\)?$/.test(trimmed);
                              
-      const isStopWord = /^(은|는|이|가|을|를|의|에|에게|에서|로|으로|과|와|도|만|부터|까지|조차|마저|치고|및|등|또는|수|할|이하|이상|초과|미만|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여|바|것|자|경우|때|중)$/.test(trimmed);
+      // 💡 [조사 추가 위치] 맨 끝에 '하여', '나' 가 추가되었습니다. 
+      // 더 추가하고 싶으시다면 이 정규식 안에 |단어| 형태로 계속 추가하시면 됩니다!
+      const isStopWord = /^(은|는|이|가|을|를|의|에|에게|에서|로|으로|과|와|도|만|부터|까지|조차|마저|치고|및|등|또는|수|할|이하|이상|초과|미만|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여|바|것|자|경우|때|중|하여|나)$/.test(trimmed);
       const isCustomSingleStopWord = currentCustomStopWords.some(cw => trimmed === cw || trimmed === cw + "." || trimmed === cw + ",");
       
       if (!isSymbolOnly && !isArticleOrNum && !isStopWord && !isCustomSingleStopWord && trimmed.length > 0) {
         initialSelected.add(idx);
       }
+    });
+
+    // 4. 제외 단어(예외 구문) 필터링 로직
+    const fullText = currentWordArray.map(w => w.text).join("");
+    const wordRanges: {start: number, end: number, wordIdx: number}[] = [];
+    let currentPos = 0;
+    currentWordArray.forEach((w, idx) => {
+       wordRanges.push({ start: currentPos, end: currentPos + w.text.length, wordIdx: idx });
+       currentPos += w.text.length;
     });
 
     const patternsToExclude: RegExp[] = [
@@ -338,7 +352,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
 
     setSelectedWords(initialSelected);
   };
-
+  
   const openCategory = (targetCat: any, bypassToggle = false) => {
     if (isSelectMode) { handleToggleCheck(targetCat.id); return; }
     if (!bypassToggle) setExpandedId(targetCat.id);
