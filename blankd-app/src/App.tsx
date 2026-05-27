@@ -565,81 +565,43 @@ function MainApp() {
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
-      {/* 💡 여기서부터 복사해서 기존 <header>...</header>가 있던 자리에 붙여넣으세요 */}
-      <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
-          
-          {/* 왼쪽 영역: 상시 이어서 하기 버튼 고정 */}
-          <div className="flex flex-wrap items-center gap-2 flex-1">
-            <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 uppercase">Resume:</span>
-            
-            {recentCraftId ? (
-              <button 
-                onClick={() => { setActiveTab('create'); setExpandedId(recentCraftId); }}
-                className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
-              >
-                <span className="text-[9px] sm:text-[10px] text-amber-400 font-bold whitespace-nowrap">▶ 만들기:</span>
-                <span className="text-[10px] sm:text-[11px] font-medium text-amber-100 truncate">{recentCraftTitle || "진행중"}</span>
-              </button>
-            ) : (
-              <div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">만들기 기록 없음</div>
-            )}
-
-            {recentEnhanceId ? (
-              <button 
-                onClick={() => {
-                  const targetCard = savedCards.find((c:any) => c.id === recentEnhanceId);
-                  if (targetCard) setActiveCard(targetCard);
-                  else setActiveTab('enhance');
-                }}
-                className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
-              >
-                <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기:</span>
-                <span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{recentEnhanceTitle || "진행중"}</span>
-              </button>
-            ) : (
-              <div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 기록 없음</div>
-            )}
-          </div>
-
-          {/* 오른쪽 영역: 전체회독 및 합격률 지표 + 사용자 정보 */}
-          <div className="flex items-center justify-between md:justify-end gap-3 sm:gap-4 shrink-0 mt-2 md:mt-0">
-            <div className="flex items-center gap-2 sm:gap-3 font-mono">
-              <div className="text-right">
-                <span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest uppercase">Rotation</span>
-                <span className="text-[10px] sm:text-xs font-bold text-amber-400">{minFilledCount} 회독</span>
+      <header className="max-w-6xl mx-auto border-b border-white/10 pb-4 sm:pb-6 mb-8 sm:mb-12 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center justify-between w-full sm:w-auto">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-widest text-white shrink-0">BlankD</h1>
+          {isLoggedIn && (
+            <div className="sm:hidden flex items-center gap-2 font-mono">
+              <div className="bg-teal-950/40 border border-teal-500/30 px-2 py-1 rounded-sm flex flex-col items-end">
+                <span className="text-[8px] text-teal-400/70">전체회독</span>
+                <span className="text-xs font-bold text-teal-300">{minFilledCount}</span>
               </div>
-              <div className="h-5 sm:h-6 w-px bg-white/10"></div>
-              <div className="text-right">
-                <span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest uppercase">Pass Rate</span>
-                <span className="text-[10px] sm:text-xs font-bold text-teal-400">{passProbability}%</span>
+              <div className="bg-indigo-900/40 border border-indigo-500/30 px-2 py-1 rounded-sm flex flex-col items-end">
+                <span className="text-[8px] text-indigo-400/70">합격률</span>
+                <span className="text-xs font-bold text-indigo-300">{passProbability}%</span>
               </div>
             </div>
-            
-            <div className="h-5 sm:h-6 w-px bg-white/10 hidden sm:block"></div>
-
-            <button onClick={handleGoogleLogout} className="border border-white/20 px-2 py-1 text-[9px] sm:text-[10px] hover:bg-white/10 tracking-wider font-mono rounded-sm text-white/70 whitespace-nowrap">LOGOUT</button>
-          </div>
+          )}
         </div>
-      </header>
-
-      {/* 💡 한 줄 아래로 안전하게 독립 배치된 메인 메뉴 내비게이션 바 */}
-      {isLoggedIn && (
-        <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
-          <div className="max-w-6xl mx-auto flex items-center justify-start gap-1 sm:gap-2">
-            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
-              <button 
-                key={tab.id} 
-                onClick={() => setActiveTab(tab.id)} 
-                className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/70'}`}
-              >
-                {tab.label}
-              </button>
-            ))}
+        
+        {isLoggedIn && (
+          <div className="flex items-center w-full sm:w-auto justify-between gap-4">
+            <nav className="flex gap-2 sm:gap-6 overflow-x-auto scrollbar-hide">
+              {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`text-[11px] sm:text-sm font-bold tracking-widest whitespace-nowrap px-2 py-1 transition-all ${activeTab === tab.id ? 'text-white border-b-2 border-white' : 'text-white/40 hover:text-white'}`}>{tab.label}</button>
+              ))}
+            </nav>
+            <div className="hidden sm:flex items-center gap-3 font-mono">
+              <div className="border border-teal-500/30 bg-teal-950/20 px-3 py-1.5 rounded-sm flex flex-col items-end">
+                <span className="text-[9px] text-teal-400/70 tracking-wider">전체회독</span>
+                <span className="text-[14px] font-bold text-teal-300">{minFilledCount} 회독</span>
+              </div>
+              <div className="border border-indigo-500/30 bg-indigo-900/20 px-3 py-1.5 rounded-sm flex flex-col items-end">
+                <span className="text-[9px] text-indigo-400/70 tracking-wider">합격률</span>
+                <span className="text-[14px] font-bold text-indigo-300">{passProbability}%</span>
+              </div>
+            </div>
           </div>
-        </nav>
-      )}
-      {/* 💡 여기까지 복사! (이 아래의 {!isLoggedIn ? ( ... 에는 영향이 가지 않도록 주의해 주세요) */}
+        )}
+      </header>
 
       {!isLoggedIn ? (
         <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
