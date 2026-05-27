@@ -92,12 +92,12 @@ def generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1):
         raise e
 
 def generate_ollama_text(prompt, model="gemma4:26b", temperature=0.1):
-    """JSON 형식 강제 없이 자유 텍스트 응답을 받는 함수."""
+    """채팅 모델용 /api/chat 엔드포인트 사용."""
     try:
-        url = "http://localhost:11434/api/generate"
+        url = "http://localhost:11434/api/chat"
         payload = {
             "model": model,
-            "prompt": prompt,
+            "messages": [{"role": "user", "content": prompt}],
             "stream": False,
             "options": {
                 "temperature": temperature,
@@ -110,9 +110,9 @@ def generate_ollama_text(prompt, model="gemma4:26b", temperature=0.1):
         }
         response = requests.post(url, json=payload, timeout=300)
         response.raise_for_status()
-        return response.json().get("response", "")
+        return response.json().get("message", {}).get("content", "")
     except Exception as e:
-        print(f"\n[🔥 로컬 AI (Ollama) 텍스트 통신 에러]\n{e}\n", file=sys.stderr, flush=True)
+        print(f"\n[🔥 Ollama chat 통신 에러]\n{e}\n", file=sys.stderr, flush=True)
         raise e
 
 # ==========================================
@@ -504,17 +504,18 @@ def analyze_chunk():
         print(f"🤖 [gemma4:26b] 응답 생성 중...", file=sys.stderr, flush=True)
 
         try:
-            url = "http://localhost:11434/api/generate"
+            url = "http://localhost:11434/api/chat"
             payload = {
                 "model": "gemma4:26b",
-                "prompt": prompt,
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
                 "stream": False,
                 "options": {
                     "temperature": 0.2,
                     "num_ctx": 8192,
-                    "num_predict": 400,
-                    "repeat_penalty": 1.4,
-                    "repeat_last_n": 128,
+                    "num_predict": 500,
+                    "repeat_penalty": 1.3,
                     "top_k": 40,
                     "top_p": 0.9,
                 }
@@ -522,8 +523,8 @@ def analyze_chunk():
             resp = requests.post(url, json=payload, timeout=300)
             resp.raise_for_status()
             ollama_resp = resp.json()
-            raw_text = ollama_resp.get("response", "").strip()
-            print(f"[Ollama 전체 응답] done={ollama_resp.get('done')} | 응답길이={len(raw_text)}", file=sys.stderr)
+            raw_text = ollama_resp.get("message", {}).get("content", "").strip()
+            print(f"[Ollama 응답] done={ollama_resp.get('done')} | 길이={len(raw_text)}", file=sys.stderr)
         except Exception as e:
             return jsonify({"error": f"AI 통신 오류: {str(e)}"}), 500
 
