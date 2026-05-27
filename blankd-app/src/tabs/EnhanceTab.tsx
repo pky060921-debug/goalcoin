@@ -65,9 +65,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             {safeCards
-              .filter((c:any) => c && c.content && c.folder_name === folder) // 💡 방어막: 데이터가 확실히 있는 카드만 통과시킵니다.
-              .sort((a:any, b:any) => a.id - b.id)
-{safeCards
               .filter((c:any) => c && c.content && c.folder_name === folder)
               .sort((a:any, b:any) => a.id - b.id)
               .map((card: any) => {
@@ -110,14 +107,14 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">반복:{stats.filled}</span>
                           <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                           
-                          {/* 💡 완벽하게 수정된 버튼 위치 */}
+                          {/* 💡 완벽하게 연결된 수정 버튼 */}
                           <button 
                             onClick={(e) => {
                               e.stopPropagation(); 
                               const match = card.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
                               if (match) {
                                 setExpandedId(parseInt(match[1], 10)); 
-                                setActiveTab('craft'); // 제대로 된 만들기 탭으로 이동!
+                                setActiveTab('craft'); 
                               } else {
                                 alert("이 카드는 예전에 생성되어 원본 조항 연결 고리(ORIG_ID)가 없습니다. \n만들기 탭에서 같은 이름의 조항을 직접 찾아 한 번 덮어써 주시면 영구적으로 연결됩니다!");
                                 setActiveTab('craft');
@@ -127,7 +124,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           >
                             ✏️수정
                           </button>
-                          {/* 버튼 끝 */}
 
                         </div>
                       </div>
@@ -135,6 +131,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                   </div>
                 );
             })}
+          </div>
         </div>
       ))}
     </div>
