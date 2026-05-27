@@ -479,67 +479,73 @@ def get_pending_exams():
 
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
-    """
-    gemma4:26b가 자체 지식으로 시험 문항을 직접 판단.
-    JSON 형식 강제 없이 자유 텍스트로 받아서 안정적으로 처리.
-    """
     try:
         data = request.json
-        chunk_text = data.get('chunk_text', '')
+        chunk_text = data.get('chunk_text', '')[:2000]  # 너무 긴 지문 방지
         user_feedback = data.get('user_feedback', '')
         chat_history = data.get('chat_history', [])
 
-        # 최근 6턴 대화 이력
-        history_str = ""
-        for msg in chat_history[-6:]:
-            sender_name = "사용자" if msg['sender'] == 'user' else "AI"
-            history_str += f"\n[{sender_name}]: {msg['text']}"
+        # 최근 4턴 대화 이력 (너무 길면 모델 혼란)
+        history_lines = []
+        for msg in chat_history[-4:]:
+            role = "사용자" if msg['sender'] == 'user' else "AI"
+            history_lines.append(f"{role}: {msg['text'][:200]}")
+        history_str = "\n".join(history_lines)
 
-        prompt = f"""당신은 시험 문제 전문 해설 AI입니다. 한국어로 답변하세요.
+        # 프롬프트는 최대한 단순하게
+        prompt = (
+            "다음 시험 문제를 읽고 질문에 한국어로 간결하게 답하세요.\n\n"
+            f"[문제]\n{chunk_text}\n\n"
+            + (f"[대화 이력]\n{history_str}\n\n" if history_str else "")
+            + f"[질문]\n{user_feedback}\n\n"
+            "답변:"
+        )
 
-[시험 지문]
-{chunk_text}
+        print(f"🤖 [gemma4:26b] 응답 생성 중...", file=sys.stderr, flush=True)
 
-[이전 대화]
-{history_str if history_str else "없음"}
+        try:
+            url = "http://localhost:11434/api/generate"
+            payload = {
+                "model": "gemma4:26b",
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.2,
+                    "num_ctx": 8192,
+                    "num_predict": 400,       # 짧게 제한
+                    "repeat_penalty": 1.4,    # 반복 루프 강하게 차단
+                    "repeat_last_n": 128,
+                    "top_k": 40,
+                    "top_p": 0.9,
+                    "stop": ["사용자:", "질문:", "[문제]", "###"]  # 반복 탈출용
+                }
+            }
+            resp = requests.post(url, json=payload, timeout=300)
+            resp.raise_for_status()
+            raw_text = resp.json().get("response", "").strip()
+        except Exception as e:
+            return jsonify({"error": f"AI 통신 오류: {str(e)}"}), 500
 
-[사용자 질문]
-{user_feedback}
+        print(f"[AI 응답]\n{raw_text[:300]}", file=sys.stderr)
 
-위 질문에 대해 아래 형식으로 정확히 답변하세요:
+        # 반복 루프 감지 (같은 단어가 5번 이상 연속이면 비정상)
+        if re.search(r'(\b\w+\b)(?:\s+\1){4,}', raw_text):
+            return jsonify({"error": "AI가 비정상적인 응답을 생성했습니다. 다시 시도해주세요."}), 500
 
-정답: (정답 번호, 모르면 "확인 필요")
-해설: (2~3문장으로 근거 설명)
-판단: (O/X 판별 요청이면 [O] 또는 [X]로 시작해서 이유 설명, 아니면 일반 답변)"""
-
-        print(f"🤖 [gemma4:26b 텍스트 응답] 생성 중...", file=sys.stderr, flush=True)
-
-        raw_text = generate_ollama_text(prompt, temperature=0.1)
-        raw_text = raw_text.strip()
-
-        print(f"[AI 응답 원문]\n{raw_text[:300]}", file=sys.stderr)
-
-        # 정답/해설 추출 (정규식)
-        answer_match = re.search(r'정답\s*[:\：]\s*(.+?)(?:\n|$)', raw_text)
-        explanation_match = re.search(r'해설\s*[:\：]\s*(.+?)(?=\n판단|\n정답|$)', raw_text, re.DOTALL)
-        judgment_match = re.search(r'판단\s*[:\：]\s*(.+?)$', raw_text, re.DOTALL)
-
-        answer = answer_match.group(1).strip() if answer_match else "확인 필요"
-        explanation = explanation_match.group(1).strip() if explanation_match else ""
-        chat_message = judgment_match.group(1).strip() if judgment_match else raw_text
-
-        # 해설이 chat_message보다 나은 경우 우선 사용
-        if not chat_message or len(chat_message) < 5:
-            chat_message = raw_text
+        # 정답 번호 추출 시도 (예: "정답은 3번", "3번", "③")
+        answer = "확인 필요"
+        ans_match = re.search(r'정답[은이]?\s*[:\：]?\s*([①②③④⑤1-5]번?|확인\s*필요)', raw_text)
+        if ans_match:
+            answer = ans_match.group(1).strip()
 
         return jsonify({"result": {
-            "chat_message": chat_message,
+            "chat_message": raw_text,
             "answer": answer,
-            "explanation": explanation
+            "explanation": raw_text
         }})
 
     except Exception as e:
-        print(f"\n[🔥 문단 분석 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
+        print(f"\n[🔥 분석 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
     except Exception as e:
         print(f"\n[🔥 문단 분석 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
