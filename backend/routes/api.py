@@ -492,38 +492,23 @@ def analyze_chunk():
             history_lines.append(f"{role}: {msg['text'][:200]}")
         history_str = "\n".join(history_lines)
 
-        # 프롬프트는 최대한 단순하게
-        prompt = (
-            "다음 시험 문제를 읽고 질문에 한국어로 간결하게 답하세요.\n\n"
-            f"=== 시험 문제 ===\n{chunk_text}\n\n"
-            + (f"=== 대화 이력 ===\n{history_str}\n\n" if history_str else "")
-            + f"=== 질문 ===\n{user_feedback}\n\n"
-            "=== 답변 ===\n"
-        )
+        # 프롬프트: 최대한 단순하게
+        history_context = f"\n이전 대화:\n{history_str}\n" if history_str else ""
+        prompt = f"다음 시험 문제에 대해 한국어로 답해주세요.\n\n{chunk_text}\n{history_context}\n질문: {user_feedback}"
 
         print(f"🤖 [gemma4:26b] 응답 생성 중...", file=sys.stderr, flush=True)
 
         try:
-            url = "http://localhost:11434/api/chat"
+            url = "http://localhost:11434/api/generate"
             payload = {
                 "model": "gemma4:26b",
-                "messages": [
-                    {"role": "user", "content": prompt}
-                ],
-                "stream": False,
-                "options": {
-                    "temperature": 0.2,
-                    "num_ctx": 8192,
-                    "num_predict": 500,
-                    "repeat_penalty": 1.3,
-                    "top_k": 40,
-                    "top_p": 0.9,
-                }
+                "prompt": prompt,
+                "stream": False
             }
             resp = requests.post(url, json=payload, timeout=300)
             resp.raise_for_status()
             ollama_resp = resp.json()
-            raw_text = ollama_resp.get("message", {}).get("content", "").strip()
+            raw_text = ollama_resp.get("response", "").strip()
             print(f"[Ollama 응답] done={ollama_resp.get('done')} | 길이={len(raw_text)}", file=sys.stderr)
         except Exception as e:
             return jsonify({"error": f"AI 통신 오류: {str(e)}"}), 500
@@ -531,7 +516,7 @@ def analyze_chunk():
         print(f"[AI 응답]\n{raw_text[:500]}", file=sys.stderr)
 
         if not raw_text:
-            return jsonify({"error": "AI가 빈 응답을 반환했습니다. Ollama가 실행 중인지, gemma4:26b 모델이 로드됐는지 확인하세요."}), 500
+            return jsonify({"error": "AI가 빈 응답을 반환했습니다."}), 500
 
         # 반복 루프 감지 (같은 단어가 5번 이상 연속이면 비정상)
         if re.search(r'(\b\w+\b)(?:\s+\1){4,}', raw_text):
