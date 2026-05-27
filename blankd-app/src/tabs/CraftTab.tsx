@@ -30,18 +30,14 @@ type WordItem = { text: string; subWords: string[]; };
 export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory, loadAllData, expandedId, setExpandedId }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   
-  // 💡 [오류 진단 코드 포함] 조항명 정밀 복구 로직
   const getDisplayTitle = (cat: any) => {
     try {
       const raw = cat.title || cat.content || "";
-      
-      // 1순위: 전체 텍스트에서 '제X조(이름)' 패턴 탐색
       const match = raw.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
       if (match && match[2].trim() !== "내용") {
         return `${match[1].replace(/\s+/g, '')} ${match[2].trim()}`;
       }
       
-      // 2순위: 본문(content)이 따로 있다면 거기서 탐색
       if (cat.content) {
         const bodyMatch = cat.content.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
         if (bodyMatch && bodyMatch[2].trim() !== "내용") {
@@ -49,32 +45,31 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
         }
       }
 
-      // 3순위: 다 없으면 기존처럼 태그와 '내용' 글자 제거 후 렌더링
       const fallbackTitle = raw.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').replace(/내용/g, '').trim();
       return fallbackTitle || "제목 없음";
       
     } catch (error) {
-      // 🩺 진단 코드: 제목 추출 중 문제 발생 시 콘솔에 원인 출력
       console.error("[진단 오류] CraftTab 제목 추출 실패:", error, "데이터 원본:", cat);
       return "제목 추출 에러";
     }
   };
 
-  const getOnlyArticleNumber = (text: string) => {
-    if (!text) return "";
-    const match = text.match(/제\s*\d+\s*조(?:\s*의\s*\d+)?/);
-    return match ? match[0].replace(/\s+/g, '') : text.replace(/\s+/g, '');
-  };
-
-  const createdCleanTitles = new Set(
-    (Array.isArray(savedCards) ? savedCards : []).map((c: any) => {
-      const rawTitle = c.title || (c.content ? c.content.split('\n')[0] : "");
-      return getOnlyArticleNumber(rawTitle);
-    })
-  );
-
-  const isCategoryCreated = (catTitle: string) => {
-    return createdCleanTitles.has(getOnlyArticleNumber(catTitle));
+  // 💡 [핵심 버그 수정] 엉성한 '제X조' 추출 로직 삭제 및 초정밀 검사 로직 도입
+  const checkIsCreated = (cat: any) => {
+    if (!Array.isArray(savedCards)) return false;
+    
+    return savedCards.some((c: any) => {
+      // 1순위: 카드 내용에 현재 조항의 고유 번호(ORIG_ID)가 정확히 박혀 있는가?
+      if (c.content && c.content.includes(`[[ORIG_ID:${cat.id}]]`)) return true;
+      
+      // 2순위: (옛날 카드 대비) 카드의 첫 줄(제목)이 조항의 제목('[법] 제1조...' 등)과 완벽하게 똑같은가?
+      if (c.content && cat.title) {
+        const cardFirstLine = c.content.split('\n')[0].trim();
+        return cardFirstLine === cat.title.trim();
+      }
+      
+      return false;
+    });
   };
 
   const craftFolders = sortChapters(
@@ -96,6 +91,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [isEraserMode, setIsEraserMode] = useState(false);
   const [isEditingText, setIsEditingText] = useState(false);
   const [editingContent, setEditingContent] = useState("");
+  
   useEffect(() => {
     if (expandedId) {
       const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${expandedId}]]`));
@@ -108,8 +104,8 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       }
     }
   }, [expandedId, savedCards, safeCategories]);
-  const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
   
+  const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
   const [customStopWords, setCustomStopWords] = useState<string[]>([]);
   const [customIncludeWords, setCustomIncludeWords] = useState<string[]>([]);
   const [newStopWord, setNewStopWord] = useState("");
@@ -343,17 +339,14 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     setSelectedWords(initialSelected);
   };
 
-// 💡 [수정] 조항 아코디언이 열릴 때(수정 모드 등) 기존 카드의 메모와 데이터를 불러옵니다.
   const openCategory = (targetCat: any, bypassToggle = false) => {
     if (isSelectMode) { handleToggleCheck(targetCat.id); return; }
     if (!bypassToggle) setExpandedId(targetCat.id);
     
-    // 💡 1. 현재 조항과 연결된 기존 생성 카드가 있는지 백엔드 데이터(savedCards)에서 찾습니다.
     const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${targetCat.id}]]`));
     
     setPageBreaks(new Set());
     
-    // 💡 2. 기존 카드가 있다면 메모 내용을 추출해서 화면에 세팅합니다.
     if (existingCard) {
       const parsed = parseCardStats(existingCard.memo);
       setMemoInput(parsed.text);
@@ -362,9 +355,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     }
     
     setIsEraserMode(false);
-    
     const { body } = formatCardText(targetCat.content || targetCat.title || "");
-    
     setIsEditingText(false);
     setEditingContent(body);
     applyTextToState(body);
@@ -533,9 +524,10 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
               {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
                   const isExpanded = expandedId === cat.id;
                   const isChecked = checkedIds.has(cat.id);
-                  const isCreated = isCategoryCreated(cat.title);
                   
-                  // 💡 위에서 선언한 정밀 복구 로직 함수 적용
+                  // 💡 위에서 선언한 초정밀 검사 적용! 이제 억울하게 회색으로 변하는 조항이 없습니다.
+                  const isCreated = checkIsCreated(cat);
+                  
                   const displayTitle = getDisplayTitle(cat);
                   
                   let colClass = ""; 
