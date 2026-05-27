@@ -246,17 +246,38 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   }, [expandedId, categories]);
 
 const applyTextToState = (textBody: string) => {
-    const initialWords = textBody.split(SPLIT_REGEX).filter(w => w !== "");
-    let currentWordArray = initialWords.map(w => ({ text: w, subWords: [w] }));
-
     const currentCustomStopWords = customStopWords;
     const currentCustomIncludeWords = customIncludeWords;
 
-    // 💡 1. [핵심 기능] 필수 포함 단어를 찾아서 '하나의 덩어리(단일 빈칸)'로 미리 병합합니다!
+    // 💡 1. [아키님의 천재적 아이디어 적용] 
+    // 사용자가 '제외 단어'에 등록한 단어들을 가져와서, 한글 단어 끝에 붙어있으면 강제로 띄어쓰기를 해버립니다!
+    let processedText = textBody;
+    if (currentCustomStopWords.length > 0) {
+       // 등록된 단어들(예: "하여", "나")을 정규식에 쓸 수 있게 안전하게 변환
+       const safeStops = currentCustomStopWords
+          .map(w => w.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .filter(w => w !== "");
+          
+       if (safeStops.length > 0) {
+          // 정규식 해석: (어떤 한글 덩어리) 뒤에 (제외단어)가 오고, 그 뒤에 (공백/기호/문장끝)이 오면 쪼개라!
+          const dynamicRegex = new RegExp(`([가-힣]+)(${safeStops.join('|')})([\\s,.)\\]]|$)`, 'g');
+          
+          // 띄어쓰기 실행 ("심사하여" -> "심사 하여")
+          processedText = processedText.replace(dynamicRegex, '$1 $2$3');
+          // 혹시 "심사하여나" 처럼 조사가 연달아 2개 붙어있을 경우를 대비해 한 번 더 실행
+          processedText = processedText.replace(dynamicRegex, '$1 $2$3'); 
+       }
+    }
+
+    // 기존의 textBody 대신, 띄어쓰기가 완료된 processedText를 사용하여 단어를 쪼갭니다.
+    const initialWords = processedText.split(SPLIT_REGEX).filter(w => w !== "");
+    let currentWordArray = initialWords.map(w => ({ text: w, subWords: [w] }));
+
+    // 💡 2. 필수 포함 단어 병합 (이전에 추가한 로직 그대로 유지)
     currentCustomIncludeWords.forEach(cw => {
        const trimmedCw = cw.trim();
        if (!trimmedCw) return;
-       const cwNoSpace = trimmedCw.replace(/\s+/g, ''); // 띄어쓰기 무시하고 검색
+       const cwNoSpace = trimmedCw.replace(/\s+/g, ''); 
 
        let i = 0;
        while (i < currentWordArray.length) {
@@ -286,7 +307,7 @@ const applyTextToState = (textBody: string) => {
     const initialSelected = new Set<number>();
     const protectedIndices = new Set<number>();
 
-    // 💡 2. 병합된 덩어리들이 필수 단어라면 무조건 빈칸으로 선택되게 보호합니다.
+    // 💡 3. 필수 단어 보호 로직
     currentWordArray.forEach((wordObj, idx) => {
         const trimmed = wordObj.text.trim();
         if (currentCustomIncludeWords.some(cw => trimmed.replace(/\s+/g, '') === cw.replace(/\s+/g, ''))) {
@@ -295,9 +316,9 @@ const applyTextToState = (textBody: string) => {
         }
     });
 
-    // 3. 일반 단어 자동 선택 로직
+    // 💡 4. 일반 단어 선택 로직
     currentWordArray.forEach((wordObj, idx) => {
-      if (protectedIndices.has(idx)) return; // 이미 필수단어로 지정된 덩어리는 건너뜀
+      if (protectedIndices.has(idx)) return;
 
       const trimmed = wordObj.text.trim();
       const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(trimmed) && trimmed !== "";
@@ -305,9 +326,10 @@ const applyTextToState = (textBody: string) => {
                              /^\(?\d+(?:항|호|목)?\)?$/.test(trimmed) || 
                              /^\(?(?:①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)\)?$/.test(trimmed);
                              
-      // 💡 [조사 추가 위치] 맨 끝에 '하여', '나' 가 추가되었습니다. 
-      // 더 추가하고 싶으시다면 이 정규식 안에 |단어| 형태로 계속 추가하시면 됩니다!
-      const isStopWord = /^(은|는|이|가|을|를|의|에|에게|에서|로|으로|과|와|도|만|부터|까지|조차|마저|치고|및|등|또는|수|할|이하|이상|초과|미만|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여|바|것|자|경우|때|중|하여|나)$/.test(trimmed);
+      // 기본적으로 걸러낼 고정 조사들
+      const isStopWord = /^(은|는|이|가|을|를|의|에|에게|에서|로|으로|과|와|도|만|부터|까지|조차|마저|치고|및|등|또는|수|할|이하|이상|초과|미만|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여|바|것|자|경우|때|중)$/.test(trimmed);
+      
+      // 사용자가 추가한 제외 단어와 일치하는지도 검사
       const isCustomSingleStopWord = currentCustomStopWords.some(cw => trimmed === cw || trimmed === cw + "." || trimmed === cw + ",");
       
       if (!isSymbolOnly && !isArticleOrNum && !isStopWord && !isCustomSingleStopWord && trimmed.length > 0) {
@@ -315,7 +337,7 @@ const applyTextToState = (textBody: string) => {
       }
     });
 
-    // 4. 제외 단어(예외 구문) 필터링 로직
+    // 💡 5. 문맥 기반 제외 필터링 (기존 로직 유지)
     const fullText = currentWordArray.map(w => w.text).join("");
     const wordRanges: {start: number, end: number, wordIdx: number}[] = [];
     let currentPos = 0;
@@ -351,8 +373,7 @@ const applyTextToState = (textBody: string) => {
     });
 
     setSelectedWords(initialSelected);
-  };
-  
+  };  
   const openCategory = (targetCat: any, bypassToggle = false) => {
     if (isSelectMode) { handleToggleCheck(targetCat.id); return; }
     if (!bypassToggle) setExpandedId(targetCat.id);
