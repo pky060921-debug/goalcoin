@@ -64,22 +64,24 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
-            {safeCards
-              .filter((c:any) => c && c.content && c.folder_name === folder)
+{safeCards
+              .filter((c:any) => c && c.content && c.folder_name === folder) // 💡 방어막: 데이터가 확실히 있는 카드만 통과시킵니다.
               .sort((a:any, b:any) => a.id - b.id)
               .map((card: any) => {
                 
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
                 
+                // 💡 [수정] 본문 첫 줄에서 '[법]' 태그만 지우고 제목으로 사용합니다!
                 let displayTitle = (cleanContent.split('\n')[0] || "")
-                    .replace(/\[.*?\]/g, '')         
-                    .replace(/\(\s*내용\s*\)/g, '')  
-                    .replace(/내용/g, '')            
+                    .replace(/\[.*?\]/g, '')         // [법], [령] 태그 제거
+                    .replace(/\(\s*내용\s*\)/g, '')  // (내용) 오염 제거
+                    .replace(/내용/g, '')            // 내용 글자 제거
                     .trim();
                 
                 if (!displayTitle) displayTitle = "제목 없음";
 
                 const { body } = formatCardText(cleanContent);
+
                 const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
                 const stats = parseCardStats(card.memo);
                 const hasWrong = stats.wrongIndices.length > 0;
@@ -106,32 +108,25 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
                           <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">반복:{stats.filled}</span>
                           <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
-                          
-                          {/* 💡 완벽하게 연결된 수정 버튼 */}
                           <button 
                             onClick={(e) => {
-                              e.stopPropagation(); 
+                              e.stopPropagation(); // 카드 클릭(모달 열기) 방지
                               const match = card.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
                               if (match) {
-                                setExpandedId(parseInt(match[1], 10)); 
-                                setActiveTab('craft'); 
-                              } else {
-                                alert("이 카드는 예전에 생성되어 원본 조항 연결 고리(ORIG_ID)가 없습니다. \n만들기 탭에서 같은 이름의 조항을 직접 찾아 한 번 덮어써 주시면 영구적으로 연결됩니다!");
-                                setActiveTab('craft');
+                                setExpandedId(parseInt(match[1], 10)); // 만들기 탭의 해당 조항 열기
+                                setActiveTab('create'); // 만들기 탭으로 강제 이동
                               }
                             }}
                             className="ml-1 px-1.5 py-0.5 bg-amber-900/40 text-amber-400 border border-amber-500/50 rounded font-mono text-[9px] hover:bg-amber-900/60 transition-colors cursor-pointer"
                           >
                             ✏️수정
                           </button>
-
                         </div>
                       </div>
                     </button>
                   </div>
                 );
-            })}
-          </div>
+            })}          </div>
         </div>
       ))}
     </div>
