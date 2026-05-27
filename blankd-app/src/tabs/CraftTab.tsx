@@ -30,9 +30,11 @@ type WordItem = { text: string; subWords: string[]; };
 export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory, loadAllData, expandedId, setExpandedId }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   
+  // 💡 [오류 진단 코드 포함] 조항명 정밀 복구 로직
   const getDisplayTitle = (cat: any) => {
     try {
       const raw = cat.title || cat.content || "";
+      
       const match = raw.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
       if (match && match[2].trim() !== "내용") {
         return `${match[1].replace(/\s+/g, '')} ${match[2].trim()}`;
@@ -54,20 +56,20 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     }
   };
 
-  // 💡 [핵심 버그 수정] 엉성한 '제X조' 추출 로직 삭제 및 초정밀 검사 로직 도입
+  // 💡 [초정밀 타겟 검사] 대충 '제X조'만 보던 로직 폐기, 고유 ID 및 풀 타이틀 정밀 대조
   const checkIsCreated = (cat: any) => {
     if (!Array.isArray(savedCards)) return false;
     
     return savedCards.some((c: any) => {
-      // 1순위: 카드 내용에 현재 조항의 고유 번호(ORIG_ID)가 정확히 박혀 있는가?
-      if (c.content && c.content.includes(`[[ORIG_ID:${cat.id}]]`)) return true;
+      if (!c || !c.content) return false;
+      // 1순위: 카드 고유의 ORIG_ID 꼬리표가 정확히 매칭되는가
+      if (c.content.includes(`[[ORIG_ID:${cat.id}]]`)) return true;
       
-      // 2순위: (옛날 카드 대비) 카드의 첫 줄(제목)이 조항의 제목('[법] 제1조...' 등)과 완벽하게 똑같은가?
-      if (c.content && cat.title) {
+      // 2순위: 수동 DB 조작 등으로 꼬리표가 탈락했을 경우 풀 타이틀 구조 대조
+      if (cat.title) {
         const cardFirstLine = c.content.split('\n')[0].trim();
         return cardFirstLine === cat.title.trim();
       }
-      
       return false;
     });
   };
@@ -91,7 +93,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [isEraserMode, setIsEraserMode] = useState(false);
   const [isEditingText, setIsEditingText] = useState(false);
   const [editingContent, setEditingContent] = useState("");
-  
+
   useEffect(() => {
     if (expandedId) {
       const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${expandedId}]]`));
@@ -104,7 +106,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       }
     }
   }, [expandedId, savedCards, safeCategories]);
-  
+
   const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
   const [customStopWords, setCustomStopWords] = useState<string[]>([]);
   const [customIncludeWords, setCustomIncludeWords] = useState<string[]>([]);
@@ -245,35 +247,28 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     }
   }, [expandedId, categories]);
 
-const applyTextToState = (textBody: string) => {
+  const applyTextToState = (textBody: string) => {
     const currentCustomStopWords = customStopWords;
     const currentCustomIncludeWords = customIncludeWords;
 
-    // 💡 1. [아키님의 천재적 아이디어 적용] 
-    // 사용자가 '제외 단어'에 등록한 단어들을 가져와서, 한글 단어 끝에 붙어있으면 강제로 띄어쓰기를 해버립니다!
+    // 💡 조사 분리 기획 적용: 제외 단어(하여, 나 등)가 등록되면 형태소 가위로 강제 분리 실행
     let processedText = textBody;
     if (currentCustomStopWords.length > 0) {
-       // 등록된 단어들(예: "하여", "나")을 정규식에 쓸 수 있게 안전하게 변환
        const safeStops = currentCustomStopWords
           .map(w => w.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
           .filter(w => w !== "");
           
        if (safeStops.length > 0) {
-          // 정규식 해석: (어떤 한글 덩어리) 뒤에 (제외단어)가 오고, 그 뒤에 (공백/기호/문장끝)이 오면 쪼개라!
           const dynamicRegex = new RegExp(`([가-힣]+)(${safeStops.join('|')})([\\s,.)\\]]|$)`, 'g');
-          
-          // 띄어쓰기 실행 ("심사하여" -> "심사 하여")
           processedText = processedText.replace(dynamicRegex, '$1 $2$3');
-          // 혹시 "심사하여나" 처럼 조사가 연달아 2개 붙어있을 경우를 대비해 한 번 더 실행
           processedText = processedText.replace(dynamicRegex, '$1 $2$3'); 
        }
     }
 
-    // 기존의 textBody 대신, 띄어쓰기가 완료된 processedText를 사용하여 단어를 쪼갭니다.
     const initialWords = processedText.split(SPLIT_REGEX).filter(w => w !== "");
     let currentWordArray = initialWords.map(w => ({ text: w, subWords: [w] }));
 
-    // 💡 2. 필수 포함 단어 병합 (이전에 추가한 로직 그대로 유지)
+    // 💡 필수 단어 단일 빈칸 처리 기획: 필수 단어 발견 시 하나의 덩어리로 사전 병합
     currentCustomIncludeWords.forEach(cw => {
        const trimmedCw = cw.trim();
        if (!trimmedCw) return;
@@ -307,7 +302,6 @@ const applyTextToState = (textBody: string) => {
     const initialSelected = new Set<number>();
     const protectedIndices = new Set<number>();
 
-    // 💡 3. 필수 단어 보호 로직
     currentWordArray.forEach((wordObj, idx) => {
         const trimmed = wordObj.text.trim();
         if (currentCustomIncludeWords.some(cw => trimmed.replace(/\s+/g, '') === cw.replace(/\s+/g, ''))) {
@@ -316,7 +310,6 @@ const applyTextToState = (textBody: string) => {
         }
     });
 
-    // 💡 4. 일반 단어 선택 로직
     currentWordArray.forEach((wordObj, idx) => {
       if (protectedIndices.has(idx)) return;
 
@@ -326,10 +319,7 @@ const applyTextToState = (textBody: string) => {
                              /^\(?\d+(?:항|호|목)?\)?$/.test(trimmed) || 
                              /^\(?(?:①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)\)?$/.test(trimmed);
                              
-      // 기본적으로 걸러낼 고정 조사들
       const isStopWord = /^(은|는|이|가|을|를|의|에|에게|에서|로|으로|과|와|도|만|부터|까지|조차|마저|치고|및|등|또는|수|할|이하|이상|초과|미만|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여|바|것|자|경우|때|중)$/.test(trimmed);
-      
-      // 사용자가 추가한 제외 단어와 일치하는지도 검사
       const isCustomSingleStopWord = currentCustomStopWords.some(cw => trimmed === cw || trimmed === cw + "." || trimmed === cw + ",");
       
       if (!isSymbolOnly && !isArticleOrNum && !isStopWord && !isCustomSingleStopWord && trimmed.length > 0) {
@@ -337,7 +327,6 @@ const applyTextToState = (textBody: string) => {
       }
     });
 
-    // 💡 5. 문맥 기반 제외 필터링 (기존 로직 유지)
     const fullText = currentWordArray.map(w => w.text).join("");
     const wordRanges: {start: number, end: number, wordIdx: number}[] = [];
     let currentPos = 0;
@@ -373,7 +362,8 @@ const applyTextToState = (textBody: string) => {
     });
 
     setSelectedWords(initialSelected);
-  };  
+  };
+
   const openCategory = (targetCat: any, bypassToggle = false) => {
     if (isSelectMode) { handleToggleCheck(targetCat.id); return; }
     if (!bypassToggle) setExpandedId(targetCat.id);
@@ -560,9 +550,8 @@ const applyTextToState = (textBody: string) => {
                   const isExpanded = expandedId === cat.id;
                   const isChecked = checkedIds.has(cat.id);
                   
-                  // 💡 위에서 선언한 초정밀 검사 적용! 이제 억울하게 회색으로 변하는 조항이 없습니다.
+                  // 💡 초정밀 고유 판별 로직 호출
                   const isCreated = checkIsCreated(cat);
-                  
                   const displayTitle = getDisplayTitle(cat);
                   
                   let colClass = ""; 
