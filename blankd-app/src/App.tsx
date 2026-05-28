@@ -587,7 +587,7 @@ function MainApp() {
             
             {/* 이어서 하기 (만들기 / 채우기) */}
             <div className="flex items-center gap-2 shrink-0">
-              <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 uppercase hidden sm:inline">Resume:</span>
+              <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 uppercase hidden sm:inline">이어하기:</span>
               
               <button 
                 onClick={() => {
