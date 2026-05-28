@@ -552,7 +552,7 @@ function MainApp() {
     recognition.start();
   };
 
-  // 💡 [추가] 전체 카드의 최소 회독수 (모두 1이상이면 1, 모두 2이상이면 2) 계산
+// 💡 [추가] 전체 카드의 최소 회독수 (모두 1이상이면 1, 모두 2이상이면 2) 계산
   const minFilledCount = savedCards.length > 0 
     ? Math.min(...savedCards.map((card: any) => {
         const stats = parseCardStats(card.memo || "");
@@ -562,6 +562,39 @@ function MainApp() {
 
   // 💡 [추가] 합격률 로직: 최소 회독수 1회당 2%씩 상승 (최대 100%)
   const passProbability = Math.min(minFilledCount * 2, 100);
+
+  // ▼▼▼▼▼▼▼▼▼ 여기에 아래 코드를 추가하세요! ▼▼▼▼▼▼▼▼▼
+  // --- [스마트 추론 알고리즘] ---
+  let nextCatToCraft = null;
+  let nextStudyCard = null;
+
+  if (isLoggedIn && categories.length > 0) {
+    const craftedOrigIds = new Set(
+      savedCards.map(c => { 
+         const m = c.content.match(/\[\[ORIG_ID:(\d+)\]\]/); 
+         return m ? parseInt(m[1], 10) : null; 
+      }).filter(id => id !== null)
+    );
+    // 조항을 순서대로 정렬하여 아직 안 만든 첫 번째 조항 탐색
+    const sortedCats = [...categories].sort((a,b) => a.id - b.id);
+    nextCatToCraft = sortedCats.find(cat => !craftedOrigIds.has(cat.id));
+  }
+
+  if (isLoggedIn && savedCards.length > 0) {
+    const cardsWithStatus = savedCards.map(c => {
+       const { body } = formatCardText(c.content);
+       const blanksCount = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
+       const stats = parseCardStats(c.memo);
+       return { ...c, totalBlanks: blanksCount, filled: stats.filled, wrongCount: stats.wrongIndices.length };
+    }).sort((a, b) => a.id - b.id);
+
+    // 1순위: 풀다 만 것, 2순위: 안 푼 것, 3순위: 오답 있는 것
+    nextStudyCard = cardsWithStatus.find(c => c.filled > 0 && c.filled < c.totalBlanks) 
+                 || cardsWithStatus.find(c => c.filled === 0 && c.totalBlanks > 0)
+                 || cardsWithStatus.find(c => c.wrongCount > 0)
+                 || cardsWithStatus[0];
+  }
+  // ▲▲▲▲▲▲▲▲▲ 여기까지 추가 ▲▲▲▲▲▲▲▲▲
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
