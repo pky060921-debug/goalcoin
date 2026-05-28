@@ -563,17 +563,13 @@ function MainApp() {
   // 💡 [추가] 합격률 로직: 최소 회독수 1회당 2%씩 상승 (최대 100%)
   const passProbability = Math.min(minFilledCount * 2, 100);
 
-  // ▼▼▼▼▼▼▼▼▼ 여기에 아래 코드를 추가하세요! ▼▼▼▼▼▼▼▼▼
-  // --- [스마트 추론 알고리즘] ---
+// --- [스마트 추론 알고리즘] ---
   let nextCatToCraft = null;
   let nextStudyCard = null;
 
-if (isLoggedIn && categories.length > 0) {
+  if (isLoggedIn && categories.length > 0) {
     const craftedOrigIds = new Set();
-    const craftedTitles = new Set();
-
-    // 💡 공백 및 특수기호(괄호, 마침표 등)만 콕 집어서 제거하는 정규식 (한자 보존!)
-    const regex = /[\s\[\]\(\)\.\,\:\;\-\_\+\=\?\!\<\>]/g;
+    const craftedTitles: string[] = []; // 💡 includes 검사를 위해 Set 대신 배열(Array) 사용
 
     savedCards.forEach((c: any) => {
       const match = c.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
@@ -581,7 +577,7 @@ if (isLoggedIn && categories.length > 0) {
       
       const firstLine = c.content.split('\n')[0];
       if (firstLine) {
-        craftedTitles.add(firstLine.replace(/[^가-힣a-zA-Z0-9一-龥]/g, ''));
+        craftedTitles.push(firstLine.replace(/[^가-힣a-zA-Z0-9一-龥]/g, ''));
       }
     });
 
@@ -589,8 +585,11 @@ if (isLoggedIn && categories.length > 0) {
     
     nextCatToCraft = sortedCats.find((cat: any) => {
       const isIdCrafted = craftedOrigIds.has(cat.id);
-      const cleanCatTitle = (cat.title || "").replace(regex, '');
-      const isTitleCrafted = craftedTitles.has(cleanCatTitle);
+      const cleanCatTitle = (cat.title || "").replace(/[^가-힣a-zA-Z0-9一-龥]/g, '');
+      
+      // 💡 내 카드 제목들 중에 조항 제목(cleanCatTitle)을 '포함(includes)'하는 것이 하나라도 있는지 검사
+      const isTitleCrafted = craftedTitles.some(title => title.includes(cleanCatTitle));
+      
       return !isIdCrafted && !isTitleCrafted;
     });
   }
