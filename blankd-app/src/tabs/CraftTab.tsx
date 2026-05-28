@@ -55,8 +55,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       return "제목 추출 에러";
     }
   };
-
-// 💡 [해결] "OO법 시행규칙 제1조"가 "제1조"를 [포함]하고 있으면 완료 처리!
+// 💡 [해결] '제1조의2'가 '제1조'로 둔갑하는 버그를 완벽 차단하는 정밀 로직
   const checkIsCreated = (cat: any) => {
     if (!Array.isArray(savedCards)) return false;
     
@@ -71,12 +70,19 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
         const cleanCardTitle = cardFirstLine.replace(regex, '');
         const cleanCatTitle = cat.title.replace(regex, '');
         
-        // 💡 핵심 변경점: === 대신 includes 사용!
-        if (cleanCardTitle && cleanCatTitle && cleanCardTitle.includes(cleanCatTitle)) return true;
+        if (cleanCardTitle && cleanCatTitle) {
+          // 💡 핵심: === 와 endsWith를 사용!
+          // '제1조의2'는 '제1조'로 안 끝나기 때문에 거짓(False)이 되어 버그가 차단되고,
+          // '시행규칙 제1조'는 '제1조'로 끝나기 때문에 참(True)으로 정상 회색 처리됩니다!
+          if (cleanCardTitle === cleanCatTitle || cleanCardTitle.endsWith(cleanCatTitle)) {
+             return true;
+          }
+        }
       }
       return false;
     });
-  };  
+  };
+  
   const craftFolders = sortChapters(
     Array.from(new Set(safeCategories.map((c: any) => c.folder_name)))
       .filter(f => f && f !== '기본 폴더') as string[]
