@@ -535,7 +535,7 @@ def analyze_chunk():
                 "stream": False,
                 "options": {
                     "num_ctx": 2048,
-                    "num_predict": 400,
+                    "num_predict": 1200,
                     "temperature": 0.2,
                     "repeat_penalty": 1.3,
                 }
@@ -548,7 +548,7 @@ def analyze_chunk():
             prompt_eval_count = ollama_resp.get("prompt_eval_count", -1)
             print(f"[Ollama] done_reason={done_reason} | prompt_tokens={prompt_eval_count} | generated_tokens={eval_count}", file=sys.stderr)
             raw_text = ollama_resp.get("response", "").strip()
-            print(f"[Ollama 응답 길이] {len(raw_text)}", file=sys.stderr)
+            print(f"[Ollama 응답 repr] {repr(raw_text[:300])}", file=sys.stderr)
         except Exception as e:
             return jsonify({"error": f"AI 통신 오류: {str(e)}"}), 500
 
