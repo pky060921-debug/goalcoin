@@ -481,7 +481,7 @@ def get_pending_exams():
 def analyze_chunk():
     try:
         data = request.json
-        chunk_text = data.get('chunk_text', '')[:2000]
+        chunk_text = data.get('chunk_text', '')[:900]
         user_feedback = data.get('user_feedback', '')
         chat_history = data.get('chat_history', [])
 
@@ -527,12 +527,14 @@ def analyze_chunk():
         try:
             url = "http://localhost:11434/api/generate"
             payload = {
-                "model": "qwen2.5-coder:14b",
+                "model": "gemma4:26b",
                 "prompt": prompt,
                 "stream": False,
                 "options": {
+                    "num_ctx": 2048,
+                    "num_predict": 400,
                     "temperature": 0.2,
-                    "num_predict": 500,
+                    "repeat_penalty": 1.3,
                 }
             }
             resp = requests.post(url, json=payload, timeout=300)
