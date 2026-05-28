@@ -569,7 +569,7 @@ function MainApp() {
 
   if (isLoggedIn && categories.length > 0) {
     const craftedOrigIds = new Set();
-    const craftedTitles: string[] = []; // 💡 includes 검사를 위해 Set 대신 배열(Array) 사용
+    const craftedTitles: string[] = []; 
 
     savedCards.forEach((c: any) => {
       const match = c.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
@@ -587,8 +587,10 @@ function MainApp() {
       const isIdCrafted = craftedOrigIds.has(cat.id);
       const cleanCatTitle = (cat.title || "").replace(/[^가-힣a-zA-Z0-9一-龥]/g, '');
       
-      // 💡 내 카드 제목들 중에 조항 제목(cleanCatTitle)을 '포함(includes)'하는 것이 하나라도 있는지 검사
-      const isTitleCrafted = craftedTitles.some(title => title.includes(cleanCatTitle));
+      // 💡 여기서도 includes 대신 === 와 endsWith 적용!
+      const isTitleCrafted = craftedTitles.some(title => 
+         title === cleanCatTitle || title.endsWith(cleanCatTitle)
+      );
       
       return !isIdCrafted && !isTitleCrafted;
     });
