@@ -624,7 +624,17 @@ function MainApp() {
               
               {nextCatToCraft ? (
                 <button 
-                  onClick={() => { setActiveTab('create'); setExpandedId(nextCatToCraft.id); }}
+                  onClick={() => { 
+                    setActiveTab('create'); 
+                    setExpandedId(nextCatToCraft.id); 
+                    // 💡 탭 전환 후 약간의 딜레이(150ms)를 주고 해당 요소로 부드럽게 스크롤
+                    setTimeout(() => {
+                      const targetElement = document.getElementById(`category-${nextCatToCraft.id}`);
+                      if (targetElement) {
+                        targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }
+                    }, 150);
+                  }}
                   className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
                 >
                   <span className="text-[9px] sm:text-[10px] text-amber-400 font-bold whitespace-nowrap">▶ 만들기</span>
