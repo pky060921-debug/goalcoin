@@ -485,6 +485,18 @@ def analyze_chunk():
         user_feedback = data.get('user_feedback', '')
         chat_history = data.get('chat_history', [])
 
+        # ── 특수문자 정규화 (gemma4가 빈 응답 반환하는 원인) ──────────
+        char_map = {
+            '㉠': '(가)', '㉡': '(나)', '㉢': '(다)', '㉣': '(라)',
+            '㉤': '(마)', '㉥': '(바)', '㉦': '(사)', '㉧': '(아)',
+            '㉨': '(자)', '㉩': '(차)', '㉪': '(카)', '㉫': '(타)',
+            '①': '1번', '②': '2번', '③': '3번', '④': '4번', '⑤': '5번',
+            '‧': '·', '\u200b': '', '\xa0': ' ',
+        }
+        for src, dst in char_map.items():
+            chunk_text = chunk_text.replace(src, dst)
+            user_feedback = user_feedback.replace(src, dst)
+
         # 최근 4턴 대화 이력 (너무 길면 모델 혼란)
         history_lines = []
         for msg in chat_history[-4:]:
