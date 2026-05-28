@@ -481,7 +481,7 @@ def get_pending_exams():
 def analyze_chunk():
     try:
         data = request.json
-        chunk_text = data.get('chunk_text', '')[:900]
+        chunk_text = data.get('chunk_text', '')[:2000]
         user_feedback = data.get('user_feedback', '')
         chat_history = data.get('chat_history', [])
 
@@ -532,8 +532,8 @@ def analyze_chunk():
                 "stream": False,
                 "think": False,
                 "options": {
-                    "num_ctx": 2048,
-                    "num_predict": 600,
+                    "num_ctx": 4096,
+                    "num_predict": 1000,
                     "temperature": 0.2,
                     "repeat_penalty": 1.3,
                 }
