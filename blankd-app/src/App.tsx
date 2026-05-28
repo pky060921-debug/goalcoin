@@ -578,17 +578,16 @@ function MainApp() {
       
       const firstLine = c.content.split('\n')[0];
       if (firstLine) {
-        // 특수기호/공백 완전 제거 후 저장
+        // 💡 띄어쓰기뿐만 아니라 괄호, 마침표 등 모든 특수문자 싹 다 무시하고 저장
         craftedTitles.add(firstLine.replace(/[^가-힣0-9a-zA-Z]/g, ''));
       }
     });
 
     const sortedCats = [...categories].sort((a: any, b: any) => a.id - b.id);
     
-    // 번호도 없고, 제목(특수기호 무시)도 일치하는게 없는 최초의 조항을 찾음
     nextCatToCraft = sortedCats.find((cat: any) => {
       const isIdCrafted = craftedOrigIds.has(cat.id);
-      const cleanCatTitle = (cat.title || "").replace(/[^가-힣0-9a-zA-Z]/g, '');
+      const cleanCatTitle = (cat.title || "").replace(/[^가-힣0-9a-zA-Z]/g, ''); // 💡 타겟도 특수문자 무시
       const isTitleCrafted = craftedTitles.has(cleanCatTitle);
       return !isIdCrafted && !isTitleCrafted;
     });
@@ -647,7 +646,7 @@ function MainApp() {
                       if (targetElement) {
                         targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
                       }
-                    }, 150);
+                    }, 500);
                   }}
                   className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
                 >
