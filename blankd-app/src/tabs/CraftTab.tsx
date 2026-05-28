@@ -55,7 +55,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       return "제목 추출 에러";
     }
   };
-// 💡 [해결] '제1조의2'가 '제1조'로 둔갑하는 버그를 완벽 차단하는 정밀 로직
+// 💡 [해결] 괄호 안의 내용(목적, 정의 등)을 아예 삭제하여 시행규칙 불일치 문제 완벽 해결
   const checkIsCreated = (cat: any) => {
     if (!Array.isArray(savedCards)) return false;
     
@@ -65,15 +65,17 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       
       if (cat.title) {
         const cardFirstLine = c.content.split('\n')[0];
-        const regex = /[^가-힣a-zA-Z0-9一-龥]/g; 
         
-        const cleanCardTitle = cardFirstLine.replace(regex, '');
-        const cleanCatTitle = cat.title.replace(regex, '');
+        // 1. (목적), [시행일] 등 괄호 안의 내용을 괄호째로 통째로 날림
+        const removeBrackets = (text: string) => text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '');
+        // 2. 한글, 영문, 숫자, 한자만 남기고 싹 다 지움
+        const onlyChars = (text: string) => text.replace(/[^가-힣a-zA-Z0-9一-龥]/g, '');
+        
+        const cleanCardTitle = onlyChars(removeBrackets(cardFirstLine));
+        const cleanCatTitle = onlyChars(removeBrackets(cat.title));
         
         if (cleanCardTitle && cleanCatTitle) {
-          // 💡 핵심: === 와 endsWith를 사용!
-          // '제1조의2'는 '제1조'로 안 끝나기 때문에 거짓(False)이 되어 버그가 차단되고,
-          // '시행규칙 제1조'는 '제1조'로 끝나기 때문에 참(True)으로 정상 회색 처리됩니다!
+          // '제1조의2' 충돌을 막는 === 와 endsWith 사용!
           if (cleanCardTitle === cleanCatTitle || cleanCardTitle.endsWith(cleanCatTitle)) {
              return true;
           }
