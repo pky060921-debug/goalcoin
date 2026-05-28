@@ -496,6 +496,9 @@ def analyze_chunk():
         history_context = f"\n이전 대화:\n{history_str}\n" if history_str else ""
         prompt = f"다음 시험 문제에 대해 한국어로 답해주세요.\n\n{chunk_text}\n{history_context}\n질문: {user_feedback}"
 
+        print(f"[전송 프롬프트 길이] {len(prompt)} chars", file=sys.stderr)
+        print(f"[프롬프트 앞 200자]\n{prompt[:200]}", file=sys.stderr)
+
         print(f"🤖 [gemma4:26b] 응답 생성 중...", file=sys.stderr, flush=True)
 
         try:
@@ -503,7 +506,12 @@ def analyze_chunk():
             payload = {
                 "model": "gemma4:26b",
                 "prompt": prompt,
-                "stream": False
+                "stream": False,
+                "options": {
+                    "num_ctx": 8192,
+                    "num_predict": 512,
+                    "temperature": 0.2
+                }
             }
             resp = requests.post(url, json=payload, timeout=300)
             resp.raise_for_status()
