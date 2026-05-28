@@ -581,7 +581,7 @@ if (isLoggedIn && categories.length > 0) {
       
       const firstLine = c.content.split('\n')[0];
       if (firstLine) {
-        craftedTitles.add(firstLine.replace(regex, ''));
+        craftedTitles.add(firstLine.replace(/[^가-힣a-zA-Z0-9一-龥]/g, ''));
       }
     });
 
