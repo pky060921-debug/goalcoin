@@ -507,6 +507,39 @@ def analyze_chunk():
         chunk_text = clean_text(chunk_text)
         user_feedback = clean_text(user_feedback)
 
+        # ── blankd.db categories 참조 ─────────────────────────────────
+        wallet_address = data.get('wallet_address', '')
+        db_context = ""
+        if wallet_address:
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT folder_name, title, content FROM categories WHERE wallet_address = ?",
+                    (wallet_address,)
+                )
+                rows = cursor.fetchall()
+                conn.close()
+
+                if rows:
+                    # 지문+질문에서 키워드 추출 후 관련 항목만 선별 (최대 5개)
+                    query_words = set(re.findall(r'[가-힣]{2,}', chunk_text + user_feedback))
+                    scored = []
+                    for folder, title, content in rows:
+                        content_words = set(re.findall(r'[가-힣]{2,}', content or ''))
+                        score = len(query_words & content_words)
+                        if score > 0:
+                            scored.append((score, folder, title, (content or '')[:500]))
+                    scored.sort(reverse=True)
+                    top = scored[:5]
+
+                    if top:
+                        db_context = "\n\n[참고 DB 자료]\n"
+                        for _, folder, title, content in top:
+                            db_context += f"---\n[{folder} - {title}]\n{content}\n"
+            except Exception as e:
+                print(f"[DB 조회 오류] {e}", file=sys.stderr)
+
         # 최근 4턴 대화 이력 (너무 길면 모델 혼란)
         history_lines = []
         for msg in chat_history[-4:]:
@@ -516,7 +549,14 @@ def analyze_chunk():
 
         # 프롬프트: 최대한 단순하게
         history_context = f"\n이전 대화:\n{history_str}\n" if history_str else ""
-        user_content = f"다음 시험 문제에 대해 한국어로 답해주세요.\n\n{chunk_text}\n{history_context}\n질문: {user_feedback}"
+        user_content = (
+            f"당신은 시험 문제 해설 전문가입니다. 아래 [참고 DB 자료]를 최우선으로 활용하여 문제를 분석하세요.\n"
+            f"DB 자료에 없는 내용은 당신의 지식을 활용하되, DB 자료와 다른 내용은 DB를 우선합니다.\n"
+            f"{db_context}\n"
+            f"[시험 문제]\n{chunk_text}\n"
+            f"{history_context}\n"
+            f"질문: {user_feedback}"
+        )
 
         print(f"[전송 프롬프트 길이] {len(user_content)} chars", file=sys.stderr)
         print(f"[프롬프트 앞 200자]\n{user_content[:200]}", file=sys.stderr)

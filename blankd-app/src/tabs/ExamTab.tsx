@@ -106,6 +106,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
           chunk_text: question,
           user_feedback: newChat[newChat.length - 1].text,
           chat_history: newChat,
+          wallet_address: userAddress,
         }),
       });
       const data = await res.json();
