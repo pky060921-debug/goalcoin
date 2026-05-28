@@ -703,12 +703,12 @@ function BlankDMain({ AppLogs, addLog }: { AppLogs: string[], addLog: (msg: stri
 
       {/* 하단 로그 영역 */}
       <footer className="border-t border-white/5 bg-black/80 backdrop-blur text-[9px] sm:text-[10px] text-white/30 font-mono flex flex-col p-2 sm:p-3 fixed bottom-0 w-full z-40 max-h-24 sm:max-h-32 overflow-y-auto">
-        {logs.map((log, idx) => (
+        {AppLogs.length > 0 ? AppLogs.map((log, idx) => (
           <div key={idx} className="flex gap-2">
             <span className="text-amber-500/50">SYS</span>
             <span className="break-all">{log}</span>
           </div>
-        ))}
+        )) : <div>시스템 상태 정상 - 대기 중</div>}
       </footer>
 
       {/* 💡 기존의 모달 (음성인식, Anki 복습 포함 전체 코드 보존) */}
