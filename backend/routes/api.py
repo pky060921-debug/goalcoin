@@ -516,7 +516,10 @@ def analyze_chunk():
 
         # 프롬프트: 최대한 단순하게
         history_context = f"\n이전 대화:\n{history_str}\n" if history_str else ""
-        prompt = f"다음 시험 문제에 대해 한국어로 답해주세요.\n\n{chunk_text}\n{history_context}\n질문: {user_feedback}"
+        user_content = f"다음 시험 문제에 대해 한국어로 답해주세요.\n\n{chunk_text}\n{history_context}\n질문: {user_feedback}"
+
+        # gemma4 chat template 수동 적용
+        prompt = f"<start_of_turn>user\n{user_content}<end_of_turn>\n<start_of_turn>model\n"
 
         print(f"[전송 프롬프트 길이] {len(prompt)} chars", file=sys.stderr)
         print(f"[프롬프트 앞 200자]\n{prompt[:200]}", file=sys.stderr)
