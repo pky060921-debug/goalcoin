@@ -622,31 +622,34 @@ function MainApp() {
             <div className="flex items-center gap-2 shrink-0">
               <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 uppercase hidden sm:inline">이어하기:</span>
               
-              <button 
-                onClick={() => {
-                  const cId = localStorage.getItem('blankd_last_crafted_id');
-                  if (cId) { setActiveTab('create'); setExpandedId(parseInt(cId, 10)); }
-                }}
-                className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left"
-              >
-                <span className="text-[9px] sm:text-[10px] text-amber-400 font-bold whitespace-nowrap">▶ 만들기</span>
-              </button>
+              {nextCatToCraft ? (
+                <button 
+                  onClick={() => { setActiveTab('create'); setExpandedId(nextCatToCraft.id); }}
+                  className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
+                >
+                  <span className="text-[9px] sm:text-[10px] text-amber-400 font-bold whitespace-nowrap">▶ 만들기</span>
+                  <span className="text-[10px] sm:text-[11px] font-medium text-amber-100 truncate">
+                    {getStrictTitleOnly(nextCatToCraft.title) || "다음 조항"}
+                  </span>
+                </button>
+              ) : (
+                <div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">만들기 완료</div>
+              )}
 
-              <button 
-                onClick={() => {
-                  const eId = localStorage.getItem('blankd_last_enhanced_id');
-                  if (eId) {
-                    const targetCard = savedCards.find((c:any) => c.id === parseInt(eId, 10));
-                    if (targetCard) setActiveCard(targetCard);
-                    else setActiveTab('enhance');
-                  }
-                }}
-                className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left"
-              >
-                <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span>
-              </button>
+              {nextStudyCard ? (
+                <button 
+                  onClick={() => { setActiveCard(nextStudyCard); }}
+                  className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
+                >
+                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span>
+                  <span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">
+                    {nextStudyCard.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim()}
+                  </span>
+                </button>
+              ) : (
+                <div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 완료</div>
+              )}
             </div>
-
             {/* 구분선 */}
             <div className="h-5 sm:h-6 w-px bg-white/10 shrink-0 hidden sm:block"></div>
 
