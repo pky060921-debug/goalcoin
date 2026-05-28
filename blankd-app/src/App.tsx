@@ -565,41 +565,61 @@ function MainApp() {
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
-{/* 💡 변경된 상단 글로벌 헤더 (이어서 하기 + 지표) */}
+{/* 💡 여기서부터 복사해서 기존 <header>...</header>가 있던 자리에 붙여넣으세요 */}
       <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
           
-          <div className="flex flex-wrap items-center gap-2 flex-1">
-            <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 uppercase">Resume:</span>
-            
+          {/* 왼쪽 영역: BlankD 로고 (클릭 시 최근 진행했던 탭으로 즉시 복귀) */}
+          <div className="flex items-center justify-between w-full md:w-auto">
             <button 
               onClick={() => {
-                const cId = localStorage.getItem('blankd_last_crafted_id');
-                if (cId) { setActiveTab('create'); setExpandedId(parseInt(cId, 10)); }
-              }}
-              className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
+                const lastTab = localStorage.getItem('blankd_active_tab') || 'progress';
+                setActiveTab(lastTab);
+              }} 
+              className="text-xl sm:text-2xl font-bold tracking-widest text-white shrink-0 hover:text-teal-400 transition-colors"
             >
-              <span className="text-[9px] sm:text-[10px] text-amber-400 font-bold whitespace-nowrap">▶ 만들기</span>
-            </button>
-
-            <button 
-              onClick={() => {
-                const eId = localStorage.getItem('blankd_last_enhanced_id');
-                if (eId) {
-                  const targetCard = savedCards.find((c:any) => c.id === parseInt(eId, 10));
-                  if (targetCard) setActiveCard(targetCard);
-                  else setActiveTab('enhance');
-                }
-              }}
-              className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
-            >
-              <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span>
+              BlankD
             </button>
           </div>
 
-          <div className="flex items-center justify-between md:justify-end gap-3 sm:gap-4 shrink-0 mt-2 md:mt-0">
+          {/* 오른쪽 영역: 이어서 하기 버튼들 + 통계 지표 + 로그아웃 */}
+          <div className="flex items-center justify-start md:justify-end gap-3 sm:gap-4 shrink-0 overflow-x-auto custom-scrollbar pb-1 md:pb-0 w-full md:w-auto">
+            
+            {/* 이어서 하기 (만들기 / 채우기) */}
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 uppercase hidden sm:inline">Resume:</span>
+              
+              <button 
+                onClick={() => {
+                  const cId = localStorage.getItem('blankd_last_crafted_id');
+                  if (cId) { setActiveTab('create'); setExpandedId(parseInt(cId, 10)); }
+                }}
+                className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left"
+              >
+                <span className="text-[9px] sm:text-[10px] text-amber-400 font-bold whitespace-nowrap">▶ 만들기</span>
+              </button>
+
+              <button 
+                onClick={() => {
+                  const eId = localStorage.getItem('blankd_last_enhanced_id');
+                  if (eId) {
+                    const targetCard = savedCards.find((c:any) => c.id === parseInt(eId, 10));
+                    if (targetCard) setActiveCard(targetCard);
+                    else setActiveTab('enhance');
+                  }
+                }}
+                className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left"
+              >
+                <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span>
+              </button>
+            </div>
+
+            {/* 구분선 */}
+            <div className="h-5 sm:h-6 w-px bg-white/10 shrink-0 hidden sm:block"></div>
+
+            {/* 통계 지표 및 로그아웃 */}
             {isLoggedIn && (
-              <div className="flex items-center gap-2 sm:gap-3 font-mono">
+              <div className="flex items-center gap-3 sm:gap-4 shrink-0 font-mono">
                 <div className="text-right">
                   <span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest uppercase">Rotation</span>
                   <span className="text-[10px] sm:text-xs font-bold text-amber-400">{minFilledCount} 회독</span>
@@ -610,12 +630,14 @@ function MainApp() {
                   <span className="text-[10px] sm:text-xs font-bold text-indigo-400">{passProbability}%</span>
                 </div>
                 <div className="h-5 sm:h-6 w-px bg-white/10 hidden sm:block"></div>
-                <button onClick={async () => { await enokiFlow.logout(); localStorage.clear(); window.location.reload(); }} className="border border-white/20 px-2 py-1 text-[9px] sm:text-[10px] hover:bg-white/10 tracking-wider font-mono rounded-sm text-white/70 whitespace-nowrap">LOGOUT</button>
+                <button onClick={async () => { await enokiFlow.logout(); localStorage.clear(); window.location.reload(); }} className="border border-white/20 px-2 py-1 text-[9px] sm:text-[10px] hover:bg-white/10 tracking-wider font-mono rounded-sm text-white/70 whitespace-nowrap shrink-0">LOGOUT</button>
               </div>
             )}
+
           </div>
         </div>
       </header>
+      {/* 💡 여기까지 복사! (이 아래의 <nav> 부분은 그대로 두시면 됩니다.) */}
 
       {/* 💡 한 줄 아래로 독립적으로 분리된 탭 네비게이션 바 */}
       {isLoggedIn && (
