@@ -23,590 +23,601 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
   }
   render() {
     if (this.state.hasError) return (
-      <div className="p-4 bg-red-950/20 border border-red-500/50 m-4 rounded text-red-200 font-mono text-xs">
-        <h2 className="font-bold mb-2">🚨 시스템 런타임 크래시 발생</h2>
-        <p>{this.state.errorMessage}</p>
-        <button onClick={() => window.location.reload()} className="mt-3 px-3 py-1 bg-red-500 text-white rounded text-[11px]">앱 새로고침</button>
+      <div className="p-6 text-red-400 font-mono border border-red-500/30 bg-red-900/10 rounded-sm shadow-xl">
+        <h3 className="text-lg font-bold mb-2">⚠️ 시스템 치명적 오류</h3>
+        <p className="text-sm opacity-80">{this.state.errorMessage}</p>
       </div>
     );
     return this.props.children;
   }
 }
 
-const useSpeechRecognition = (onResult: (text: string) => void) => {
+const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
+  try {
+    const qStr = localStorage.getItem('blankd_sync_queue');
+    const q = qStr ? JSON.parse(qStr) : { memos: [], answers: [] };
+    if (type === 'MEMO') {
+      q.memos = q.memos.filter((m: any) => m.id !== payload.id); 
+      q.memos.push(payload);
+    } else if (type === 'ANSWER') {
+      q.answers.push(payload);
+    }
+    localStorage.setItem('blankd_sync_queue', JSON.stringify(q));
+  } catch (e) { 
+    console.error("큐 저장 실패", e); 
+  }
+};
+
+function MainApp() {
+  const enokiFlow = useEnokiFlow();
+  const zkLogin = useZkLogin();
+  const suiWalletAccount = useCurrentAccount();
+  const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
+  const isLoggedIn = safeAddress.length > 0;
+
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('blankd_active_tab') || 'progress';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('blankd_active_tab', activeTab);
+  }, [activeTab]);
+
+  const [categories, setCategories] = useState<any[]>([]);
+  const [savedCards, setSavedCards] = useState<any[]>([]);
+  const [activeCard, setActiveCard] = useState<any>(null);
+  
+  const [viewMode, setViewMode] = useState('all');
+  const [colCount, setColCount] = useState(3);
+  const [useAiRecommend, setUseAiRecommend] = useState(true);
+  
+  const [lawFile, setLawFile] = useState<File | null>(null);
+  const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
+  const [isTerminalOpen, setIsTerminalOpen] = useState(false);
+  
+  const [isMemoOpen, setIsMemoOpen] = useState(false);
+
+  const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
+  const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
+  const [answerInput, setAnswerInput] = useState("");
+  const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
+  const [startTime, setStartTime] = useState<number>(0);
+  const [elapsed, setElapsed] = useState<number>(0);
+  const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
+
+  const [goalBalance, setGoalBalance] = useState<number>(0);
+  
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
   
-  useEffect(() => {
-    if (typeof window !== 'undefined' && ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = true;
-      recognitionRef.current.interimResults = false;
-      recognitionRef.current.lang = 'ko-KR';
+  const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
+  const isClosingRef = useRef(false);
 
-      recognitionRef.current.onresult = (event: any) => {
-        const transcript = Array.from(event.results)
-          .map((result: any) => result[0])
-          .map(result => result.transcript)
-          .join('');
-        onResult(transcript);
-      };
+  const [expandedId, setExpandedId] = useState<number | null>(() => {
+    const saved = localStorage.getItem('blankd_craft_expanded');
+    return saved ? parseInt(saved, 10) : null;
+  });
 
-      recognitionRef.current.onerror = (event: any) => {
-        console.error("Speech recognition error", event.error);
-        if (event.error === 'not-allowed') {
-          setIsListening(false);
-        }
-      };
+  const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-40));
 
-      recognitionRef.current.onend = () => {
-        if (isListening && recognitionRef.current) {
-          try {
-            recognitionRef.current.start();
-          } catch (e) {
-            console.error("음성 인식 재시작 오류:", e);
-          }
-        }
-      };
-    }
-    
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-    };
-  }, [onResult, isListening]);
-
-  const toggleListening = () => {
-    if (isListening) {
-      setIsListening(false);
-      recognitionRef.current?.stop();
-    } else {
-      setIsListening(true);
-      try {
-        recognitionRef.current?.start();
-      } catch (e) {
-        console.error("음성 인식 시작 오류:", e);
-      }
-    }
-  };
-
-  return { isListening, setIsListening, toggleListening, recognitionRef };
-};
-
-export default function App() {
-  const [logs, setLogs] = useState<string[]>([]);
-  const addLog = (msg: string) => {
-    setLogs(prev => {
-      const newLogs = [ `[${new Date().toLocaleTimeString()}] ${msg}`, ...prev ];
-      return newLogs.slice(0, 4);
-    });
-  };
-
-  return (
-    <ErrorBoundary fallbackLog={addLog}>
-      <BlankDMain AppLogs={logs} addLog={addLog} />
-    </ErrorBoundary>
-  );
-}
-
-function BlankDMain({ AppLogs, addLog }: { AppLogs: string[], addLog: (msg: string) => void }) {
-  const enokiFlow = useEnokiFlow();
-  const { providerState } = useZkLogin();
-  const currentAccount = useCurrentAccount();
-  const userEmail = providerState?.type === "authenticated" ? providerState.user.email : null;
-  const isLoggedIn = !!userEmail;
-  const safeAddress = userEmail || "guest_mode_address";
-
-  const [activeTab, setActiveTab] = useState('progress');
-  const [categories, setCategories] = useState<any[]>([]);
-  const [savedCards, setSavedCards] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [expandedId, setExpandedId] = useState<number | null>(null);
-
-  const [lawFile, setLawFile] = useState<File | null>(null);
-  
-  const [colCount, setColCount] = useState(3);
-  const [viewMode, setViewMode] = useState<'card'|'list'>('card');
-  const [useAiRecommend, setUseAiRecommend] = useState(false);
-
-  const [activeCard, setActiveCard] = useState<any | null>(null);
-  const [answerInput, setAnswerInput] = useState("");
-  const [inputStatus, setInputStatus] = useState<"typing" | "correct" | "wrong">("typing");
-  const [elapsed, setElapsed] = useState(0);
-  const totalTimeLimit = 15;
-
-  const timerRef = useRef<any>(null);
-  const currentBlankIdxRef = useRef<number>(0);
-  const statsRef = useRef<{ text: string; filled: number; wrongIndices: number[] }>({ text: "", filled: 0, wrongIndices: [] });
-
-  const [isMemoOpen, setIsMemoOpen] = useState(false);
-  const [isAiProcessing, setIsAiProcessing] = useState(false);
-  const [aiAnalysisResult, setAiAnalysisResult] = useState<any>(null);
-  const [showAiModal, setShowAiModal] = useState(false);
-  const [aiRecommendations, setAiRecommendations] = useState<any[]>([]);
-
-  // 💡 [추가] 이어서 하기 상태 실시간 추적 (로컬 스토리지 연동)
-  const [recentCraftId, setRecentCraftId] = useState<number | null>(null);
-  const [recentCraftTitle, setRecentCraftTitle] = useState("");
-  const [recentEnhanceId, setRecentEnhanceId] = useState<number | null>(null);
-  const [recentEnhanceTitle, setRecentEnhanceTitle] = useState("");
+  useEffect(() => { document.title = "BlankD | 인지 과학 기반 학습"; }, []);
 
   useEffect(() => {
-    const checkResumeData = () => {
-      const cId = localStorage.getItem('blankd_last_crafted_id');
-      const cTitle = localStorage.getItem('blankd_last_crafted_title');
-      const eId = localStorage.getItem('blankd_last_enhanced_id');
-      const eTitle = localStorage.getItem('blankd_last_enhanced_title');
-      
-      setRecentCraftId(cId ? parseInt(cId, 10) : null);
-      setRecentCraftTitle(cTitle || "");
-      setRecentEnhanceId(eId ? parseInt(eId, 10) : null);
-      setRecentEnhanceTitle(eTitle || "");
-    };
-    checkResumeData();
-    const interval = setInterval(checkResumeData, 1000); 
-    return () => clearInterval(interval);
-  }, []);
+    if (window.location.hash) {
+      enokiFlow.handleAuthCallback().then(() => { 
+        window.history.replaceState(null, '', window.location.pathname); 
+        addLog("✅ 로그인 콜백 처리 완료"); 
+      }).catch((err: any) => addLog(`❌ 인증 실패: ${err.message}`));
+    }
+    if (isLoggedIn) loadAllData();
+  }, [isLoggedIn, safeAddress, enokiFlow]);
 
   const loadAllData = async () => {
-    if (!isLoggedIn) return;
-    setLoading(true);
     try {
-      const [catsData, cardsData] = await Promise.all([
-        api.getCategories(safeAddress),
-        api.getCards(safeAddress)
+      const [catRes, cardRes, balance] = await Promise.all([
+        fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r=>r.json()),
+        fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`).then(r=>r.json()),
+        api.getGoalCoinBalance(safeAddress).catch(()=>0)
       ]);
-      setCategories(Array.isArray(catsData) ? catsData : []);
-      setSavedCards(Array.isArray(cardsData) ? cardsData : []);
-      addLog("🔄 데이터 동기화 완료");
-    } catch (e) {
-      addLog("❌ 데이터 로드 실패");
-    } finally {
-      setLoading(false);
+      setCategories(catRes.categories || []); 
+      setSavedCards(cardRes.cards || []); 
+      setGoalBalance(balance);
+    } catch (e: any) { 
+      addLog(`❌ 데이터 동기화 실패: ${e.message}`);
+    }
+  };
+
+  const flushQueue = async () => {
+    if (!safeAddress) return;
+    try {
+      const qStr = localStorage.getItem('blankd_sync_queue');
+      if (!qStr) return;
+      const q = JSON.parse(qStr);
+      if (q.memos.length === 0 && q.answers.length === 0) return;
+
+      const res = await fetch("https://api.blankd.top/api/sync-batch", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, memos: q.memos, answers: q.answers })
+      });
+      if (res.ok) {
+        localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
+        addLog(`🔄 백그라운드 동기화 완료 (M:${q.memos.length}, A:${q.answers.length})`);
+        const newBalance = await api.getGoalCoinBalance(safeAddress).catch(()=>goalBalance);
+        setGoalBalance(newBalance);
+      }
+    } catch (e) { 
+      addLog("⚠️ 오프라인 감지: 데이터는 로컬에 안전하게 보관 중입니다.");
     }
   };
 
   useEffect(() => {
-    if (isLoggedIn) {
-      loadAllData();
-      
-      if (activeTab === 'create' || activeTab === 'enhance' || activeTab === 'progress') {
-        const checkData = async () => {
-          try {
-            const [newCats, newCards] = await Promise.all([
-              api.getCategories(safeAddress),
-              api.getCards(safeAddress)
-            ]);
-            
-            if (JSON.stringify(newCats) !== JSON.stringify(categories) || JSON.stringify(newCards) !== JSON.stringify(savedCards)) {
-                setCategories(Array.isArray(newCats) ? newCats : []);
-                setSavedCards(Array.isArray(newCards) ? newCards : []);
-                addLog("✨ 백그라운드 데이터 갱신");
-            }
-          } catch(e) {}
-        };
-        const interval = setInterval(checkData, 15000);
-        return () => clearInterval(interval);
-      }
-    }
-  }, [isLoggedIn, safeAddress, activeTab]);
-
-  const handleGoogleLogout = async () => {
-    await enokiFlow.logout();
-    localStorage.clear();
-    window.location.reload();
-  };
+    if (!safeAddress) return;
+    const interval = setInterval(flushQueue, 30000); 
+    const handleVisibility = () => { if(document.visibilityState === 'hidden') flushQueue(); };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', handleVisibility); };
+  }, [safeAddress]);
 
   const uploadLaw = async () => {
     if (!lawFile) return alert("파일을 선택해주세요.");
-    addLog(`⏳ 문헌 업로드 분석 시작: ${lawFile.name}`);
-    try {
-      const res = await api.uploadLawFile(safeAddress, lawFile);
-      addLog(`✅ 분석 완료: ${res.count}개 조항 파싱됨`);
+    addLog("▶️ 법령 텍스트 분석 업로드 시작...");
+    const fd = new FormData(); fd.append("file", lawFile); fd.append("wallet_address", safeAddress);
+    const res = await fetch(`https://api.blankd.top/api/upload-pdf`, { method: "POST", body: fd });
+    if (res.ok) { 
       setLawFile(null);
-      await loadAllData();
-    } catch (e) {
-      addLog("❌ 문헌 분석 실패");
+      addLog("✅ 업로드 완료. AI 아카이빙 중..."); 
+      setTimeout(() => loadAllData(), 2500);
     }
   };
 
-  const handleMakeBlankCard = async (cat: any, tokens: string[], selectedIndices: Set<number>, pageBreaks: Set<number>, memoText: string, origId: number, onSuccess?: () => void) => {
-    let textBuilder = "";
-    tokens.forEach((t, idx) => {
-      if (pageBreaks.has(idx)) textBuilder += "\n---PAGE---\n";
-      
-      if (selectedIndices.has(idx)) {
-        textBuilder += `[${t}]`;
-      } else {
-        textBuilder += t;
+  const handleSplitCategory = async (cat: any, text1: string, text2: string, title1: string, title2: string) => {
+    try {
+        const res = await fetch("https://api.blankd.top/api/split-category", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet_address: safeAddress, id: cat.id, text1, text2, title1, title2, folder_name: cat.folder_name })
+        });
+        if (res.ok) { 
+          addLog(`✂️ [${title1}] 분할 완료`); 
+          await loadAllData();
+        }
+    } catch (e: any) { 
+      addLog(`❌ 분할 처리 통신 에러`);
+    }
+  };
+
+// 💡 [수정] 옛날에 만든 카드도 완벽하게 찾아서 덮어쓰기!
+  const handleMakeBlankCard = async (
+    cat: any, 
+    wordsArray: string[], 
+    selectedIndices: Set<number>, 
+    pageBreaks: Set<number>, 
+    memo: string, 
+    cardId: any, 
+    onComplete: () => void
+  ) => {
+    let bodyContent = "";
+    let answerText = ""; 
+    let isBlanking = false;
+    
+    wordsArray.forEach((word, index) => {
+      if (pageBreaks.has(index)) { bodyContent += " ##PAGE_BREAK## "; }
+      if (selectedIndices.has(index)) {
+        if (!isBlanking) { bodyContent += "[ "; isBlanking = true; }
+        bodyContent += word; answerText += (answerText ? ", " : "") + word;
+      } else { 
+        if (isBlanking) { bodyContent += " ]"; isBlanking = false; } 
+        bodyContent += word; 
       }
     });
-
-    const finalContent = `${cat.title || ""}\n${textBuilder}\n[[ORIG_ID:${origId}]]`;
-    const finalMemo = stringifyCardStats(memoText, 0, []);
-
-    try {
-      await api.createCard({
-        wallet_address: safeAddress,
-        folder_name: cat.folder_name || "기본 폴더",
-        content: finalContent,
-        memo: finalMemo
-      });
-      addLog(`🃏 카드 생성 성공: ${getStrictTitleOnly(cat.title)}`);
-      
-      localStorage.setItem('blankd_last_crafted_id', origId.toString());
-      localStorage.setItem('blankd_last_crafted_title', getStrictTitleOnly(cat.title));
-
-      await loadAllData();
-      if (onSuccess) onSuccess();
-    } catch (e) {
-      alert("카드 생성 실패");
-    }
-  };
-
-  const handleDeleteCategory = async (id: number) => {
-    try {
-      await api.deleteCategory(safeAddress, id);
-      addLog("🗑️ 조항 대기열에서 삭제 완료");
-      await loadAllData();
-    } catch (e) {
-      alert("삭제 실패");
-    }
-  };
-
-  const handleDeleteCard = async (id: number) => {
-    if (!window.confirm("이 카드를 영구 삭제하시겠습니까?")) return;
-    try {
-      await api.deleteCard(safeAddress, id);
-      addLog("🗑️ 학습 카드 삭제 완료");
-      await loadAllData();
-    } catch (e) {
-      alert("카드 삭제 실패");
-    }
-  };
-
-  const handleUpdateMemoBackground = async (cardId: number, nextMemo: string) => {
-    try {
-      await api.updateCardMemo(safeAddress, cardId, nextMemo);
-    } catch(e){
-    }
-  };
-
-  const processInput = (val: string) => {
-    if (inputStatus !== "typing" || !activeCard) return;
+    if (isBlanking) bodyContent += " ]";
     
-    const { body } = formatCardText(activeCard.content);
-    const blanks = [...body.matchAll(/\[\s*(.*?)\s*\]/g)].map(m => m[1].trim());
-    const targetAnswer = blanks[currentBlankIdxRef.current].replace(/\s+/g, '').toLowerCase();
-    const actualInput = val.replace(/\s+/g, '').toLowerCase();
+    // 💡 [핵심 원인 해결] 꼬리표(ORIG_ID)가 없어도, 카드의 첫 시작이 '조항 제목'과 똑같으면 같은 카드로 인식합니다!
+    const existingCard = savedCards.find((c: any) => 
+      c && c.content && (
+        c.content.includes(`[[ORIG_ID:${cat.id}]]`) || 
+        c.content.trim().startsWith(cat.title.trim())
+      )
+    );
+    
+    // 찾아낸 기존 카드의 ID를 타겟으로 설정합니다.
+    const targetCardId = existingCard ? existingCard.id : null; 
 
-    if (actualInput.includes(targetAnswer)) {
-      if (currentBlankIdxRef.current < blanks.length - 1) {
-        currentBlankIdxRef.current += 1;
-        setAnswerInput("");
-        addLog(`✨ 음성 정답! 다음 빈칸 대기중...`);
-      } else {
-        clearInterval(timerRef.current);
-        setInputStatus("correct");
-        statsRef.current.filled += 1;
-        
-        const finalMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices));
-        handleUpdateMemoBackground(activeCard.id, finalMemo);
-        
-        addLog("🎉 모든 빈칸 해제 완료! 통계 동기화됨");
-      }
+    const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n[[ORIG_ID:${cat.id}]]`;
+    const initialMemo = stringifyCardStats(memo, 0, []);
+    
+    const res = await fetch("https://api.blankd.top/api/save-card", { 
+      method: "POST", headers: { "Content-Type": "application/json" }, 
+      body: JSON.stringify({ 
+          wallet_address: safeAddress, 
+          card_id: targetCardId, // 💡 이제 진짜 카드 ID가 전달되어 완벽한 덮어쓰기(UPDATE)가 실행됩니다!
+          card_content: finalCardContent, 
+          answer_text: answerText, 
+          folder_name: cat.folder_name, 
+          memo: initialMemo 
+      }) 
+    });
+    
+    if (res.ok) {
+      localStorage.setItem('blankd_last_crafted_id', cat.id.toString());
+      localStorage.setItem('blankd_last_crafted_title', cat.title);
+      addLog(targetCardId ? "✅ 덮어쓰기 완료" : "✅ 신규 생성 완료");
+      await loadAllData(); 
+      onComplete(); 
     }
   };
-
-  const { isListening, setIsListening, recognitionRef } = useSpeechRecognition((transcript) => {
-    if (inputStatus === "typing") {
-      setAnswerInput(transcript);
-      processInput(transcript);
-    }
-  });
-
-  const handleSequentialInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (inputStatus !== "typing") return;
-    
-    const val = e.target.value;
-    setAnswerInput(val);
-
-    const { body } = formatCardText(activeCard.content);
-    const blanks = [...body.matchAll(/\[\s*(.*?)\s*\]/g)].map(m => m[1].trim());
-    const targetAnswer = blanks[currentBlankIdxRef.current];
-
-    if (val.trim() === targetAnswer) {
-      if (currentBlankIdxRef.current < blanks.length - 1) {
-        currentBlankIdxRef.current += 1;
-        setAnswerInput("");
-        addLog(`✨ 정답! 다음 빈칸 입력`);
-      } else {
-        clearInterval(timerRef.current);
-        setInputStatus("correct");
-        
-        statsRef.current.filled += 1;
-        const finalMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices));
-        
-        handleUpdateMemoBackground(activeCard.id, finalMemo);
-        addLog("🎉 모든 빈칸 해제 완료! 통계 동기화됨");
-      }
-    }
+  const handleUpdateMemoBackground = (id: number, memo: string) => {
+    setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
+    pushToQueue('MEMO', { id, memo });
   };
 
   useEffect(() => {
     if (activeCard) {
-      setElapsed(0);
-      setInputStatus("typing");
-      setAnswerInput("");
-      setIsMemoOpen(false);
-      currentBlankIdxRef.current = 0;
-      statsRef.current = parseCardStats(activeCard.memo);
-
-      const match = activeCard.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
-      if (match) {
-        localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
-        localStorage.setItem('blankd_last_enhanced_title', activeCard.content.split('\n')[0]);
-      }
-
-      timerRef.current = setInterval(() => {
-        setElapsed(prev => {
-          if (prev >= totalTimeLimit) {
-            clearInterval(timerRef.current);
-            handleShowAnswer();
-            return totalTimeLimit;
-          }
-          return prev + 0.1;
-        });
-      }, 100);
+      isClosingRef.current = false;
+      const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+      const { body } = formatCardText(cleanContent);
+      const foundBlanks: {answer: string, correct: boolean}[] = [];
+      const parts = body.split(/(\[.*?\])/g);
+      parts.forEach(part => {
+        if (part.startsWith('[') && part.endsWith(']')) {
+          foundBlanks.push({ answer: part.replace(/\[|\]/g, '').trim(), correct: false });
+        }
+      });
       
+      const savedProgress = localStorage.getItem(`blankd_progress_${activeCard.id}`);
+      const lastIdx = savedProgress ? parseInt(savedProgress, 10) : 0;
+      
+      const restoredBlanks = foundBlanks.map((b, i) => ({
+          ...b,
+          correct: i < lastIdx 
+      }));
+
+      setBlanks(restoredBlanks); 
+      setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); 
+      setAnswerInput(""); 
+      setInputStatus('idle');
+
+      const stats = parseCardStats(activeCard.memo);
+      const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
+      setTotalTimeLimit(timePerBlank * foundBlanks.length); 
+      
+      setStartTime(Date.now()); 
+      setElapsed(0);
+      setIsMemoOpen(false);
+
+      let cleanText = stats.text;
+      if (cleanText) {
+         cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim();
+      }
+      statsRef.current = { text: cleanText, filled: stats.filled, wrongIndices: new Set(stats.wrongIndices) };
+      const cleanTitle = getStrictTitleOnly(cleanContent);
+      localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
+      localStorage.setItem('blankd_last_enhanced_title', cleanTitle || "이름 없는 카드");
     } else {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (isListening && recognitionRef.current) {
-        setIsListening(false);
+      if (recognitionRef.current) {
+        recognitionRef.current.onend = null;
         recognitionRef.current.stop();
+        recognitionRef.current = null;
+        setIsListening(false);
       }
     }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
   }, [activeCard]);
 
-  const handleShowAnswer = () => {
-    clearInterval(timerRef.current);
-    setInputStatus("wrong");
-    statsRef.current.wrongIndices = Array.from(new Set([...statsRef.current.wrongIndices, currentBlankIdxRef.current]));
-    
-    const finalMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices));
-    handleUpdateMemoBackground(activeCard.id, finalMemo);
-    
-    addLog("❌ 오답 처리 및 정답 오픈");
-  };
+  // 💡 [수정] 복습 주기 자율 선택 기능을 위해 customDays 매개변수를 추가했습니다.
+  const finishCard = (customDays?: number) => {
+    if (isClosingRef.current || !activeCard) return;
+    isClosingRef.current = true;
+    const currentId = activeCard.id;
+    const currentFolder = activeCard.folder_name;
+    const finalTime = elapsed;
+    const wrongArr = Array.from(statsRef.current.wrongIndices);
+    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+    const isCorrect = wrongArr.length === 0;
 
-  const handleAnkiReview = (reviewType: "again" | "hard" | "good" | "easy") => {
-    if (!activeCard) return;
+    let daysInterval = customDays;
     
-    addLog(`🧠 Anki 복습 강도 지정: [${reviewType.toUpperCase()}]`);
-    
-    if (reviewType === "again" || reviewType === "hard") {
-        statsRef.current.wrongIndices = Array.from(new Set([...statsRef.current.wrongIndices, currentBlankIdxRef.current]));
+    // 자동 계산 (직접 선택하지 않은 경우)
+    if (daysInterval === undefined) {
+      const wrongCount = wrongArr.length;
+      const totalBlanks = blanks.length;
+      let quality = 5;
+      if (totalBlanks > 0 && wrongCount > 0) {
+        const wrongRatio = wrongCount / totalBlanks;
+        if (wrongRatio > 0.5) quality = 1;
+        else if (wrongRatio > 0.2) quality = 2;
+        else quality = 3;
+      }
+      let easiness = parseFloat(localStorage.getItem(`blankd_factor_${currentId}`) || "2.5");
+      easiness = easiness + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+      if (easiness < 1.3) easiness = 1.3;
+      localStorage.setItem(`blankd_factor_${currentId}`, easiness.toString());
+
+      const currentRepetitions = statsRef.current.filled || 1;
+      if (quality < 3) {
+        daysInterval = 1;
+      } else {
+        if (currentRepetitions === 1) daysInterval = 1;
+        else if (currentRepetitions === 2) daysInterval = 4;
+        else daysInterval = Math.ceil((currentRepetitions - 1) * easiness);
+      }
     } else {
-        statsRef.current.wrongIndices = statsRef.current.wrongIndices.filter(idx => idx !== currentBlankIdxRef.current);
+      // 💡 [추가] 사용자가 복습 주기를 강제 지정한 경우에도 알고리즘 난이도는 내부적으로 보정
+      let quality = 3;
+      if (daysInterval === 1) quality = 1;
+      else if (daysInterval === 4) quality = 2;
+      else if (daysInterval >= 14) quality = 5;
+      
+      let easiness = parseFloat(localStorage.getItem(`blankd_factor_${currentId}`) || "2.5");
+      easiness = easiness + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+      if (easiness < 1.3) easiness = 1.3;
+      localStorage.setItem(`blankd_factor_${currentId}`, easiness.toString());
     }
-    
-    const finalMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices));
-    
-    handleUpdateMemoBackground(activeCard.id, finalMemo).then(() => {
-        loadAllData().then(() => {
-            const sorted = [...savedCards].sort((a,b) => a.id - b.id);
-            const curIdx = sorted.findIndex(c => c.id === activeCard.id);
-            
-            if (curIdx !== -1 && curIdx < sorted.length - 1) {
-                setActiveCard(sorted[curIdx + 1]);
-            } else {
-                setActiveCard(null);
-            }
-        });
+
+    const nextReviewDate = new Date();
+    nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
+
+    const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
+        const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
+        const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
+        return origIdA - origIdB;
     });
-  };
+    const currentIdx = folderCards.findIndex(c => c.id === currentId);
+    const nextCard = folderCards[currentIdx + 1] || null;
 
-  const renderContent = () => {
-    if (!activeCard) return null;
-    const { body } = formatCardText(activeCard.content);
+    localStorage.removeItem(`blankd_progress_${currentId}`);
+
+    setActiveCard(nextCard);
+    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     
-    const tokens = body.split(SPLIT_REGEX).filter(w => w !== "");
-    let blankCounter = 0;
-
-    return (
-      <div className="font-serif text-[15px] sm:text-[17px] leading-loose whitespace-pre-wrap break-keep text-white/90 select-none">
-        {tokens.map((token, idx) => {
-          const isBlank = token.startsWith("[") && token.endsWith("]");
-          
-          if (isBlank) {
-            const currentCounter = blankCounter;
-            blankCounter++;
-            const cleanText = token.slice(1, -1).trim();
-
-            if (currentCounter < currentBlankIdxRef.current) {
-              return (
-                <span key={idx} className="mx-1 px-1.5 bg-teal-500/20 text-teal-300 font-bold border-b border-teal-400/50">
-                  {cleanText}
-                </span>
-              );
-            } else if (currentCounter === currentBlankIdxRef.current) {
-              if (inputStatus === "wrong") {
-                return (
-                  <span key={idx} className="mx-1 px-1.5 bg-red-600 text-white font-bold animate-pulse">
-                    {cleanText}
-                  </span>
-                );
-              }
-              if (inputStatus === "correct") {
-                return (
-                  <span key={idx} className="mx-1 px-1.5 bg-teal-500 text-black font-bold">
-                    {cleanText}
-                  </span>
-                );
-              }
-              return (
-                <span key={idx} className="mx-1 px-3 py-0.5 bg-amber-500/20 text-amber-400 border border-amber-500 font-mono text-sm animate-pulse">
-                  ??
-                </span>
-              );
-            } else {
-              return (
-                <span key={idx} className="mx-1 px-2 bg-white/5 border border-white/10 text-white/10 select-none filter blur-[2px]">
-                  🛑🛑
-                </span>
-              );
-            }
-          }
-          
-          if (token === "\n---PAGE---\n") {
-             return <div key={idx} className="w-full border-t border-white/20 my-6 relative"><span className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-black px-2 text-[10px] text-white/40 tracking-widest font-mono">PAGE BREAK</span></div>;
-          }
-
-          return <span key={idx}>{token}</span>;
-        })}
-      </div>
-    );
+    pushToQueue('MEMO', { id: currentId, memo: newMemo });
+    pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
+    
+    // 로그 문구 추가 수정
+    addLog(`✅ 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
+    flushQueue();
   };
 
-  const analyzeAllForTest = async () => {
-    if (!savedCards || savedCards.length === 0) {
-      alert("분석할 카드가 없습니다. 카드를 먼저 만들어주세요.");
+  // 💡 [추가] 카드 모달에서 복습 주기 버튼(1일, 4일, 7일, 14일)을 눌렀을 때 실행되는 함수
+  const handleReviewSelect = (days: number) => {
+    if (!activeCard) return;
+    statsRef.current.filled += 1;
+    finishCard(days);
+  };
+
+  const handleCloseModal = () => {
+    if (isClosingRef.current || !activeCard) return;
+    isClosingRef.current = true;
+    const currentId = activeCard.id;
+    const wrongArr = Array.from(statsRef.current.wrongIndices);
+    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+    setActiveCard(null);
+    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
+    pushToQueue('MEMO', { id: currentId, memo: newMemo });
+    flushQueue();
+  };
+
+  useEffect(() => {
+    if (activeCard && currentBlankIdx < blanks.length) {
+      const interval = setInterval(() => {
+        const diff = (Date.now() - startTime) / 1000; setElapsed(diff);
+        if (diff >= totalTimeLimit) { clearInterval(interval); alert("집중 시간 초과! 현재 기록을 저장합니다."); finishCard(); }
+      }, 100);
+      return () => clearInterval(interval);
+    }
+  }, [activeCard, currentBlankIdx, blanks.length, startTime, totalTimeLimit]);
+
+  useEffect(() => {
+    if (inputStatus === 'idle' && blanks[currentBlankIdx] && answerInput) {
+      const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
+      const actual = answerInput.replace(/\s+/g, '').toLowerCase();
+      if (expected === actual) handleSequentialInput(actual); 
+    }
+  }, [answerInput, inputStatus, blanks, currentBlankIdx]);
+
+  const handleSequentialInput = (overrideInput?: string | any) => {
+    if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
+    const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
+    let actual = typeof overrideInput === 'string' ? overrideInput : answerInput.replace(/\s+/g, '').toLowerCase();
+    
+    if (expected === actual) {
+      const activeEl = document.activeElement as HTMLElement;
+      if (activeEl) activeEl.blur(); 
+
+      setInputStatus('correct');
+      
+      // 💡 [핵심] 과거의 blanks를 쓰지 않고, 무조건 가장 최신의 prev 상태를 가져와서 덮어씁니다!
+      setBlanks(prev => {
+        const nb = [...prev]; 
+        if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; 
+        return nb;
+      });
+      
+      statsRef.current.wrongIndices.delete(currentBlankIdx);
+      
+      setTimeout(() => { 
+        setAnswerInput(""); 
+        setTimeout(() => {
+          setInputStatus('idle'); 
+          
+          setBlanks(currentBlanks => {
+              if (currentBlankIdx + 1 < currentBlanks.length) {
+                // 다음 빈칸으로 안전하게 이동
+                setCurrentBlankIdx(prevIdx => {
+                    const nextIdx = prevIdx + 1;
+                    localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
+                    return nextIdx;
+                });
+              } else { 
+                // 모든 빈칸 완료
+                localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+                statsRef.current.filled += 1; 
+                finishCard(); 
+              }
+              return currentBlanks;
+          });
+        }, 130);
+      }, 20);
+    } else { 
+      setInputStatus('wrong'); 
+      statsRef.current.wrongIndices.add(currentBlankIdx); 
+      setTimeout(() => setInputStatus('idle'), 500); 
+    }
+  };
+
+  const handleShowAnswer = () => {
+    if (!blanks[currentBlankIdx]) return;
+    setInputStatus('wrong'); 
+    statsRef.current.wrongIndices.add(currentBlankIdx); 
+    
+    // 💡 정답 보기(오답 처리)도 가장 최신의 prev 상태를 사용하도록 변경!
+    setBlanks(prev => {
+      const nb = [...prev];
+      if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; 
+      return nb;
+    });
+
+    setTimeout(() => {
+      setAnswerInput(""); 
+      setInputStatus('idle');
+      
+      setBlanks(currentBlanks => {
+          if (currentBlankIdx + 1 < currentBlanks.length) {
+            setCurrentBlankIdx(prevIdx => {
+                const nextIdx = prevIdx + 1;
+                localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
+                return nextIdx;
+            });
+          } else {
+            localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+            statsRef.current.filled += 1;
+            finishCard();
+          }
+          return currentBlanks;
+      });
+    }, 800);
+  };
+
+  const toggleVoiceRecognition = () => {
+    if (isListening) {
+      setIsListening(false);
+      if (recognitionRef.current) {
+        recognitionRef.current.onend = null; 
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+      }
+      addLog("🎙️ 음성 인식 종료됨");
       return;
     }
-    
-    setIsAiProcessing(true);
-    addLog("🤖 모의고사 기반 AI 문헌 분석 시작 (전체 카드 대상)...");
-    
-    try {
-      const data = await api.analyzeExam(safeAddress, savedCards);
-      
-      setAiAnalysisResult(data);
-      addLog("✅ AI 문헌 분석 완료! 빈칸 추천 데이터가 생성되었습니다.");
-      
-      const newRecs = data.analysis.flatMap((item: any) => item.recommendations || []);
-      setAiRecommendations(newRecs);
-      
-      setShowAiModal(true);
-      
-    } catch (e: any) {
-      console.error(e);
-      addLog(`❌ AI 분석 실패: ${e.message}`);
-      alert("AI 분석 중 오류가 발생했습니다.");
-    } finally {
-      setIsAiProcessing(false);
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다.");
+      return; 
     }
+    
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'ko-KR'; 
+    recognition.interimResults = false;
+    recognition.continuous = true; 
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => { 
+      setIsListening(true);
+      addLog("🎙️ 음성 인식 활성화됨 (계속 듣는 중...)");
+    };
+    
+    recognition.onresult = (event: any) => {
+      const last = event.results.length - 1;
+      const transcript = event.results[last][0].transcript;
+      const cleanText = transcript.replace(/\s+/g, '').replace(/[.,!?]/g, '');
+      setAnswerInput(cleanText);
+      addLog(`🗣️ 인식: "${transcript}"`);
+      setTimeout(() => handleSequentialInput(cleanText), 300);
+    };
+    recognition.onerror = (err: any) => { 
+      if (err.error !== 'no-speech') {
+        setIsListening(false);
+        recognitionRef.current = null;
+      }
+    };
+    
+    recognition.onend = () => { 
+      if (recognitionRef.current) {
+         try { recognitionRef.current.start();
+         } catch(e) {}
+      } else {
+         setIsListening(false);
+      }
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
   };
 
-  const applyAiRecommendations = () => {
-     alert("이 기능은 현재 UI 통합 중입니다. (추천된 빈칸 목록을 카드에 일괄 적용하는 로직 추가 예정)");
-     setShowAiModal(false);
-  };
+  // 💡 [추가] 전체 카드의 최소 회독수 (모두 1이상이면 1, 모두 2이상이면 2) 계산
+  const minFilledCount = savedCards.length > 0 
+    ? Math.min(...savedCards.map((card: any) => {
+        const stats = parseCardStats(card.memo || "");
+        return stats.filled || 0;
+      }))
+    : 0;
 
-  let totalCardBlanks = 0;
-  let minFilledCount = 9999;
-  let totalWrongIndices = 0;
-  let totalCardsWithWrong = 0;
-
-  if (savedCards.length > 0) {
-    savedCards.forEach(c => {
-      const { body } = formatCardText(c.content);
-      totalCardBlanks += (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
-      const st = parseCardStats(c.memo);
-      if (st.filled < minFilledCount) minFilledCount = st.filled;
-      totalWrongIndices += st.wrongIndices.length;
-      if (st.wrongIndices.length > 0) totalCardsWithWrong += 1;
-    });
-  } else {
-    minFilledCount = 0;
-  }
-
-  const passProbability = totalCardBlanks === 0 ? 0 : Math.max(0, 100 - Math.round((totalCardsWithWrong / savedCards.length) * 100));
+  // 💡 [추가] 합격률 로직: 최소 회독수 1회당 2%씩 상승 (최대 100%)
+  const passProbability = Math.min(minFilledCount * 2, 100);
 
   return (
-    <div className="min-h-screen bg-[#030303] text-white flex flex-col font-sans select-none antialiased selection:bg-amber-500 selection:text-black">
-      
-      {/* 💡 [핵심] 상시 이어서 하기 버튼 및 글로벌 지표가 고정된 최상단 헤더 */}
+    <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
+{/* 💡 변경된 상단 글로벌 헤더 (이어서 하기 + 지표) */}
       <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
           
           <div className="flex flex-wrap items-center gap-2 flex-1">
             <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 uppercase">Resume:</span>
             
-            {recentCraftId ? (
-              <button 
-                onClick={() => { setActiveTab('create'); setExpandedId(recentCraftId); }}
-                className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
-              >
-                <span className="text-[9px] sm:text-[10px] text-amber-400 font-bold whitespace-nowrap">▶ 만들기:</span>
-                <span className="text-[10px] sm:text-[11px] font-medium text-amber-100 truncate">{recentCraftTitle || "진행중"}</span>
-              </button>
-            ) : (
-              <div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">만들기 기록 없음</div>
-            )}
+            <button 
+              onClick={() => {
+                const cId = localStorage.getItem('blankd_last_crafted_id');
+                if (cId) { setActiveTab('create'); setExpandedId(parseInt(cId, 10)); }
+              }}
+              className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
+            >
+              <span className="text-[9px] sm:text-[10px] text-amber-400 font-bold whitespace-nowrap">▶ 만들기</span>
+            </button>
 
-            {recentEnhanceId ? (
-              <button 
-                onClick={() => {
-                  const targetCard = savedCards.find((c:any) => c.id === recentEnhanceId);
+            <button 
+              onClick={() => {
+                const eId = localStorage.getItem('blankd_last_enhanced_id');
+                if (eId) {
+                  const targetCard = savedCards.find((c:any) => c.id === parseInt(eId, 10));
                   if (targetCard) setActiveCard(targetCard);
                   else setActiveTab('enhance');
-                }}
-                className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
-              >
-                <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기:</span>
-                <span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{recentEnhanceTitle || "진행중"}</span>
-              </button>
-            ) : (
-              <div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 기록 없음</div>
-            )}
+                }
+              }}
+              className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
+            >
+              <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span>
+            </button>
           </div>
 
           <div className="flex items-center justify-between md:justify-end gap-3 sm:gap-4 shrink-0 mt-2 md:mt-0">
-            <div className="flex items-center gap-2 sm:gap-3 font-mono">
-              <div className="text-right">
-                <span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest uppercase">Rotation</span>
-                <span className="text-[10px] sm:text-xs font-bold text-amber-400">{minFilledCount} 회독</span>
+            {isLoggedIn && (
+              <div className="flex items-center gap-2 sm:gap-3 font-mono">
+                <div className="text-right">
+                  <span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest uppercase">Rotation</span>
+                  <span className="text-[10px] sm:text-xs font-bold text-amber-400">{minFilledCount} 회독</span>
+                </div>
+                <div className="h-5 sm:h-6 w-px bg-white/10"></div>
+                <div className="text-right">
+                  <span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest uppercase">Pass Rate</span>
+                  <span className="text-[10px] sm:text-xs font-bold text-indigo-400">{passProbability}%</span>
+                </div>
+                <div className="h-5 sm:h-6 w-px bg-white/10 hidden sm:block"></div>
+                <button onClick={async () => { await enokiFlow.logout(); localStorage.clear(); window.location.reload(); }} className="border border-white/20 px-2 py-1 text-[9px] sm:text-[10px] hover:bg-white/10 tracking-wider font-mono rounded-sm text-white/70 whitespace-nowrap">LOGOUT</button>
               </div>
-              <div className="h-5 sm:h-6 w-px bg-white/10"></div>
-              <div className="text-right">
-                <span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest uppercase">Pass Rate</span>
-                <span className="text-[10px] sm:text-xs font-bold text-teal-400">{passProbability}%</span>
-              </div>
-            </div>
-            
-            <div className="h-5 sm:h-6 w-px bg-white/10 hidden sm:block"></div>
-
-            <button onClick={handleGoogleLogout} className="border border-white/20 px-2 py-1 text-[9px] sm:text-[10px] hover:bg-white/10 tracking-wider font-mono rounded-sm text-white/70 whitespace-nowrap">LOGOUT</button>
+            )}
           </div>
         </div>
       </header>
 
-      {/* 💡 [핵심] 한 줄 아래로 독립적으로 분리된 탭 네비게이션 바 */}
+      {/* 💡 한 줄 아래로 독립적으로 분리된 탭 네비게이션 바 */}
       {isLoggedIn && (
         <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="max-w-6xl mx-auto flex items-center justify-start gap-1 sm:gap-2">
@@ -622,228 +633,280 @@ function BlankDMain({ AppLogs, addLog }: { AppLogs: string[], addLog: (msg: stri
           </div>
         </nav>
       )}
-{!isLoggedIn ? (
+      {!isLoggedIn ? (
         <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
           <h2 className="text-xl sm:text-2xl font-serif text-white mb-4 tracking-tight">빈칸개발 (BlankD)</h2>
           <p className="text-xs sm:text-sm text-white/40 mb-10 sm:mb-12 text-center leading-relaxed">인지 부하 이론 기반의 학습 플랫폼<br/>압도적인 영구 기억을 형성합니다.</p>
-          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq3oam3id83q7a50id36v6.apps.googleusercontent.com', redirectUrl: window.location.href.split('?')[0], extraParams: { scope: ['openid', 'email', 'profile'] } }); }} className="w-full bg-white text-black font-bold py-3.5 sm:py-4 rounded shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:shadow-[0_0_30px_rgba(255,255,255,0.4)] transition-all flex items-center justify-center gap-3 text-xs sm:text-sm">
-            <svg className="w-4 h-4 sm:w-5 sm:h-5" viewBox="0 0 24 24"><path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-            구글 계정으로 동기화 시작
-          </button>
+          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-white text-black text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
         </main>
       ) : (
-        <main className="flex-1 max-w-6xl w-full mx-auto p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
-          
-          {loading && (
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 bg-amber-500 text-black text-[10px] font-bold px-3 py-1 rounded-b shadow-lg animate-pulse z-50">
-              DATABANK SYNCHRONIZING...
+        <main className="max-w-6xl mx-auto w-full">
+          <ErrorBoundary fallbackLog={addLog}>
+            
+            <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
+              <DashboardTab 
+                categories={categories} 
+                savedCards={savedCards} 
+                setActiveTab={setActiveTab}
+                setExpandedId={setExpandedId}
+                setActiveCard={setActiveCard}
+              />
             </div>
-          )}
-          
-          {activeTab === 'progress' && (
-            <DashboardTab 
-              categories={categories} 
-              savedCards={savedCards} 
-              setActiveTab={setActiveTab} 
-              setExpandedId={setExpandedId}
-              setActiveCard={setActiveCard}
-            />
-          )}
+            
+            <div className={activeTab === 'create' ? 'block' : 'hidden'}>
+              <CraftTab 
+                categories={categories} 
+                savedCards={savedCards} 
+                colCount={colCount} 
+                viewMode={viewMode} 
+                useAiRecommend={useAiRecommend} 
+                safeAddress={safeAddress} 
+                lawFile={lawFile} 
+                setLawFile={setLawFile} 
+                uploadLaw={uploadLaw} 
+                handleMakeBlankCard={handleMakeBlankCard} 
+                handleSplitCategory={handleSplitCategory} 
+                addLog={addLog} 
+                expandedId={expandedId}
+                setExpandedId={setExpandedId}
+                handleDeleteCategory={async (id: number) => {
+                  if(confirm('삭제하시겠습니까?')){
+                    await fetch("https://api.blankd.top/api/delete-category", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ wallet_address: safeAddress, id })
+                    });
+                    loadAllData();
+                  }
+                }} 
+              />
+            </div>
+            
+            <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
+              <EnhanceTab 
+                categories={categories}
+                savedCards={savedCards} 
+                colCount={colCount} 
+                viewMode={viewMode} 
+                setActiveCard={setActiveCard} 
+                setActiveTab={setActiveTab}
+                setExpandedId={setExpandedId}
+                handleDeleteCard={async (id: number) => {
+                  if(confirm('삭제하시겠습니까?')){
+                    await fetch("https://api.blankd.top/api/delete-card", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ wallet_address: safeAddress, id })
+                    });
+                    setActiveCard(null);
+                    loadAllData();
+                  }
+                }} 
+              />
+            </div>
+            
+            <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
+              <ExamTab walletAddress={safeAddress} address={safeAddress} />
+            </div>
+            
+            <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
+              <MypageTab 
+                safeAddress={safeAddress} 
+                enokiFlow={enokiFlow} 
+                useAiRecommend={useAiRecommend} 
+                setUseAiRecommend={setUseAiRecommend} 
+                viewMode={viewMode} 
+                setViewMode={setViewMode} 
+                colCount={colCount} 
+                updateColCount={setColCount} 
+                handleDeleteAll={async () => { 
+                  if(confirm('전체 초기화하시겠습니까?')) { 
+                    await api.deleteAll(safeAddress);
+                    loadAllData();
+                  } 
+                }} 
+              />
+            </div>
 
-          {activeTab === 'create' && (
-            <CraftTab 
-              categories={categories} 
-              savedCards={savedCards}
-              colCount={colCount}
-              viewMode={viewMode}
-              useAiRecommend={useAiRecommend}
-              safeAddress={safeAddress}
-              lawFile={lawFile}
-              setLawFile={setLawFile}
-              uploadLaw={uploadLaw}
-              handleMakeBlankCard={handleMakeBlankCard}
-              addLog={addLog}
-              handleDeleteCategory={handleDeleteCategory}
-              loadAllData={loadAllData}
-              expandedId={expandedId}
-              setExpandedId={setExpandedId}
-            />
-          )}
-
-          {activeTab === 'enhance' && (
-             <EnhanceTab 
-               savedCards={savedCards}
-               colCount={colCount}
-               viewMode={viewMode}
-               setActiveCard={setActiveCard}
-               setActiveTab={setActiveTab}
-               setExpandedId={setExpandedId}
-               handleDeleteCard={handleDeleteCard}
-             />
-          )}
-
-          {activeTab === 'exam' && (
-             <ExamTab safeAddress={safeAddress} addLog={addLog} />
-          )}
-
-          {activeTab === 'settings' && (
-            <MypageTab 
-               colCount={colCount}
-               setColCount={setColCount}
-               viewMode={viewMode}
-               setViewMode={setViewMode}
-               useAiRecommend={useAiRecommend}
-               setUseAiRecommend={setUseAiRecommend}
-               safeAddress={safeAddress}
-               addLog={addLog}
-            />
-          )}
+          </ErrorBoundary>
         </main>
       )}
 
-      {/* 하단 로그 영역 */}
-      <footer className="border-t border-white/5 bg-black/80 backdrop-blur text-[9px] sm:text-[10px] text-white/30 font-mono flex flex-col p-2 sm:p-3 fixed bottom-0 w-full z-40 max-h-24 sm:max-h-32 overflow-y-auto">
-        {AppLogs.length > 0 ? AppLogs.map((log, idx) => (
-          <div key={idx} className="flex gap-2">
-            <span className="text-amber-500/50">SYS</span>
-            <span className="break-all">{log}</span>
+      <div className="fixed bottom-4 right-4 z-[999] flex flex-col items-end gap-2">
+        {isTerminalOpen && (
+          <div className="w-[85vw] max-w-lg h-64 bg-black/95 border border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto rounded shadow-2xl flex flex-col custom-scrollbar animate-in slide-in-from-bottom-5 fade-in">
+            <div className="flex justify-between items-center mb-2 border-b border-teal-500/10 pb-2 sticky top-0 bg-black/95">
+              <span className="uppercase tracking-widest text-teal-500/50 font-bold">Diagnostic Terminal</span>
+              <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2 py-0.5 bg-white/5 rounded transition-colors">Clear</button>
+            </div>
+            <div className="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
+              {systemLogs.map((l, i) => (
+                <div key={i} className={`leading-snug break-all ${l.includes('❌') ? 'text-red-400 font-bold' : l.includes('▶️') ? 'text-amber-300' : ''}`}>
+                  {l}
+                </div>
+              ))}
+            </div>
           </div>
-        )) : <div>시스템 상태 정상 - 대기 중</div>}
-      </footer>
+        )}
+        <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>
+          {isTerminalOpen ? 'Close Terminal' : 'Open Terminal'}
+        </button>
+      </div>
 
-      {/* 💡 기존의 모달 (음성인식, Anki 복습 포함 전체 코드 보존) */}
       {activeCard && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-[#0a0a0c] border border-white/10 rounded-sm shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col relative overflow-hidden">
-            <div className="absolute top-0 left-0 h-1 bg-white/10 w-full z-10">
-              <div className={`h-full transition-all duration-100 ease-linear ${elapsed / totalTimeLimit > 0.8 ? 'bg-red-500' : 'bg-teal-500'}`} style={{ width: `${(elapsed / totalTimeLimit) * 100}%` }} />
-            </div>
+        <CardModal 
+          activeCard={activeCard} 
+          totalTimeLimit={totalTimeLimit} 
+          elapsed={elapsed} 
+          answerInput={answerInput}
+          setAnswerInput={setAnswerInput}
+          inputStatus={inputStatus}
+          handleSequentialInput={handleSequentialInput}
+          handleReviewSelect={handleReviewSelect} // 💡 추가된 프롭스
+          renderContent={() => {
+            const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
             
-            <div className="p-4 sm:p-6 border-b border-white/10 flex justify-between items-start bg-white/5">
-              <div className="flex-1 pr-4">
-                <div className="text-[10px] text-teal-500/80 font-mono mb-1 tracking-widest uppercase">{activeCard.folder_name}</div>
-                <h3 className="text-sm sm:text-base font-bold text-teal-100 tracking-tight leading-snug break-keep">{activeCard.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '')}</h3>
-              </div>
-              <button onClick={() => { setActiveCard(null); setIsMemoOpen(false); }} className="text-white/30 hover:text-white p-2 shrink-0 transition-colors">✕</button>
-            </div>
+            // 💡 [수정] 본문 첫 줄에서 '[법]' 태그만 지우고 제목으로 사용합니다!
+            let displayTitle = (cleanContent.split('\n')[0] || "")
+                .replace(/\[.*?\]/g, '')
+                .replace(/\(\s*내용\s*\)/g, '')
+                .replace(/내용/g, '')
+                .trim();
+            
+            if (!displayTitle) displayTitle = "제목 없음";
 
-            <div className="p-4 sm:p-6 flex-1 overflow-y-auto custom-scrollbar relative">
-              {renderContent()}
-            </div>
-
-            <div className="p-4 sm:p-6 bg-black/40 border-t border-white/5 space-y-4">
-              <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-                <input 
-                  type="text" 
-                  autoFocus 
-                  value={answerInput} 
-                  onChange={handleSequentialInput} 
-                  disabled={inputStatus !== "typing"}
-                  autoComplete="off"
-                  autoCorrect="off"
-                  spellCheck="false"
-                  autoCapitalize="none"
-                  onCompositionStart={(e) => { e.currentTarget.dataset.composing = "true"; }}
-                  onCompositionEnd={(e) => { e.currentTarget.dataset.composing = "false"; }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && e.currentTarget.dataset.composing !== "true") {
-                      const val = e.currentTarget.value;
-                      const { body } = formatCardText(activeCard.content);
-                      const blanks = [...body.matchAll(/\[\s*(.*?)\s*\]/g)].map(m => m[1].trim());
-                      const targetAnswer = blanks[currentBlankIdxRef.current];
-
-                      if (val.trim() === targetAnswer) {
-                        if (currentBlankIdxRef.current < blanks.length - 1) {
-                          currentBlankIdxRef.current += 1;
-                          setAnswerInput("");
-                          addLog(`✨ 정답! 다음 빈칸 입력`);
-                        } else {
-                          clearInterval(timerRef.current);
-                          setInputStatus("correct");
-                          statsRef.current.filled += 1;
-                          const finalMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices));
-                          handleUpdateMemoBackground(activeCard.id, finalMemo);
-                          addLog("🎉 모든 빈칸 해제 완료! 통계 동기화됨");
-                        }
-                      } else {
-                         handleShowAnswer();
-                      }
+            const { body } = formatCardText(cleanContent);
+            const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== '');
+            let displayPage = 0; 
+            let tempGlobalBlank = 0; 
+            let tempPage = 0;
+            for (let part of parts) {
+                if (part === '##PAGE_BREAK##') tempPage++;
+                else if (part.startsWith('[') && part.endsWith(']')) {
+                    if (tempGlobalBlank === currentBlankIdx) { 
+                      displayPage = tempPage;
+                      break; 
                     }
-                  }}
-                  className={`flex-1 h-10 sm:h-12 bg-[#0a0a0c] border-2 outline-none text-center font-bold text-sm sm:text-base rounded-sm transition-all shadow-inner ${
-                    inputStatus === "wrong" ? "border-red-500 text-red-400 bg-red-950/30 animate-shake" : 
-                    inputStatus === "correct" ? "border-teal-500 text-teal-400 bg-teal-950/30 shadow-[0_0_15px_rgba(20,184,166,0.2)]" : 
-                    "border-teal-900/50 text-teal-100 focus:border-teal-500 focus:bg-teal-950/10"
-                  }`} 
-                  placeholder={inputStatus === "typing" ? "빈칸 내용 입력 후 Enter..." : inputStatus === "correct" ? "완료!" : "오답"} 
-                />
+                    tempGlobalBlank++;
+                }
+            }
+
+            let renderPage = 0;
+            let bIdx = 0;
+            const contentToRender: any[] = [];
+            parts.forEach((part: string, i: number) => {
+              if (part === '##PAGE_BREAK##') { renderPage++; return; }
+              if (renderPage === displayPage) {
+                  if (part.startsWith('[') && part.endsWith(']')) {
+                    const isCorrect = blanks[bIdx]?.correct; 
+                    const isCurrent = bIdx === currentBlankIdx; 
+                    const isWrong = statsRef.current.wrongIndices.has(bIdx); 
+                    
+                    if (isCorrect) {
+                      contentToRender.push(
+                        <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>
+                          {part.replace(/\[|\]/g, '')}
+                        </span>
+                      );
+                    }
+                    else if (isCurrent) {
+                      contentToRender.push(
+                        <input 
+                          key={i}
+                          autoFocus
+                          value={answerInput}
+                          // 💡 1. 키보드의 쓸데없는 개입 완벽 차단!
+                          autoComplete="off"
+                          autoCorrect="off"
+                          spellCheck="false"
+                          autoCapitalize="none"
+                          
+                          // 💡 2. 한글 조합 중(글자 아래 밑줄)일 때는 정답 제출이나 렌더링이 꼬이지 않게 방어!
+                          onCompositionStart={(e) => { e.currentTarget.dataset.composing = "true"; }}
+                          onCompositionEnd={(e) => { e.currentTarget.dataset.composing = "false"; }}
+                          
+                          onChange={(e) => setAnswerInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            // 조합 중이 아닐 때만 엔터키 허용
+                            if(e.key === 'Enter' && e.currentTarget.dataset.composing !== "true") {
+                               handleSequentialInput(e.currentTarget.value);
+                            }
+                          }}
+                          placeholder="입력..."
+                          style={{ width: `${Math.max(60, answerInput.length * 15 + 40)}px` }}
+                          className={`inline-block h-6 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-all mx-1 px-1 rounded-t-sm ${
+                            inputStatus === 'wrong' 
+                              ? 'border-red-500 text-red-400 bg-red-900/40 animate-shake' 
+                              : 'border-indigo-400 text-amber-300 focus:border-amber-400'
+                          }`}
+                        />
+                      );
+                    }
+                    else {
+                      contentToRender.push(
+                        <span key={i} className="inline-block min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>
+                      );
+                    }
+                    bIdx++;
+                  } else {
+                    contentToRender.push(<span key={i}>{part}</span>);
+                  }
+              } else if (part.startsWith('[') && part.endsWith(']')) {
+                bIdx++;
+              }
+            });
+            return (
+              <div className="flex flex-col gap-6 w-full">
+                <div className="flex justify-between items-center border-b border-white/10 pb-2">
+                    <span className="text-amber-400 font-bold text-[14px] leading-tight">{cleanContent.split('\n')[0]}</span>
+                    <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
+                </div>
                 
-                <button onClick={() => setIsMemoOpen(!isMemoOpen)} className={`h-10 sm:h-12 px-3 sm:px-4 border rounded-sm text-xs font-bold shrink-0 transition-all ${isMemoOpen ? 'bg-teal-600/30 border-teal-500/50 text-teal-300' : 'border-white/10 text-white/40 hover:bg-white/5'}`}>
-                  {isMemoOpen ? '메모 닫기' : '📝 메모'}
-                </button>
-              </div>
+                <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
+                
+                <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
+                  <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
+                    {isMemoOpen ? '닫기 ✕' : '📝 메모 열기'}
+                  </button>
+                  
+                  <button 
+                    onClick={toggleVoiceRecognition} 
+                    className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${
+                      isListening 
+                        ? 'bg-red-600/50 text-white border-red-500 animate-pulse' 
+                        : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'
+                    }`}
+                  >
+                    {isListening ? '🎙️ 음성 인식 끄기 (활성화됨)' : '🎤 음성으로 입력 (계속 켜두기)'}
+                  </button>
 
-              <div className="flex justify-between gap-2 overflow-x-auto custom-scrollbar pb-1">
-                <button onClick={toggleListening} className={`px-3 py-1.5 border rounded-sm text-[10px] sm:text-[11px] font-bold shrink-0 transition-all flex items-center gap-1 ${isListening ? 'bg-teal-600/30 border-teal-500/50 text-teal-300 animate-pulse shadow-[0_0_10px_rgba(20,184,166,0.2)]' : 'bg-black/50 border-white/10 text-white/40 hover:bg-white/5'}`}>
-                  {isListening ? '🎙️ 음성 인식 끄기 (활성화됨)' : '🎤 음성으로 입력 (계속 켜두기)'}
-                </button>
-
-                <button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
-                  정답 보기 (오답 처리)
-                </button>
-              </div>
-              
-              {isMemoOpen && (
-                <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
-                  <input 
-                    defaultValue={statsRef.current.text || ""} 
-                    placeholder="학습 인사이트 기록..." 
-                    onBlur={(e) => { 
-                      statsRef.current.text = e.target.value; 
-                      handleUpdateMemoBackground(activeCard.id, stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices))); 
-                    }} 
-                    className="text-[12px] sm:text-[13px] text-teal-300 bg-teal-950/20 p-2.5 sm:p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all" 
-                    autoFocus
-                  />
+                  <button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
+                    정답 보기 (오답 처리)
+                  </button>
                 </div>
-              )}
-
-              {inputStatus === "correct" && (
-                <div className="flex justify-between gap-2 pt-4 border-t border-white/10 animate-in slide-in-from-bottom-2">
-                  <button onClick={() => handleAnkiReview("again")} className="flex-1 py-2 sm:py-2.5 bg-red-950/40 text-red-400 border border-red-900 rounded-sm text-[10px] sm:text-[11px] font-bold hover:bg-red-900/40 transition-colors">다시 (1m)</button>
-                  <button onClick={() => handleAnkiReview("hard")} className="flex-1 py-2 sm:py-2.5 bg-orange-950/40 text-orange-400 border border-orange-900 rounded-sm text-[10px] sm:text-[11px] font-bold hover:bg-orange-900/40 transition-colors">어려움 (6m)</button>
-                  <button onClick={() => handleAnkiReview("good")} className="flex-1 py-2 sm:py-2.5 bg-teal-950/40 text-teal-400 border border-teal-900 rounded-sm text-[10px] sm:text-[11px] font-bold hover:bg-teal-900/40 transition-colors">알맞음 (10m)</button>
-                  <button onClick={() => handleAnkiReview("easy")} className="flex-1 py-2 sm:py-2.5 bg-blue-950/40 text-blue-400 border border-blue-900 rounded-sm text-[10px] sm:text-[11px] font-bold hover:bg-blue-900/40 transition-colors">쉬움 (4d)</button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showAiModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-           <div className="bg-[#0a0a0c] border border-amber-500/30 rounded shadow-2xl w-full max-w-lg p-6 flex flex-col">
-              <h3 className="text-amber-400 font-bold mb-4">🤖 AI 모의고사 기반 빈칸 추천</h3>
-              <div className="flex-1 overflow-y-auto custom-scrollbar mb-4 text-sm text-white/70 space-y-4 max-h-[50vh]">
-                 <p>AI가 모의고사를 분석하여 출제 확률이 높은 핵심 키워드를 추천합니다.</p>
-                 {aiRecommendations.length > 0 ? (
-                    <ul className="list-disc pl-5 space-y-1">
-                      {aiRecommendations.map((rec, i) => (
-                        <li key={i} className="text-teal-300 font-mono">{rec.keyword} <span className="text-white/40 text-xs">({rec.reason})</span></li>
-                      ))}
-                    </ul>
-                 ) : (
-                    <p className="text-white/30">추천된 단어가 없습니다.</p>
-                 )}
+                
+                {isMemoOpen && (
+                  <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
+                    <input 
+                      defaultValue={statsRef.current.text || ""} 
+                      placeholder="학습 인사이트 기록..." 
+                      onBlur={(e) => { 
+                        statsRef.current.text = e.target.value; 
+                        handleUpdateMemoBackground(activeCard.id, stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices))); 
+                      }} 
+                      className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all" 
+                      autoFocus
+                    />
+                  </div>
+                )}
               </div>
-              <div className="flex gap-2 justify-end mt-2">
-                 <button onClick={() => setShowAiModal(false)} className="px-4 py-2 border border-white/20 text-white/50 rounded hover:bg-white/10 transition-colors">닫기</button>
-                 <button onClick={applyAiRecommendations} className="px-4 py-2 bg-amber-500/20 text-amber-400 border border-amber-500/50 rounded hover:bg-amber-500/30 transition-colors">추천 빈칸 전체 적용</button>
-              </div>
-           </div>
-        </div>
+            );
+          }} 
+          onClose={handleCloseModal} 
+        />
       )}
     </div>
   );
 }
+
+export default function App() { return <MainApp />; }
