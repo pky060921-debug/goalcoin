@@ -481,21 +481,31 @@ def get_pending_exams():
 def analyze_chunk():
     try:
         data = request.json
-        chunk_text = data.get('chunk_text', '')[:2000]  # 너무 긴 지문 방지
+        chunk_text = data.get('chunk_text', '')[:2000]
         user_feedback = data.get('user_feedback', '')
         chat_history = data.get('chat_history', [])
 
-        # ── 특수문자 정규화 (gemma4가 빈 응답 반환하는 원인) ──────────
+        # ── 특수문자 및 제어문자 정규화 ──────────────────────────────
         char_map = {
             '㉠': '(가)', '㉡': '(나)', '㉢': '(다)', '㉣': '(라)',
             '㉤': '(마)', '㉥': '(바)', '㉦': '(사)', '㉧': '(아)',
             '㉨': '(자)', '㉩': '(차)', '㉪': '(카)', '㉫': '(타)',
             '①': '1번', '②': '2번', '③': '3번', '④': '4번', '⑤': '5번',
-            '‧': '·', '\u200b': '', '\xa0': ' ',
+            '‧': '·', '\u200b': '', '\xa0': ' ', '\u3000': ' ',
+            '\u202f': ' ', '\ufeff': '',
         }
-        for src, dst in char_map.items():
-            chunk_text = chunk_text.replace(src, dst)
-            user_feedback = user_feedback.replace(src, dst)
+        def clean_text(text):
+            for src, dst in char_map.items():
+                text = text.replace(src, dst)
+            # 출력 불가 제어문자 제거 (탭·줄바꿈은 유지)
+            text = ''.join(ch if ch == '\n' or ch == '\t' or ch >= ' ' else ' ' for ch in text)
+            # 연속 공백 정리
+            import re as _re
+            text = _re.sub(r'[ \t]{3,}', '  ', text)
+            return text.strip()
+
+        chunk_text = clean_text(chunk_text)
+        user_feedback = clean_text(user_feedback)
 
         # 최근 4턴 대화 이력 (너무 길면 모델 혼란)
         history_lines = []
@@ -510,6 +520,7 @@ def analyze_chunk():
 
         print(f"[전송 프롬프트 길이] {len(prompt)} chars", file=sys.stderr)
         print(f"[프롬프트 앞 200자]\n{prompt[:200]}", file=sys.stderr)
+        print(f"[hex 샘플] {prompt[:50].encode('utf-8').hex()}", file=sys.stderr)
 
         print(f"🤖 [gemma4:26b] 응답 생성 중...", file=sys.stderr, flush=True)
 
@@ -518,12 +529,7 @@ def analyze_chunk():
             payload = {
                 "model": "gemma4:26b",
                 "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "num_ctx": 8192,
-                    "num_predict": 512,
-                    "temperature": 0.2
-                }
+                "stream": False
             }
             resp = requests.post(url, json=payload, timeout=300)
             resp.raise_for_status()
