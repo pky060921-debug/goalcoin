@@ -569,15 +569,26 @@ function MainApp() {
   let nextStudyCard = null;
 
   if (isLoggedIn && categories.length > 0) {
-    const craftedOrigIds = new Set(
-      savedCards.map(c => { 
-         const m = c.content.match(/\[\[ORIG_ID:(\d+)\]\]/); 
-         return m ? parseInt(m[1], 10) : null; 
-      }).filter(id => id !== null)
-    );
-    // 조항을 순서대로 정렬하여 아직 안 만든 첫 번째 조항 탐색
+    const craftedOrigIds = new Set();
+    const craftedTitles = new Set();
+
+    savedCards.forEach(c => {
+      // 1. 번호 태그가 있으면 번호 수집
+      const match = c.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
+      if (match) craftedOrigIds.add(parseInt(match[1], 10));
+      // 2. 제목(첫 줄) 수집 (띄어쓰기 등 공백 제거하여 엄격히 비교)
+      const firstLine = c.content.split('\n')[0].replace(/\s+/g, '');
+      if (firstLine) craftedTitles.add(firstLine);
+    });
+
     const sortedCats = [...categories].sort((a,b) => a.id - b.id);
-    nextCatToCraft = sortedCats.find(cat => !craftedOrigIds.has(cat.id));
+    
+    // 번호도 없고, 제목도 일치하는게 없는 최초의 조항을 찾음
+    nextCatToCraft = sortedCats.find(cat => {
+      const isIdCrafted = craftedOrigIds.has(cat.id);
+      const isTitleCrafted = craftedTitles.has((cat.title || "").replace(/\s+/g, ''));
+      return !isIdCrafted && !isTitleCrafted;
+    });
   }
 
   if (isLoggedIn && savedCards.length > 0) {
