@@ -518,24 +518,22 @@ def analyze_chunk():
         history_context = f"\n이전 대화:\n{history_str}\n" if history_str else ""
         user_content = f"다음 시험 문제에 대해 한국어로 답해주세요.\n\n{chunk_text}\n{history_context}\n질문: {user_feedback}"
 
-        # gemma4 chat template 수동 적용
-        prompt = f"<start_of_turn>user\n{user_content}<end_of_turn>\n<start_of_turn>model\n"
-
-        print(f"[전송 프롬프트 길이] {len(prompt)} chars", file=sys.stderr)
-        print(f"[프롬프트 앞 200자]\n{prompt[:200]}", file=sys.stderr)
-        print(f"[hex 샘플] {prompt[:50].encode('utf-8').hex()}", file=sys.stderr)
+        print(f"[전송 프롬프트 길이] {len(user_content)} chars", file=sys.stderr)
+        print(f"[프롬프트 앞 200자]\n{user_content[:200]}", file=sys.stderr)
+        print(f"[hex 샘플] {user_content[:50].encode('utf-8').hex()}", file=sys.stderr)
 
         print(f"🤖 [gemma4:26b] 응답 생성 중...", file=sys.stderr, flush=True)
 
         try:
-            url = "http://localhost:11434/api/generate"
+            url = "http://localhost:11434/api/chat"
             payload = {
                 "model": "gemma4:26b",
-                "prompt": prompt,
+                "messages": [{"role": "user", "content": user_content}],
                 "stream": False,
+                "think": False,
                 "options": {
                     "num_ctx": 2048,
-                    "num_predict": -1,
+                    "num_predict": 600,
                     "temperature": 0.2,
                     "repeat_penalty": 1.3,
                 }
@@ -547,8 +545,7 @@ def analyze_chunk():
             eval_count = ollama_resp.get("eval_count", -1)
             prompt_eval_count = ollama_resp.get("prompt_eval_count", -1)
             print(f"[Ollama] done_reason={done_reason} | prompt_tokens={prompt_eval_count} | generated_tokens={eval_count}", file=sys.stderr)
-            raw_text = ollama_resp.get("response", "").strip()
-            # <think>...</think> 내부 추론 태그 제거 후 실제 답변만 추출
+            raw_text = (ollama_resp.get("message") or {}).get("content", "").strip()
             raw_text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL).strip()
             print(f"[Ollama 응답 repr] {repr(raw_text[:300])}", file=sys.stderr)
         except Exception as e:
