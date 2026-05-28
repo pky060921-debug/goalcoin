@@ -58,6 +58,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
 
 // 💡 [초정밀 타겟 검사] 고유 ID 및 공백을 완벽 무시한 풀 타이틀 정밀 대조
   // 💡 [초정밀 타겟 검사] 고유 ID 및 '특수기호/괄호/공백'을 완벽 무시한 순수 텍스트 대조 (시행규칙 해결)
+// 💡 [초정밀 타겟 검사] 고유 ID 및 '특수기호/괄호/공백'을 완벽 무시한 순수 텍스트 대조 (시행규칙 완벽 해결)
   const checkIsCreated = (cat: any) => {
     if (!Array.isArray(savedCards)) return false;
     
