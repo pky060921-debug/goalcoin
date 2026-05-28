@@ -56,14 +56,30 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
   // 💡 도구 상태: 'editor'(텍스트), 'include'(포함), 'exclude'(제외), null(비활성화/뷰어)
   const [activeTool, setActiveTool] = useState<'editor' | 'include' | 'exclude' | null>('include');
 
+    // --- 💡 저장 함수 (api.put 대신 올바른 save-card 엔드포인트 사용) ---
   const handleSaveEdit = async (card: any) => {
     setIsSaving(true);
     setErrorMsg(null);
     try {
-      await api.put(`/api/cards/${card.id}`, { content: editContent, memo: card.memo });
-      card.content = editContent; // 로컬 즉시 반영
+      const res = await fetch("https://api.blankd.top/api/save-card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          wallet_address: card.wallet_address || "ENOKI_USER", 
+          card_id: card.id, // 💡 기존 ID를 보내면 서버가 자동으로 덮어쓰기(UPDATE)를 수행합니다.
+          card_content: editContent,
+          answer_text: card.answer_text || "",
+          folder_name: card.folder_name,
+          memo: card.memo // 💡 학습 통계 데이터 그대로 유지!
+        })
+      });
+
+      if (!res.ok) throw new Error("서버 통신에 실패했습니다.");
+      
+      card.content = editContent; // API 전체 재호출 없이 로컬에 즉시 반영 (API 절약)
       setEditingId(null);
     } catch (error: any) {
+      console.error("수정 저장 실패:", error);
       setErrorMsg(error.message || "서버 통신에 실패했습니다.");
     } finally {
       setIsSaving(false);
