@@ -572,21 +572,24 @@ function MainApp() {
     const craftedOrigIds = new Set();
     const craftedTitles = new Set();
 
-    savedCards.forEach(c => {
-      // 1. 번호 태그가 있으면 번호 수집
+    savedCards.forEach((c: any) => {
       const match = c.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
       if (match) craftedOrigIds.add(parseInt(match[1], 10));
-      // 2. 제목(첫 줄) 수집 (띄어쓰기 등 공백 제거하여 엄격히 비교)
-      const firstLine = c.content.split('\n')[0].replace(/\s+/g, '');
-      if (firstLine) craftedTitles.add(firstLine);
+      
+      const firstLine = c.content.split('\n')[0];
+      if (firstLine) {
+        // 특수기호/공백 완전 제거 후 저장
+        craftedTitles.add(firstLine.replace(/[^가-힣0-9a-zA-Z]/g, ''));
+      }
     });
 
-    const sortedCats = [...categories].sort((a,b) => a.id - b.id);
+    const sortedCats = [...categories].sort((a: any, b: any) => a.id - b.id);
     
-    // 번호도 없고, 제목도 일치하는게 없는 최초의 조항을 찾음
-    nextCatToCraft = sortedCats.find(cat => {
+    // 번호도 없고, 제목(특수기호 무시)도 일치하는게 없는 최초의 조항을 찾음
+    nextCatToCraft = sortedCats.find((cat: any) => {
       const isIdCrafted = craftedOrigIds.has(cat.id);
-      const isTitleCrafted = craftedTitles.has((cat.title || "").replace(/\s+/g, ''));
+      const cleanCatTitle = (cat.title || "").replace(/[^가-힣0-9a-zA-Z]/g, '');
+      const isTitleCrafted = craftedTitles.has(cleanCatTitle);
       return !isIdCrafted && !isTitleCrafted;
     });
   }
@@ -638,7 +641,7 @@ function MainApp() {
                   onClick={() => { 
                     setActiveTab('create'); 
                     setExpandedId(nextCatToCraft.id); 
-                    // 💡 탭 전환 후 약간의 딜레이(150ms)를 주고 해당 요소로 부드럽게 스크롤
+                    // 💡 탭 전환 후 약간의 딜레이(150ms)를 주고 도착 지점으로 부드럽게 스크롤
                     setTimeout(() => {
                       const targetElement = document.getElementById(`category-${nextCatToCraft.id}`);
                       if (targetElement) {
