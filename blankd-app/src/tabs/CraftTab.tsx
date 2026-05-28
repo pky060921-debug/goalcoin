@@ -56,23 +56,20 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     }
   };
 
-// 💡 [초정밀 타겟 검사] 고유 ID 및 공백을 완벽 무시한 풀 타이틀 정밀 대조
-  // 💡 [초정밀 타겟 검사] 고유 ID 및 '특수기호/괄호/공백'을 완벽 무시한 순수 텍스트 대조 (시행규칙 해결)
-// 💡 [초정밀 타겟 검사] 고유 ID 및 '특수기호/괄호/공백'을 완벽 무시한 순수 텍스트 대조 (시행규칙 완벽 해결)
+// 💡 [초정밀 타겟 검사] 한자를 보존하면서 공백과 괄호만 완벽 무시 (시행규칙 완벽 해결)
   const checkIsCreated = (cat: any) => {
     if (!Array.isArray(savedCards)) return false;
     
     return savedCards.some((c: any) => {
       if (!c || !c.content) return false;
       
-      // 1순위: 카드 고유의 ORIG_ID 꼬리표가 정확히 매칭되는가
       if (c.content.includes(`[[ORIG_ID:${cat.id}]]`)) return true;
       
-      // 2순위: 꼬리표가 없는 옛날 카드의 경우, 한글/숫자/영문을 제외한 모든 특수기호([] () 등)와 공백을 싹 지우고 비교
       if (cat.title) {
         const cardFirstLine = c.content.split('\n')[0];
-        const cleanCardTitle = cardFirstLine.replace(/[^가-힣0-9a-zA-Z]/g, '');
-        const cleanCatTitle = cat.title.replace(/[^가-힣0-9a-zA-Z]/g, '');
+        const regex = /[\s\[\]\(\)\.\,\:\;\-\_\+\=\?\!\<\>]/g;
+        const cleanCardTitle = cardFirstLine.replace(regex, '');
+        const cleanCatTitle = cat.title.replace(regex, '');
         
         if (cleanCardTitle && cleanCatTitle && cleanCardTitle === cleanCatTitle) return true;
       }
