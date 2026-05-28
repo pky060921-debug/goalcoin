@@ -56,19 +56,21 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     }
   };
 
-  // 💡 [초정밀 타겟 검사] 대충 '제X조'만 보던 로직 폐기, 고유 ID 및 풀 타이틀 정밀 대조
+// 💡 [초정밀 타겟 검사] 고유 ID 및 공백을 완벽 무시한 풀 타이틀 정밀 대조
   const checkIsCreated = (cat: any) => {
     if (!Array.isArray(savedCards)) return false;
     
     return savedCards.some((c: any) => {
       if (!c || !c.content) return false;
+      
       // 1순위: 카드 고유의 ORIG_ID 꼬리표가 정확히 매칭되는가
       if (c.content.includes(`[[ORIG_ID:${cat.id}]]`)) return true;
       
-      // 2순위: 수동 DB 조작 등으로 꼬리표가 탈락했을 경우 풀 타이틀 구조 대조
+      // 2순위: 꼬리표가 없는 옛날 카드의 경우, 모든 공백/띄어쓰기를 완전히 제거하고 비교
       if (cat.title) {
-        const cardFirstLine = c.content.split('\n')[0].trim();
-        return cardFirstLine === cat.title.trim();
+        const cardFirstLine = c.content.split('\n')[0].replace(/\s+/g, '');
+        const targetTitle = cat.title.replace(/\s+/g, '');
+        return cardFirstLine === targetTitle;
       }
       return false;
     });
