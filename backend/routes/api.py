@@ -543,7 +543,10 @@ def analyze_chunk():
             resp = requests.post(url, json=payload, timeout=300)
             resp.raise_for_status()
             ollama_resp = resp.json()
-            print(f"[Ollama 전체 응답 키] {list(ollama_resp.keys())}", file=sys.stderr)
+            done_reason = ollama_resp.get("done_reason", "unknown")
+            eval_count = ollama_resp.get("eval_count", -1)
+            prompt_eval_count = ollama_resp.get("prompt_eval_count", -1)
+            print(f"[Ollama] done_reason={done_reason} | prompt_tokens={prompt_eval_count} | generated_tokens={eval_count}", file=sys.stderr)
             raw_text = ollama_resp.get("response", "").strip()
             print(f"[Ollama 응답 길이] {len(raw_text)}", file=sys.stderr)
         except Exception as e:
