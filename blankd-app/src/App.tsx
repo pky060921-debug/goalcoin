@@ -571,13 +571,20 @@ function MainApp() {
     const craftedOrigIds = new Set();
     const craftedTitles: string[] = []; 
 
+    // 💡 괄호(목적 등)와 특수문자를 완전히 날리는 정밀 필터 함수
+    const cleanText = (text: string) => {
+       if (!text) return "";
+       const noBrackets = text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '');
+       return noBrackets.replace(/[^가-힣a-zA-Z0-9一-龥]/g, '');
+    };
+
     savedCards.forEach((c: any) => {
       const match = c.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
       if (match) craftedOrigIds.add(parseInt(match[1], 10));
       
       const firstLine = c.content.split('\n')[0];
       if (firstLine) {
-        craftedTitles.push(firstLine.replace(/[^가-힣a-zA-Z0-9一-龥]/g, ''));
+        craftedTitles.push(cleanText(firstLine));
       }
     });
 
@@ -585,12 +592,11 @@ function MainApp() {
     
     nextCatToCraft = sortedCats.find((cat: any) => {
       const isIdCrafted = craftedOrigIds.has(cat.id);
-      const cleanCatTitle = (cat.title || "").replace(/[^가-힣a-zA-Z0-9一-龥]/g, '');
+      const cleanCatTitle = cleanText(cat.title || "");
       
-      // 💡 여기서도 includes 대신 === 와 endsWith 적용!
-      const isTitleCrafted = craftedTitles.some(title => 
-         title === cleanCatTitle || title.endsWith(cleanCatTitle)
-      );
+      const isTitleCrafted = cleanCatTitle 
+         ? craftedTitles.some(title => title === cleanCatTitle || title.endsWith(cleanCatTitle))
+         : false;
       
       return !isIdCrafted && !isTitleCrafted;
     });
