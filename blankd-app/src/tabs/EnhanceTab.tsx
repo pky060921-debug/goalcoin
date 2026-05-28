@@ -200,15 +200,10 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                 let colClass = "";
                 let titleColor = "text-teal-400";
                 
-                if (viewMode === 'all' && colCount >= 3) {
-                  if (cleanContent.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
-                  else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
-                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
-                } else {
-                  if (cleanContent.includes('[법]')) titleColor = "text-red-500";
-                  else if (cleanContent.includes('[령]')) titleColor = "text-blue-400";
-                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
-                }
+                // 💡 빈자리로 점프하는 원인(col-start)을 제거하고, 순서대로 색상만 입힙니다.
+                if (cleanContent.includes('[법]')) titleColor = "text-red-500";
+                else if (cleanContent.includes('[령]')) titleColor = "text-blue-400";
+                else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
 
                 if (editingId === card.id) {
                   colClass = "col-span-full";
