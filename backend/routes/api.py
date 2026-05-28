@@ -525,17 +525,20 @@ def analyze_chunk():
         print(f"🤖 [gemma4:26b] 응답 생성 중...", file=sys.stderr, flush=True)
 
         try:
-            url = "http://localhost:11434/api/generate"
+            url = "http://localhost:11434/api/chat"
             payload = {
                 "model": "gemma4:26b",
-                "prompt": prompt,
+                "messages": [{"role": "user", "content": prompt}],
                 "stream": False
             }
             resp = requests.post(url, json=payload, timeout=300)
             resp.raise_for_status()
             ollama_resp = resp.json()
-            raw_text = ollama_resp.get("response", "").strip()
-            print(f"[Ollama 응답] done={ollama_resp.get('done')} | 길이={len(raw_text)}", file=sys.stderr)
+            # 전체 응답 구조 로깅
+            print(f"[Ollama 전체 응답 키] {list(ollama_resp.keys())}", file=sys.stderr)
+            print(f"[Ollama message 필드] {ollama_resp.get('message')}", file=sys.stderr)
+            raw_text = (ollama_resp.get("message") or {}).get("content", "").strip()
+            print(f"[Ollama 응답 길이] {len(raw_text)}", file=sys.stderr)
         except Exception as e:
             return jsonify({"error": f"AI 통신 오류: {str(e)}"}), 500
 
