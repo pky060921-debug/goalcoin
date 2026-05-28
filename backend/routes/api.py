@@ -522,21 +522,25 @@ def analyze_chunk():
                 conn.close()
 
                 if rows:
-                    # 지문+질문에서 키워드 추출 후 관련 항목만 선별 (최대 5개)
+                    # DB 내용의 공백 제거 후 키워드 매칭
                     query_words = set(re.findall(r'[가-힣]{2,}', chunk_text + user_feedback))
                     scored = []
                     for folder, title, content in rows:
-                        content_words = set(re.findall(r'[가-힣]{2,}', content or ''))
-                        score = len(query_words & content_words)
+                        # DB에 글자 사이 공백이 있는 경우 제거
+                        clean_content = re.sub(r'(?<=[가-힣])\s+(?=[가-힣])', '', content or '')
+                        clean_title = re.sub(r'(?<=[가-힣])\s+(?=[가-힣])', '', title or '')
+                        content_words = set(re.findall(r'[가-힣]{2,}', clean_content))
+                        title_words = set(re.findall(r'[가-힣]{2,}', clean_title))
+                        score = len(query_words & content_words) + len(query_words & title_words) * 3
                         if score > 0:
-                            scored.append((score, folder, title, (content or '')[:500]))
+                            scored.append((score, folder, title, clean_content[:500]))
                     scored.sort(reverse=True)
                     top = scored[:5]
 
                     if top:
-                        db_context = "\n\n[참고 DB 자료]\n"
+                        db_context = "\n\n[참고 DB 자료 - 아래 원문을 최우선으로 참고하세요]\n"
                         for _, folder, title, content in top:
-                            db_context += f"---\n[{folder} - {title}]\n{content}\n"
+                            db_context += f"---\n[{folder} / {title}]\n{content}\n"
             except Exception as e:
                 print(f"[DB 조회 오류] {e}", file=sys.stderr)
 
