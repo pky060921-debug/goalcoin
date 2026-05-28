@@ -565,7 +565,11 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                   if (isExpanded) colClass = "col-span-full";
 
                   return (
-                    <div key={cat.id} className={`relative transition-all w-full ${colClass}`}>
+                    <div 
+                      key={cat.id} 
+                      id={`category-${cat.id}`} // 💡 바로 이 부분을 추가했습니다!
+                      className={`relative transition-all w-full ${colClass}`}
+                    >
                       {!isExpanded ? (
                         <div className="relative group/card w-full flex items-center gap-2">
                           {isSelectMode && (
