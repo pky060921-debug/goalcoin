@@ -56,42 +56,27 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     }
   };
 
-// 💡 [진단 모드] 고유 ID 및 '특수기호/공백' 완벽 무시 (한글/영문/숫자/한자 보존)
+// 💡 [해결] "OO법 시행규칙 제1조"가 "제1조"를 [포함]하고 있으면 완료 처리!
   const checkIsCreated = (cat: any) => {
     if (!Array.isArray(savedCards)) return false;
     
-    let debugInfo = ""; // 진단 텍스트 저장용
-
-    const isMatch = savedCards.some((c: any) => {
+    return savedCards.some((c: any) => {
       if (!c || !c.content) return false;
       if (c.content.includes(`[[ORIG_ID:${cat.id}]]`)) return true;
       
       if (cat.title) {
         const cardFirstLine = c.content.split('\n')[0];
-        // 💡 궁극의 정규식: 한글, 영문, 숫자, 한자(一-龥) 빼고 싹 다 제거!
         const regex = /[^가-힣a-zA-Z0-9一-龥]/g; 
         
         const cleanCardTitle = cardFirstLine.replace(regex, '');
         const cleanCatTitle = cat.title.replace(regex, '');
         
-        // 시행규칙이면서 매칭이 안되는 경우 원인 분석을 위해 로그 캡처
-        if (cat.title.includes('시행규칙') && cardFirstLine.includes('시행규칙')) {
-            debugInfo = `\n- 내 카드 원본: [${cardFirstLine}]\n- 내 카드 필터: [${cleanCardTitle}]\n- 서버 조항 원본: [${cat.title}]\n- 서버 조항 필터: [${cleanCatTitle}]`;
-        }
-
-        if (cleanCardTitle && cleanCatTitle && cleanCardTitle === cleanCatTitle) return true;
+        // 💡 핵심 변경점: === 대신 includes 사용!
+        if (cleanCardTitle && cleanCatTitle && cleanCardTitle.includes(cleanCatTitle)) return true;
       }
       return false;
     });
-
-    // 매칭 실패 시 개발자 도구 콘솔에 빨간색 에러로 출력!
-    if (!isMatch && debugInfo) {
-       console.error(`[회색처리 실패 진단] 조항ID: ${cat.id} ${debugInfo}`);
-    }
-
-    return isMatch;
-  };
-  
+  };  
   const craftFolders = sortChapters(
     Array.from(new Set(safeCategories.map((c: any) => c.folder_name)))
       .filter(f => f && f !== '기본 폴더') as string[]
@@ -125,23 +110,28 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     }
   }, [expandedId, savedCards, safeCategories]);
   
-// 💡 2. [스크롤 진단 및 자동 이동 마법] 
+// 💡 [해결] 닫혀있는 폴더를 먼저 강제로 열고 스크롤하기!
   useEffect(() => {
     if (expandedId) {
-      console.log(`[스크롤 진단] expandedId(${expandedId}) 이동 요청 감지됨. 0.5초 대기...`);
+      // 1. 해당 조항이 어느 폴더에 있는지 찾기
+      const targetCat = safeCategories.find((c: any) => c.id === expandedId);
+      
+      if (targetCat && targetCat.folder_name) {
+        // 2. 해당 폴더를 강제로 열기 (setOpenFolders 상태 업데이트)
+        setOpenFolders((prev: any) => ({ ...prev, [targetCat.folder_name]: true }));
+      }
+
+      // 3. 폴더가 열리는 애니메이션(렌더링)을 기다린 후 스크롤!
       setTimeout(() => {
         const targetId = `category-${expandedId}`;
         const targetElement = document.getElementById(targetId);
         
         if (targetElement) {
-          console.log(`[스크롤 진단] ✅ 요소를 찾았습니다! 스크롤 실행!`, targetElement);
           targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } else {
-          console.error(`[스크롤 진단] 🚨 실패! 화면에서 id="${targetId}" 인 요소를 찾을 수 없습니다!`);
         }
       }, 500); 
     }
-  }, [expandedId]);
+  }, [expandedId, safeCategories]); // 의존성 배열 유지
   
   const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
   const [customStopWords, setCustomStopWords] = useState<string[]>([]);
