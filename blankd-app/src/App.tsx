@@ -40,21 +40,9 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected }: {
       autoComplete="off" autoCorrect="off" spellCheck={false} autoCapitalize="none"
       onChange={handleChange} // 💡 수정된 검사 함수 사용
       onKeyDown={(e) => {
-        // 1. 한글 조합 중일 때는 동작 방지
         if (e.nativeEvent.isComposing) return;
-
-        // 2. [Enter] 정답 보기 (현재 빈칸 강제 오답 처리 후 정답 표시)
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          if (onShowAnswer) onShowAnswer();
-        }
-
-        // 3. [Backspace] 입력 내용이 비어있을 때만 이전 빈칸으로 이동 (선택 사항)
-        if (e.key === 'Backspace' && e.currentTarget.value === '') {
-          e.preventDefault();
-          // 여기에 '이전 빈칸으로 포커스 이동' 로직을 추가할 수 있습니다.
-          console.log("이전 빈칸으로 이동");
-        }
+        if (e.key === 'Enter') onSubmit(val);
+      }}
       placeholder="입력..."
       style={{ width: `${Math.max(60, val.length * 15 + 40)}px`, transition: 'width 0.15s ease' }}
       className={`inline-block h-7 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-colors duration-150 mx-1 px-1 rounded-t-sm ${
