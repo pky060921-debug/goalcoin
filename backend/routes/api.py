@@ -520,13 +520,13 @@ def analyze_chunk():
                 )
                 rows = cursor.fetchall()
                 conn.close()
+                print(f"[DB 조회] wallet={wallet_address[:10]}... | 총 {len(rows)}건", file=sys.stderr)
 
                 if rows:
-                    # DB 내용의 공백 제거 후 키워드 매칭
                     query_words = set(re.findall(r'[가-힣]{2,}', chunk_text + user_feedback))
+                    print(f"[DB 키워드] {list(query_words)[:10]}", file=sys.stderr)
                     scored = []
                     for folder, title, content in rows:
-                        # DB에 글자 사이 공백이 있는 경우 제거
                         clean_content = re.sub(r'(?<=[가-힣])\s+(?=[가-힣])', '', content or '')
                         clean_title = re.sub(r'(?<=[가-힣])\s+(?=[가-힣])', '', title or '')
                         content_words = set(re.findall(r'[가-힣]{2,}', clean_content))
@@ -536,13 +536,18 @@ def analyze_chunk():
                             scored.append((score, folder, title, clean_content[:500]))
                     scored.sort(reverse=True)
                     top = scored[:5]
+                    print(f"[DB 매칭 상위5] {[(s, t) for s,f,t,_ in top]}", file=sys.stderr)
 
                     if top:
                         db_context = "\n\n[참고 DB 자료 - 아래 원문을 최우선으로 참고하세요]\n"
                         for _, folder, title, content in top:
                             db_context += f"---\n[{folder} / {title}]\n{content}\n"
+                else:
+                    print(f"[DB 조회] 매칭 결과 없음 - wallet_address 불일치 가능성", file=sys.stderr)
             except Exception as e:
                 print(f"[DB 조회 오류] {e}", file=sys.stderr)
+        else:
+            print(f"[DB 조회] wallet_address 없음 - 프론트에서 미전송", file=sys.stderr)
 
         # 최근 4턴 대화 이력 (너무 길면 모델 혼란)
         history_lines = []
