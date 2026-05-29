@@ -1,6 +1,29 @@
 import React, { useEffect, useRef } from "react";
 import { formatCardText } from "../utils/constants";
 
+// 💡 글자를 칠 때 이 쪼그만 입력창 하나만 다시 그려지게 만드는 마법의 컴포넌트
+const FastBlankInput = ({ value, onChange, onEnter }: any) => {
+  const [localValue, setLocalValue] = useState(value);
+
+  return (
+    <input
+      type="text"
+      value={localValue}
+      onChange={(e) => {
+        setLocalValue(e.target.value); // 타이핑할 땐 내 화면만 즉시 업데이트 (초고속)
+      }}
+      onBlur={() => onChange(localValue)} // 커서가 빠져나갈 때만 부모에게 데이터 전달
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          onChange(localValue);
+          if (onEnter) onEnter();
+        }
+      }}
+      className="bg-transparent border-b-2 border-teal-500/50 text-teal-300 w-16 text-center focus:outline-none focus:border-teal-300 font-bold"
+    />
+  );
+};
+
 export const CardModal = ({ 
   activeCard, 
   totalTimeLimit, 
@@ -20,6 +43,8 @@ export const CardModal = ({
 
   if (!activeCard) return null;
 
+
+  
   const progressPercent = totalTimeLimit > 0 ? Math.min((elapsed / totalTimeLimit) * 100, 100) : 0;
   const remainingTime = Math.max(0, totalTimeLimit - elapsed).toFixed(1);
 
