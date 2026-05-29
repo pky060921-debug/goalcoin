@@ -9,7 +9,6 @@ import { CraftTab } from "./tabs/CraftTab";
 import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
-
 // 💡 [추가] 본문 중간에 들어가는 빈칸 입력창의 타자 렉을 원천 차단하는 순수 HTML 컴포넌트
 const FastInlineInput = ({ value, onSubmit, inputStatus }: any) => {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -17,8 +16,12 @@ const FastInlineInput = ({ value, onSubmit, inputStatus }: any) => {
   // 카드가 바뀌거나 정답/오답 처리가 끝나면 입력창을 비워줌
   useEffect(() => {
     if (inputRef.current) {
-      inputRef.current.value = value || "";
-      inputRef.current.focus();
+      if (inputRef.current.value !== (value || "")) {
+        inputRef.current.value = value || "";
+      }
+      if (value === "") {
+        inputRef.current.focus();
+      }
     }
   }, [value]);
 
@@ -33,12 +36,19 @@ const FastInlineInput = ({ value, onSubmit, inputStatus }: any) => {
       spellCheck="false"
       autoCapitalize="none"
       placeholder="입력..."
-      // 🚨 onChange를 없애서 타자 칠 때마다 앱 전체가 새로고침되는 것을 완벽 차단!
+      
+      // 🚨 핵심 방어막: 한글을 칠 때 리액트가 헷갈리지 않도록 꼬리표(composing)를 붙여줍니다.
+      onCompositionStart={(e) => { e.currentTarget.dataset.composing = "true"; }}
+      onCompositionEnd={(e) => { e.currentTarget.dataset.composing = "false"; }}
+      
       onKeyDown={(e) => {
-        if (e.nativeEvent.isComposing) return; // 한글 조합 중복 방지
+        // 💡 꼬리표가 true(조합 중)일 때는 엔터키를 완벽하게 무시합니다!
+        if (e.currentTarget.dataset.composing === "true") return; 
+        
         if (e.key === 'Enter') {
+          e.preventDefault(); // 기본 이벤트(중복 실행) 차단
           const typedValue = e.currentTarget.value;
-          onSubmit(typedValue); // 엔터를 칠 때 딱 한 번만 정답 제출!
+          onSubmit(typedValue); // 딱 한 번만 안전하게 제출
         }
       }}
       className={`inline-block h-6 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-all mx-1 px-1 rounded-t-sm w-[80px] sm:w-[100px] ${
@@ -49,7 +59,6 @@ const FastInlineInput = ({ value, onSubmit, inputStatus }: any) => {
     />
   );
 };
-
 class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
   constructor(props: any) { 
     super(props);
