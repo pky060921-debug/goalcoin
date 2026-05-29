@@ -620,7 +620,7 @@ function MainApp() {
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
-{/* 💡 여기서부터 복사해서 기존 <header>...</header>가 있던 자리에 붙여넣으세요 */}
+{/* 💡 여기서부터 복사해서 기존 <header>를 교체하세요 (빠진 태그 없이 완벽한 전체 코드입니다!) */}
       <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
           
@@ -649,6 +649,12 @@ function MainApp() {
                   onClick={() => { 
                     setActiveTab('create'); 
                     setExpandedId(nextCatToCraft.id); 
+                    setTimeout(() => {
+                      const targetElement = document.getElementById(`category-${nextCatToCraft.id}`);
+                      if (targetElement) {
+                        targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }
+                    }, 500);
                   }}
                   className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
                 >
@@ -663,7 +669,10 @@ function MainApp() {
 
               {nextStudyCard ? (
                 <button 
-                  onClick={() => { setActiveCard(nextStudyCard); }}
+                  onClick={() => { 
+                    setActiveTab('enhance'); // 💡 탭을 먼저 채우기 화면으로 이동
+                    setTimeout(() => setActiveCard(nextStudyCard), 150); // 💡 모달창 띄우기
+                  }}
                   className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
                 >
                   <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span>
@@ -675,6 +684,7 @@ function MainApp() {
                 <div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 완료</div>
               )}
             </div>
+
             {/* 구분선 */}
             <div className="h-5 sm:h-6 w-px bg-white/10 shrink-0 hidden sm:block"></div>
 
@@ -699,7 +709,7 @@ function MainApp() {
         </div>
       </header>
       {/* 💡 여기까지 복사! (이 아래의 <nav> 부분은 그대로 두시면 됩니다.) */}
-
+      
       {/* 💡 한 줄 아래로 독립적으로 분리된 탭 네비게이션 바 */}
       {isLoggedIn && (
         <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
