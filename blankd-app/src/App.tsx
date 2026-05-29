@@ -79,7 +79,6 @@ function MainApp() {
 
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
-  const [answerInput, setAnswerInput] = useState("");
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
   const [startTime, setStartTime] = useState<number>(0);
   const [elapsed, setElapsed] = useState<number>(0);
@@ -273,7 +272,6 @@ function MainApp() {
 
       setBlanks(restoredBlanks); 
       setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); 
-      setAnswerInput(""); 
       setInputStatus('idle');
 
       const stats = parseCardStats(activeCard.memo);
@@ -405,57 +403,36 @@ function MainApp() {
     }
   }, [activeCard, currentBlankIdx, blanks.length, startTime, totalTimeLimit]);
 
-  useEffect(() => {
-    if (inputStatus === 'idle' && blanks[currentBlankIdx] && answerInput) {
-      const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
-      const actual = answerInput.replace(/\s+/g, '').toLowerCase();
-      if (expected === actual) handleSequentialInput(actual); 
-    }
-  }, [answerInput, inputStatus, blanks, currentBlankIdx]);
-
   const handleSequentialInput = (overrideInput?: string | any) => {
     if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
-    let actual = typeof overrideInput === 'string' ? overrideInput : answerInput.replace(/\s+/g, '').toLowerCase();
+    let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
     
     if (expected === actual) {
-      const activeEl = document.activeElement as HTMLElement;
-      if (activeEl) activeEl.blur(); 
-
       setInputStatus('correct');
-      
-      // ?? [핵심] 과거의 blanks를 쓰지 않고, 무조건 가장 최신의 prev 상태를 가져와서 덮어씁니다!
       setBlanks(prev => {
         const nb = [...prev]; 
         if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; 
         return nb;
       });
-      
       statsRef.current.wrongIndices.delete(currentBlankIdx);
-      
-      setTimeout(() => { 
-        setAnswerInput(""); 
-        setTimeout(() => {
-          setInputStatus('idle'); 
-          
-          setBlanks(currentBlanks => {
-              if (currentBlankIdx + 1 < currentBlanks.length) {
-                // 다음 빈칸으로 안전하게 이동
-                setCurrentBlankIdx(prevIdx => {
-                    const nextIdx = prevIdx + 1;
-                    localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
-                    return nextIdx;
-                });
-              } else { 
-                // 모든 빈칸 완료
-                localStorage.removeItem(`blankd_progress_${activeCard.id}`);
-                statsRef.current.filled += 1; 
-                finishCard(); 
-              }
-              return currentBlanks;
-          });
-        }, 130);
-      }, 20);
+      setTimeout(() => {
+        setInputStatus('idle'); 
+        setBlanks(currentBlanks => {
+          if (currentBlankIdx + 1 < currentBlanks.length) {
+            setCurrentBlankIdx(prevIdx => {
+              const nextIdx = prevIdx + 1;
+              localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
+              return nextIdx;
+            });
+          } else { 
+            localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+            statsRef.current.filled += 1; 
+            finishCard(); 
+          }
+          return currentBlanks;
+        });
+      }, 150);
     } else { 
       setInputStatus('wrong'); 
       statsRef.current.wrongIndices.add(currentBlankIdx); 
@@ -467,31 +444,26 @@ function MainApp() {
     if (!blanks[currentBlankIdx]) return;
     setInputStatus('wrong'); 
     statsRef.current.wrongIndices.add(currentBlankIdx); 
-    
-    // ?? 정답 보기(오답 처리)도 가장 최신의 prev 상태를 사용하도록 변경!
     setBlanks(prev => {
       const nb = [...prev];
       if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; 
       return nb;
     });
-
     setTimeout(() => {
-      setAnswerInput(""); 
       setInputStatus('idle');
-      
       setBlanks(currentBlanks => {
-          if (currentBlankIdx + 1 < currentBlanks.length) {
-            setCurrentBlankIdx(prevIdx => {
-                const nextIdx = prevIdx + 1;
-                localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
-                return nextIdx;
-            });
-          } else {
-            localStorage.removeItem(`blankd_progress_${activeCard.id}`);
-            statsRef.current.filled += 1;
-            finishCard();
-          }
-          return currentBlanks;
+        if (currentBlankIdx + 1 < currentBlanks.length) {
+          setCurrentBlankIdx(prevIdx => {
+            const nextIdx = prevIdx + 1;
+            localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
+            return nextIdx;
+          });
+        } else {
+          localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+          statsRef.current.filled += 1;
+          finishCard();
+        }
+        return currentBlanks;
       });
     }, 800);
   };
@@ -528,7 +500,6 @@ function MainApp() {
       const last = event.results.length - 1;
       const transcript = event.results[last][0].transcript;
       const cleanText = transcript.replace(/\s+/g, '').replace(/[.,!?]/g, '');
-      setAnswerInput(cleanText);
       addLog(`??? 인식: "${transcript}"`);
       setTimeout(() => handleSequentialInput(cleanText), 300);
     };
@@ -841,21 +812,16 @@ function MainApp() {
           activeCard={activeCard} 
           totalTimeLimit={totalTimeLimit} 
           elapsed={elapsed} 
-          answerInput={answerInput}
-          setAnswerInput={setAnswerInput}
           inputStatus={inputStatus}
           handleSequentialInput={handleSequentialInput}
-          handleReviewSelect={handleReviewSelect} // ?? 추가된 프롭스
-          renderContent={() => {
+          handleReviewSelect={handleReviewSelect}
+          renderContent={React.useCallback(() => {
             const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-            
-            // ?? [수정] 본문 첫 줄에서 '[법]' 태그만 지우고 제목으로 사용합니다!
             let displayTitle = (cleanContent.split('\n')[0] || "")
                 .replace(/\[.*?\]/g, '')
                 .replace(/\(\s*내용\s*\)/g, '')
                 .replace(/내용/g, '')
                 .trim();
-            
             if (!displayTitle) displayTitle = "제목 없음";
 
             const { body } = formatCardText(cleanContent);
@@ -891,41 +857,15 @@ function MainApp() {
                           {part.replace(/\[|\]/g, '')}
                         </span>
                       );
-                    }
-                    else if (isCurrent) {
+                    } else if (isCurrent) {
                       contentToRender.push(
-                        <input 
-                          key={i}
-                          autoFocus
-                          value={answerInput}
-                          // ?? 1. 키보드의 쓸데없는 개입 완벽 차단!
-                          autoComplete="off"
-                          autoCorrect="off"
-                          spellCheck="false"
-                          autoCapitalize="none"
-                          
-                          // ?? 2. 한글 조합 중(글자 아래 밑줄)일 때는 정답 제출이나 렌더링이 꼬이지 않게 방어!
-                          onCompositionStart={(e) => { e.currentTarget.dataset.composing = "true"; }}
-                          onCompositionEnd={(e) => { e.currentTarget.dataset.composing = "false"; }}
-                          
-                          onChange={(e) => setAnswerInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            // 조합 중이 아닐 때만 엔터키 허용
-                            if(e.key === 'Enter' && e.currentTarget.dataset.composing !== "true") {
-                               handleSequentialInput(e.currentTarget.value);
-                            }
-                          }}
-                          placeholder="입력..."
-                          style={{ width: `${Math.max(60, answerInput.length * 15 + 40)}px` }}
-                          className={`inline-block h-6 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-all mx-1 px-1 rounded-t-sm ${
-                            inputStatus === 'wrong' 
-                              ? 'border-red-500 text-red-400 bg-red-900/40 animate-shake' 
-                              : 'border-indigo-400 text-amber-300 focus:border-amber-400'
-                          }`}
+                        <InlineBlankInput
+                          key={`blank-${currentBlankIdx}`}
+                          inputStatus={inputStatus}
+                          onSubmit={handleSequentialInput}
                         />
                       );
-                    }
-                    else {
+                    } else {
                       contentToRender.push(
                         <span key={i} className="inline-block min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>
                       );
@@ -944,14 +884,11 @@ function MainApp() {
                     <span className="text-amber-400 font-bold text-[14px] leading-tight">{cleanContent.split('\n')[0]}</span>
                     <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
                 </div>
-                
                 <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
-                
                 <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
                   <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
                     {isMemoOpen ? '닫기 ?' : '?? 메모 열기'}
                   </button>
-                  
                   <button 
                     onClick={toggleVoiceRecognition} 
                     className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${
@@ -962,12 +899,10 @@ function MainApp() {
                   >
                     {isListening ? '??? 음성 인식 끄기 (활성화됨)' : '?? 음성으로 입력 (계속 켜두기)'}
                   </button>
-
                   <button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
                     정답 보기 (오답 처리)
                   </button>
                 </div>
-                
                 {isMemoOpen && (
                   <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
                     <input 
@@ -984,7 +919,7 @@ function MainApp() {
                 )}
               </div>
             );
-          }} 
+          }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening])}
           onClose={handleCloseModal} 
         />
       )}
