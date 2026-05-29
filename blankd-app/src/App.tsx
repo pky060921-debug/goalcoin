@@ -9,56 +9,7 @@ import { CraftTab } from "./tabs/CraftTab";
 import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
-// 💡 [추가] 본문 중간에 들어가는 빈칸 입력창의 타자 렉을 원천 차단하는 순수 HTML 컴포넌트
-const FastInlineInput = ({ value, onSubmit, inputStatus }: any) => {
-  const inputRef = useRef<HTMLInputElement>(null);
 
-  // 카드가 바뀌거나 정답/오답 처리가 끝나면 입력창을 비워줌
-  useEffect(() => {
-    if (inputRef.current) {
-      if (inputRef.current.value !== (value || "")) {
-        inputRef.current.value = value || "";
-      }
-      if (value === "") {
-        inputRef.current.focus();
-      }
-    }
-  }, [value]);
-
-  return (
-    <input
-      ref={inputRef}
-      type="text"
-      defaultValue={value}
-      autoFocus
-      autoComplete="off"
-      autoCorrect="off"
-      spellCheck="false"
-      autoCapitalize="none"
-      placeholder="입력..."
-      
-      // 🚨 핵심 방어막: 한글을 칠 때 리액트가 헷갈리지 않도록 꼬리표(composing)를 붙여줍니다.
-      onCompositionStart={(e) => { e.currentTarget.dataset.composing = "true"; }}
-      onCompositionEnd={(e) => { e.currentTarget.dataset.composing = "false"; }}
-      
-      onKeyDown={(e) => {
-        // 💡 꼬리표가 true(조합 중)일 때는 엔터키를 완벽하게 무시합니다!
-        if (e.currentTarget.dataset.composing === "true") return; 
-        
-        if (e.key === 'Enter') {
-          e.preventDefault(); // 기본 이벤트(중복 실행) 차단
-          const typedValue = e.currentTarget.value;
-          onSubmit(typedValue); // 딱 한 번만 안전하게 제출
-        }
-      }}
-      className={`inline-block h-6 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-all mx-1 px-1 rounded-t-sm w-[80px] sm:w-[100px] ${
-        inputStatus === 'wrong' 
-          ? 'border-red-500 text-red-400 bg-red-900/40 animate-shake' 
-          : 'border-indigo-400 text-amber-300 focus:border-amber-400'
-      }`}
-    />
-  );
-};
 class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
   constructor(props: any) { 
     super(props);
@@ -68,12 +19,12 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
     return { hasError: true, errorMessage: error.message };
   }
   componentDidCatch(error: any, errorInfo: any) { 
-    this.props.fallbackLog(`❌ 런타임 에러: ${error.message}`);
+    this.props.fallbackLog(`? 런타임 에러: ${error.message}`);
   }
   render() {
     if (this.state.hasError) return (
       <div className="p-6 text-red-400 font-mono border border-red-500/30 bg-red-900/10 rounded-sm shadow-xl">
-        <h3 className="text-lg font-bold mb-2">⚠️ 시스템 치명적 오류</h3>
+        <h3 className="text-lg font-bold mb-2">?? 시스템 치명적 오류</h3>
         <p className="text-sm opacity-80">{this.state.errorMessage}</p>
       </div>
     );
@@ -155,8 +106,8 @@ function MainApp() {
     if (window.location.hash) {
       enokiFlow.handleAuthCallback().then(() => { 
         window.history.replaceState(null, '', window.location.pathname); 
-        addLog("✅ 로그인 콜백 처리 완료"); 
-      }).catch((err: any) => addLog(`❌ 인증 실패: ${err.message}`));
+        addLog("? 로그인 콜백 처리 완료"); 
+      }).catch((err: any) => addLog(`? 인증 실패: ${err.message}`));
     }
     if (isLoggedIn) loadAllData();
   }, [isLoggedIn, safeAddress, enokiFlow]);
@@ -172,7 +123,7 @@ function MainApp() {
       setSavedCards(cardRes.cards || []); 
       setGoalBalance(balance);
     } catch (e: any) { 
-      addLog(`❌ 데이터 동기화 실패: ${e.message}`);
+      addLog(`? 데이터 동기화 실패: ${e.message}`);
     }
   };
 
@@ -190,12 +141,12 @@ function MainApp() {
       });
       if (res.ok) {
         localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
-        addLog(`🔄 백그라운드 동기화 완료 (M:${q.memos.length}, A:${q.answers.length})`);
+        addLog(`?? 백그라운드 동기화 완료 (M:${q.memos.length}, A:${q.answers.length})`);
         const newBalance = await api.getGoalCoinBalance(safeAddress).catch(()=>goalBalance);
         setGoalBalance(newBalance);
       }
     } catch (e) { 
-      addLog("⚠️ 오프라인 감지: 데이터는 로컬에 안전하게 보관 중입니다.");
+      addLog("?? 오프라인 감지: 데이터는 로컬에 안전하게 보관 중입니다.");
     }
   };
 
@@ -209,12 +160,12 @@ function MainApp() {
 
   const uploadLaw = async () => {
     if (!lawFile) return alert("파일을 선택해주세요.");
-    addLog("▶️ 법령 텍스트 분석 업로드 시작...");
+    addLog("▶? 법령 텍스트 분석 업로드 시작...");
     const fd = new FormData(); fd.append("file", lawFile); fd.append("wallet_address", safeAddress);
     const res = await fetch(`https://api.blankd.top/api/upload-pdf`, { method: "POST", body: fd });
     if (res.ok) { 
       setLawFile(null);
-      addLog("✅ 업로드 완료. AI 아카이빙 중..."); 
+      addLog("? 업로드 완료. AI 아카이빙 중..."); 
       setTimeout(() => loadAllData(), 2500);
     }
   };
@@ -226,15 +177,15 @@ function MainApp() {
             body: JSON.stringify({ wallet_address: safeAddress, id: cat.id, text1, text2, title1, title2, folder_name: cat.folder_name })
         });
         if (res.ok) { 
-          addLog(`✂️ [${title1}] 분할 완료`); 
+          addLog(`?? [${title1}] 분할 완료`); 
           await loadAllData();
         }
     } catch (e: any) { 
-      addLog(`❌ 분할 처리 통신 에러`);
+      addLog(`? 분할 처리 통신 에러`);
     }
   };
 
-// 💡 [수정] 옛날에 만든 카드도 완벽하게 찾아서 덮어쓰기!
+// ?? [수정] 옛날에 만든 카드도 완벽하게 찾아서 덮어쓰기!
   const handleMakeBlankCard = async (
     cat: any, 
     wordsArray: string[], 
@@ -260,7 +211,7 @@ function MainApp() {
     });
     if (isBlanking) bodyContent += " ]";
     
-    // 💡 [핵심 원인 해결] 꼬리표(ORIG_ID)가 없어도, 카드의 첫 시작이 '조항 제목'과 똑같으면 같은 카드로 인식합니다!
+    // ?? [핵심 원인 해결] 꼬리표(ORIG_ID)가 없어도, 카드의 첫 시작이 '조항 제목'과 똑같으면 같은 카드로 인식합니다!
     const existingCard = savedCards.find((c: any) => 
       c && c.content && (
         c.content.includes(`[[ORIG_ID:${cat.id}]]`) || 
@@ -278,7 +229,7 @@ function MainApp() {
       method: "POST", headers: { "Content-Type": "application/json" }, 
       body: JSON.stringify({ 
           wallet_address: safeAddress, 
-          card_id: targetCardId, // 💡 이제 진짜 카드 ID가 전달되어 완벽한 덮어쓰기(UPDATE)가 실행됩니다!
+          card_id: targetCardId, // ?? 이제 진짜 카드 ID가 전달되어 완벽한 덮어쓰기(UPDATE)가 실행됩니다!
           card_content: finalCardContent, 
           answer_text: answerText, 
           folder_name: cat.folder_name, 
@@ -289,7 +240,7 @@ function MainApp() {
     if (res.ok) {
       localStorage.setItem('blankd_last_crafted_id', cat.id.toString());
       localStorage.setItem('blankd_last_crafted_title', cat.title);
-      addLog(targetCardId ? "✅ 덮어쓰기 완료" : "✅ 신규 생성 완료");
+      addLog(targetCardId ? "? 덮어쓰기 완료" : "? 신규 생성 완료");
       await loadAllData(); 
       onComplete(); 
     }
@@ -351,7 +302,7 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // 💡 [수정] 복습 주기 자율 선택 기능을 위해 customDays 매개변수를 추가했습니다.
+  // ?? [수정] 복습 주기 자율 선택 기능을 위해 customDays 매개변수를 추가했습니다.
   const finishCard = (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
@@ -389,7 +340,7 @@ function MainApp() {
         else daysInterval = Math.ceil((currentRepetitions - 1) * easiness);
       }
     } else {
-      // 💡 [추가] 사용자가 복습 주기를 강제 지정한 경우에도 알고리즘 난이도는 내부적으로 보정
+      // ?? [추가] 사용자가 복습 주기를 강제 지정한 경우에도 알고리즘 난이도는 내부적으로 보정
       let quality = 3;
       if (daysInterval === 1) quality = 1;
       else if (daysInterval === 4) quality = 2;
@@ -421,11 +372,11 @@ function MainApp() {
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
     
     // 로그 문구 추가 수정
-    addLog(`✅ 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
+    addLog(`? 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
     flushQueue();
   };
 
-  // 💡 [추가] 카드 모달에서 복습 주기 버튼(1일, 4일, 7일, 14일)을 눌렀을 때 실행되는 함수
+  // ?? [추가] 카드 모달에서 복습 주기 버튼(1일, 4일, 7일, 14일)을 눌렀을 때 실행되는 함수
   const handleReviewSelect = (days: number) => {
     if (!activeCard) return;
     statsRef.current.filled += 1;
@@ -473,7 +424,7 @@ function MainApp() {
 
       setInputStatus('correct');
       
-      // 💡 [핵심] 과거의 blanks를 쓰지 않고, 무조건 가장 최신의 prev 상태를 가져와서 덮어씁니다!
+      // ?? [핵심] 과거의 blanks를 쓰지 않고, 무조건 가장 최신의 prev 상태를 가져와서 덮어씁니다!
       setBlanks(prev => {
         const nb = [...prev]; 
         if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; 
@@ -517,7 +468,7 @@ function MainApp() {
     setInputStatus('wrong'); 
     statsRef.current.wrongIndices.add(currentBlankIdx); 
     
-    // 💡 정답 보기(오답 처리)도 가장 최신의 prev 상태를 사용하도록 변경!
+    // ?? 정답 보기(오답 처리)도 가장 최신의 prev 상태를 사용하도록 변경!
     setBlanks(prev => {
       const nb = [...prev];
       if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; 
@@ -553,7 +504,7 @@ function MainApp() {
         recognitionRef.current.stop();
         recognitionRef.current = null;
       }
-      addLog("🎙️ 음성 인식 종료됨");
+      addLog("??? 음성 인식 종료됨");
       return;
     }
 
@@ -570,7 +521,7 @@ function MainApp() {
 
     recognition.onstart = () => { 
       setIsListening(true);
-      addLog("🎙️ 음성 인식 활성화됨 (계속 듣는 중...)");
+      addLog("??? 음성 인식 활성화됨 (계속 듣는 중...)");
     };
     
     recognition.onresult = (event: any) => {
@@ -578,7 +529,7 @@ function MainApp() {
       const transcript = event.results[last][0].transcript;
       const cleanText = transcript.replace(/\s+/g, '').replace(/[.,!?]/g, '');
       setAnswerInput(cleanText);
-      addLog(`🗣️ 인식: "${transcript}"`);
+      addLog(`??? 인식: "${transcript}"`);
       setTimeout(() => handleSequentialInput(cleanText), 300);
     };
     recognition.onerror = (err: any) => { 
@@ -601,7 +552,7 @@ function MainApp() {
     recognition.start();
   };
 
-// 💡 [추가] 전체 카드의 최소 회독수 (모두 1이상이면 1, 모두 2이상이면 2) 계산
+// ?? [추가] 전체 카드의 최소 회독수 (모두 1이상이면 1, 모두 2이상이면 2) 계산
   const minFilledCount = savedCards.length > 0 
     ? Math.min(...savedCards.map((card: any) => {
         const stats = parseCardStats(card.memo || "");
@@ -609,7 +560,7 @@ function MainApp() {
       }))
     : 0;
 
-  // 💡 [추가] 합격률 로직: 최소 회독수 1회당 2%씩 상승 (최대 100%)
+  // ?? [추가] 합격률 로직: 최소 회독수 1회당 2%씩 상승 (최대 100%)
   const passProbability = Math.min(minFilledCount * 2, 100);
 
 // --- [스마트 추론 알고리즘] ---
@@ -620,11 +571,11 @@ function MainApp() {
     const craftedOrigIds = new Set();
     const craftedTitles: string[] = []; 
 
-    // 💡 괄호(목적 등)와 특수문자를 완전히 날리는 정밀 필터 함수
+    // ?? 괄호(목적 등)와 특수문자를 완전히 날리는 정밀 필터 함수
     const cleanText = (text: string) => {
        if (!text) return "";
        const noBrackets = text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '');
-       return noBrackets.replace(/[^가-힣a-zA-Z0-9一-龥]/g, '');
+       return noBrackets.replace(/[^가-힣a-zA-Z0-9一-?]/g, '');
     };
 
     savedCards.forEach((c: any) => {
@@ -669,7 +620,7 @@ function MainApp() {
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
-{/* 💡 여기서부터 복사해서 기존 <header>...</header>가 있던 자리에 붙여넣으세요 */}
+{/* ?? 여기서부터 복사해서 기존 <header>...</header>가 있던 자리에 붙여넣으세요 */}
       <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
           
@@ -747,9 +698,9 @@ function MainApp() {
           </div>
         </div>
       </header>
-      {/* 💡 여기까지 복사! (이 아래의 <nav> 부분은 그대로 두시면 됩니다.) */}
+      {/* ?? 여기까지 복사! (이 아래의 <nav> 부분은 그대로 두시면 됩니다.) */}
 
-      {/* 💡 한 줄 아래로 독립적으로 분리된 탭 네비게이션 바 */}
+      {/* ?? 한 줄 아래로 독립적으로 분리된 탭 네비게이션 바 */}
       {isLoggedIn && (
         <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="max-w-6xl mx-auto flex items-center justify-start gap-1 sm:gap-2">
@@ -873,7 +824,7 @@ function MainApp() {
             </div>
             <div className="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
               {systemLogs.map((l, i) => (
-                <div key={i} className={`leading-snug break-all ${l.includes('❌') ? 'text-red-400 font-bold' : l.includes('▶️') ? 'text-amber-300' : ''}`}>
+                <div key={i} className={`leading-snug break-all ${l.includes('?') ? 'text-red-400 font-bold' : l.includes('▶?') ? 'text-amber-300' : ''}`}>
                   {l}
                 </div>
               ))}
@@ -894,11 +845,11 @@ function MainApp() {
           setAnswerInput={setAnswerInput}
           inputStatus={inputStatus}
           handleSequentialInput={handleSequentialInput}
-          handleReviewSelect={handleReviewSelect} // 💡 추가된 프롭스
+          handleReviewSelect={handleReviewSelect} // ?? 추가된 프롭스
           renderContent={() => {
             const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
             
-            // 💡 [수정] 본문 첫 줄에서 '[법]' 태그만 지우고 제목으로 사용합니다!
+            // ?? [수정] 본문 첫 줄에서 '[법]' 태그만 지우고 제목으로 사용합니다!
             let displayTitle = (cleanContent.split('\n')[0] || "")
                 .replace(/\[.*?\]/g, '')
                 .replace(/\(\s*내용\s*\)/g, '')
@@ -943,17 +894,34 @@ function MainApp() {
                     }
                     else if (isCurrent) {
                       contentToRender.push(
-                        // 💡 렉의 원흉이던 복잡한 input을 초고속 컴포넌트로 깔끔하게 교체!
-                        <FastInlineInput 
+                        <input 
                           key={i}
+                          autoFocus
                           value={answerInput}
-                          inputStatus={inputStatus}
-                          onSubmit={(typedValue: string) => {
-                            setAnswerInput(typedValue);
-                            setTimeout(() => {
-                              handleSequentialInput(typedValue);
-                            }, 0);
+                          // ?? 1. 키보드의 쓸데없는 개입 완벽 차단!
+                          autoComplete="off"
+                          autoCorrect="off"
+                          spellCheck="false"
+                          autoCapitalize="none"
+                          
+                          // ?? 2. 한글 조합 중(글자 아래 밑줄)일 때는 정답 제출이나 렌더링이 꼬이지 않게 방어!
+                          onCompositionStart={(e) => { e.currentTarget.dataset.composing = "true"; }}
+                          onCompositionEnd={(e) => { e.currentTarget.dataset.composing = "false"; }}
+                          
+                          onChange={(e) => setAnswerInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            // 조합 중이 아닐 때만 엔터키 허용
+                            if(e.key === 'Enter' && e.currentTarget.dataset.composing !== "true") {
+                               handleSequentialInput(e.currentTarget.value);
+                            }
                           }}
+                          placeholder="입력..."
+                          style={{ width: `${Math.max(60, answerInput.length * 15 + 40)}px` }}
+                          className={`inline-block h-6 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-all mx-1 px-1 rounded-t-sm ${
+                            inputStatus === 'wrong' 
+                              ? 'border-red-500 text-red-400 bg-red-900/40 animate-shake' 
+                              : 'border-indigo-400 text-amber-300 focus:border-amber-400'
+                          }`}
                         />
                       );
                     }
@@ -981,7 +949,7 @@ function MainApp() {
                 
                 <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
                   <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
-                    {isMemoOpen ? '닫기 ✕' : '📝 메모 열기'}
+                    {isMemoOpen ? '닫기 ?' : '?? 메모 열기'}
                   </button>
                   
                   <button 
@@ -992,7 +960,7 @@ function MainApp() {
                         : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'
                     }`}
                   >
-                    {isListening ? '🎙️ 음성 인식 끄기 (활성화됨)' : '🎤 음성으로 입력 (계속 켜두기)'}
+                    {isListening ? '??? 음성 인식 끄기 (활성화됨)' : '?? 음성으로 입력 (계속 켜두기)'}
                   </button>
 
                   <button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
