@@ -11,30 +11,14 @@ import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
 // ── 인라인 빈칸 입력 컴포넌트 (부모 리렌더링 완전 격리) ─────────────────
-const InlineBlankInput = React.memo(({ statusRef, onSubmit }: {
-  statusRef: React.MutableRefObject<string>;
+const InlineBlankInput = React.memo(({ inputStatus, onSubmit }: {
+  inputStatus: string;
   onSubmit: (val: string) => void;
 }) => {
   const [val, setVal] = useState('');
-  const [localStatus, setLocalStatus] = useState('idle');
   const inputRef = useRef<HTMLInputElement>(null);
-
   useEffect(() => { inputRef.current?.focus(); }, []);
-
-  // statusRef 폴링 (16ms마다) — 부모 리렌더링 없이 색상만 반영
-  useEffect(() => {
-    const id = setInterval(() => {
-      const s = statusRef.current;
-      setLocalStatus(prev => prev === s ? prev : s);
-    }, 16);
-    return () => clearInterval(id);
-  }, [statusRef]);
-
-  // 정답 후 입력창 초기화
-  useEffect(() => {
-    if (localStatus === 'correct' || localStatus === 'idle') setVal('');
-  }, [localStatus]);
-
+  useEffect(() => { if (inputStatus === 'correct' || inputStatus === 'idle') setVal(''); }, [inputStatus]);
   return (
     <input
       ref={inputRef}
@@ -49,9 +33,9 @@ const InlineBlankInput = React.memo(({ statusRef, onSubmit }: {
       placeholder="입력..."
       style={{ width: `${Math.max(60, val.length * 15 + 40)}px`, transition: 'width 0.15s ease' }}
       className={`inline-block h-7 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-colors duration-150 mx-1 px-1 rounded-t-sm ${
-        localStatus === 'wrong'
+        inputStatus === 'wrong'
           ? 'border-red-500 text-red-400 bg-red-900/40'
-          : localStatus === 'correct'
+          : inputStatus === 'correct'
           ? 'border-teal-500 text-teal-300 bg-teal-900/20'
           : 'border-indigo-400 text-amber-300 focus:border-amber-400'
       }`}
@@ -129,11 +113,6 @@ function MainApp() {
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
-  const inputStatusRef = useRef<string>('idle');
-  const setStatus = (s: 'idle'|'correct'|'wrong') => {
-    inputStatusRef.current = s;
-    setStatus(s);
-  };
   const [startTime, setStartTime] = useState<number>(0);
   const [elapsed, setElapsed] = useState<number>(0);
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
@@ -326,7 +305,7 @@ function MainApp() {
 
       setBlanks(restoredBlanks); 
       setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); 
-      setStatus('idle');
+      setInputStatus('idle');
 
       const stats = parseCardStats(activeCard.memo);
       const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
@@ -463,7 +442,7 @@ function MainApp() {
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
     
     if (expected === actual) {
-      setStatus('correct');
+      setInputStatus('correct');
       setBlanks(prev => {
         const nb = [...prev]; 
         if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; 
@@ -471,7 +450,7 @@ function MainApp() {
       });
       statsRef.current.wrongIndices.delete(currentBlankIdx);
       setTimeout(() => {
-        setStatus('idle'); 
+        setInputStatus('idle'); 
         setBlanks(currentBlanks => {
           if (currentBlankIdx + 1 < currentBlanks.length) {
             setCurrentBlankIdx(prevIdx => {
@@ -488,15 +467,15 @@ function MainApp() {
         });
       }, 150);
     } else { 
-      setStatus('wrong'); 
+      setInputStatus('wrong'); 
       statsRef.current.wrongIndices.add(currentBlankIdx); 
-      setTimeout(() => setStatus('idle'), 500); 
+      setTimeout(() => setInputStatus('idle'), 500); 
     }
   };
 
   const handleShowAnswer = () => {
     if (!blanks[currentBlankIdx]) return;
-    setStatus('wrong'); 
+    setInputStatus('wrong'); 
     statsRef.current.wrongIndices.add(currentBlankIdx); 
     setBlanks(prev => {
       const nb = [...prev];
@@ -504,7 +483,7 @@ function MainApp() {
       return nb;
     });
     setTimeout(() => {
-      setStatus('idle');
+      setInputStatus('idle');
       setBlanks(currentBlanks => {
         if (currentBlankIdx + 1 < currentBlanks.length) {
           setCurrentBlankIdx(prevIdx => {
@@ -690,7 +669,7 @@ function MainApp() {
               contentToRender.push(
                 <InlineBlankInput
                   key={`blank-${currentBlankIdx}`}
-                  statusRef={inputStatusRef}
+                  inputStatus={inputStatus}
                   onSubmit={handleSequentialInput}
                 />
               );
@@ -748,7 +727,7 @@ function MainApp() {
         )}
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, isMemoOpen, isListening]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening]);
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
