@@ -10,6 +10,35 @@ import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
+// ── 인라인 빈칸 입력 (부모 리렌더링 완전 격리) ──────────────────────────
+const InlineBlankInput = ({ inputStatus, onSubmit }: { inputStatus: string; onSubmit: (val: string) => void }) => {
+  const [val, setVal] = useState('');
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { ref.current?.focus(); }, []);
+  // 정답 판정 후 초기화
+  useEffect(() => { if (inputStatus === 'correct') setVal(''); }, [inputStatus]);
+  return (
+    <input
+      ref={ref}
+      type="text"
+      value={val}
+      autoComplete="off" autoCorrect="off" spellCheck={false} autoCapitalize="none"
+      onChange={(e) => setVal(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.nativeEvent.isComposing) return;
+        if (e.key === 'Enter') onSubmit(val);
+      }}
+      placeholder="입력..."
+      style={{ width: `${Math.max(60, val.length * 15 + 40)}px` }}
+      className={`inline-block h-6 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-all mx-1 px-1 rounded-t-sm ${
+        inputStatus === 'wrong'
+          ? 'border-red-500 text-red-400 bg-red-900/40 animate-shake'
+          : 'border-indigo-400 text-amber-300 focus:border-amber-400'
+      }`}
+    />
+  );
+};
+
 class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
   constructor(props: any) { 
     super(props);
@@ -904,34 +933,10 @@ function MainApp() {
                     }
                     else if (isCurrent) {
                       contentToRender.push(
-                        <input 
+                        <InlineBlankInput
                           key={i}
-                          autoFocus
-                          value={answerInput}
-                          // 💡 1. 키보드의 쓸데없는 개입 완벽 차단!
-                          autoComplete="off"
-                          autoCorrect="off"
-                          spellCheck="false"
-                          autoCapitalize="none"
-                          
-                          // 💡 2. 한글 조합 중(글자 아래 밑줄)일 때는 정답 제출이나 렌더링이 꼬이지 않게 방어!
-                          onCompositionStart={(e) => { e.currentTarget.dataset.composing = "true"; }}
-                          onCompositionEnd={(e) => { e.currentTarget.dataset.composing = "false"; }}
-                          
-                          onChange={(e) => setAnswerInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            // 조합 중이 아닐 때만 엔터키 허용
-                            if(e.key === 'Enter' && e.currentTarget.dataset.composing !== "true") {
-                               handleSequentialInput(e.currentTarget.value);
-                            }
-                          }}
-                          placeholder="입력..."
-                          style={{ width: `${Math.max(60, answerInput.length * 15 + 40)}px` }}
-                          className={`inline-block h-6 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-all mx-1 px-1 rounded-t-sm ${
-                            inputStatus === 'wrong' 
-                              ? 'border-red-500 text-red-400 bg-red-900/40 animate-shake' 
-                              : 'border-indigo-400 text-amber-300 focus:border-amber-400'
-                          }`}
+                          inputStatus={inputStatus}
+                          onSubmit={(val: string) => handleSequentialInput(val)}
                         />
                       );
                     }
