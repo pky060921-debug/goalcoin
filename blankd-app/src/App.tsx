@@ -575,7 +575,7 @@ function MainApp() {
     const cleanText = (text: string) => {
        if (!text) return "";
        const noBrackets = text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '');
-       return noBrackets.replace(/[^가-힣a-zA-Z0-9一-?]/g, '');
+       return noBrackets.replace(/[^가-힣a-zA-Z0-9一-龥]/g, '');
     };
 
     savedCards.forEach((c: any) => {
