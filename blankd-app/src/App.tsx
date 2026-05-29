@@ -571,7 +571,6 @@ function MainApp() {
     const craftedOrigIds = new Set();
     const craftedTitles: string[] = []; 
 
-    // 💡 괄호(목적 등)와 특수문자를 완전히 날리는 정밀 필터 함수
     const cleanText = (text: string) => {
        if (!text) return "";
        const noBrackets = text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '');
@@ -601,44 +600,43 @@ function MainApp() {
       return !isIdCrafted && !isTitleCrafted;
     });
   }
-  
+
   if (isLoggedIn && savedCards.length > 0) {
-    const cardsWithStatus = savedCards.map(c => {
-       const { body } = formatCardText(c.content);
-       const blanksCount = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
+    const cardsWithStatus = savedCards.map((c: any) => {
        const stats = parseCardStats(c.memo);
-       return { ...c, totalBlanks: blanksCount, filled: stats.filled, wrongCount: stats.wrongIndices.length };
-    }).sort((a, b) => a.id - b.id);
+       return { ...c, filled: stats.filled, wrongCount: stats.wrongIndices.length };
+    }).sort((a: any, b: any) => a.id - b.id);
 
-    // 1순위: 풀다 만 것, 2순위: 안 푼 것, 3순위: 오답 있는 것
-    nextStudyCard = cardsWithStatus.find(c => c.filled > 0 && c.filled < c.totalBlanks) 
-                 || cardsWithStatus.find(c => c.filled === 0 && c.totalBlanks > 0)
-                 || cardsWithStatus.find(c => c.wrongCount > 0)
-                 || cardsWithStatus[0];
+    // 💡 논리 오류 완벽 해결!
+    // 1순위: 오답이 남아있는 카드
+    let target = cardsWithStatus.find(c => c.wrongCount > 0);
+    
+    // 2순위: 한 번도 안 푼 카드
+    if (!target) {
+      target = cardsWithStatus.find(c => c.filled === 0);
+    }
+    
+    // 3순위: 전체 카드 중 가장 회독수(반복 횟수)가 적은 카드
+    if (!target) {
+      const minFilled = Math.min(...cardsWithStatus.map(c => c.filled));
+      target = cardsWithStatus.find(c => c.filled === minFilled);
+    }
+
+    nextStudyCard = target || cardsWithStatus[0];
   }
-  // ▲▲▲▲▲▲▲▲▲ 여기까지 추가 ▲▲▲▲▲▲▲▲▲
-
-  return (
+return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
-{/* 💡 여기서부터 복사해서 기존 <header>...</header>가 있던 자리에 붙여넣으세요 */}
+      
+      {/* 여기서부터 복사해서 기존 <header>를 교체하세요 */}
       <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
-          
-          {/* 왼쪽 영역: BlankD 로고 (클릭 시 최근 진행했던 탭으로 즉시 복귀) */}
-          <div className="flex items-center justify-between w-full md:w-auto">
-            <button 
-              onClick={() => {
-                const lastTab = localStorage.getItem('blankd_active_tab') || 'progress';
-                setActiveTab(lastTab);
-              }} 
-              className="text-xl sm:text-2xl font-bold tracking-widest text-white shrink-0 hover:text-teal-400 transition-colors"
-            >
-              BlankD
-            </button>
-          </div>
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 sm:gap-6 overflow-x-auto custom-scrollbar pb-1 sm:pb-0">
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-teal-500 mr-2 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-950/30">BLANK:D</span>
+              <span className="text-[10px] sm:text-xs font-mono text-white/50">{safeAddress.slice(0,6)}...{safeAddress.slice(-4)}</span>
+            </div>
 
-          {/* 오른쪽 영역: 이어서 하기 버튼들 + 통계 지표 + 로그아웃 */}
-          <div className="flex items-center justify-start md:justify-end gap-3 sm:gap-4 shrink-0 overflow-x-auto custom-scrollbar pb-1 md:pb-0 w-full md:w-auto">
+            <div className="w-px h-4 bg-white/10 shrink-0 hidden sm:block"></div>
             
             {/* 이어서 하기 (만들기 / 채우기) */}
             <div className="flex items-center gap-2 shrink-0">
@@ -646,10 +644,7 @@ function MainApp() {
               
               {nextCatToCraft ? (
                 <button 
-                  onClick={() => { 
-                    setActiveTab('create'); 
-                    setExpandedId(nextCatToCraft.id); 
-                  }}
+                  onClick={() => { setActiveTab('create'); setExpandedId(nextCatToCraft.id); }}
                   className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
                 >
                   <span className="text-[9px] sm:text-[10px] text-amber-400 font-bold whitespace-nowrap">▶ 만들기</span>
@@ -663,7 +658,10 @@ function MainApp() {
 
               {nextStudyCard ? (
                 <button 
-                  onClick={() => { setActiveCard(nextStudyCard); }}
+                  onClick={() => { 
+                    setActiveTab('enhance'); // 💡 탭을 채우기 화면으로 먼저 이동
+                    setTimeout(() => setActiveCard(nextStudyCard), 150); // 💡 0.15초 뒤에 모달창 띄우기
+                  }}
                   className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
                 >
                   <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span>
@@ -675,7 +673,9 @@ function MainApp() {
                 <div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 완료</div>
               )}
             </div>
-            {/* 구분선 */}
+          </div>
+          
+          {/* 구분선 */}
             <div className="h-5 sm:h-6 w-px bg-white/10 shrink-0 hidden sm:block"></div>
 
             {/* 통계 지표 및 로그아웃 */}
