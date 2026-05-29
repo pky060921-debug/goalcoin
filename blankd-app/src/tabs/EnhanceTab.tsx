@@ -12,6 +12,10 @@ const getGridClass = (cols: number) => {
 };
 
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, handleDeleteCard }: any) => {
+  
+  // 💡 [진단 코드] 글자를 칠 때마다 이 로그가 찍히는지 확인합니다!
+  console.log("🚨 [진단] EnhanceTab이 다시 렌더링되었습니다!! (이게 타자 칠 때마다 뜨면 심각한 렉 유발)");
+
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
