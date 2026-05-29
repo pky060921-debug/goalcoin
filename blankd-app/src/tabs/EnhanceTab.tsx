@@ -11,7 +11,7 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-export const EnhanceTab = React.memo(({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, handleDeleteCard }: any) => {
+export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
@@ -47,16 +47,16 @@ export const EnhanceTab = React.memo(({ savedCards, colCount, viewMode, setActiv
     return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
   };
 
-  // --- 💡 새로 추가된 직접 수정(Edit) 모드 상태 ---
+  // --- ?? 새로 추가된 직접 수정(Edit) 모드 상태 ---
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editContent, setEditContent] = useState<string>("");
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   
-  // 💡 도구 상태: 'editor'(텍스트), 'include'(포함), 'exclude'(제외), null(비활성화/뷰어)
+  // ?? 도구 상태: 'editor'(텍스트), 'include'(포함), 'exclude'(제외), null(비활성화/뷰어)
   const [activeTool, setActiveTool] = useState<'editor' | 'include' | 'exclude' | null>('include');
 
-    // --- 💡 저장 함수 (api.put 대신 올바른 save-card 엔드포인트 사용) ---
+    // --- ?? 저장 함수 (api.put 대신 올바른 save-card 엔드포인트 사용) ---
   const handleSaveEdit = async (card: any) => {
     setIsSaving(true);
     setErrorMsg(null);
@@ -66,11 +66,11 @@ export const EnhanceTab = React.memo(({ savedCards, colCount, viewMode, setActiv
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           wallet_address: card.wallet_address || "ENOKI_USER", 
-          card_id: card.id, // 💡 기존 ID를 보내면 서버가 자동으로 덮어쓰기(UPDATE)를 수행합니다.
+          card_id: card.id, // ?? 기존 ID를 보내면 서버가 자동으로 덮어쓰기(UPDATE)를 수행합니다.
           card_content: editContent,
           answer_text: card.answer_text || "",
           folder_name: card.folder_name,
-          memo: card.memo // 💡 학습 통계 데이터 그대로 유지!
+          memo: card.memo // ?? 학습 통계 데이터 그대로 유지!
         })
       });
 
@@ -99,13 +99,13 @@ export const EnhanceTab = React.memo(({ savedCards, colCount, viewMode, setActiv
           const isWhitespace = /^\s+$/.test(token);
           
           if (isOrigId) {
-            return <div key={idx} className="inline-block text-[10px] text-white/20 font-mono bg-white/5 px-2 py-0.5 rounded mr-2 mb-2 select-none cursor-default">🔗 시스템 태그: {token}</div>;
+            return <div key={idx} className="inline-block text-[10px] text-white/20 font-mono bg-white/5 px-2 py-0.5 rounded mr-2 mb-2 select-none cursor-default">?? 시스템 태그: {token}</div>;
           }
           if (isPageBreak) {
             return (
               <div key={idx} className="my-6 border-b-2 border-dashed border-white/20 relative flex justify-center cursor-default">
                 <span className="absolute -top-3 bg-[#0a0a0c] px-3 py-0.5 rounded-full text-[10px] text-white/40 font-bold tracking-widest border border-white/10">
-                  ✂️ PAGE BREAK (---)
+                  ?? PAGE BREAK (---)
                 </span>
               </div>
             );
@@ -168,7 +168,7 @@ export const EnhanceTab = React.memo(({ savedCards, colCount, viewMode, setActiv
             onClick={() => handleToggleFolder(f)} 
             className={`px-3 py-1.5 sm:py-2 text-[10px] sm:text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-teal-600 border-teal-500 text-white shadow-sm' : 'bg-teal-900/40 text-teal-300 border-teal-500/30'}`}
           >
-            📁 {f}
+            ?? {f}
           </button>
         ))}
       </div>
@@ -200,15 +200,10 @@ export const EnhanceTab = React.memo(({ savedCards, colCount, viewMode, setActiv
                 let colClass = "";
                 let titleColor = "text-teal-400";
                 
-                if (viewMode === 'all' && colCount >= 3) {
-                  if (cleanContent.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
-                  else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
-                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
-                } else {
-                  if (cleanContent.includes('[법]')) titleColor = "text-red-500";
-                  else if (cleanContent.includes('[령]')) titleColor = "text-blue-400";
-                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
-                }
+                // ?? 빈자리로 점프하는 원인(col-start)을 제거하고, 순서대로 색상만 입힙니다.
+                if (cleanContent.includes('[법]')) titleColor = "text-red-500";
+                else if (cleanContent.includes('[령]')) titleColor = "text-blue-400";
+                else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
 
                 if (editingId === card.id) {
                   colClass = "col-span-full";
@@ -220,7 +215,7 @@ export const EnhanceTab = React.memo(({ savedCards, colCount, viewMode, setActiv
                       <div className="relative flex flex-col p-4 rounded-sm border border-amber-500/50 bg-[#0a0a0c] transition-all duration-300 w-full shadow-[0_0_15px_rgba(245,158,11,0.15)]">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
                           <span className="text-[12px] text-amber-400 font-bold flex items-center gap-2">
-                            <span className="animate-pulse">🛠️</span> 빈칸 직접 수정 모드
+                            <span className="animate-pulse">???</span> 빈칸 직접 수정 모드
                           </span>
                           
                           <div className="flex items-center gap-1.5 bg-black/50 p-1 rounded-md border border-white/10">
@@ -228,20 +223,20 @@ export const EnhanceTab = React.memo(({ savedCards, colCount, viewMode, setActiv
                               onClick={() => setActiveTool(activeTool === 'editor' ? null : 'editor')}
                               className={`px-2.5 py-1.5 rounded text-[10px] font-bold transition-all flex items-center gap-1.5 ${activeTool === 'editor' ? 'bg-amber-600/90 text-white shadow-md' : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/80'}`}
                             >
-                              📝 직접 타이핑
+                              ?? 직접 타이핑
                             </button>
                             <div className="w-px h-4 bg-white/10 mx-0.5"></div>
                             <button 
                               onClick={() => setActiveTool(activeTool === 'include' ? null : 'include')}
                               className={`px-2.5 py-1.5 rounded text-[10px] font-bold transition-all flex items-center gap-1.5 ${activeTool === 'include' ? 'bg-teal-600/90 text-white shadow-md' : 'bg-white/5 text-white/50 hover:bg-teal-500/20 hover:text-teal-200'}`}
                             >
-                              ➕ 클릭 포함
+                              ? 클릭 포함
                             </button>
                             <button 
                               onClick={() => setActiveTool(activeTool === 'exclude' ? null : 'exclude')}
                               className={`px-2.5 py-1.5 rounded text-[10px] font-bold transition-all flex items-center gap-1.5 ${activeTool === 'exclude' ? 'bg-red-600/90 text-white shadow-md' : 'bg-white/5 text-white/50 hover:bg-red-500/20 hover:text-red-200'}`}
                             >
-                              ➖ 클릭 제외
+                              ? 클릭 제외
                             </button>
                           </div>
                         </div>
@@ -272,7 +267,7 @@ export const EnhanceTab = React.memo(({ savedCards, colCount, viewMode, setActiv
                             className="px-5 py-2 bg-amber-600 border border-amber-500/50 text-white hover:bg-amber-500 rounded-sm text-[11px] font-bold transition-all flex items-center gap-1.5 shadow-lg shadow-amber-900/20"
                             disabled={isSaving}
                           >
-                            {isSaving ? '저장 중...' : '💾 내용 저장'}
+                            {isSaving ? '저장 중...' : '?? 내용 저장'}
                           </button>
                         </div>
                       </div>
@@ -293,7 +288,7 @@ export const EnhanceTab = React.memo(({ savedCards, colCount, viewMode, setActiv
                               }}
                               className="ml-1 px-1.5 py-0.5 bg-amber-900/40 text-amber-400 border border-amber-500/50 rounded font-mono text-[9px] hover:bg-amber-900/60 transition-colors cursor-pointer"
                             >
-                              ✏️수정
+                              ??수정
                             </button>
                           </div>
                         </div>
@@ -307,11 +302,4 @@ export const EnhanceTab = React.memo(({ savedCards, colCount, viewMode, setActiv
         ))}
     </div>
   );
-// 🚨 기존의 '};' 를 지우고 아래처럼 방어막 조건을 덧붙여서 닫아줍니다!
-}, (prevProps: any, nextProps: any) => {
-  // 💡 마법의 방어막: 타자를 치는 동안에는 뒤에 있는 카드들이 절대 새로고침되지 않도록 막아줍니다.
-  // 오직 카드가 새로 저장되거나, 배열(단수) 모드가 바뀌었을 때만 화면을 다시 그립니다.
-  return prevProps.savedCards === nextProps.savedCards && 
-         prevProps.colCount === nextProps.colCount &&
-         prevProps.viewMode === nextProps.viewMode;
-});
+};
