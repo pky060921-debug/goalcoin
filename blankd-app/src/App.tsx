@@ -15,24 +15,30 @@ const InlineBlankInput = ({ inputStatus, onSubmit }: { inputStatus: string; onSu
   const [val, setVal] = useState('');
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => { ref.current?.focus(); }, []);
-  // 정답 판정 후 초기화
-  useEffect(() => { if (inputStatus === 'correct') setVal(''); }, [inputStatus]);
+  useEffect(() => { if (inputStatus === 'correct' || inputStatus === 'idle') setVal(''); }, [inputStatus]);
   return (
     <input
       ref={ref}
       type="text"
       value={val}
       autoComplete="off" autoCorrect="off" spellCheck={false} autoCapitalize="none"
-      onChange={(e) => setVal(e.target.value)}
+      onChange={(e) => {
+        const v = e.target.value;
+        setVal(v);
+        // 스페이스바 없이 글자만 입력해도 즉시 제출 시도 (onSubmit에서 정답 판별)
+        if (v.length >= 1) onSubmit(v);
+      }}
       onKeyDown={(e) => {
         if (e.nativeEvent.isComposing) return;
         if (e.key === 'Enter') onSubmit(val);
       }}
       placeholder="입력..."
-      style={{ width: `${Math.max(60, val.length * 15 + 40)}px` }}
-      className={`inline-block h-6 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-all mx-1 px-1 rounded-t-sm ${
+      style={{ width: `${Math.max(60, val.length * 15 + 40)}px`, transition: 'width 0.15s ease' }}
+      className={`inline-block h-7 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-colors duration-150 mx-1 px-1 rounded-t-sm ${
         inputStatus === 'wrong'
-          ? 'border-red-500 text-red-400 bg-red-900/40 animate-shake'
+          ? 'border-red-500 text-red-400 bg-red-900/40'
+          : inputStatus === 'correct'
+          ? 'border-teal-500 text-teal-300 bg-teal-900/20'
           : 'border-indigo-400 text-amber-300 focus:border-amber-400'
       }`}
     />
