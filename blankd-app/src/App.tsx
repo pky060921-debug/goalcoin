@@ -14,18 +14,31 @@ import { MypageTab } from "./tabs/MypageTab";
 const InlineBlankInput = React.memo(({ inputStatus, onSubmit }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
+  expectedAnswer: string; // 💡 정답을 넘겨받음
 }) => {
   const [val, setVal] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { inputRef.current?.focus(); }, []);
   useEffect(() => { if (inputStatus === 'correct' || inputStatus === 'idle') setVal(''); }, [inputStatus]);
+
+  // 💡 [핵심] 한 글자 입력될 때마다 정답 체크
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVal = e.target.value;
+    setVal(newVal);
+    
+    // 정답과 완전히 일치하면 엔터 없이 바로 onSubmit 실행
+    if (newVal.replace(/\s+/g, '').toLowerCase() === expectedAnswer.replace(/\s+/g, '').toLowerCase()) {
+      onSubmit(newVal);
+    }
+  };
+  
   return (
     <input
       ref={inputRef}
       type="text"
       value={val}
       autoComplete="off" autoCorrect="off" spellCheck={false} autoCapitalize="none"
-      onChange={(e) => setVal(e.target.value)}
+      onChange={handleChange} // 💡 수정된 검사 함수 사용
       onKeyDown={(e) => {
         if (e.nativeEvent.isComposing) return;
         if (e.key === 'Enter') onSubmit(val);
@@ -667,9 +680,10 @@ function MainApp() {
               );
             } else if (isCurrent) {
               contentToRender.push(
-                <InlineBlankInput
+                <InlineBlankInput                  
                   key={`blank-${currentBlankIdx}`}
                   inputStatus={inputStatus}
+                  expected={blanks[currentBlankIdx]?.answer || ""} // 💡 현재 빈칸의 정답을 전달
                   onSubmit={handleSequentialInput}
                 />
               );
