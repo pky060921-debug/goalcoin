@@ -16,7 +16,7 @@ export const CardModal = ({
 
   useEffect(() => {
     if (inputRef.current) inputRef.current.focus();
-  }, [activeCard]);
+  }, [activeCard, answerInput]);
 
   if (!activeCard) return null;
 
