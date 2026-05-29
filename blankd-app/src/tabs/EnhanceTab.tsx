@@ -248,22 +248,18 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                         </div>
                         
                         {activeTool === 'editor' ? (
-                          <textarea
-                          defaultValue={editContent} // 💡 value 대신 defaultValue 사용
-                          onChange={(e) => {
-                             // 타이핑 할 때 화면을 다시 그리지 않고 값만 조용히 기억함
-                             editContent = e.target.value; 
-                          }}
-                          onBlur={(e) => {
-                             // 💡 텍스트 박스 바깥을 클릭했을 때만 리액트 상태 업데이트
-                             setEditContent(e.target.value); 
-                          }}
-                          className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] sm:text-[13px] p-4 rounded border border-white/10 focus:border-amber-500/70 outline-none resize-none custom-scrollbar leading-relaxed font-sans"
-                          placeholder="여기에 텍스트를 직접 입력하거나 [ ] 기호로 감싸세요."
-                        />
-                        ) : (
-                          renderInteractiveText()
-                        )}
+                      <textarea
+                        defaultValue={editContent} // 💡 처음 열릴 때의 값만 넣어줍니다.
+                        onBlur={(e) => {
+                          // 💡 입력창 바깥이나 다른 버튼을 클릭해 포커스가 빠져나갈 때 딱 한 번만 상태를 저장합니다.
+                          setEditContent(e.target.value); 
+                        }}
+                        className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] sm:text-[13px] p-4 rounded border border-white/10 focus:border-amber-500/70 outline-none resize-none custom-scrollbar leading-relaxed font-sans"
+                        placeholder="여기에 텍스트를 직접 입력하거나 [ ] 기호로 감싸세요."
+                      />
+                    ) : (
+                      renderInteractiveText()
+                    )}
                         
                         {errorMsg && <div className="text-red-400 text-[10px] mt-3 font-bold">{errorMsg}</div>}
                         
