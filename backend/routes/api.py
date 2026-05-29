@@ -524,25 +524,38 @@ def analyze_chunk():
 
                 if rows:
                     query_words = set(re.findall(r'[가-힣]{2,}', chunk_text + user_feedback))
-                    # 조문 번호 추출 (예: 제1조, 제62조, 제70조)
+                    # 조문 번호 추출 (예: 제1조, 제4조, 제62조)
                     article_nums = set(re.findall(r'제\s*\d+조', chunk_text + user_feedback))
+                    # 법령명 추출 (예: 국민건강보험법, 노인장기요양보험법)
+                    law_names = set(re.findall(r'[가-힣]+법', chunk_text))
                     print(f"[DB 키워드] {list(query_words)[:10]}", file=sys.stderr)
                     print(f"[DB 조문번호] {article_nums}", file=sys.stderr)
+                    print(f"[DB 법령명] {law_names}", file=sys.stderr)
+
                     scored = []
                     for folder, title, content in rows:
                         clean_content = re.sub(r'(?<=[가-힣])\s+(?=[가-힣])', '', content or '')
                         clean_title = re.sub(r'(?<=[가-힣])\s+(?=[가-힣])', '', title or '')
                         clean_folder = re.sub(r'(?<=[가-힣])\s+(?=[가-힣])', '', folder or '')
+
                         content_words = set(re.findall(r'[가-힣]{2,}', clean_content))
                         title_words = set(re.findall(r'[가-힣]{2,}', clean_title))
                         score = len(query_words & content_words) + len(query_words & title_words) * 3
-                        # 조문 번호 일치 시 가중치 대폭 추가
+
+                        # 조문 번호 제목 일치 시 +20
                         for art in article_nums:
                             art_clean = re.sub(r'\s', '', art)
                             if art_clean in re.sub(r'\s', '', clean_title):
                                 score += 20
+
+                        # 법령명이 폴더명에 포함되면 +30 (핵심 수정)
+                        for law in law_names:
+                            if law in clean_folder:
+                                score += 30
+
                         if score > 0:
                             scored.append((score, clean_folder, title, clean_content[:600]))
+
                     scored.sort(reverse=True)
                     top = scored[:10]
                     print(f"[DB 매칭 상위10] {[(s, t) for s,f,t,_ in top]}", file=sys.stderr)
