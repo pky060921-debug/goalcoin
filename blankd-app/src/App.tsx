@@ -589,6 +589,113 @@ function MainApp() {
   }
   // ▲▲▲▲▲▲▲▲▲ 여기까지 추가 ▲▲▲▲▲▲▲▲▲
 
+  // renderContent를 useCallback으로 메모이제이션 (Hook 규칙: return 전에 선언)
+  const renderContent = React.useCallback(() => {
+    if (!activeCard) return null;
+    const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+    let displayTitle = (cleanContent.split('\n')[0] || "")
+        .replace(/\[.*?\]/g, '')
+        .replace(/\(\s*내용\s*\)/g, '')
+        .replace(/내용/g, '')
+        .trim();
+    if (!displayTitle) displayTitle = "제목 없음";
+
+    const { body } = formatCardText(cleanContent);
+    const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== '');
+    let displayPage = 0; 
+    let tempGlobalBlank = 0; 
+    let tempPage = 0;
+    for (let part of parts) {
+        if (part === '##PAGE_BREAK##') tempPage++;
+        else if (part.startsWith('[') && part.endsWith(']')) {
+            if (tempGlobalBlank === currentBlankIdx) { 
+              displayPage = tempPage;
+              break; 
+            }
+            tempGlobalBlank++;
+        }
+    }
+
+    let renderPage = 0;
+    let bIdx = 0;
+    const contentToRender: any[] = [];
+    parts.forEach((part: string, i: number) => {
+      if (part === '##PAGE_BREAK##') { renderPage++; return; }
+      if (renderPage === displayPage) {
+          if (part.startsWith('[') && part.endsWith(']')) {
+            const isCorrect = blanks[bIdx]?.correct; 
+            const isCurrent = bIdx === currentBlankIdx; 
+            const isWrong = statsRef.current.wrongIndices.has(bIdx); 
+            if (isCorrect) {
+              contentToRender.push(
+                <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>
+                  {part.replace(/\[|\]/g, '')}
+                </span>
+              );
+            } else if (isCurrent) {
+              contentToRender.push(
+                <InlineBlankInput
+                  key={`blank-${currentBlankIdx}`}
+                  inputStatus={inputStatus}
+                  onSubmit={handleSequentialInput}
+                />
+              );
+            } else {
+              contentToRender.push(
+                <span key={i} className="inline-block min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>
+              );
+            }
+            bIdx++;
+          } else {
+            contentToRender.push(<span key={i}>{part}</span>);
+          }
+      } else if (part.startsWith('[') && part.endsWith(']')) {
+        bIdx++;
+      }
+    });
+    return (
+      <div className="flex flex-col gap-6 w-full">
+        <div className="flex justify-between items-center border-b border-white/10 pb-2">
+            <span className="text-amber-400 font-bold text-[14px] leading-tight">{cleanContent.split('\n')[0]}</span>
+            <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
+        </div>
+        <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
+        <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
+          <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
+            {isMemoOpen ? '닫기 ?' : '?? 메모 열기'}
+          </button>
+          <button 
+            onClick={toggleVoiceRecognition} 
+            className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${
+              isListening 
+                ? 'bg-red-600/50 text-white border-red-500 animate-pulse' 
+                : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'
+            }`}
+          >
+            {isListening ? '??? 음성 인식 끄기 (활성화됨)' : '?? 음성으로 입력 (계속 켜두기)'}
+          </button>
+          <button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
+            정답 보기 (오답 처리)
+          </button>
+        </div>
+        {isMemoOpen && (
+          <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
+            <input 
+              defaultValue={statsRef.current.text || ""} 
+              placeholder="학습 인사이트 기록..." 
+              onBlur={(e) => { 
+                statsRef.current.text = e.target.value; 
+                handleUpdateMemoBackground(activeCard.id, stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices))); 
+              }} 
+              className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all" 
+              autoFocus
+            />
+          </div>
+        )}
+      </div>
+    );
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening]);
+
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
 {/* ?? 여기서부터 복사해서 기존 <header>...</header>가 있던 자리에 붙여넣으세요 */}
@@ -815,111 +922,7 @@ function MainApp() {
           inputStatus={inputStatus}
           handleSequentialInput={handleSequentialInput}
           handleReviewSelect={handleReviewSelect}
-          renderContent={React.useCallback(() => {
-            const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-            let displayTitle = (cleanContent.split('\n')[0] || "")
-                .replace(/\[.*?\]/g, '')
-                .replace(/\(\s*내용\s*\)/g, '')
-                .replace(/내용/g, '')
-                .trim();
-            if (!displayTitle) displayTitle = "제목 없음";
-
-            const { body } = formatCardText(cleanContent);
-            const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== '');
-            let displayPage = 0; 
-            let tempGlobalBlank = 0; 
-            let tempPage = 0;
-            for (let part of parts) {
-                if (part === '##PAGE_BREAK##') tempPage++;
-                else if (part.startsWith('[') && part.endsWith(']')) {
-                    if (tempGlobalBlank === currentBlankIdx) { 
-                      displayPage = tempPage;
-                      break; 
-                    }
-                    tempGlobalBlank++;
-                }
-            }
-
-            let renderPage = 0;
-            let bIdx = 0;
-            const contentToRender: any[] = [];
-            parts.forEach((part: string, i: number) => {
-              if (part === '##PAGE_BREAK##') { renderPage++; return; }
-              if (renderPage === displayPage) {
-                  if (part.startsWith('[') && part.endsWith(']')) {
-                    const isCorrect = blanks[bIdx]?.correct; 
-                    const isCurrent = bIdx === currentBlankIdx; 
-                    const isWrong = statsRef.current.wrongIndices.has(bIdx); 
-                    
-                    if (isCorrect) {
-                      contentToRender.push(
-                        <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>
-                          {part.replace(/\[|\]/g, '')}
-                        </span>
-                      );
-                    } else if (isCurrent) {
-                      contentToRender.push(
-                        <InlineBlankInput
-                          key={`blank-${currentBlankIdx}`}
-                          inputStatus={inputStatus}
-                          onSubmit={handleSequentialInput}
-                        />
-                      );
-                    } else {
-                      contentToRender.push(
-                        <span key={i} className="inline-block min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>
-                      );
-                    }
-                    bIdx++;
-                  } else {
-                    contentToRender.push(<span key={i}>{part}</span>);
-                  }
-              } else if (part.startsWith('[') && part.endsWith(']')) {
-                bIdx++;
-              }
-            });
-            return (
-              <div className="flex flex-col gap-6 w-full">
-                <div className="flex justify-between items-center border-b border-white/10 pb-2">
-                    <span className="text-amber-400 font-bold text-[14px] leading-tight">{cleanContent.split('\n')[0]}</span>
-                    <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
-                </div>
-                <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
-                <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
-                  <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
-                    {isMemoOpen ? '닫기 ?' : '?? 메모 열기'}
-                  </button>
-                  <button 
-                    onClick={toggleVoiceRecognition} 
-                    className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${
-                      isListening 
-                        ? 'bg-red-600/50 text-white border-red-500 animate-pulse' 
-                        : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'
-                    }`}
-                  >
-                    {isListening ? '??? 음성 인식 끄기 (활성화됨)' : '?? 음성으로 입력 (계속 켜두기)'}
-                  </button>
-                  <button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
-                    정답 보기 (오답 처리)
-                  </button>
-                </div>
-                {isMemoOpen && (
-                  <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
-                    <input 
-                      defaultValue={statsRef.current.text || ""} 
-                      placeholder="학습 인사이트 기록..." 
-                      onBlur={(e) => { 
-                        statsRef.current.text = e.target.value; 
-                        handleUpdateMemoBackground(activeCard.id, stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices))); 
-                      }} 
-                      className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all" 
-                      autoFocus
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening])}
+          renderContent={renderContent}
           onClose={handleCloseModal} 
         />
       )}
