@@ -216,6 +216,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
                 return (
                   <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
+                    style={{ contentVisibility: 'auto', containIntrinsicSize: '200px' }} // 💡 이 마법의 한 줄을 추가하세요!
                     {editingId === card.id ? (
                       <div className="relative flex flex-col p-4 rounded-sm border border-amber-500/50 bg-[#0a0a0c] transition-all duration-300 w-full shadow-[0_0_15px_rgba(245,158,11,0.15)]">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
@@ -248,11 +249,18 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                         
                         {activeTool === 'editor' ? (
                           <textarea
-                            value={editContent}
-                            onChange={(e) => setEditContent(e.target.value)}
-                            className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] sm:text-[13px] p-4 rounded border border-white/10 focus:border-amber-500/70 outline-none resize-none custom-scrollbar leading-relaxed font-sans"
-                            placeholder="여기에 텍스트를 직접 입력하거나 [ ] 기호로 감싸세요."
-                          />
+                          defaultValue={editContent} // 💡 value 대신 defaultValue 사용
+                          onChange={(e) => {
+                             // 타이핑 할 때 화면을 다시 그리지 않고 값만 조용히 기억함
+                             editContent = e.target.value; 
+                          }}
+                          onBlur={(e) => {
+                             // 💡 텍스트 박스 바깥을 클릭했을 때만 리액트 상태 업데이트
+                             setEditContent(e.target.value); 
+                          }}
+                          className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] sm:text-[13px] p-4 rounded border border-white/10 focus:border-amber-500/70 outline-none resize-none custom-scrollbar leading-relaxed font-sans"
+                          placeholder="여기에 텍스트를 직접 입력하거나 [ ] 기호로 감싸세요."
+                        />
                         ) : (
                           renderInteractiveText()
                         )}
