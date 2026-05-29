@@ -11,23 +11,23 @@ import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
 // ── 인라인 빈칸 입력 컴포넌트 (부모 리렌더링 완전 격리) ─────────────────
-const InlineBlankInput = React.memo(({ inputStatus, onSubmit }: {
+const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
-  expectedAnswer: string; // 💡 정답을 넘겨받음
+  expected: string; // 💡 정답을 props로 받습니다.
 }) => {
   const [val, setVal] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => { inputRef.current?.focus(); }, []);
   useEffect(() => { if (inputStatus === 'correct' || inputStatus === 'idle') setVal(''); }, [inputStatus]);
 
-  // 💡 [핵심] 한 글자 입력될 때마다 정답 체크
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVal = e.target.value;
     setVal(newVal);
     
-    // 정답과 완전히 일치하면 엔터 없이 바로 onSubmit 실행
-    if (newVal.replace(/\s+/g, '').toLowerCase() === expectedAnswer.replace(/\s+/g, '').toLowerCase()) {
+    // 💡 정답이 일치하는 순간 바로 다음으로 점프!
+    if (newVal.trim().toLowerCase() === expected.trim().toLowerCase()) {
       onSubmit(newVal);
     }
   };
