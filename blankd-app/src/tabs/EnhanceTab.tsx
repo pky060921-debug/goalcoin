@@ -12,10 +12,6 @@ const getGridClass = (cols: number) => {
 };
 
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, handleDeleteCard }: any) => {
-  
-  // 💡 [진단 코드] 글자를 칠 때마다 이 로그가 찍히는지 확인합니다!
-  console.log("🚨 [진단] EnhanceTab이 다시 렌더링되었습니다!! (이게 타자 칠 때마다 뜨면 심각한 렉 유발)");
-
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
@@ -219,10 +215,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                 }
 
                 return (
-                  <div 
-                    key={card.id} 
-                    className={`relative transition-all w-full ${colClass}`}
-                  >
+                  <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
                     {editingId === card.id ? (
                       <div className="relative flex flex-col p-4 rounded-sm border border-amber-500/50 bg-[#0a0a0c] transition-all duration-300 w-full shadow-[0_0_15px_rgba(245,158,11,0.15)]">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
@@ -255,11 +248,11 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                         
                         {activeTool === 'editor' ? (
                           <textarea
-                          value={editContent}
-                          onChange={(e) => setEditContent(e.target.value)}
-                          className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] sm:text-[13px] p-4 rounded border border-white/10 focus:border-amber-500/70 outline-none resize-none custom-scrollbar leading-relaxed font-sans"
-                          placeholder="여기에 텍스트를 직접 입력하거나 [ ] 기호로 감싸세요."
-                        />
+                            value={editContent}
+                            onChange={(e) => setEditContent(e.target.value)}
+                            className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] sm:text-[13px] p-4 rounded border border-white/10 focus:border-amber-500/70 outline-none resize-none custom-scrollbar leading-relaxed font-sans"
+                            placeholder="여기에 텍스트를 직접 입력하거나 [ ] 기호로 감싸세요."
+                          />
                         ) : (
                           renderInteractiveText()
                         )}
