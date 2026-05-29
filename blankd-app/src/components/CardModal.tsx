@@ -2,12 +2,11 @@ import React, { useState, useEffect, useRef } from "react";
 import { formatCardText } from "../utils/constants";
 
 // =====================================================================
-// 💡 1. 인라인 빈칸용 초고속 컴포넌트 (반드시 CardModal 바깥에 위치해야 렉이 없습니다!)
+// 💡 1. 인라인 빈칸용 초고속 컴포넌트
 // =====================================================================
 export const FastBlankInput = ({ value, onChange, onEnter }: any) => {
   const [localValue, setLocalValue] = useState(value || "");
 
-  // 외부(부모)에서 정답이 바뀌거나 리셋될 때만 내 화면 동기화
   useEffect(() => {
     setLocalValue(value || "");
   }, [value]);
@@ -17,13 +16,16 @@ export const FastBlankInput = ({ value, onChange, onEnter }: any) => {
       type="text"
       value={localValue}
       onChange={(e) => {
-        setLocalValue(e.target.value); // 타이핑할 땐 내 화면만 즉시 업데이트 (초고속)
+        setLocalValue(e.target.value); // 나 혼자만 변경 (렉 0%)
       }}
-      onBlur={() => onChange(localValue)} // 커서가 빠져나갈 때만 부모에게 데이터 전달
+      onBlur={() => onChange(localValue)}
       onKeyDown={(e) => {
+        if (e.nativeEvent.isComposing) return; // 한글 중복 입력 방지
         if (e.key === 'Enter') {
           onChange(localValue);
-          if (onEnter) onEnter();
+          setTimeout(() => {
+            if (onEnter) onEnter();
+          }, 10);
         }
       }}
       className="bg-transparent border-b-2 border-teal-500/50 text-teal-300 w-16 text-center focus:outline-none focus:border-teal-300 font-bold"
@@ -32,12 +34,11 @@ export const FastBlankInput = ({ value, onChange, onEnter }: any) => {
 };
 
 // =====================================================================
-// 💡 2. 하단 순차 입력창용 초고속 컴포넌트 (반드시 CardModal 바깥에 위치!)
+// 💡 2. 하단 순차 입력창용 초고속 컴포넌트 (🚨 렉의 진짜 주범 해결 완료)
 // =====================================================================
 export const FastSequentialInput = ({ value, onChange, onKeyDown }: any) => {
   const [localValue, setLocalValue] = useState(value || "");
 
-  // 엔터를 쳐서 정답이 제출되고 빈칸으로 초기화될 때 동기화
   useEffect(() => {
     setLocalValue(value || "");
   }, [value]);
@@ -47,12 +48,23 @@ export const FastSequentialInput = ({ value, onChange, onKeyDown }: any) => {
       type="text"
       value={localValue}
       onChange={(e) => {
-        setLocalValue(e.target.value); // 타이핑 렉 원천 차단
-        onChange(e.target.value); // 부모 상태 업데이트
+        setLocalValue(e.target.value); 
+        // 🚨 아뿔싸! 예전 코드에 있던 onChange(e.target.value)를 삭제했습니다!
+        // 부모(App.tsx)를 업데이트하는 코드가 지워졌기 때문에 이제 타자가 즉각적으로 쳐집니다.
       }}
       onKeyDown={(e) => {
-        if (onKeyDown) onKeyDown(e, localValue);
+        if (e.nativeEvent.isComposing) return; // 한글 입력 시 엔터 두 번 실행되는 버그 차단
+        
+        if (e.key === 'Enter') {
+          onChange(localValue); // 엔터를 칠 때 딱 한 번만 부모에게 정답 전달!
+          setTimeout(() => {
+            if (onKeyDown) onKeyDown(e);
+          }, 10); // 부모 상태가 갱신될 시간을 아주 살짝(0.01초) 줍니다.
+        } else {
+          if (onKeyDown) onKeyDown(e);
+        }
       }}
+      onBlur={() => onChange(localValue)}
       placeholder="정답 입력 후 엔터"
       className="w-full text-[13px] sm:text-[14px] bg-transparent text-white outline-none placeholder-white/30"
       autoFocus
@@ -101,12 +113,12 @@ export const CardModal = ({
            </button>
         </div>
 
-        {/* 💡 메인 컨텐츠 (조항 및 빈칸) 렌더링 영역 */}
+        {/* 💡 메인 컨텐츠 렌더링 영역 */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar text-white/80 leading-relaxed font-sans text-sm sm:text-base">
           {renderContent ? renderContent() : null}
         </div>
 
-        {/* 💡 하단 순차 입력창 (초고속 컴포넌트 적용 완료) */}
+        {/* 💡 하단 순차 입력창 */}
         <div className="p-4 sm:p-6 border-t border-white/10 bg-white/5">
           <div className={`flex items-center gap-3 bg-black/40 border p-3 rounded transition-colors ${
             inputStatus === 'correct' ? 'border-teal-500/50 shadow-[0_0_15px_rgba(20,184,166,0.2)]' :
