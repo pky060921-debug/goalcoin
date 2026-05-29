@@ -11,7 +11,7 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, handleDeleteCard }: any) => {
+export const EnhanceTab = React.memo({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
@@ -307,4 +307,11 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         ))}
     </div>
   );
-};
+// 🚨 기존의 '};' 를 지우고 아래처럼 방어막 조건을 덧붙여서 닫아줍니다!
+}, (prevProps: any, nextProps: any) => {
+  // 💡 마법의 방어막: 타자를 치는 동안에는 뒤에 있는 카드들이 절대 새로고침되지 않도록 막아줍니다.
+  // 오직 카드가 새로 저장되거나, 배열(단수) 모드가 바뀌었을 때만 화면을 다시 그립니다.
+  return prevProps.savedCards === nextProps.savedCards && 
+         prevProps.colCount === nextProps.colCount &&
+         prevProps.viewMode === nextProps.viewMode;
+});
