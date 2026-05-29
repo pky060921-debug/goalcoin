@@ -10,41 +10,6 @@ import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
-// ── 인라인 빈칸 입력 (부모 리렌더링 완전 격리) ──────────────────────────
-const InlineBlankInput = ({ inputStatus, onSubmit }: { inputStatus: string; onSubmit: (val: string) => void }) => {
-  const [val, setVal] = useState('');
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => { ref.current?.focus(); }, []);
-  useEffect(() => { if (inputStatus === 'correct' || inputStatus === 'idle') setVal(''); }, [inputStatus]);
-  return (
-    <input
-      ref={ref}
-      type="text"
-      value={val}
-      autoComplete="off" autoCorrect="off" spellCheck={false} autoCapitalize="none"
-      onChange={(e) => {
-        const v = e.target.value;
-        setVal(v);
-        // 스페이스바 없이 글자만 입력해도 즉시 제출 시도 (onSubmit에서 정답 판별)
-        if (v.length >= 1) onSubmit(v);
-      }}
-      onKeyDown={(e) => {
-        if (e.nativeEvent.isComposing) return;
-        if (e.key === 'Enter') onSubmit(val);
-      }}
-      placeholder="입력..."
-      style={{ width: `${Math.max(60, val.length * 15 + 40)}px`, transition: 'width 0.15s ease' }}
-      className={`inline-block h-7 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-colors duration-150 mx-1 px-1 rounded-t-sm ${
-        inputStatus === 'wrong'
-          ? 'border-red-500 text-red-400 bg-red-900/40'
-          : inputStatus === 'correct'
-          ? 'border-teal-500 text-teal-300 bg-teal-900/20'
-          : 'border-indigo-400 text-amber-300 focus:border-amber-400'
-      }`}
-    />
-  );
-};
-
 class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
   constructor(props: any) { 
     super(props);
@@ -655,7 +620,7 @@ function MainApp() {
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
-{/* 💡 여기서부터 복사해서 기존 <header>를 교체하세요 (빠진 태그 없이 완벽한 전체 코드입니다!) */}
+{/* 💡 여기서부터 복사해서 기존 <header>...</header>가 있던 자리에 붙여넣으세요 */}
       <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
           
@@ -684,12 +649,6 @@ function MainApp() {
                   onClick={() => { 
                     setActiveTab('create'); 
                     setExpandedId(nextCatToCraft.id); 
-                    setTimeout(() => {
-                      const targetElement = document.getElementById(`category-${nextCatToCraft.id}`);
-                      if (targetElement) {
-                        targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                      }
-                    }, 500);
                   }}
                   className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
                 >
@@ -704,10 +663,7 @@ function MainApp() {
 
               {nextStudyCard ? (
                 <button 
-                  onClick={() => { 
-                    setActiveTab('enhance'); // 💡 탭을 먼저 채우기 화면으로 이동
-                    setTimeout(() => setActiveCard(nextStudyCard), 150); // 💡 모달창 띄우기
-                  }}
+                  onClick={() => { setActiveCard(nextStudyCard); }}
                   className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
                 >
                   <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span>
@@ -719,7 +675,6 @@ function MainApp() {
                 <div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 완료</div>
               )}
             </div>
-
             {/* 구분선 */}
             <div className="h-5 sm:h-6 w-px bg-white/10 shrink-0 hidden sm:block"></div>
 
@@ -744,7 +699,7 @@ function MainApp() {
         </div>
       </header>
       {/* 💡 여기까지 복사! (이 아래의 <nav> 부분은 그대로 두시면 됩니다.) */}
-      
+
       {/* 💡 한 줄 아래로 독립적으로 분리된 탭 네비게이션 바 */}
       {isLoggedIn && (
         <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
@@ -939,10 +894,34 @@ function MainApp() {
                     }
                     else if (isCurrent) {
                       contentToRender.push(
-                        <InlineBlankInput
+                        <input 
                           key={i}
-                          inputStatus={inputStatus}
-                          onSubmit={(val: string) => handleSequentialInput(val)}
+                          autoFocus
+                          value={answerInput}
+                          // 💡 1. 키보드의 쓸데없는 개입 완벽 차단!
+                          autoComplete="off"
+                          autoCorrect="off"
+                          spellCheck="false"
+                          autoCapitalize="none"
+                          
+                          // 💡 2. 한글 조합 중(글자 아래 밑줄)일 때는 정답 제출이나 렌더링이 꼬이지 않게 방어!
+                          onCompositionStart={(e) => { e.currentTarget.dataset.composing = "true"; }}
+                          onCompositionEnd={(e) => { e.currentTarget.dataset.composing = "false"; }}
+                          
+                          onChange={(e) => setAnswerInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            // 조합 중이 아닐 때만 엔터키 허용
+                            if(e.key === 'Enter' && e.currentTarget.dataset.composing !== "true") {
+                               handleSequentialInput(e.currentTarget.value);
+                            }
+                          }}
+                          placeholder="입력..."
+                          style={{ width: `${Math.max(60, answerInput.length * 15 + 40)}px` }}
+                          className={`inline-block h-6 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-all mx-1 px-1 rounded-t-sm ${
+                            inputStatus === 'wrong' 
+                              ? 'border-red-500 text-red-400 bg-red-900/40 animate-shake' 
+                              : 'border-indigo-400 text-amber-300 focus:border-amber-400'
+                          }`}
                         />
                       );
                     }
