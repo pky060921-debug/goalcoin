@@ -109,40 +109,27 @@ function MainApp() {
     localStorage.setItem('blankd_active_tab', activeTab);
   }, [activeTab]);
 
-  // 💡 DB에서 가져온 최근 학습 카드 정보를 담을 상태 정의
+    // 💡 DB에서 최근 학습 카드 정보를 가져와 담아둘 바구니(State)
   const [recentDbCard, setRecentDbCard] = useState<{ id: string; title: string } | null>(null);
 
-  // 💡 앱 초기 구동 시 DB에서 최근 학습 기록을 가져오는 함수 (오류 진단 포함)
+  // 💡 앱이 켜질 때 DB에서 기록을 가져옵니다.
   useEffect(() => {
+    if (!safeAddress) return;
     const fetchRecentCardFromDb = async () => {
       try {
-        addLog("🔄 DB로부터 최근 학습 기록 조회를 시도합니다...");
-        
-        // 백엔드 엔드포인트(예: /api/user/recent-progress) 호출
-        const response = await api.get("/user/recent-progress");
-        
-        if (response && response.data) {
-          const { card_id, card_title } = response.data;
-          
-          if (card_id) {
-            setRecentDbCard({ id: String(card_id), title: card_title });
-            addLog(`✅ DB 최근 기록 로드 성공: [ID: ${card_id}] ${card_title}`);
-          } else {
-            addLog("ℹ️ DB에 저장된 최근 학습 기록이 비어있습니다.");
+        const res = await fetch(`https://api.blankd.top/api/recent-progress?wallet_address=${safeAddress}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.card_id) {
+            setRecentDbCard({ id: String(data.card_id), title: data.card_title });
           }
         }
-      } catch (error: any) {
-        // 🚨 오류 진단 및 로깅 코드
-        console.error("최근 학습 기록 DB 조회 실패:", error);
-        addLog(`❌ [오류 진단] DB 조회 실패: ${error.message || "네트워크 상태 또는 토큰 만료를 확인하세요."}`);
+      } catch (error) {
+        console.error("DB 조회 실패:", error);
       }
     };
-
-    // 구글 로그인이 완료되거나 세션이 유효할 때 호출되도록 설정
     fetchRecentCardFromDb();
-  }, [savedCards]); // savedCards 로드 완료 시점 연동
-
-
+  }, [safeAddress]);
   
   const [categories, setCategories] = useState<any[]>([]);
   const [savedCards, setSavedCards] = useState<any[]>([]);
@@ -689,23 +676,25 @@ function MainApp() {
     });
   }
   
-  if (isLoggedIn && savedCards.length > 0) {
+    if (isLoggedIn && savedCards.length > 0) {
     const cardsWithStatus = savedCards.map(c => {
        const { body } = formatCardText(c.content);
        const blanksCount = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
        const stats = parseCardStats(c.memo);
        return { ...c, totalBlanks: blanksCount, filled: stats.filled, wrongCount: stats.wrongIndices.length };
     }).sort((a, b) => a.id - b.id);
-
-    // 💡 로컬 스토리지를 버리고, DB에서 가져와 담아둔 바구니(recentDbCard) 안의 ID를 확인합니다.
-  const recentId = recentDbCard ? recentDbCard.id : null;
-  const recentCard = recentId ? cardsWithStatus.find(c => String(c.id) === String(recentId)) : null;
+    
+    // 💡 DB 바구니(recentDbCard)에 담긴 ID를 먼저 확인합니다.
+    const recentId = recentDbCard ? recentDbCard.id : null;
+    const recentCard = recentId ? cardsWithStatus.find(c => String(c.id) === String(recentId)) : null;
 
     nextStudyCard = recentCard
                  || cardsWithStatus.find(c => c.filled > 0 && c.filled < c.totalBlanks) 
                  || cardsWithStatus.find(c => c.filled === 0 && c.totalBlanks > 0)
                  || cardsWithStatus.find(c => c.wrongCount > 0)
                  || cardsWithStatus[0];
+  }
+
 
   // renderContent를 useCallback으로 메모이제이션 (Hook 규칙: return 전에 선언)
   const renderContent = React.useCallback(() => {
