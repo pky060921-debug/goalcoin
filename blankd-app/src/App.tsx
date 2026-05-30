@@ -1047,7 +1047,7 @@ function MainApp() {
       )}
     </div>
   );
-};
+}
   
 export default function App() { 
   return <MainApp />; 
