@@ -590,64 +590,49 @@ function MainApp() {
   // ?? [추가] 합격률 로직: 최소 회독수 1회당 2%씩 상승 (최대 100%)
   const passProbability = Math.min(minFilledCount * 2, 100);
 
-  let nextStudyCard = null;
-  let nextCatToCraft = null;
+    // 💡 [렉 완전 박멸] 1초마다 돌아가는 타이머나 키보드 입력에 의해 무거운 연산이 반복되지 않도록 완벽히 가둡니다.
+  const { nextCatToCraft, nextStudyCard } = useMemo(() => {
+    let craftTarget = null;
+    let studyTarget = null;
 
-  // 1. [기존 로직 유지] '만들기' 상단 버튼: 아직 안 만든 조항 찾기
-  if (isLoggedIn && categories.length > 0) {
-    const craftedOrigIds = new Set();
-    const craftedTitles: string[] = []; 
+    if (!isLoggedIn) return { nextCatToCraft: null, nextStudyCard: null };
 
-    // ?? 괄호(목적 등)와 특수문자를 완전히 날리는 정밀 필터 함수
-    const cleanText = (text: string) => {
-       if (!text) return "";
-       const noBrackets = text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '');
-       return noBrackets.replace(/[^가-힣a-zA-Z0-9一-龥]/g, '');
-    };
+    // 1. 만들기 상단 버튼 로직 (괄호 날리기 및 필터링)
+    if (categories && categories.length > 0) {
+      const craftedOrigIds = new Set();
+      const craftedTitles: string[] = [];
+      const cleanText = (text: string) => text ? text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '').replace(/[^가-힣a-zA-Z0-9一-龥]/g, '') : "";
 
-    savedCards.forEach((c: any) => {
-      const match = c.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
-      if (match) craftedOrigIds.add(parseInt(match[1], 10));
-      
-      const firstLine = c.content.split('\n')[0];
-      if (firstLine) {
-        craftedTitles.push(cleanText(firstLine));
-      }
-    });
+      savedCards.forEach((c: any) => {
+        const match = c.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
+        if (match) craftedOrigIds.add(parseInt(match[1], 10));
+        const firstLine = c.content.split('\n')[0];
+        if (firstLine) craftedTitles.push(cleanText(firstLine));
+      });
 
-    const sortedCats = [...categories].sort((a: any, b: any) => a.id - b.id);
-    
-    nextCatToCraft = sortedCats.find((cat: any) => {
-      const isIdCrafted = craftedOrigIds.has(cat.id);
-      const cleanCatTitle = cleanText(cat.title || "");
-      
-      const isTitleCrafted = cleanCatTitle 
-         ? craftedTitles.some(title => title === cleanCatTitle || title.endsWith(cleanCatTitle))
-         : false;
-      
-      return !isIdCrafted && !isTitleCrafted;
-    });
-  }
+      const sortedCats = [...categories].sort((a: any, b: any) => a.id - b.id);
+      craftTarget = sortedCats.find((cat: any) => {
+        const cleanTitle = cleanText(cat.title || "");
+        return !craftedOrigIds.has(cat.id) && !(cleanTitle && craftedTitles.some(t => t === cleanTitle || t.endsWith(cleanTitle)));
+      });
+    }
 
-  // 2. 💡 [신규 로직 추가] '채우기' 상단 버튼: 1조부터 + 최소 반복 횟수 찾기
-  if (isLoggedIn && savedCards.length > 0) {
-    // 카드를 1조부터 순서대로 정렬하고, 각 카드의 학습 반복 횟수를 추출합니다.
-    const cardsWithStatus = savedCards.map(c => {
-       const stats = parseCardStats(c.memo);
-       const origId = parseInt((c.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || c.id, 10);
-       return { 
-         ...c, 
-         repetitions: stats.filled || 0, // 학습 횟수 (0번이면 0)
-         origId 
-       };
-    }).sort((a, b) => a.origId - b.origId); // 무조건 1조부터 오름차순 정렬
+    // 2. 채우기 상단 버튼 로직 (순서대로 1조부터 + 최소 반복 횟수)
+    if (savedCards && savedCards.length > 0) {
+      const cardsWithStatus = savedCards.map(c => {
+         const stats = parseCardStats(c.memo);
+         const origId = parseInt((c.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || c.id, 10);
+         return { ...c, repetitions: stats.filled || 0, origId };
+      }).sort((a, b) => a.origId - b.origId);
 
-    // 전체 카드 중 가장 적게 학습한 횟수를 찾습니다.
-    const minReps = Math.min(...cardsWithStatus.map(c => c.repetitions));
+      const minReps = Math.min(...cardsWithStatus.map(c => c.repetitions));
+      studyTarget = cardsWithStatus.find(c => c.repetitions === minReps) || cardsWithStatus[0];
+    }
 
-    // 1조부터 내려가면서 최소 학습 횟수와 일치하는 첫 번째 조항을 상단에 띄웁니다.
-    nextStudyCard = cardsWithStatus.find(c => c.repetitions === minReps) || cardsWithStatus[0];
-  }
+    // 계산이 완료된 결과만 내보냅니다.
+    return { nextCatToCraft: craftTarget, nextStudyCard: studyTarget };
+  }, [isLoggedIn, categories, savedCards]); 
+  // 💡 [핵심] 오직 '카드 목록'이 업데이트될 때만 단 1번 연산됩니다. 타자를 칠 때는 절대 실행되지 않습니다!
 
   // renderContent를 useCallback으로 메모이제이션 (Hook 규칙: return 전에 선언)
   const renderContent = React.useCallback(() => {
