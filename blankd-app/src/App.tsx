@@ -409,6 +409,16 @@ function MainApp() {
 
     localStorage.removeItem(`blankd_progress_${currentId}`);
 
+    const currentId = activeCard.id; // 현재 카드 ID
+    const currentTitle = getStrictTitleOnly(activeCard.content); // 💡 아키님께서 원하시는 카드 제목 추출!
+    
+    // 💡 [추가] 학습 완료 시점에 최근 학습 기록을 영구 저장
+    localStorage.setItem('last_learned_card_id', currentId);
+    localStorage.setItem('last_learned_card_title', currentTitle);
+
+    const nextCard = folderCards[currentIdx + 1] || null;
+    localStorage.removeItem(`blankd_progress_${currentId}`);
+    
     setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     
