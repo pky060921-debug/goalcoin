@@ -147,6 +147,16 @@ function MainApp() {
 
   useEffect(() => { document.title = "BlankD | 인지 과학 기반 학습"; }, []);
 
+  // 💡 App.tsx 내부의 적절한 useEffect 모음 구역에 추가하세요.
+  useEffect(() => {
+    if (activeCard) {
+      // 카드가 활성화되는 순간, 정확한 법령 제목(예: 제69조 보험료 등)을 추출하여 기록합니다.
+      const currentTitle = getStrictTitleOnly(activeCard.content);
+      localStorage.setItem('recent_enhance_id', activeCard.id);
+      localStorage.setItem('recent_enhance_title', currentTitle);
+    }
+  }, [activeCard]);
+
   useEffect(() => {
     if (window.location.hash) {
       enokiFlow.handleAuthCallback().then(() => { 
