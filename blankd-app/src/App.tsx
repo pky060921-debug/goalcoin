@@ -109,6 +109,41 @@ function MainApp() {
     localStorage.setItem('blankd_active_tab', activeTab);
   }, [activeTab]);
 
+  // 💡 DB에서 가져온 최근 학습 카드 정보를 담을 상태 정의
+  const [recentDbCard, setRecentDbCard] = useState<{ id: string; title: string } | null>(null);
+
+  // 💡 앱 초기 구동 시 DB에서 최근 학습 기록을 가져오는 함수 (오류 진단 포함)
+  useEffect(() => {
+    const fetchRecentCardFromDb = async () => {
+      try {
+        addLog("🔄 DB로부터 최근 학습 기록 조회를 시도합니다...");
+        
+        // 백엔드 엔드포인트(예: /api/user/recent-progress) 호출
+        const response = await api.get("/user/recent-progress");
+        
+        if (response && response.data) {
+          const { card_id, card_title } = response.data;
+          
+          if (card_id) {
+            setRecentDbCard({ id: String(card_id), title: card_title });
+            addLog(`✅ DB 최근 기록 로드 성공: [ID: ${card_id}] ${card_title}`);
+          } else {
+            addLog("ℹ️ DB에 저장된 최근 학습 기록이 비어있습니다.");
+          }
+        }
+      } catch (error: any) {
+        // 🚨 오류 진단 및 로깅 코드
+        console.error("최근 학습 기록 DB 조회 실패:", error);
+        addLog(`❌ [오류 진단] DB 조회 실패: ${error.message || "네트워크 상태 또는 토큰 만료를 확인하세요."}`);
+      }
+    };
+
+    // 구글 로그인이 완료되거나 세션이 유효할 때 호출되도록 설정
+    fetchRecentCardFromDb();
+  }, [savedCards]); // savedCards 로드 완료 시점 연동
+
+
+  
   const [categories, setCategories] = useState<any[]>([]);
   const [savedCards, setSavedCards] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
@@ -415,8 +450,34 @@ function MainApp() {
         return origIdA - origIdB;
     });
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
-    const nextCard = folderCards[currentIdx + 1] || null;
+    const currentTitle = getStrictTitleOnly(activeCard.content);
 
+    // 💡 [DB 교체] 로컬스토리지 대신 서버 DB에 최근 학습 기록 영구 저장 (오류 진단 포함)
+    const saveProgressToDb = async () => {
+      try {
+        addLog(`📤 카드 [ID: ${currentId}] 상태를 DB에 동기화 중...`);
+        
+        await api.post("/user/recent-progress", {
+          card_id: currentId,
+          card_title: currentTitle,
+          updated_at: new Date().toISOString()
+        });
+        
+        // 프론트엔드 상태도 즉시 동기화하여 UI 반영
+        setRecentDbCard({ id: String(currentId), title: currentTitle });
+        addLog("✅ 최근 학습 기록이 DB에 성공적으로 저장되었습니다.");
+      } catch (error: any) {
+        // 🚨 오류 진단 및 로깅 코드
+        console.error("DB 학습 기록 저장 실패:", error);
+        addLog(`❌ [오류 진단] DB 저장 실패: ${error.message || "서버 백엔드(app.py)의 앤드포인트 설정을 확인하세요."}`);
+      }
+    };
+    
+    // 비동기 저장 함수 실행
+    saveProgressToDb();
+
+    // 다음 카드 지정 및 진행도 초기화 (기존 로직 유지)
+    const nextCard = folderCards[currentIdx + 1] || null;
     localStorage.removeItem(`blankd_progress_${currentId}`);
 
     setActiveCard(nextCard);
@@ -425,7 +486,6 @@ function MainApp() {
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
     
-    // 로그 문구 추가 수정
     addLog(`? 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
     flushQueue();
   };
