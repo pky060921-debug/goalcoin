@@ -378,10 +378,11 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // ?? [수정] 복습 주기 자율 선택 기능을 위해 customDays 매개변수를 추가했습니다.
+    // ?? [수정] 복습 주기 자율 선택 기능을 위해 customDays 매개변수를 추가했습니다.
   const finishCard = (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
+    
     const currentId = activeCard.id;
     const currentFolder = activeCard.folder_name;
     const finalTime = elapsed;
@@ -391,7 +392,7 @@ function MainApp() {
 
     let daysInterval = customDays;
     
-    // 자동 계산 (직접 선택하지 않은 경우)
+    // 1. 복습 주기(SMART) 알고리즘 계산
     if (daysInterval === undefined) {
       const wrongCount = wrongArr.length;
       const totalBlanks = blanks.length;
@@ -416,7 +417,7 @@ function MainApp() {
         else daysInterval = Math.ceil((currentRepetitions - 1) * easiness);
       }
     } else {
-      // ?? [추가] 사용자가 복습 주기를 강제 지정한 경우에도 알고리즘 난이도는 내부적으로 보정
+      // 사용자가 복습 주기를 강제 지정한 경우 내부 난이도 보정
       let quality = 3;
       if (daysInterval === 1) quality = 1;
       else if (daysInterval === 4) quality = 2;
@@ -428,50 +429,52 @@ function MainApp() {
       localStorage.setItem(`blankd_factor_${currentId}`, easiness.toString());
     }
 
+    // 2. 다음 복습일 계산
     const nextReviewDate = new Date();
-    nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
+    nextReviewDate.setDate(nextReviewDate.getDate() + (daysInterval || 1));
 
+    // 3. 같은 폴더 내 다음 카드 찾기 (ORIG_ID 기준으로 정렬)
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
         const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
         const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
         return origIdA - origIdB;
     });
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
-    const currentTitle = getStrictTitleOnly(activeCard.content);
+    const nextCard = folderCards[currentIdx + 1] || null;
 
-    // 💡 [DB 교체] 로컬스토리지 대신 서버 DB에 최근 학습 기록 영구 저장 (오류 진단 포함)
+    // 4. 💡 최근 학습 기록 DB 연동 및 전역 상태 업데이트
+    const currentTitle = getStrictTitleOnly(activeCard.content);
     const saveProgressToDb = async () => {
       try {
         addLog(`📤 카드 [ID: ${currentId}] 상태를 DB에 동기화 중...`);
-        
         await api.post("/user/recent-progress", {
           card_id: currentId,
           card_title: currentTitle,
           updated_at: new Date().toISOString()
         });
         
-        // 프론트엔드 상태도 즉시 동기화하여 UI 반영
+        // 상단 바 UI를 즉시 바꾸기 위해 상태(State) 업데이트
         setRecentDbCard({ id: String(currentId), title: currentTitle });
         addLog("✅ 최근 학습 기록이 DB에 성공적으로 저장되었습니다.");
       } catch (error: any) {
-        // 🚨 오류 진단 및 로깅 코드
         console.error("DB 학습 기록 저장 실패:", error);
-        addLog(`❌ [오류 진단] DB 저장 실패: ${error.message || "서버 백엔드(app.py)의 앤드포인트 설정을 확인하세요."}`);
+        addLog(`❌ DB 저장 실패: 백엔드 설정을 확인하세요.`);
       }
     };
-    
-    // 비동기 저장 함수 실행
-    saveProgressToDb();
+    saveProgressToDb(); // 비동기 함수 실행
 
-    // 다음 카드 지정 및 진행도 초기화 (기존 로직 유지)
-    const nextCard = folderCards[currentIdx + 1] || null;
+    // 5. 프론트엔드 상태 변경 및 큐(Queue) 처리
     localStorage.removeItem(`blankd_progress_${currentId}`);
-
     setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
-    pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
+    pushToQueue('ANSWER', { 
+      card_id: currentId, 
+      is_correct: isCorrect, 
+      clear_time: finalTime, 
+      next_review: nextReviewDate.toISOString() 
+    });
     
     addLog(`? 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
     flushQueue();
