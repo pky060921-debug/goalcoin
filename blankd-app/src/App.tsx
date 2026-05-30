@@ -697,12 +697,10 @@ function MainApp() {
        return { ...c, totalBlanks: blanksCount, filled: stats.filled, wrongCount: stats.wrongIndices.length };
     }).sort((a, b) => a.id - b.id);
 
-    // 💡 0순위: 우리가 로컬 스토리지에 정성껏 저장해 둔 '진짜 최근 학습 카드 ID'를 찾습니다.
-    const recentId = localStorage.getItem('recent_enhance_id') || localStorage.getItem('last_learned_card_id');
-    // ID 타입(문자/숫자) 충돌을 막기 위해 String으로 변환해서 비교합니다.
-    const recentCard = recentId ? cardsWithStatus.find(c => String(c.id) === String(recentId)) : null;
+    // 💡 로컬 스토리지를 버리고, DB에서 가져와 담아둔 바구니(recentDbCard) 안의 ID를 확인합니다.
+  const recentId = recentDbCard ? recentDbCard.id : null;
+  const recentCard = recentId ? cardsWithStatus.find(c => String(c.id) === String(recentId)) : null;
 
-    // 💡 1순위: 방금 본 그 카드! (없으면 2순위: 풀다 만 것 -> 3순위: 안 푼 것 -> 4순위: 오답)
     nextStudyCard = recentCard
                  || cardsWithStatus.find(c => c.filled > 0 && c.filled < c.totalBlanks) 
                  || cardsWithStatus.find(c => c.filled === 0 && c.totalBlanks > 0)
