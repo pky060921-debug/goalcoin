@@ -28,17 +28,19 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected }: {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVal = e.target.value;
-    // 💡 1. 오직 입력창 내부의 로컬 상태만 변경합니다. (부모 컴포넌트는 전혀 모름 = 리렌더링 0%)
     setVal(newVal);
 
-    // 💡 2. 부모에게는 "정답과 완벽히 일치할 때"만 신호를 보냅니다. (불필요한 오답 검사 방지)
-    if (newVal.trim() === expected) {
+    // 💡 [핵심 수정] 사용자가 친 글자와 정답에서 모든 띄어쓰기를 완전히 제거합니다.
+    const cleanInput = newVal.replace(/\s+/g, '').toLowerCase();
+    const cleanExpected = expected.replace(/\s+/g, '').toLowerCase();
+
+    // 💡 띄어쓰기를 뺀 진짜 알맹이 글자만 똑같다면 즉시 정답으로 처리하여 부모에게 보냅니다.
+    if (cleanInput === cleanExpected) {
       onSubmit(newVal);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // 엔터키를 쳤을 때만 강제로 부모에게 검사를 요청합니다.
     if (e.key === 'Enter') {
       onSubmit(val);
     }
@@ -60,9 +62,6 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected }: {
     />
   );
 }, (prevProps, nextProps) => {
-  // 💡 3. 철통 방어막 (React.memo 비교 함수)
-  // 부모 컴포넌트(App.tsx)에서 타이머가 1초마다 바뀌든 말든, 
-  // 입력창의 상태(틀렸는지 맞았는지)가 변하지 않았다면 절대 리렌더링을 허용하지 않습니다.
   return prevProps.inputStatus === nextProps.inputStatus && prevProps.expected === nextProps.expected;
 });
 
