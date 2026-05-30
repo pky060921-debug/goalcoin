@@ -637,13 +637,17 @@ function MainApp() {
        return { ...c, totalBlanks: blanksCount, filled: stats.filled, wrongCount: stats.wrongIndices.length };
     }).sort((a, b) => a.id - b.id);
 
-    // 1순위: 풀다 만 것, 2순위: 안 푼 것, 3순위: 오답 있는 것
-    nextStudyCard = cardsWithStatus.find(c => c.filled > 0 && c.filled < c.totalBlanks) 
+    // 💡 0순위: 우리가 로컬 스토리지에 정성껏 저장해 둔 '진짜 최근 학습 카드 ID'를 찾습니다.
+    const recentId = localStorage.getItem('recent_enhance_id') || localStorage.getItem('last_learned_card_id');
+    // ID 타입(문자/숫자) 충돌을 막기 위해 String으로 변환해서 비교합니다.
+    const recentCard = recentId ? cardsWithStatus.find(c => String(c.id) === String(recentId)) : null;
+
+    // 💡 1순위: 방금 본 그 카드! (없으면 2순위: 풀다 만 것 -> 3순위: 안 푼 것 -> 4순위: 오답)
+    nextStudyCard = recentCard
+                 || cardsWithStatus.find(c => c.filled > 0 && c.filled < c.totalBlanks) 
                  || cardsWithStatus.find(c => c.filled === 0 && c.totalBlanks > 0)
                  || cardsWithStatus.find(c => c.wrongCount > 0)
                  || cardsWithStatus[0];
-  }
-  // ▲▲▲▲▲▲▲▲▲ 여기까지 추가 ▲▲▲▲▲▲▲▲▲
 
   // renderContent를 useCallback으로 메모이제이션 (Hook 규칙: return 전에 선언)
   const renderContent = React.useCallback(() => {
