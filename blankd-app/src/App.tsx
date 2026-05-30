@@ -1047,6 +1047,9 @@ function MainApp() {
       )}
     </div>
   );
-}
+}; // 💡 1. MainApp 함수를 닫는 이 중괄호와 세미콜론이 빠져있을 것입니다! 여기에 추가해 주세요.
 
-export default function App() { return <MainApp />; }
+// 💡 2. 그 다음에 export가 와야 정상적으로 작동합니다.
+export default function App() { 
+  return <MainApp />; 
+}
