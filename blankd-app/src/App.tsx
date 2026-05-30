@@ -109,28 +109,6 @@ function MainApp() {
     localStorage.setItem('blankd_active_tab', activeTab);
   }, [activeTab]);
 
-    // 💡 DB에서 최근 학습 카드 정보를 가져와 담아둘 바구니(State)
-  const [recentDbCard, setRecentDbCard] = useState<{ id: string; title: string } | null>(null);
-
-  // 💡 앱이 켜질 때 DB에서 기록을 가져옵니다.
-  useEffect(() => {
-    if (!safeAddress) return;
-    const fetchRecentCardFromDb = async () => {
-      try {
-        const res = await fetch(`https://api.blankd.top/api/recent-progress?wallet_address=${safeAddress}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.card_id) {
-            setRecentDbCard({ id: String(data.card_id), title: data.card_title });
-          }
-        }
-      } catch (error) {
-        console.error("DB 조회 실패:", error);
-      }
-    };
-    fetchRecentCardFromDb();
-  }, [safeAddress]);
-  
   const [categories, setCategories] = useState<any[]>([]);
   const [savedCards, setSavedCards] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
@@ -168,16 +146,6 @@ function MainApp() {
   const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-40));
 
   useEffect(() => { document.title = "BlankD | 인지 과학 기반 학습"; }, []);
-
-  // 💡 App.tsx 내부의 적절한 useEffect 모음 구역에 추가하세요.
-  useEffect(() => {
-    if (activeCard) {
-      // 카드가 활성화되는 순간, 정확한 법령 제목(예: 제69조 보험료 등)을 추출하여 기록합니다.
-      const currentTitle = getStrictTitleOnly(activeCard.content);
-      localStorage.setItem('recent_enhance_id', activeCard.id);
-      localStorage.setItem('recent_enhance_title', currentTitle);
-    }
-  }, [activeCard]);
 
   useEffect(() => {
     if (window.location.hash) {
@@ -378,11 +346,10 @@ function MainApp() {
     }
   }, [activeCard]);
 
-    // ?? [수정] 복습 주기 자율 선택 기능을 위해 customDays 매개변수를 추가했습니다.
+  // ?? [수정] 복습 주기 자율 선택 기능을 위해 customDays 매개변수를 추가했습니다.
   const finishCard = (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
-    
     const currentId = activeCard.id;
     const currentFolder = activeCard.folder_name;
     const finalTime = elapsed;
@@ -392,7 +359,7 @@ function MainApp() {
 
     let daysInterval = customDays;
     
-    // 1. 복습 주기(SMART) 알고리즘 계산
+    // 자동 계산 (직접 선택하지 않은 경우)
     if (daysInterval === undefined) {
       const wrongCount = wrongArr.length;
       const totalBlanks = blanks.length;
@@ -417,7 +384,7 @@ function MainApp() {
         else daysInterval = Math.ceil((currentRepetitions - 1) * easiness);
       }
     } else {
-      // 사용자가 복습 주기를 강제 지정한 경우 내부 난이도 보정
+      // ?? [추가] 사용자가 복습 주기를 강제 지정한 경우에도 알고리즘 난이도는 내부적으로 보정
       let quality = 3;
       if (daysInterval === 1) quality = 1;
       else if (daysInterval === 4) quality = 2;
@@ -429,11 +396,9 @@ function MainApp() {
       localStorage.setItem(`blankd_factor_${currentId}`, easiness.toString());
     }
 
-    // 2. 다음 복습일 계산
     const nextReviewDate = new Date();
-    nextReviewDate.setDate(nextReviewDate.getDate() + (daysInterval || 1));
+    nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
 
-    // 3. 같은 폴더 내 다음 카드 찾기 (ORIG_ID 기준으로 정렬)
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
         const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
         const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
@@ -442,40 +407,15 @@ function MainApp() {
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
     const nextCard = folderCards[currentIdx + 1] || null;
 
-    // 4. 💡 최근 학습 기록 DB 연동 및 전역 상태 업데이트
-    const currentTitle = getStrictTitleOnly(activeCard.content);
-    const saveProgressToDb = async () => {
-      try {
-        addLog(`📤 카드 [ID: ${currentId}] 상태를 DB에 동기화 중...`);
-        await api.post("/user/recent-progress", {
-          card_id: currentId,
-          card_title: currentTitle,
-          updated_at: new Date().toISOString()
-        });
-        
-        // 상단 바 UI를 즉시 바꾸기 위해 상태(State) 업데이트
-        setRecentDbCard({ id: String(currentId), title: currentTitle });
-        addLog("✅ 최근 학습 기록이 DB에 성공적으로 저장되었습니다.");
-      } catch (error: any) {
-        console.error("DB 학습 기록 저장 실패:", error);
-        addLog(`❌ DB 저장 실패: 백엔드 설정을 확인하세요.`);
-      }
-    };
-    saveProgressToDb(); // 비동기 함수 실행
-
-    // 5. 프론트엔드 상태 변경 및 큐(Queue) 처리
     localStorage.removeItem(`blankd_progress_${currentId}`);
+
     setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
-    pushToQueue('ANSWER', { 
-      card_id: currentId, 
-      is_correct: isCorrect, 
-      clear_time: finalTime, 
-      next_review: nextReviewDate.toISOString() 
-    });
+    pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
     
+    // 로그 문구 추가 수정
     addLog(`? 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
     flushQueue();
   };
@@ -679,25 +619,21 @@ function MainApp() {
     });
   }
   
-    if (isLoggedIn && savedCards.length > 0) {
+  if (isLoggedIn && savedCards.length > 0) {
     const cardsWithStatus = savedCards.map(c => {
        const { body } = formatCardText(c.content);
        const blanksCount = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
        const stats = parseCardStats(c.memo);
        return { ...c, totalBlanks: blanksCount, filled: stats.filled, wrongCount: stats.wrongIndices.length };
     }).sort((a, b) => a.id - b.id);
-    
-    // 💡 DB 바구니(recentDbCard)에 담긴 ID를 먼저 확인합니다.
-    const recentId = recentDbCard ? recentDbCard.id : null;
-    const recentCard = recentId ? cardsWithStatus.find(c => String(c.id) === String(recentId)) : null;
 
-    nextStudyCard = recentCard
-                 || cardsWithStatus.find(c => c.filled > 0 && c.filled < c.totalBlanks) 
+    // 1순위: 풀다 만 것, 2순위: 안 푼 것, 3순위: 오답 있는 것
+    nextStudyCard = cardsWithStatus.find(c => c.filled > 0 && c.filled < c.totalBlanks) 
                  || cardsWithStatus.find(c => c.filled === 0 && c.totalBlanks > 0)
                  || cardsWithStatus.find(c => c.wrongCount > 0)
                  || cardsWithStatus[0];
   }
-
+  // ▲▲▲▲▲▲▲▲▲ 여기까지 추가 ▲▲▲▲▲▲▲▲▲
 
   // renderContent를 useCallback으로 메모이제이션 (Hook 규칙: return 전에 선언)
   const renderContent = React.useCallback(() => {
@@ -1040,7 +976,5 @@ function MainApp() {
     </div>
   );
 }
-  
-export default function App() { 
-  return <MainApp />; 
-}
+
+export default function App() { return <MainApp />; }
