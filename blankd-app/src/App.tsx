@@ -405,14 +405,8 @@ function MainApp() {
         return origIdA - origIdB;
     });
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
-    const nextCard = folderCards[currentIdx + 1] || null;
-
-    localStorage.removeItem(`blankd_progress_${currentId}`);
-
-    const currentId = activeCard.id; // 현재 카드 ID
-    // 💡 여기서부터 복사해서 기존 하단부 코드와 통째로 교체하세요!
     
-    // 1. 최근 학습 기록 저장 (이미 currentId가 있다면 그대로 사용)
+    // 1. 최근 학습 기록 저장 (이미 currentId가 상단에 있으므로 그대로 사용)
     const currentTitle = getStrictTitleOnly(activeCard.content);
     localStorage.setItem('last_learned_card_id', currentId);
     localStorage.setItem('last_learned_card_title', currentTitle);
@@ -432,13 +426,6 @@ function MainApp() {
     addLog(`? 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
     flushQueue();
   }; // <- finishCard 함수 끝나는 괄호
-
-  // ?? [추가] 카드 모달에서 복습 주기 버튼(1일, 4일, 7일, 14일)을 눌렀을 때 실행되는 함수
-  const handleReviewSelect = (days: number) => {
-    if (!activeCard) return;
-    statsRef.current.filled += 1;
-    finishCard(days);
-  };
 
   const handleCloseModal = () => {
     if (isClosingRef.current || !activeCard) return;
