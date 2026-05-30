@@ -721,9 +721,15 @@ function MainApp() {
           >
             {isListening ? '음성 인식 끄기 (활성화됨)' : '음성으로 입력 (계속 켜두기)'}
           </button>
-          <button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
-            정답 보기 (오답 처리)
-          </button>
+          
+            <button 
+              id="show-answer-btn" // 💡 이 이름표가 있어야 엔터키 단축키가 작동합니다!
+              onClick={handleShowAnswer} 
+              className="px-3 py-1.5 bg-red-900/30 text-red-400 border ..."
+            >
+              정답 보기 (오답 처리)
+            </button>
+
         </div>
         {isMemoOpen && (
           <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
