@@ -699,6 +699,7 @@ function MainApp() {
         bIdx++;
       }
     });
+    
     return (
       <div className="flex flex-col gap-6 w-full">
         <div className="flex justify-between items-center border-b border-white/10 pb-2">
@@ -741,6 +742,33 @@ function MainApp() {
       </div>
     );
   }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening]);
+    // 💡 [궁극의 최적화] 1초 타이머와 상관없이 탭을 한 번 만들어 캐싱(기억)합니다.
+  const memoizedTabs = useMemo(() => {
+    return (
+      <>
+        <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
+          <DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} />
+        </div>
+        
+        <div className={activeTab === 'create' ? 'block' : 'hidden'}>
+          <CraftTab categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} expandedId={expandedId} setExpandedId={setExpandedId} handleDeleteCategory={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} />
+        </div>
+        
+        <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
+          <EnhanceTab categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} handleDeleteCard={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); setActiveCard(null); loadAllData(); } }} />
+        </div>
+        
+        <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
+          <ExamTab walletAddress={safeAddress} address={safeAddress} />
+        </div>
+        
+        <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
+          <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화하시겠습니까?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />
+        </div>
+      </>
+    );
+  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow]); 
+  // 💡 [핵심 방어막] 타이머(elapsed)가 감시 대상에서 빠져 있으므로 1초마다 화면이 새로고침되지 않습니다!
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
@@ -846,94 +874,12 @@ function MainApp() {
           <p className="text-xs sm:text-sm text-white/40 mb-10 sm:mb-12 text-center leading-relaxed">인지 부하 이론 기반의 학습 플랫폼<br/>압도적인 영구 기억을 형성합니다.</p>
           <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-white text-black text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
         </main>
-      ) : (
+            ) : (
         <main className="max-w-6xl mx-auto w-full">
           <ErrorBoundary fallbackLog={addLog}>
             
-            <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
-              <DashboardTab 
-                categories={categories} 
-                savedCards={savedCards} 
-                setActiveTab={setActiveTab}
-                setExpandedId={setExpandedId}
-                setActiveCard={setActiveCard}
-              />
-            </div>
-            
-            <div className={activeTab === 'create' ? 'block' : 'hidden'}>
-              <CraftTab 
-                categories={categories} 
-                savedCards={savedCards} 
-                colCount={colCount} 
-                viewMode={viewMode} 
-                useAiRecommend={useAiRecommend} 
-                safeAddress={safeAddress} 
-                lawFile={lawFile} 
-                setLawFile={setLawFile} 
-                uploadLaw={uploadLaw} 
-                handleMakeBlankCard={handleMakeBlankCard} 
-                handleSplitCategory={handleSplitCategory} 
-                addLog={addLog} 
-                expandedId={expandedId}
-                setExpandedId={setExpandedId}
-                handleDeleteCategory={async (id: number) => {
-                  if(confirm('삭제하시겠습니까?')){
-                    await fetch("https://api.blankd.top/api/delete-category", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ wallet_address: safeAddress, id })
-                    });
-                    loadAllData();
-                  }
-                }} 
-              />
-            </div>
-            
-            <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
-              <EnhanceTab 
-                categories={categories}
-                savedCards={savedCards} 
-                colCount={colCount} 
-                viewMode={viewMode} 
-                setActiveCard={setActiveCard} 
-                setActiveTab={setActiveTab}
-                setExpandedId={setExpandedId}
-                handleDeleteCard={async (id: number) => {
-                  if(confirm('삭제하시겠습니까?')){
-                    await fetch("https://api.blankd.top/api/delete-card", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ wallet_address: safeAddress, id })
-                    });
-                    setActiveCard(null);
-                    loadAllData();
-                  }
-                }} 
-              />
-            </div>
-            
-            <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
-              <ExamTab walletAddress={safeAddress} address={safeAddress} />
-            </div>
-            
-            <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
-              <MypageTab 
-                safeAddress={safeAddress} 
-                enokiFlow={enokiFlow} 
-                useAiRecommend={useAiRecommend} 
-                setUseAiRecommend={setUseAiRecommend} 
-                viewMode={viewMode} 
-                setViewMode={setViewMode} 
-                colCount={colCount} 
-                updateColCount={setColCount} 
-                handleDeleteAll={async () => { 
-                  if(confirm('전체 초기화하시겠습니까?')) { 
-                    await api.deleteAll(safeAddress);
-                    loadAllData();
-                  } 
-                }} 
-              />
-            </div>
+            {/* 💡 1단계에서 만들어둔 투명 망토(캐싱) 탭을 여기서 불러옵니다. */}
+            {memoizedTabs}
 
           </ErrorBoundary>
         </main>
