@@ -1,4 +1,4 @@
-import React, { useState, useEffect, Component, ReactNode, useRef } from "react";
+import React, { useState, useEffect, Component, ReactNode, useRef, useMemo } from "react";
 import { useCurrentAccount } from "@mysten/dapp-kit";
 import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
 import { api } from "./services/api";
@@ -580,10 +580,10 @@ function MainApp() {
   // ?? [추가] 합격률 로직: 최소 회독수 1회당 2%씩 상승 (최대 100%)
   const passProbability = Math.min(minFilledCount * 2, 100);
 
-// --- [스마트 추론 알고리즘] ---
-  let nextCatToCraft = null;
   let nextStudyCard = null;
+  let nextCatToCraft = null;
 
+  // 1. [기존 로직 유지] '만들기' 상단 버튼: 아직 안 만든 조항 찾기
   if (isLoggedIn && categories.length > 0) {
     const craftedOrigIds = new Set();
     const craftedTitles: string[] = []; 
@@ -618,22 +618,26 @@ function MainApp() {
       return !isIdCrafted && !isTitleCrafted;
     });
   }
-  
-  if (isLoggedIn && savedCards.length > 0) {
-    const cardsWithStatus = savedCards.map(c => {
-       const { body } = formatCardText(c.content);
-       const blanksCount = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
-       const stats = parseCardStats(c.memo);
-       return { ...c, totalBlanks: blanksCount, filled: stats.filled, wrongCount: stats.wrongIndices.length };
-    }).sort((a, b) => a.id - b.id);
 
-    // 1순위: 풀다 만 것, 2순위: 안 푼 것, 3순위: 오답 있는 것
-    nextStudyCard = cardsWithStatus.find(c => c.filled > 0 && c.filled < c.totalBlanks) 
-                 || cardsWithStatus.find(c => c.filled === 0 && c.totalBlanks > 0)
-                 || cardsWithStatus.find(c => c.wrongCount > 0)
-                 || cardsWithStatus[0];
+  // 2. 💡 [신규 로직 추가] '채우기' 상단 버튼: 1조부터 + 최소 반복 횟수 찾기
+  if (isLoggedIn && savedCards.length > 0) {
+    // 카드를 1조부터 순서대로 정렬하고, 각 카드의 학습 반복 횟수를 추출합니다.
+    const cardsWithStatus = savedCards.map(c => {
+       const stats = parseCardStats(c.memo);
+       const origId = parseInt((c.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || c.id, 10);
+       return { 
+         ...c, 
+         repetitions: stats.filled || 0, // 학습 횟수 (0번이면 0)
+         origId 
+       };
+    }).sort((a, b) => a.origId - b.origId); // 무조건 1조부터 오름차순 정렬
+
+    // 전체 카드 중 가장 적게 학습한 횟수를 찾습니다.
+    const minReps = Math.min(...cardsWithStatus.map(c => c.repetitions));
+
+    // 1조부터 내려가면서 최소 학습 횟수와 일치하는 첫 번째 조항을 상단에 띄웁니다.
+    nextStudyCard = cardsWithStatus.find(c => c.repetitions === minReps) || cardsWithStatus[0];
   }
-  // ▲▲▲▲▲▲▲▲▲ 여기까지 추가 ▲▲▲▲▲▲▲▲▲
 
   // renderContent를 useCallback으로 메모이제이션 (Hook 규칙: return 전에 선언)
   const renderContent = React.useCallback(() => {
