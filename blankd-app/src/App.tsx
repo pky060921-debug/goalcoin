@@ -709,7 +709,7 @@ function MainApp() {
         <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
         <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
           <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
-            {isMemoOpen ? '닫기 ?' : '?? 메모 열기'}
+            {isMemoOpen ? '닫기 ?' : '메모 열기'}
           </button>
           <button 
             onClick={toggleVoiceRecognition} 
@@ -719,7 +719,7 @@ function MainApp() {
                 : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'
             }`}
           >
-            {isListening ? '??? 음성 인식 끄기 (활성화됨)' : '?? 음성으로 입력 (계속 켜두기)'}
+            {isListening ? '음성 인식 끄기 (활성화됨)' : '음성으로 입력 (계속 켜두기)'}
           </button>
           <button onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
             정답 보기 (오답 처리)
