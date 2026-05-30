@@ -56,7 +56,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected }: {
         'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400'
       }`}
       style={{ width: `${Math.max(expected.length * 1.2, 3)}em` }}
-      placeholder="?"
+      placeholder=""
     />
   );
 }, (prevProps, nextProps) => {
