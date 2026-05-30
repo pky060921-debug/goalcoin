@@ -14,46 +14,56 @@ import { MypageTab } from "./tabs/MypageTab";
 const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
-  expected: string; // 💡 정답을 props로 받습니다.
+  expected: string; 
 }) => {
   const [val, setVal] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
-  useEffect(() => { if (inputStatus === 'correct' || inputStatus === 'idle') setVal(''); }, [inputStatus]);
+  
+  // 상태가 초기화되어야 할 때만 값을 비움
+  useEffect(() => { 
+    if (inputStatus === 'correct' || inputStatus === 'idle') setVal(''); 
+  }, [inputStatus]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVal = e.target.value;
+    // 💡 1. 오직 입력창 내부의 로컬 상태만 변경합니다. (부모 컴포넌트는 전혀 모름 = 리렌더링 0%)
     setVal(newVal);
-    
-    // 💡 정답이 일치하는 순간 바로 다음으로 점프!
-    if (newVal.trim().toLowerCase() === expected.trim().toLowerCase()) {
+
+    // 💡 2. 부모에게는 "정답과 완벽히 일치할 때"만 신호를 보냅니다. (불필요한 오답 검사 방지)
+    if (newVal.trim() === expected) {
       onSubmit(newVal);
     }
   };
-  
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    // 엔터키를 쳤을 때만 강제로 부모에게 검사를 요청합니다.
+    if (e.key === 'Enter') {
+      onSubmit(val);
+    }
+  };
+
   return (
     <input
       ref={inputRef}
-      type="text"
       value={val}
-      autoComplete="off" autoCorrect="off" spellCheck={false} autoCapitalize="none"
-      onChange={handleChange} // 💡 수정된 검사 함수 사용
-      onKeyDown={(e) => {
-        if (e.nativeEvent.isComposing) return;
-        if (e.key === 'Enter') onSubmit(val);
-      }}
-      placeholder="입력..."
-      style={{ width: `${Math.max(60, val.length * 15 + 40)}px`, transition: 'width 0.15s ease' }}
-      className={`inline-block h-7 bg-indigo-900/30 border-b-2 outline-none text-center font-bold transition-colors duration-150 mx-1 px-1 rounded-t-sm ${
-        inputStatus === 'wrong'
-          ? 'border-red-500 text-red-400 bg-red-900/40'
-          : inputStatus === 'correct'
-          ? 'border-teal-500 text-teal-300 bg-teal-900/20'
-          : 'border-indigo-400 text-amber-300 focus:border-amber-400'
+      onChange={handleChange}
+      onKeyDown={handleKeyDown}
+      className={`inline-block mx-1 px-1.5 py-0.5 text-center font-bold border-b-2 outline-none transition-all ${
+        inputStatus === 'error' ? 'bg-red-900/40 text-red-300 border-red-500' :
+        inputStatus === 'correct' ? 'bg-teal-900/40 text-teal-300 border-teal-500' :
+        'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400'
       }`}
+      style={{ width: `${Math.max(expected.length * 1.2, 3)}em` }}
+      placeholder="?"
     />
   );
+}, (prevProps, nextProps) => {
+  // 💡 3. 철통 방어막 (React.memo 비교 함수)
+  // 부모 컴포넌트(App.tsx)에서 타이머가 1초마다 바뀌든 말든, 
+  // 입력창의 상태(틀렸는지 맞았는지)가 변하지 않았다면 절대 리렌더링을 허용하지 않습니다.
+  return prevProps.inputStatus === nextProps.inputStatus && prevProps.expected === nextProps.expected;
 });
 
 class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
