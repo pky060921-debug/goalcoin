@@ -432,7 +432,7 @@ def delete_pending_exam():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# 💡 [신규] 기존 모의고사 기반 CBT 자동 변환 & 해설 생성 엔진
+# 💡 [신규] 기존 모의고사 기반 CBT 자동 변환 & 해설 생성 엔진 (토큰 제한 해제 버전)
 # ==========================================
 @api_bp.route('/upload-exam-cbt', methods=['POST'])
 def upload_exam_cbt():
@@ -443,7 +443,7 @@ def upload_exam_cbt():
         if not file or not wallet_address:
             return jsonify({"error": "파일이나 인증 정보가 없습니다."}), 400
             
-        # 1. 업로드된 파일에서 텍스트 추출 (기존 내장 함수 활용)
+        # 1. 업로드된 파일에서 텍스트 추출
         exam_text = extract_text_from_file(file)
         if not exam_text:
             return jsonify({"error": "파일에서 텍스트를 추출하지 못했습니다."}), 400
@@ -452,12 +452,13 @@ def upload_exam_cbt():
         prompt = f"""당신은 법령 및 실무 승진 시험 전문 튜터입니다. 
 사용자가 '모의고사 문제와 정답'이 포함된 문서를 업로드했습니다. 
 당신의 임무는 이 문서에 있는 문제들을 분석하여 컴퓨터로 풀 수 있는 객관식 데이터로 분해하고, 각 문제마다 왜 그것이 정답인지 상세한 [해설]을 추가하는 것입니다.
-주의: 문제를 새로 창작하지 마세요. 반드시 문서에 있는 문제와 정답만을 그대로 사용해야 합니다.
 
-반드시 아래의 JSON 배열 형식으로만 출력하세요. 마크다운(` ```json `)이나 다른 부연 설명은 절대 금지합니다.
+[중요 지침]
+1. 내부 텍스트에 큰따옴표(")가 있다면 반드시 작은따옴표(')로 변경하여 JSON 구조가 깨지지 않게 하세요.
+2. 생성 도중 멈추지 말고 문서 끝까지 완벽한 JSON 배열 형태로 출력하세요.
 
 [업로드된 문제 및 정답 문서 내용]
-{exam_text[:4000]}
+{exam_text[:6000]}
 
 [출력할 JSON 구조 (반드시 이 구조를 지키세요)]
 {{
@@ -472,16 +473,39 @@ def upload_exam_cbt():
   ]
 }}
 """
-        # 3. Ollama JSON 모드 호출 (temperature를 낮춰서 환각 방지 및 규격 엄수)
-        print("🤖 [gemma4:26b] 모의고사 파싱 및 해설 생성 중...", file=sys.stderr)
-        response_text = generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1)
+        # 3. Ollama API 직접 호출 (출력 제한을 1024 -> 8192로 대폭 상향)
+        import requests
+        import sys
+        print("🤖 [gemma4:26b] 모의고사 파싱 및 해설 생성 중... (대용량 모드)", file=sys.stderr)
+        
+        url = "http://localhost:11434/api/generate"
+        payload = {
+            "model": "gemma4:26b",
+            "prompt": prompt,
+            "stream": False,
+            "format": "json",
+            "options": {
+                "temperature": 0.1,
+                "num_ctx": 16384,
+                "num_predict": 8192, # 💡 핵심 해결책: 출력 토큰을 8192까지 허용합니다.
+                "top_k": 40,
+                "top_p": 0.9,
+                "repeat_penalty": 1.15
+            }
+        }
+        
+        # 타임아웃도 600초(10분)로 넉넉하게 주어 긴 문서도 분석할 시간을 줍니다.
+        resp = requests.post(url, json=payload, timeout=600)
+        resp.raise_for_status()
+        response_text = resp.json().get("response", "{}")
         
         # 4. JSON 파싱 후 프론트엔드로 전달
         result = clean_and_parse_json(response_text)
         return jsonify(result)
         
     except Exception as e:
-        # 💡 [수정됨] 문제를 일으켰던 내부 import 구문을 완전히 삭제했습니다!
+        import traceback
+        import sys
         print(f"\n[🔥 CBT 모의고사 변환 에러]\n{traceback.format_exc()}\n", file=sys.stderr)
         return jsonify({"error": str(e)}), 500
         
