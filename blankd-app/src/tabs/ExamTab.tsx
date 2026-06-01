@@ -1,315 +1,220 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useEffect } from "react";
 
 const BASE_URL = "https://api.blankd.top/api";
+
+interface ExamQuestion {
+  id: number;
+  questionText: string;
+  choices: string[];
+  correctAnswer: number; 
+  explanation: string;   
+}
 
 export const ExamTab = ({ walletAddress, address }: any) => {
   const userAddress = walletAddress || address;
 
-  const [mode, setMode] = useState<'list' | 'coop'>('list');
-  const [pendingExams, setPendingExams] = useState<Array<{ id: number; filename: string; chunks: string[] }>>([]);
+  // 상태 관리: idle -> analyzing -> ready -> testing -> result
+  const [phase, setPhase] = useState<'idle' | 'analyzing' | 'ready' | 'testing' | 'result'>('idle');
+  const [progress, setProgress] = useState(0);
+  
+  const [examData, setExamData] = useState<ExamQuestion[]>([]);
+  const [userAnswers, setUserAnswers] = useState<Record<number, number>>({});
+  const [score, setScore] = useState(0);
 
-  const [examFile, setExamFile] = useState<File | null>(null);
-  const [answerFile, setAnswerFile] = useState<File | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 진행 상태
-  const [currentExamId, setCurrentExamId] = useState<number | null>(null);
-  const [chunks, setChunks] = useState<string[]>([]);
-  const [chunkIndex, setChunkIndex] = useState(0);
-  const [filename, setFilename] = useState('');
-
-  // 검수 상태
-  const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState('');
-  const [explanation, setExplanation] = useState('');
-
-  // 채팅 상태
-  const [chatMessages, setChatMessages] = useState<Array<{ sender: 'ai' | 'user'; text: string }>>([]);
-  const [userInput, setUserInput] = useState('');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
-  const fetchPending = async () => {
-    if (!userAddress) return;
-    try {
-      const res = await fetch(`${BASE_URL}/get-pending-exams?wallet_address=${userAddress}`);
-      const data = await res.json();
-      setPendingExams(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  useEffect(() => { fetchPending(); }, [userAddress]);
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
-
-  // 업로드
-  const handleUpload = async () => {
-    if (!examFile || !userAddress) return alert('문제지 파일을 반드시 첨부해주세요.');
-    setIsUploading(true);
-    const fd = new FormData();
-    fd.append('exam_file', examFile);
-    if (answerFile) fd.append('answer_file', answerFile);
-    fd.append('wallet_address', userAddress);
-
-    try {
-      const res = await fetch(`${BASE_URL}/upload-exam-coop`, { method: 'POST', body: fd });
-      if (res.ok) {
-        setExamFile(null);
-        setAnswerFile(null);
-        alert('업로드 완료!');
-        fetchPending();
-      } else {
-        const err = await res.json();
-        alert(`업로드 실패: ${err.error}`);
-      }
-    } catch (err: any) {
-      alert(`업로드 실패: ${err.message}`);
-    }
-    setIsUploading(false);
-  };
-
-  // 검수 시작
-  const startReview = (exam: any) => {
-    setCurrentExamId(exam.id);
-    setChunks(exam.chunks);
-    setFilename(exam.filename);
-    setChunkIndex(0);
-    setQuestion(exam.chunks[0]);
-    setAnswer('확인 필요');
-    setExplanation('');
-    setChatMessages([{
-      sender: 'ai',
-      text: `[${exam.filename}] 검수를 시작합니다.\n지문을 읽고 궁금한 내용을 질문하거나 "정답 알려줘", "O/X 판별해줘" 등을 입력하세요.`
-    }]);
-    setUserInput('');
-    setMode('coop');
-  };
-
-  // AI와 대화 (gemma4:26b 직접 판단)
-  const sendMessage = async () => {
-    if (isAnalyzing || !userInput.trim()) return;
-    setIsAnalyzing(true);
-
-    const newChat: Array<{ sender: 'ai' | 'user'; text: string }> = [
-      ...chatMessages,
-      { sender: 'user', text: userInput }
-    ];
-    setChatMessages(newChat);
-    setUserInput('');
-
-    try {
-      const res = await fetch(`${BASE_URL}/analyze-chunk`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chunk_text: question,
-          user_feedback: newChat[newChat.length - 1].text,
-          chat_history: newChat,
-          wallet_address: userAddress,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.result) {
-        const r = data.result;
-        if (r.answer && r.answer !== '확인 필요') setAnswer(r.answer);
-        if (r.explanation) setExplanation(r.explanation);
-        const msg = r.chat_message && r.chat_message.trim()
-          ? r.chat_message
-          : '[AI 응답이 비어있습니다. 서버 로그를 확인해주세요.]';
-        setChatMessages(prev => [...prev, { sender: 'ai', text: msg }]);
-      } else {
-        setChatMessages(prev => [...prev, { sender: 'ai', text: `오류: ${data.error || 'AI 응답 실패'}` }]);
-      }
-    } catch (err) {
-      setChatMessages(prev => [...prev, { sender: 'ai', text: 'AI 통신 오류가 발생했습니다.' }]);
-    }
-    setIsAnalyzing(false);
-  };
-
-  // 저장 후 다음 문항으로
-  const nextChunk = async () => {
-    try {
-      await fetch(`${BASE_URL}/save-golden-exam`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          wallet_address: userAddress,
-          title: filename,
-          question,
-          options: [],
-          answer,
-          explanation,
-        }),
-      });
-
-      const nextIndex = chunkIndex + 1;
-      if (nextIndex < chunks.length) {
-        setChunkIndex(nextIndex);
-        setQuestion(chunks[nextIndex]);
-        setAnswer('확인 필요');
-        setExplanation('');
-        setChatMessages([{ sender: 'ai', text: `[${nextIndex + 1}/${chunks.length}] 다음 문항입니다. 질문을 입력하세요.` }]);
-      } else {
-        await fetch(`${BASE_URL}/delete-pending-exam`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: currentExamId, wallet_address: userAddress }),
+  // 💡 가짜 프로그레스 바 (AI 통신 대기 중 시각적 효과)
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (phase === 'analyzing') {
+      setProgress(0);
+      interval = setInterval(() => {
+        setProgress(prev => {
+          if (prev >= 95) return 95;
+          const increment = prev < 50 ? 5 : prev < 80 ? 2 : 0.5;
+          return prev + increment;
         });
-        alert('이 모의고사의 검수가 모두 완료되었습니다!');
-        setMode('list');
-        fetchPending();
+      }, 500);
+    }
+    return () => clearInterval(interval);
+  }, [phase]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !userAddress) return alert("파일과 지갑 주소가 필요합니다.");
+
+    setPhase('analyzing'); 
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("wallet_address", userAddress);
+
+      // 💡 백엔드(api.py)의 새로운 객관식 자동 출제 API 호출
+      const response = await fetch(`${BASE_URL}/upload-exam-cbt`, {
+        method: "POST",
+        body: formData,
+      });
+      
+      const data = await response.json();
+
+      if (response.ok && data.questions) {
+        setProgress(100); 
+        setTimeout(() => {
+          setExamData(data.questions); 
+          setPhase('ready');
+        }, 500); 
+      } else {
+        throw new Error(data.error || "분석 결과가 올바르지 않습니다.");
       }
-    } catch (err) {
-      alert('저장 중 오류가 발생했습니다.');
+    } catch (error: any) {
+      console.error("AI 분석 실패:", error);
+      alert(`파일 분석 중 오류가 발생했습니다: ${error.message}`);
+      setPhase('idle');
     }
   };
 
-  // ─── 대화형 검수 UI ───────────────────────────────────────────
-  if (mode === 'coop') {
-    return (
-      <div className="flex flex-col h-[85vh] space-y-4 animate-in fade-in pb-10">
-        <div className="flex justify-between items-center pb-4 border-b border-white/10">
-          <h2 className="text-xl text-teal-400 font-serif">
-            🔍 검수 중 [{filename}] ({chunkIndex + 1} / {chunks.length})
-          </h2>
-          <button
-            onClick={() => setMode('list')}
-            className="text-xs text-white/40 border border-white/10 px-3 py-1 rounded-sm hover:bg-white/5"
-          >
-            목록으로
-          </button>
-        </div>
+  const submitExam = () => {
+    if (Object.keys(userAnswers).length < examData.length) {
+      if (!confirm("아직 풀지 않은 문제가 있습니다. 그래도 제출하시겠습니까?")) return;
+    }
+    
+    let currentScore = 0;
+    examData.forEach(q => {
+      if (userAnswers[q.id] === q.correctAnswer) currentScore++;
+    });
+    
+    setScore(Math.round((currentScore / examData.length) * 100));
+    setPhase('result');
+  };
 
-        <div className="flex flex-1 gap-6 overflow-hidden">
-          {/* 좌측: 지문 & 정답/해설 */}
-          <div className="w-[50%] flex flex-col gap-4 border border-white/10 rounded-sm bg-black/20 p-5 overflow-y-auto">
-            <label className="text-teal-300 font-bold text-sm">📝 지문</label>
-            <textarea
-              value={question}
-              onChange={e => setQuestion(e.target.value)}
-              className="w-full min-h-[220px] bg-black/40 border border-white/10 text-white/90 p-4 text-[15px] leading-loose outline-none resize-none"
-            />
+  const resetExamTab = () => {
+    setPhase('idle');
+    setExamData([]);
+    setUserAnswers({});
+    setProgress(0);
+    setScore(0);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
 
-            <div className="flex gap-2 items-center">
-              <label className="text-sm font-bold text-teal-400 w-16">정답:</label>
-              <input
-                value={answer}
-                onChange={e => setAnswer(e.target.value)}
-                className="bg-transparent border border-white/20 p-2 text-white outline-none w-24"
-                placeholder="번호 입력"
-              />
-            </div>
-
-            <label className="text-[13px] font-bold text-emerald-400 mt-2">💡 해설</label>
-            <textarea
-              value={explanation}
-              onChange={e => setExplanation(e.target.value)}
-              className="w-full min-h-[120px] bg-emerald-950/20 border border-emerald-500/30 text-emerald-100/90 p-4 text-[14px] leading-loose resize-none outline-none"
-              placeholder="AI 답변을 참고해 해설을 정리하세요"
-            />
-
-            <button
-              onClick={nextChunk}
-              className="mt-auto py-3 bg-teal-600 hover:bg-teal-500 text-white font-bold rounded-sm transition-all"
-            >
-              ✅ 저장 후 다음 문항
-            </button>
-          </div>
-
-          {/* 우측: AI 채팅 */}
-          <div className="w-[50%] flex flex-col border border-emerald-900/40 rounded-sm bg-[#0a192f]">
-            <div className="bg-emerald-950/60 p-4 border-b border-emerald-900/40 shrink-0 text-emerald-300 font-bold text-sm">
-              💬 AI 해설 (gemma4:26b)
-              {isAnalyzing && <span className="animate-pulse ml-2 text-xs text-yellow-400">분석 중...</span>}
-            </div>
-            <div className="flex-1 overflow-y-auto flex flex-col gap-4 p-5">
-              {chatMessages.map((msg, idx) => (
-                <div
-                  key={idx}
-                  className={`flex flex-col max-w-[92%] ${msg.sender === 'user' ? 'self-end items-end' : 'self-start items-start'}`}
-                >
-                  <div className={`p-3 text-[14px] leading-relaxed rounded-lg whitespace-pre-wrap ${
-                    msg.sender === 'user'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-800 text-emerald-50 border border-emerald-500/20'
-                  }`}>
-                    {msg.text}
-                  </div>
-                </div>
-              ))}
-              <div ref={chatEndRef} />
-            </div>
-            <div className="shrink-0 p-4 bg-slate-900 border-t border-white/5 flex gap-2">
-              <input
-                type="text"
-                value={userInput}
-                onChange={e => setUserInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && sendMessage()}
-                placeholder="질문 또는 정답 판별 요청..."
-                className="flex-1 bg-black/50 border border-indigo-500/40 text-white p-3 text-sm rounded outline-none"
-              />
-              <button
-                onClick={sendMessage}
-                disabled={isAnalyzing}
-                className="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-sm rounded transition-all"
-              >
-                전송
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ─── 목록 & 업로드 UI ─────────────────────────────────────────
   return (
-    <div className="space-y-8 animate-in fade-in pb-20">
-      {/* 업로드 영역 */}
-      <div className="flex flex-col md:flex-row gap-4 p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm">
-        <label className="flex-1 border border-teal-900/40 p-3 text-center text-sm cursor-pointer text-teal-400 hover:bg-teal-900/20 transition-colors">
-          <input type="file" accept=".pdf,.txt" onChange={e => setExamFile(e.target.files?.[0] || null)} className="hidden" />
-          {examFile ? `📂 ${examFile.name}` : '➕ 문제지 파일 선택 (PDF/TXT)'}
-        </label>
-        <label className="flex-1 border border-emerald-900/40 p-3 text-center text-sm cursor-pointer text-emerald-400 hover:bg-emerald-900/20 transition-colors">
-          <input type="file" accept=".pdf,.txt" onChange={e => setAnswerFile(e.target.files?.[0] || null)} className="hidden" />
-          {answerFile ? `📂 ${answerFile.name}` : '➕ 정답지 파일 선택 (선택)'}
-        </label>
-        <button
-          onClick={handleUpload}
-          disabled={isUploading || !examFile}
-          className="px-6 py-3 bg-teal-500 hover:bg-teal-400 disabled:opacity-50 text-teal-950 font-bold text-sm w-full md:w-32 transition-all"
-        >
-          {isUploading ? '업로드 중...' : '업로드'}
-        </button>
-      </div>
-
-      {/* 목록 */}
-      <div className="p-6 border border-teal-500/50 bg-teal-950/30 rounded-sm">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-teal-400 font-bold text-lg">📁 업로드된 모의고사 목록</h3>
-          <button onClick={fetchPending} className="text-xs text-white/40 border border-white/10 px-3 py-1 rounded-sm hover:bg-white/5">
-            새로고침
+    <div className="p-6 h-full flex flex-col font-sans animate-in fade-in">
+      
+      {/* 1. 대기 및 업로드 화면 */}
+      {phase === 'idle' && (
+        <div className="flex-1 flex flex-col items-center justify-center border border-white/10 bg-[#121214] p-10 text-center">
+          <h2 className="text-xl font-bold text-white mb-2">모의고사 자동 생성 시스템</h2>
+          <p className="text-white/50 text-sm mb-8">참고할 법령이나 교재 파일을 올리면, AI가 읽고 즉시 4지선다형 모의고사를 출제합니다.</p>
+          <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} accept=".txt,.pdf" />
+          <button onClick={() => fileInputRef.current?.click()} className="px-6 py-3 bg-teal-900/30 text-teal-400 border border-teal-500/50 hover:bg-teal-900/50 transition-colors font-bold tracking-wide">
+            문서 업로드 및 AI 분석 시작
           </button>
         </div>
-        {pendingExams.length === 0 ? (
-          <div className="py-8 text-center text-teal-500/50 text-sm">업로드된 파일이 없습니다.</div>
-        ) : (
-          <div className="space-y-2">
-            {pendingExams.map(exam => (
-              <div
-                key={exam.id}
-                onClick={() => startReview(exam)}
-                className="p-4 bg-black/40 border border-teal-500/20 rounded-sm hover:border-teal-400 cursor-pointer flex justify-between items-center transition-colors"
-              >
-                <span className="text-teal-100 font-bold text-sm">{exam.filename}</span>
-                <span className="text-white/40 text-xs">총 {exam.chunks.length} 문항 ➔ 클릭하여 시작</span>
+      )}
+
+      {/* 2. AI 분석 진행 중 화면 */}
+      {phase === 'analyzing' && (
+        <div className="flex-1 flex flex-col items-center justify-center border border-white/10 bg-[#121214] p-10">
+          <h2 className="text-xl font-bold text-amber-300 mb-6 animate-pulse">로컬 뇌(Gemma 26B) 가동 중...</h2>
+          <div className="w-full max-w-md h-2 bg-black border border-white/20 mb-4 relative overflow-hidden">
+            <div className="h-full bg-amber-500 transition-all duration-300 ease-out" style={{ width: `${progress}%` }} />
+          </div>
+          <p className="text-white/70 font-mono text-sm">{Math.floor(progress)}% 분석 및 문제 출제 중</p>
+          <p className="text-white/40 text-xs mt-4">문맥을 파악하고 함정 보기를 생성하고 있습니다.</p>
+        </div>
+      )}
+
+      {/* 3. 분석 완료 및 시험 준비 화면 */}
+      {phase === 'ready' && (
+        <div className="flex-1 flex flex-col items-center justify-center border border-teal-900/50 bg-[#121214] p-10 text-center">
+          <h2 className="text-2xl font-bold text-teal-400 mb-2">출제 완료!</h2>
+          <p className="text-white/70 mb-8">총 {examData.length}문항의 실전 테스트 및 AI 해설 생성이 완료되었습니다.</p>
+          <button onClick={() => setPhase('testing')} className="px-8 py-4 bg-teal-900/30 text-teal-300 border border-teal-500/50 hover:bg-teal-900/60 font-bold text-lg transition-colors">
+            실전 모의고사 시작
+          </button>
+        </div>
+      )}
+
+      {/* 4. 실전 풀이 화면 */}
+      {phase === 'testing' && (
+        <div className="flex-1 flex flex-col max-w-3xl mx-auto w-full">
+          <div className="flex justify-between items-center mb-6 pb-4 border-b border-white/10">
+            <h2 className="text-lg font-bold text-white">실전 모의고사</h2>
+            <span className="text-amber-400 font-mono">{Object.keys(userAnswers).length} / {examData.length} 완료</span>
+          </div>
+          <div className="flex-1 overflow-y-auto space-y-8 pb-10 custom-scrollbar pr-2">
+            {examData.map((q, idx) => (
+              <div key={q.id} className="bg-[#1a1a1d] border border-white/5 p-6">
+                <p className="text-white/90 font-bold mb-4 leading-relaxed whitespace-pre-wrap">
+                  <span className="text-amber-500 mr-2">Q{idx + 1}.</span> {q.questionText}
+                </p>
+                <div className="space-y-2">
+                  {q.choices.map((choice, cIdx) => (
+                    <label key={cIdx} className={`block p-3 border transition-colors cursor-pointer ${userAnswers[q.id] === cIdx ? 'bg-amber-900/20 border-amber-500/50 text-amber-200' : 'bg-black/40 border-white/10 text-white/60 hover:bg-white/5'}`}>
+                      <input type="radio" name={`q_${q.id}`} className="hidden" checked={userAnswers[q.id] === cIdx} onChange={() => setUserAnswers(prev => ({ ...prev, [q.id]: cIdx }))} />
+                      <span className="mr-3 text-xs opacity-50">{(cIdx + 1)}</span> {choice}
+                    </label>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
-        )}
-      </div>
+          <div className="pt-4 border-t border-white/10 mt-4">
+            <button onClick={submitExam} className="w-full py-4 bg-white/10 text-white border border-white/20 hover:bg-white/20 font-bold transition-colors">
+              답안지 제출 및 채점
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 5. 결과 및 해설 확인 화면 */}
+      {phase === 'result' && (
+        <div className="flex-1 flex flex-col max-w-3xl mx-auto w-full">
+          <div className="text-center mb-8 pb-6 border-b border-white/10">
+            <h2 className="text-2xl font-bold text-white mb-2">테스트 결과</h2>
+            <p className={`text-5xl font-black ${score >= 80 ? 'text-teal-400' : score >= 60 ? 'text-amber-400' : 'text-red-400'}`}>{score}점</p>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto space-y-8 pb-10 custom-scrollbar pr-2">
+            {examData.map((q, idx) => {
+              const isCorrect = userAnswers[q.id] === q.correctAnswer;
+              return (
+                <div key={q.id} className={`p-6 border ${isCorrect ? 'bg-teal-900/10 border-teal-900/30' : 'bg-red-900/10 border-red-900/30'}`}>
+                  <p className="text-white/90 font-bold mb-4 leading-relaxed whitespace-pre-wrap">
+                    <span className={isCorrect ? 'text-teal-500 mr-2' : 'text-red-500 mr-2'}>
+                      {isCorrect ? '✅' : '❌'} Q{idx + 1}.
+                    </span> 
+                    {q.questionText}
+                  </p>
+                  
+                  <div className="space-y-2 mb-6 opacity-70">
+                    {q.choices.map((choice, cIdx) => (
+                      <div key={cIdx} className={`p-2 px-4 border flex items-center ${q.correctAnswer === cIdx ? 'bg-teal-900/30 border-teal-500/50 text-teal-300' : userAnswers[q.id] === cIdx ? 'bg-red-900/30 border-red-500/50 text-red-300' : 'border-white/5 text-white/40 bg-black/20'}`}>
+                        <span className="mr-3 text-xs opacity-50">{(cIdx + 1)}</span> {choice}
+                        {q.correctAnswer === cIdx && <span className="ml-auto text-xs font-bold text-teal-400">정답</span>}
+                        {userAnswers[q.id] === cIdx && !isCorrect && <span className="ml-auto text-xs font-bold text-red-400">내 선택</span>}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="bg-black/60 border border-amber-900/30 p-4 relative">
+                    <span className="absolute -top-3 left-4 bg-[#121214] px-2 text-xs font-bold text-amber-500 uppercase tracking-widest">AI 해설</span>
+                    <p className="text-white/70 text-sm leading-relaxed mt-2 whitespace-pre-wrap">
+                      {q.explanation}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="pt-4 border-t border-white/10 mt-4 text-center">
+            <button onClick={resetExamTab} className="px-8 py-3 bg-white/5 text-white/50 border border-white/10 hover:bg-white/10 hover:text-white transition-colors">
+              처음으로 돌아가기
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
