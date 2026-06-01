@@ -481,11 +481,10 @@ def upload_exam_cbt():
         return jsonify(result)
         
     except Exception as e:
-        import traceback
-        import sys
+        # 💡 [수정됨] 문제를 일으켰던 내부 import 구문을 완전히 삭제했습니다!
         print(f"\n[🔥 CBT 모의고사 변환 에러]\n{traceback.format_exc()}\n", file=sys.stderr)
         return jsonify({"error": str(e)}), 500
-
+        
 @api_bp.route('/upload-exam-coop', methods=['POST'])
 def upload_exam_coop():
     try:
