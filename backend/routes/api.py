@@ -431,6 +431,61 @@ def delete_pending_exam():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ==========================================
+# 💡 [신규] 기존 모의고사 기반 CBT 자동 변환 & 해설 생성 엔진
+# ==========================================
+@api_bp.route('/upload-exam-cbt', methods=['POST'])
+def upload_exam_cbt():
+    try:
+        wallet_address = request.form.get('wallet_address')
+        file = request.files.get('file')
+        
+        if not file or not wallet_address:
+            return jsonify({"error": "파일이나 인증 정보가 없습니다."}), 400
+            
+        # 1. 업로드된 파일에서 텍스트 추출 (기존 내장 함수 활용)
+        exam_text = extract_text_from_file(file)
+        if not exam_text:
+            return jsonify({"error": "파일에서 텍스트를 추출하지 못했습니다."}), 400
+            
+        # 2. 로컬 AI(Gemma 26B)에게 기존 문제 파싱 및 해설 작성 명령
+        prompt = f"""당신은 법령 및 실무 승진 시험 전문 튜터입니다. 
+사용자가 '모의고사 문제와 정답'이 포함된 문서를 업로드했습니다. 
+당신의 임무는 이 문서에 있는 문제들을 분석하여 컴퓨터로 풀 수 있는 객관식 데이터로 분해하고, 각 문제마다 왜 그것이 정답인지 상세한 [해설]을 추가하는 것입니다.
+주의: 문제를 새로 창작하지 마세요. 반드시 문서에 있는 문제와 정답만을 그대로 사용해야 합니다.
+
+반드시 아래의 JSON 배열 형식으로만 출력하세요. 마크다운(` ```json `)이나 다른 부연 설명은 절대 금지합니다.
+
+[업로드된 문제 및 정답 문서 내용]
+{exam_text[:4000]}
+
+[출력할 JSON 구조 (반드시 이 구조를 지키세요)]
+{{
+  "questions": [
+    {{
+      "id": 1,
+      "questionText": "원문서에 있는 문제 텍스트 (예: 다음 중 ~은?)",
+      "choices": ["보기1 텍스트", "보기2 텍스트", "보기3 텍스트", "보기4 텍스트"],
+      "correctAnswer": 0,  
+      "explanation": "이 문제의 정답이 이것인 이유와 관련 법령/실무 지식을 상세히 설명하는 해설."
+    }}
+  ]
+}}
+"""
+        # 3. Ollama JSON 모드 호출 (temperature를 낮춰서 환각 방지 및 규격 엄수)
+        print("🤖 [gemma4:26b] 모의고사 파싱 및 해설 생성 중...", file=sys.stderr)
+        response_text = generate_ollama_json(prompt, model="gemma4:26b", temperature=0.1)
+        
+        # 4. JSON 파싱 후 프론트엔드로 전달
+        result = clean_and_parse_json(response_text)
+        return jsonify(result)
+        
+    except Exception as e:
+        import traceback
+        import sys
+        print(f"\n[🔥 CBT 모의고사 변환 에러]\n{traceback.format_exc()}\n", file=sys.stderr)
+        return jsonify({"error": str(e)}), 500
+
 @api_bp.route('/upload-exam-coop', methods=['POST'])
 def upload_exam_coop():
     try:
