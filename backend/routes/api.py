@@ -388,7 +388,7 @@ def delete_pending_exam():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# 💡 [신규] 기존 모의고사 기반 CBT 자동 변환 & 해설 생성 엔진 (침묵 방지 및 메모리 최적화 버전)
+# 💡 [신규] 모의고사 CBT 변환 엔진 (초경량 다이어트 & 강제 시작 버전)
 # ==========================================
 @api_bp.route('/upload-exam-cbt', methods=['POST'])
 def upload_exam_cbt():
@@ -408,19 +408,19 @@ def upload_exam_cbt():
         if not exam_text:
             return jsonify({"error": "파일에서 텍스트를 추출하지 못했습니다."}), 400
             
-        safe_exam_text = exam_text[:5000].replace('"', "'")
+        # 💡 [핵심 1] 텍스트 입력량 다이어트: 5000자 -> 2500자로 대폭 줄여서 메모리 폭발 방지
+        safe_exam_text = exam_text[:2500].replace('"', "'")
         
+        # 💡 [핵심 2] 프롬프트 단순화: AI가 헷갈릴 여지를 모두 없앰
         prompt = (
-            "당신은 법령 및 실무 승진 시험 전문 튜터입니다.\n"
-            "사용자가 '모의고사 문제와 정답' 문서를 업로드했습니다.\n"
-            "임무: 이 문서를 분석하여 컴퓨터로 풀 수 있는 객관식 데이터로 분해하고 상세한 해설을 추가하세요.\n\n"
-            "[🚨 중요 규칙 🚨]\n"
-            "1. 반드시 마크다운 JSON 코드블록(```json ... ```) 안에 작성하세요.\n"
-            "2. 출력할 데이터는 최대 10문제까지만 작성하세요.\n"
-            "3. 텍스트 내부에 줄바꿈을 넣고 싶을 때는 반드시 '\\n' 대신 '<br>' 태그를 사용하세요.\n\n"
-            "[업로드된 문서 내용]\n"
+            "당신은 아주 정확한 데이터 추출기입니다.\n"
+            "아래 [문서 내용]을 읽고, 최대 5개의 객관식 문제를 찾아 JSON 배열로만 출력하세요.\n\n"
+            "[문서 내용]\n"
             f"{safe_exam_text}\n\n"
-            "[출력할 JSON 구조 예시]\n"
+            "[🚨 절대 준수 규칙 🚨]\n"
+            "1. JSON 문법을 완벽히 지키세요.\n"
+            "2. 해설 내용에 줄바꿈이 필요하면 반드시 '<br>'을 쓰세요. 엔터키는 금지입니다.\n"
+            "3. 아래의 마크다운 형식을 그대로 복사해서 내용을 채워 넣는 것으로 출력을 시작하세요.\n\n"
             "```json\n"
             "{\n"
             '  "questions": [\n'
@@ -429,16 +429,15 @@ def upload_exam_cbt():
             '      "questionText": "다음 중 ~은?",\n'
             '      "choices": ["보기1", "보기2", "보기3", "보기4"],\n'
             '      "correctAnswer": 0,\n'
-            '      "explanation": "정답인 이유를 설명하는 해설입니다."\n'
+            '      "explanation": "해설입니다."\n'
             "    }\n"
             "  ]\n"
             "}\n"
-            "```\n\n"
-            "💡 자, 이제 위의 예시를 참고하여 [업로드된 문서 내용]을 분석한 실제 결과물 출력을 시작하세요.\n" # <- AI를 깨우는 핵심 문장 추가!
-            "응답은 반드시 ```json 으로 시작해야 합니다.\n"
+            "```\n"
+            "자, 지금 바로 위 형식대로 출력을 시작하세요:"
         )
 
-        print("🤖 [gemma4:26b] 모의고사 파싱 및 해설 생성 시작...", file=sys.stderr)
+        print("🤖 [gemma4:26b] 모의고사 파싱 시작 (경량화 모드)...", file=sys.stderr)
         url = "http://localhost:11434/api/generate"
         payload = {
             "model": "gemma4:26b",
@@ -446,8 +445,9 @@ def upload_exam_cbt():
             "stream": False,
             "options": {
                 "temperature": 0.1,
-                "num_ctx": 8192,     # 💡 [수정] 맥미니 메모리(RAM)가 버티도록 16384 -> 8192로 하향
-                "num_predict": 2048, # 💡 [수정] 모델이 너무 길게 뱉다 죽지 않도록 안전선 설정
+                # 💡 [핵심 3] 맥미니 RAM 사수: 컨텍스트를 4096으로 제한
+                "num_ctx": 4096,     
+                "num_predict": 1500, 
                 "top_k": 40,
                 "top_p": 0.9,
                 "repeat_penalty": 1.15
@@ -457,12 +457,10 @@ def upload_exam_cbt():
         resp = requests.post(url, json=payload, timeout=600)
         resp.raise_for_status()
         
-        # 앞뒤 공백을 자르고 가져옵니다.
         response_text = resp.json().get("response", "").strip()
         
-        # 💡 [신규 방어] 모델이 또 침묵할 경우를 대비한 안전장치
         if not response_text:
-            raise ValueError("AI가 빈 응답을 반환했습니다. (맥미니 메모리 부족 또는 모델 침묵 현상)")
+            raise ValueError("AI가 여전히 빈 응답을 반환했습니다. 모델(gemma4:26b)이 현재 상태에서 응답할 수 없습니다.")
 
         result = clean_and_parse_json(response_text)
         
