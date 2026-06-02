@@ -241,6 +241,8 @@ def init_golden_db():
         except: pass
         try: conn.execute('ALTER TABLE user_settings ADD COLUMN ai_rules TEXT DEFAULT ""')
         except: pass
+        try: conn.execute('ALTER TABLE pending_exams ADD COLUMN answers_json TEXT DEFAULT "[]"')
+        except: pass
             
         conn.commit()
         conn.close()
