@@ -115,50 +115,6 @@ def generate_ollama_text(prompt, model="gemma4:26b", temperature=0.1):
         print(f"\n[🔥 Ollama chat 통신 에러]\n{e}\n", file=sys.stderr, flush=True)
         raise e
 
-# ==========================================
-# 💡 제미나이 무한 동력 & 우회(Fallback) 엔진
-# ==========================================
-def generate_gemini_json(prompt_or_contents, temperature=0.1):
-    global current_api_key_index
-    if not GEMINI_API_KEYS or GEMINI_API_KEYS[0].startswith("AIzaSyA_YOUR_GEMINI_KEY"):
-        return '{"error": "API 키가 올바르지 않습니다."}'
-
-    fallback_models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest']
-    max_retries = len(GEMINI_API_KEYS) * len(fallback_models)
-    
-    contents = prompt_or_contents if isinstance(prompt_or_contents, list) else [prompt_or_contents]
-    
-    for attempt in range(max_retries):
-        try:
-            client = genai.Client(api_key=GEMINI_API_KEYS[current_api_key_index])
-            current_model = fallback_models[attempt % len(fallback_models)]
-            
-            response = client.models.generate_content(
-                model=current_model,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=temperature
-                )
-            )
-            return response.text
-            
-        except Exception as e:
-            error_msg = str(e).lower()
-            if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
-                print(f"⚠️ [API 진단] API 키 {current_api_key_index} 한도 초과! 다음 키로 전환합니다.", file=sys.stderr, flush=True)
-                current_api_key_index = (current_api_key_index + 1) % len(GEMINI_API_KEYS)
-            elif "503" in error_msg or "unavailable" in error_msg or "high demand" in error_msg:
-                print(f"⚠️ [API 진단] 구글 서버({current_model}) 폭주(503). 우회합니다...", file=sys.stderr, flush=True)
-                time.sleep(1)
-            else:
-                if attempt == max_retries - 1:
-                    print(f"❌ [API 치명적 진단] 제미나이 최종 실패:\n{traceback.format_exc()}", file=sys.stderr, flush=True)
-                    raise e
-                time.sleep(1)
-                
-    raise Exception("🚨 구글 서버 불안정 또는 모든 API 키 한도 초과입니다.")
-
 def sanitize_json_string_values(text):
     """JSON 문자열 값 안의 raw 개행/탭을 이스케이프 처리."""
     result = []
@@ -429,6 +385,91 @@ def delete_pending_exam():
         conn.close()
         return jsonify({"message": "대기열에서 삭제 완료"})
     except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ==========================================
+# 💡 [신규] 기존 모의고사 기반 CBT 자동 변환 & 해설 생성 엔진
+# ==========================================
+@api_bp.route('/upload-exam-cbt', methods=['POST'])
+def upload_exam_cbt():
+    import traceback
+    import sys
+    import requests
+    import json
+    
+    try:
+        wallet_address = request.form.get('wallet_address')
+        file = request.files.get('file')
+        
+        if not file or not wallet_address:
+            return jsonify({"error": "파일이나 인증 정보가 없습니다."}), 400
+            
+        exam_text = extract_text_from_file(file)
+        if not exam_text:
+            return jsonify({"error": "파일에서 텍스트를 추출하지 못했습니다."}), 400
+            
+        safe_exam_text = exam_text[:5000].replace('"', "'")
+        
+        prompt = (
+            "당신은 법령 및 실무 승진 시험 전문 튜터입니다.\n"
+            "사용자가 '모의고사 문제와 정답' 문서를 업로드했습니다.\n"
+            "임무: 이 문서를 분석하여 컴퓨터로 풀 수 있는 객관식 데이터로 분해하고 상세한 해설을 추가하세요.\n\n"
+            "[🚨 중요 규칙 🚨]\n"
+            "1. 반드시 마크다운 JSON 코드블록(```json ... ```) 안에 작성하세요.\n"
+            "2. 출력할 데이터는 최대 10문제까지만 작성하세요.\n"
+            "3. 텍스트 내부에 줄바꿈을 넣고 싶을 때는 반드시 '\\n' 대신 '<br>' 태그를 사용하세요.\n\n"
+            "[업로드된 문서 내용]\n"
+            f"{safe_exam_text}\n\n"
+            "[출력할 JSON 구조 예시]\n"
+            "```json\n"
+            "{\n"
+            '  "questions": [\n'
+            "    {\n"
+            '      "id": 1,\n'
+            '      "questionText": "다음 중 ~은?",\n'
+            '      "choices": ["보기1", "보기2", "보기3", "보기4"],\n'
+            '      "correctAnswer": 0,\n'
+            '      "explanation": "정답인 이유를 설명하는 해설입니다."\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+            "```"
+        )
+
+        print("🤖 [gemma4:26b] 모의고사 파싱 및 해설 생성 시작...", file=sys.stderr)
+        url = "http://localhost:11434/api/generate"
+        payload = {
+            "model": "gemma4:26b",
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.1,
+                "num_ctx": 16384,
+                "num_predict": 4096, 
+                "top_k": 40,
+                "top_p": 0.9,
+                "repeat_penalty": 1.15
+            }
+        }
+        
+        resp = requests.post(url, json=payload, timeout=600)
+        resp.raise_for_status()
+        
+        response_text = resp.json().get("response", "{}")
+        result = clean_and_parse_json(response_text)
+        
+        if isinstance(result, dict) and "questions" in result:
+            for q in result["questions"]:
+                if "explanation" in q and isinstance(q["explanation"], str):
+                    q["explanation"] = q["explanation"].replace("<br>", "\n")
+                if "questionText" in q and isinstance(q["questionText"], str):
+                    q["questionText"] = q["questionText"].replace("<br>", "\n")
+                    
+        print("✅ [gemma4:26b] 변환 성공!", file=sys.stderr)
+        return jsonify(result)
+        
+    except Exception as e:
+        print(f"\n[🔥 CBT 모의고사 변환 에러]\n{traceback.format_exc()}\n", file=sys.stderr)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/upload-exam-coop', methods=['POST'])
