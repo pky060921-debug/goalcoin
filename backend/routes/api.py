@@ -484,29 +484,39 @@ def upload_exam_coop():
         wallet_address = request.form.get('wallet_address')
         exam_file = request.files.get('exam_file')
         answer_file = request.files.get('answer_file')
-        
-        if not exam_file or not wallet_address: return jsonify({"error": "문제 파일이나 인증 정보가 없습니다."}), 400
-        
-        filename = exam_file.filename.lower()
+
+        if not exam_file or not wallet_address:
+            return jsonify({"error": "문제 파일이나 인증 정보가 없습니다."}), 400
+
         exam_text = extract_exam_text_with_color(exam_file, is_answer=False)
-        answer_text = extract_exam_text_with_color(answer_file, is_answer=True)
-        
         exam_text = re.sub(r'-\s*\d+\s*-', '', exam_text)
         exam_text = re.sub(r'【[^】]+】', '', exam_text)
-        
-        if answer_text:
-            exam_text += "\n\n[정답 및 해설지 참고 (빨간색 텍스트는 🔴정답으로 표시됨)]\n" + answer_text
-            
-        chunks = re.split(r'(?m)^(?=\s*\d+\.\s)', exam_text)
+
+        # 문제 파싱: 1. / 1) / 문1. 형식 모두 지원
+        chunks = re.split(r'(?m)^(?=\s*(?:문\s*)?\d+\s*[.)]\s)', exam_text)
         valid_chunks = [c.strip() for c in chunks if c.strip() and len(c.strip()) > 10]
 
+        # 정답 파싱
+        answers = []
+        if answer_file:
+            answer_text = extract_exam_text_with_color(answer_file, is_answer=True)
+            ans_matches = re.findall(r'(\d+)[.\)번]\s*([①②③④⑤1-5])', answer_text)
+            ans_dict = {}
+            for num, ans in ans_matches:
+                num_map = {'①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5'}
+                ans_dict[int(num)] = num_map.get(ans, ans)
+            answers = [ans_dict.get(i + 1, '') for i in range(len(valid_chunks))]
+
         conn = get_db_connection()
-        conn.execute("INSERT INTO pending_exams (wallet_address, filename, chunks_json) VALUES (?, ?, ?)",
-                     (wallet_address, exam_file.filename, json.dumps(valid_chunks, ensure_ascii=False)))
+        conn.execute(
+            "INSERT INTO pending_exams (wallet_address, filename, chunks_json, answers_json) VALUES (?, ?, ?, ?)",
+            (wallet_address, exam_file.filename,
+             json.dumps(valid_chunks, ensure_ascii=False),
+             json.dumps(answers, ensure_ascii=False))
+        )
         conn.commit()
         conn.close()
-            
-        return jsonify({"message": "대기열 DB 저장 완료"})
+        return jsonify({"message": "업로드 완료", "question_count": len(valid_chunks)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -516,10 +526,102 @@ def get_pending_exams():
         wallet_address = request.args.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, filename, chunks_json FROM pending_exams WHERE wallet_address = ? ORDER BY id DESC", (wallet_address,))
-        results = [{"id": r[0], "filename": r[1], "chunks": json.loads(r[2])} for r in cursor.fetchall()]
+        cursor.execute(
+            "SELECT id, filename, chunks_json, answers_json FROM pending_exams WHERE wallet_address = ? ORDER BY id DESC",
+            (wallet_address,)
+        )
+        results = []
+        for r in cursor.fetchall():
+            results.append({
+                "id": r[0],
+                "filename": r[1],
+                "chunks": json.loads(r[2]),
+                "answers": json.loads(r[3]) if r[3] else []
+            })
         conn.close()
         return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route('/cbt-explain', methods=['POST'])
+def cbt_explain():
+    """CBT 완료 후 문항별 AI 해설 생성."""
+    try:
+        data = request.json
+        question_text = data.get('question', '')[:1500]
+        correct_answer = data.get('correct_answer', '')
+        user_answer = data.get('user_answer', '')
+        wallet_address = data.get('wallet_address', '')
+
+        char_map = {
+            '㉠':'(가)','㉡':'(나)','㉢':'(다)','㉣':'(라)','㉤':'(마)',
+            '①':'1번','②':'2번','③':'3번','④':'4번','⑤':'5번',
+            '‧':'·','\u200b':'','\xa0':' ',
+        }
+        for s, d in char_map.items():
+            question_text = question_text.replace(s, d)
+
+        # DB 관련 법령 검색
+        db_context = ""
+        if wallet_address:
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT folder_name, title, content FROM categories WHERE wallet_address = ?", (wallet_address,))
+                rows = cursor.fetchall()
+                conn.close()
+                if rows:
+                    q_words = set(re.findall(r'[가-힣]{2,}', question_text))
+                    law_names = set(re.findall(r'[가-힣]+법', question_text))
+                    article_nums = set(re.findall(r'제\s*\d+조', question_text))
+                    scored = []
+                    for folder, title, content in rows:
+                        cc = re.sub(r'(?<=[가-힣])\s+(?=[가-힣])', '', content or '')
+                        ct = re.sub(r'(?<=[가-힣])\s+(?=[가-힣])', '', title or '')
+                        cf = re.sub(r'(?<=[가-힣])\s+(?=[가-힣])', '', folder or '')
+                        score = len(q_words & set(re.findall(r'[가-힣]{2,}', cc)))
+                        score += len(q_words & set(re.findall(r'[가-힣]{2,}', ct))) * 3
+                        for art in article_nums:
+                            if re.sub(r'\s','',art) in re.sub(r'\s','',ct): score += 20
+                        for law in law_names:
+                            if law in cf: score += 30
+                        if score > 0:
+                            scored.append((score, folder, title, cc[:400]))
+                    scored.sort(reverse=True)
+                    if scored:
+                        db_context = "\n[참고 DB 자료]\n" + "\n".join(
+                            f"---\n[{f}/{t}]\n{c}" for _,f,t,c in scored[:5]
+                        )
+            except Exception as e:
+                print(f"[DB 조회 오류] {e}", file=sys.stderr)
+
+        is_wrong = user_answer != correct_answer
+        prompt = (
+            f"당신은 시험 문제 해설 전문가입니다.\n"
+            f"{db_context}\n\n"
+            f"[문제]\n{question_text}\n\n"
+            f"정답: {correct_answer}번\n"
+            f"응시자 답: {user_answer}번 ({'틀림' if is_wrong else '맞음'})\n\n"
+            f"정답({correct_answer}번)이 맞는 이유를 DB 자료를 우선 참고하여 3~5문장으로 해설하세요."
+        )
+
+        try:
+            url = "http://localhost:11434/api/chat"
+            payload = {
+                "model": "gemma4:26b",
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+                "think": False,
+                "options": {"num_ctx": 4096, "num_predict": 600, "temperature": 0.2}
+            }
+            resp = requests.post(url, json=payload, timeout=300)
+            raw = (resp.json().get("message") or {}).get("content", "").strip()
+            raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
+        except Exception as e:
+            raw = f"AI 통신 오류: {e}"
+
+        return jsonify({"explanation": raw or "해설 생성 실패"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
