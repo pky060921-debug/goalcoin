@@ -88,7 +88,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   };
 
   const startCBT = (exam: Exam) => {
-    setCurrentExam(exam);
+    setCurrentExam({ ...exam, answers: exam.answers ?? [] });
     setCurrentIdx(0);
     setUserAnswers(new Array(exam.chunks.length).fill(''));
     setSelectedAnswer('');
@@ -405,7 +405,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                   <div className="text-white/80 font-bold text-sm">{exam.filename}</div>
                   <div className="text-white/30 text-xs mt-0.5">
                     총 {exam.chunks.length}문항
-                    {exam.answers.some(a => a) ? ' · 정답지 있음 ✓' : ' · 정답지 없음'}
+                    {(exam.answers ?? []).some(a => a) ? ' · 정답지 있음 ✓' : ' · 정답지 없음'}
                   </div>
                 </div>
                 <button
