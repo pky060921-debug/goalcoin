@@ -408,12 +408,28 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                     {(exam.answers ?? []).some(a => a) ? ' · 정답지 있음 ✓' : ' · 정답지 없음'}
                   </div>
                 </div>
-                <button
-                  onClick={() => startCBT(exam)}
-                  className="px-5 py-2 bg-teal-600 hover:bg-teal-500 text-white text-sm font-bold rounded-sm opacity-0 group-hover:opacity-100 transition-all"
-                >
-                  CBT 시작 →
-                </button>
+                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm(`"${exam.filename}" 을 삭제할까요?`)) return;
+                      await fetch(`${BASE_URL}/delete-pending-exam`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id: exam.id, wallet_address: userAddress }),
+                      });
+                      fetchPending();
+                    }}
+                    className="px-3 py-2 bg-red-900/40 hover:bg-red-700 text-red-400 hover:text-white text-xs font-bold rounded-sm border border-red-500/30 transition-all"
+                  >
+                    🗑 삭제
+                  </button>
+                  <button
+                    onClick={() => startCBT(exam)}
+                    className="px-5 py-2 bg-teal-600 hover:bg-teal-500 text-white text-sm font-bold rounded-sm transition-all"
+                  >
+                    CBT 시작 →
+                  </button>
+                </div>
               </div>
             ))}
           </div>
