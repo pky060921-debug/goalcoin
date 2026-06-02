@@ -1,166 +1,424 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useEffect, useRef } from 'react';
 
 const BASE_URL = "https://api.blankd.top/api";
 
-interface ExamQuestion {
+type Mode = 'list' | 'cbt' | 'result';
+
+interface Exam {
   id: number;
-  questionText: string;
-  choices: string[];
-  correctAnswer: number; 
-  explanation: string;   
+  filename: string;
+  chunks: string[];
+  answers: string[];
+}
+
+interface QuestionResult {
+  question: string;
+  correctAnswer: string;
+  userAnswer: string;
+  explanation: string;
+  loadingExplanation: boolean;
 }
 
 export const ExamTab = ({ walletAddress, address }: any) => {
   const userAddress = walletAddress || address;
-  const [phase, setPhase] = useState<'idle' | 'analyzing' | 'ready' | 'testing' | 'result'>('idle');
-  const [progress, setProgress] = useState(0);
-  const [examData, setExamData] = useState<ExamQuestion[]>([]);
-  const [userAnswers, setUserAnswers] = useState<Record<number, number>>({});
-  const [score, setScore] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [mode, setMode] = useState<Mode>('list');
+  const [pendingExams, setPendingExams] = useState<Exam[]>([]);
+  const [examFile, setExamFile] = useState<File | null>(null);
+  const [answerFile, setAnswerFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (phase === 'analyzing') {
-      setProgress(0);
-      interval = setInterval(() => {
-        setProgress(prev => (prev >= 95 ? 95 : prev + (prev < 50 ? 5 : prev < 80 ? 2 : 0.5)));
-      }, 500);
-    }
-    return () => clearInterval(interval);
-  }, [phase]);
+  // CBT 상태
+  const [currentExam, setCurrentExam] = useState<Exam | null>(null);
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const [userAnswers, setUserAnswers] = useState<string[]>([]);
+  const [selectedAnswer, setSelectedAnswer] = useState('');
+  const [timeElapsed, setTimeElapsed] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !userAddress) return alert("파일과 지갑 주소가 필요합니다.");
+  // 결과 상태
+  const [results, setResults] = useState<QuestionResult[]>([]);
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
-    setPhase('analyzing'); 
+  const fetchPending = async () => {
+    if (!userAddress) return;
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("wallet_address", userAddress);
+      const res = await fetch(`${BASE_URL}/get-pending-exams?wallet_address=${userAddress}`);
+      const data = await res.json();
+      setPendingExams(Array.isArray(data) ? data : []);
+    } catch (err) { console.error(err); }
+  };
 
-      const response = await fetch(`${BASE_URL}/upload-exam-cbt`, { method: "POST", body: formData });
-      const data = await response.json();
+  useEffect(() => { fetchPending(); }, [userAddress]);
 
-      if (response.ok && data.questions) {
-        setProgress(100); 
-        setTimeout(() => {
-          setExamData(data.questions); 
-          setPhase('ready');
-        }, 500); 
+  // 타이머
+  useEffect(() => {
+    if (mode === 'cbt') {
+      timerRef.current = setInterval(() => setTimeElapsed(t => t + 1), 1000);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, [mode]);
+
+  const formatTime = (sec: number) => {
+    const m = Math.floor(sec / 60).toString().padStart(2, '0');
+    const s = (sec % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
+  const handleUpload = async () => {
+    if (!examFile || !userAddress) return alert('문제지 파일을 첨부해주세요.');
+    setIsUploading(true);
+    const fd = new FormData();
+    fd.append('exam_file', examFile);
+    if (answerFile) fd.append('answer_file', answerFile);
+    fd.append('wallet_address', userAddress);
+    try {
+      const res = await fetch(`${BASE_URL}/upload-exam-coop`, { method: 'POST', body: fd });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`업로드 완료! 총 ${data.question_count}문항이 파싱됐습니다.`);
+        setExamFile(null); setAnswerFile(null);
+        fetchPending();
       } else {
-        throw new Error(data.error || "분석 결과가 올바르지 않습니다.");
+        alert(`업로드 실패: ${data.error}`);
       }
-    } catch (error: any) {
-      alert(`파일 분석 중 오류가 발생했습니다: ${error.message}`);
-      setPhase('idle');
+    } catch (err: any) { alert(`업로드 실패: ${err.message}`); }
+    setIsUploading(false);
+  };
+
+  const startCBT = (exam: Exam) => {
+    setCurrentExam(exam);
+    setCurrentIdx(0);
+    setUserAnswers(new Array(exam.chunks.length).fill(''));
+    setSelectedAnswer('');
+    setTimeElapsed(0);
+    setMode('cbt');
+  };
+
+  const submitAnswer = () => {
+    if (!selectedAnswer) return alert('답을 선택해주세요.');
+    if (!currentExam) return;
+    const updated = [...userAnswers];
+    updated[currentIdx] = selectedAnswer;
+    setUserAnswers(updated);
+
+    if (currentIdx + 1 < currentExam.chunks.length) {
+      setCurrentIdx(currentIdx + 1);
+      setSelectedAnswer(updated[currentIdx + 1] || '');
+    } else {
+      finishExam(updated);
     }
   };
 
-  const submitExam = () => {
-    if (Object.keys(userAnswers).length < examData.length) {
-      if (!confirm("아직 풀지 않은 문제가 있습니다. 그래도 제출하시겠습니까?")) return;
+  const goToPrev = () => {
+    if (currentIdx === 0) return;
+    const updated = [...userAnswers];
+    updated[currentIdx] = selectedAnswer;
+    setUserAnswers(updated);
+    setCurrentIdx(currentIdx - 1);
+    setSelectedAnswer(updated[currentIdx - 1] || '');
+  };
+
+  const finishExam = (finalAnswers: string[]) => {
+    if (!currentExam) return;
+    const r: QuestionResult[] = currentExam.chunks.map((q, i) => ({
+      question: q,
+      correctAnswer: currentExam.answers[i] || '?',
+      userAnswer: finalAnswers[i] || '미응답',
+      explanation: '',
+      loadingExplanation: false,
+    }));
+    setResults(r);
+    setMode('result');
+  };
+
+  const loadExplanation = async (idx: number) => {
+    const r = results[idx];
+    if (r.explanation || r.loadingExplanation) return;
+    setResults(prev => prev.map((item, i) => i === idx ? { ...item, loadingExplanation: true } : item));
+    try {
+      const res = await fetch(`${BASE_URL}/cbt-explain`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: r.question,
+          correct_answer: r.correctAnswer,
+          user_answer: r.userAnswer,
+          wallet_address: userAddress,
+        }),
+      });
+      const data = await res.json();
+      setResults(prev => prev.map((item, i) =>
+        i === idx ? { ...item, explanation: data.explanation || '해설 없음', loadingExplanation: false } : item
+      ));
+    } catch {
+      setResults(prev => prev.map((item, i) =>
+        i === idx ? { ...item, explanation: 'AI 통신 오류', loadingExplanation: false } : item
+      ));
     }
-    const currentScore = examData.filter(q => userAnswers[q.id] === q.correctAnswer).length;
-    setScore(Math.round((currentScore / examData.length) * 100));
-    setPhase('result');
   };
 
-  const resetExamTab = () => {
-    setPhase('idle'); setExamData([]); setUserAnswers({}); setProgress(0); setScore(0);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+  const handleExpandResult = (idx: number) => {
+    if (expandedIdx === idx) {
+      setExpandedIdx(null);
+    } else {
+      setExpandedIdx(idx);
+      loadExplanation(idx);
+    }
   };
 
+  // ── 결과 화면 ─────────────────────────────────────────────────
+  if (mode === 'result' && currentExam) {
+    const score = results.filter(r => r.userAnswer === r.correctAnswer).length;
+    const total = results.length;
+    const pct = Math.round((score / total) * 100);
+
+    return (
+      <div className="space-y-6 animate-in fade-in pb-20">
+        {/* 점수 카드 */}
+        <div className="p-6 border border-teal-500/50 bg-teal-950/20 rounded-sm text-center">
+          <div className="text-white/50 text-sm mb-1">{currentExam.filename}</div>
+          <div className={`text-6xl font-bold mb-2 ${pct >= 60 ? 'text-teal-400' : 'text-red-400'}`}>{pct}점</div>
+          <div className="text-white/60 text-lg">{total}문제 중 {score}개 정답 · 소요시간 {formatTime(timeElapsed)}</div>
+          <div className="flex gap-3 justify-center mt-4">
+            <button
+              onClick={() => { setMode('list'); fetchPending(); }}
+              className="px-6 py-2 border border-white/20 text-white/60 text-sm rounded-sm hover:bg-white/5"
+            >
+              목록으로
+            </button>
+            <button
+              onClick={() => startCBT(currentExam)}
+              className="px-6 py-2 bg-teal-600 hover:bg-teal-500 text-white text-sm font-bold rounded-sm"
+            >
+              다시 풀기
+            </button>
+          </div>
+        </div>
+
+        {/* 문항별 결과 */}
+        <div className="space-y-2">
+          {results.map((r, idx) => {
+            const isCorrect = r.userAnswer === r.correctAnswer;
+            const isExpanded = expandedIdx === idx;
+            return (
+              <div key={idx} className={`border rounded-sm overflow-hidden transition-all ${isCorrect ? 'border-teal-500/30' : 'border-red-500/40'}`}>
+                <button
+                  onClick={() => handleExpandResult(idx)}
+                  className={`w-full flex items-center justify-between p-4 text-left ${isCorrect ? 'bg-teal-950/20 hover:bg-teal-950/30' : 'bg-red-950/20 hover:bg-red-950/30'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className={`text-lg font-bold ${isCorrect ? 'text-teal-400' : 'text-red-400'}`}>
+                      {isCorrect ? '✓' : '✗'}
+                    </span>
+                    <span className="text-white/80 text-sm font-bold">{idx + 1}번</span>
+                    <span className="text-white/50 text-xs">
+                      내 답: <span className={isCorrect ? 'text-teal-300' : 'text-red-300'}>{r.userAnswer}번</span>
+                      {!isCorrect && <span className="ml-2 text-teal-300">정답: {r.correctAnswer}번</span>}
+                    </span>
+                  </div>
+                  <span className="text-white/30 text-xs">{isExpanded ? '▲ 닫기' : '▼ 해설 보기'}</span>
+                </button>
+
+                {isExpanded && (
+                  <div className="border-t border-white/10 bg-black/30 p-5 space-y-4">
+                    {/* 문제 */}
+                    <div className="text-white/70 text-sm leading-relaxed whitespace-pre-wrap bg-white/5 p-4 rounded-sm">
+                      {r.question}
+                    </div>
+                    {/* AI 해설 */}
+                    <div className="border-t border-emerald-900/40 pt-4">
+                      <div className="text-emerald-400 text-xs font-bold mb-2">💡 AI 해설 (gemma4:26b)</div>
+                      {r.loadingExplanation ? (
+                        <div className="flex items-center gap-2 text-white/40 text-sm">
+                          <span className="animate-spin">⟳</span> AI가 해설을 생성 중입니다...
+                        </div>
+                      ) : r.explanation ? (
+                        <div className="text-emerald-100/80 text-sm leading-relaxed whitespace-pre-wrap">
+                          {r.explanation}
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => loadExplanation(idx)}
+                          className="text-xs text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-sm hover:bg-emerald-900/20"
+                        >
+                          AI 해설 불러오기
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // ── CBT 풀기 화면 ──────────────────────────────────────────────
+  if (mode === 'cbt' && currentExam) {
+    const q = currentExam.chunks[currentIdx];
+    const total = currentExam.chunks.length;
+    const answered = userAnswers.filter(a => a !== '').length;
+
+    return (
+      <div className="flex flex-col h-[85vh] animate-in fade-in">
+        {/* 헤더 */}
+        <div className="flex justify-between items-center pb-3 border-b border-white/10 mb-4">
+          <div className="flex items-center gap-3">
+            <span className="text-teal-400 font-bold">{currentIdx + 1} / {total}</span>
+            <span className="text-white/30 text-xs">응답 {answered}/{total}</span>
+            <div className="w-32 h-1.5 bg-white/10 rounded-full overflow-hidden">
+              <div className="h-full bg-teal-500 transition-all" style={{ width: `${((currentIdx) / total) * 100}%` }} />
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-white/40 font-mono text-sm">⏱ {formatTime(timeElapsed)}</span>
+            <button
+              onClick={() => {
+                if (window.confirm('시험을 종료하고 결과를 확인할까요?')) {
+                  const updated = [...userAnswers];
+                  updated[currentIdx] = selectedAnswer;
+                  finishExam(updated);
+                }
+              }}
+              className="text-xs text-white/40 border border-white/10 px-3 py-1 rounded-sm hover:bg-white/5"
+            >
+              제출 종료
+            </button>
+          </div>
+        </div>
+
+        {/* 문제 본문 */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="bg-black/20 border border-white/10 rounded-sm p-5 mb-4">
+            <div className="text-white/80 text-sm leading-loose whitespace-pre-wrap">{q}</div>
+          </div>
+
+          {/* 보기 선택 */}
+          <div className="grid grid-cols-5 gap-2 mb-4">
+            {['1', '2', '3', '4', '5'].map(n => (
+              <button
+                key={n}
+                onClick={() => setSelectedAnswer(n)}
+                className={`py-4 rounded-sm text-xl font-bold transition-all border ${
+                  selectedAnswer === n
+                    ? 'bg-teal-500 border-teal-400 text-white shadow-lg shadow-teal-500/30'
+                    : 'bg-black/30 border-white/10 text-white/50 hover:border-teal-500/50 hover:text-white/80'
+                }`}
+              >
+                {['①', '②', '③', '④', '⑤'][parseInt(n) - 1]}
+              </button>
+            ))}
+          </div>
+
+          {/* 답안 현황 미니맵 */}
+          <div className="flex flex-wrap gap-1.5 p-3 bg-black/20 border border-white/5 rounded-sm mb-4">
+            {currentExam.chunks.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => {
+                  const updated = [...userAnswers];
+                  updated[currentIdx] = selectedAnswer;
+                  setUserAnswers(updated);
+                  setCurrentIdx(i);
+                  setSelectedAnswer(updated[i] || '');
+                }}
+                className={`w-8 h-8 text-xs font-bold rounded-sm border transition-all ${
+                  i === currentIdx
+                    ? 'bg-teal-500 border-teal-400 text-white'
+                    : userAnswers[i]
+                    ? 'bg-teal-900/50 border-teal-500/30 text-teal-300'
+                    : 'bg-black/30 border-white/10 text-white/30'
+                }`}
+              >
+                {i + 1}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 하단 버튼 */}
+        <div className="flex gap-3 pt-3 border-t border-white/10">
+          <button
+            onClick={goToPrev}
+            disabled={currentIdx === 0}
+            className="px-6 py-3 border border-white/10 text-white/50 rounded-sm disabled:opacity-30 hover:bg-white/5 transition-all"
+          >
+            ← 이전
+          </button>
+          <button
+            onClick={submitAnswer}
+            disabled={!selectedAnswer}
+            className="flex-1 py-3 bg-teal-600 hover:bg-teal-500 disabled:opacity-40 text-white font-bold rounded-sm transition-all"
+          >
+            {currentIdx + 1 === total ? '🏁 최종 제출' : '다음 →'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── 목록 & 업로드 ─────────────────────────────────────────────
   return (
-    <div className="p-6 h-full flex flex-col font-sans animate-in fade-in">
-      {phase === 'idle' && (
-        <div className="flex-1 flex flex-col items-center justify-center border border-white/10 bg-[#121214] p-10 text-center">
-          <h2 className="text-xl font-bold text-white mb-2">모의고사 CBT 변환 시스템</h2>
-          <p className="text-white/50 text-sm mb-8">가지고 계신 모의고사 파일(문제+정답)을 업로드하면 AI가 실전용으로 변환합니다.</p>
-          <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} accept=".txt,.pdf" />
-          <button onClick={() => fileInputRef.current?.click()} className="px-6 py-3 bg-teal-900/30 text-teal-400 border border-teal-500/50 hover:bg-teal-900/50 transition-colors font-bold tracking-wide">
-            문제 업로드 및 분석 시작
+    <div className="space-y-6 animate-in fade-in pb-20">
+      {/* 업로드 */}
+      <div className="p-5 border border-teal-500/50 bg-teal-950/20 rounded-sm space-y-3">
+        <h3 className="text-teal-400 font-bold text-sm">📤 모의고사 업로드</h3>
+        <div className="flex flex-col md:flex-row gap-3">
+          <label className="flex-1 border border-teal-900/40 p-3 text-center text-sm cursor-pointer text-teal-400 hover:bg-teal-900/20 transition-colors rounded-sm">
+            <input type="file" accept=".pdf,.txt" onChange={e => setExamFile(e.target.files?.[0] || null)} className="hidden" />
+            {examFile ? `📂 ${examFile.name}` : '➕ 문제지 파일 (PDF/TXT)'}
+          </label>
+          <label className="flex-1 border border-emerald-900/40 p-3 text-center text-sm cursor-pointer text-emerald-400 hover:bg-emerald-900/20 transition-colors rounded-sm">
+            <input type="file" accept=".pdf,.txt" onChange={e => setAnswerFile(e.target.files?.[0] || null)} className="hidden" />
+            {answerFile ? `📂 ${answerFile.name}` : '➕ 정답지 파일 (선택)'}
+          </label>
+          <button
+            onClick={handleUpload}
+            disabled={isUploading || !examFile}
+            className="px-6 py-3 bg-teal-500 hover:bg-teal-400 disabled:opacity-40 text-teal-950 font-bold text-sm rounded-sm transition-all"
+          >
+            {isUploading ? '처리 중...' : '업로드'}
           </button>
         </div>
-      )}
+        <p className="text-white/30 text-xs">정답지를 함께 올리면 CBT 종료 후 자동으로 채점됩니다.</p>
+      </div>
 
-      {phase === 'analyzing' && (
-        <div className="flex-1 flex flex-col items-center justify-center border border-white/10 bg-[#121214] p-10">
-          <h2 className="text-xl font-bold text-teal-300 mb-6 animate-pulse">로컬 AI 분석 가동 중...</h2>
-          <div className="w-full max-w-md h-2 bg-black border border-white/20 mb-4 relative overflow-hidden">
-            <div className="h-full bg-teal-500 transition-all duration-300 ease-out" style={{ width: `${progress}%` }} />
-          </div>
-          <p className="text-white/70 font-mono text-sm">{Math.floor(progress)}% 파싱 및 해설 작성 중</p>
-        </div>
-      )}
-
-      {phase === 'ready' && (
-        <div className="flex-1 flex flex-col items-center justify-center border border-teal-900/50 bg-[#121214] p-10 text-center">
-          <h2 className="text-2xl font-bold text-teal-400 mb-2">출제 완료!</h2>
-          <p className="text-white/70 mb-8">총 {examData.length}문항 변환 완료. 실전처럼 풀어보세요.</p>
-          <button onClick={() => setPhase('testing')} className="px-8 py-4 bg-teal-900/30 text-teal-300 border border-teal-500/50 hover:bg-teal-900/60 font-bold transition-colors">
-            실전 모의고사 시작
+      {/* 목록 */}
+      <div className="p-5 border border-white/10 rounded-sm">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-white/70 font-bold text-sm">📋 모의고사 목록</h3>
+          <button onClick={fetchPending} className="text-xs text-white/30 border border-white/10 px-3 py-1 rounded-sm hover:bg-white/5">
+            새로고침
           </button>
         </div>
-      )}
-
-      {phase === 'testing' && (
-        <div className="flex-1 flex flex-col max-w-3xl mx-auto w-full">
-          <div className="flex justify-between items-center mb-6 pb-4 border-b border-white/10">
-            <h2 className="text-lg font-bold text-white">실전 모의고사</h2>
-            <span className="text-teal-400 font-mono">{Object.keys(userAnswers).length} / {examData.length} 완료</span>
-          </div>
-          <div className="flex-1 overflow-y-auto space-y-8 pb-10 pr-2">
-            {examData.map((q, idx) => (
-              <div key={q.id} className="bg-[#1a1a1d] border border-white/5 p-6">
-                <p className="text-white/90 font-bold mb-4 whitespace-pre-wrap"><span className="text-teal-500 mr-2">Q{idx + 1}.</span> {q.questionText}</p>
-                <div className="space-y-2">
-                  {q.choices.map((choice, cIdx) => (
-                    <label key={cIdx} className={`block p-3 border transition-colors cursor-pointer ${userAnswers[q.id] === cIdx ? 'bg-teal-900/20 border-teal-500/50 text-teal-200' : 'bg-black/40 border-white/10 text-white/60 hover:bg-white/5'}`}>
-                      <input type="radio" name={`q_${q.id}`} className="hidden" checked={userAnswers[q.id] === cIdx} onChange={() => setUserAnswers(prev => ({ ...prev, [q.id]: cIdx }))} />
-                      <span className="mr-3 text-xs opacity-50">{(cIdx + 1)}</span> {choice}
-                    </label>
-                  ))}
+        {pendingExams.length === 0 ? (
+          <div className="py-10 text-center text-white/20 text-sm">업로드된 모의고사가 없습니다.</div>
+        ) : (
+          <div className="space-y-2">
+            {pendingExams.map(exam => (
+              <div key={exam.id} className="flex items-center justify-between p-4 bg-black/30 border border-white/10 rounded-sm hover:border-teal-500/40 transition-colors group">
+                <div>
+                  <div className="text-white/80 font-bold text-sm">{exam.filename}</div>
+                  <div className="text-white/30 text-xs mt-0.5">
+                    총 {exam.chunks.length}문항
+                    {exam.answers.some(a => a) ? ' · 정답지 있음 ✓' : ' · 정답지 없음'}
+                  </div>
                 </div>
+                <button
+                  onClick={() => startCBT(exam)}
+                  className="px-5 py-2 bg-teal-600 hover:bg-teal-500 text-white text-sm font-bold rounded-sm opacity-0 group-hover:opacity-100 transition-all"
+                >
+                  CBT 시작 →
+                </button>
               </div>
             ))}
           </div>
-          <div className="pt-4 border-t border-white/10"><button onClick={submitExam} className="w-full py-4 bg-white/10 text-white border border-white/20 hover:bg-white/20 font-bold">답안지 제출</button></div>
-        </div>
-      )}
-
-      {phase === 'result' && (
-        <div className="flex-1 flex flex-col max-w-3xl mx-auto w-full">
-          <div className="text-center mb-8 pb-6 border-b border-white/10">
-            <h2 className="text-2xl font-bold text-white mb-2">테스트 결과</h2>
-            <p className={`text-5xl font-black ${score >= 80 ? 'text-teal-400' : 'text-amber-400'}`}>{score}점</p>
-          </div>
-          <div className="flex-1 overflow-y-auto space-y-8 pb-10 pr-2">
-            {examData.map((q, idx) => {
-              const isCorrect = userAnswers[q.id] === q.correctAnswer;
-              return (
-                <div key={q.id} className={`p-6 border ${isCorrect ? 'bg-teal-900/10 border-teal-900/30' : 'bg-red-900/10 border-red-900/30'}`}>
-                  <p className="text-white/90 font-bold mb-4 whitespace-pre-wrap"><span className={isCorrect ? 'text-teal-500 mr-2' : 'text-red-500 mr-2'}>{isCorrect ? '✅' : '❌'} Q{idx + 1}.</span> {q.questionText}</p>
-                  <div className="space-y-2 mb-6 opacity-70">
-                    {q.choices.map((c, cIdx) => (
-                      <div key={cIdx} className={`p-2 px-4 border flex items-center ${q.correctAnswer === cIdx ? 'bg-teal-900/30 border-teal-500/50 text-teal-300' : userAnswers[q.id] === cIdx ? 'bg-red-900/30 border-red-500/50 text-red-300' : 'border-white/5 text-white/40'}`}>
-                        <span className="mr-3 text-xs opacity-50">{(cIdx + 1)}</span> {c}
-                        {q.correctAnswer === cIdx && <span className="ml-auto text-xs font-bold text-teal-400">정답</span>}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="bg-black/60 border border-teal-900/30 p-4 relative">
-                    <span className="absolute -top-3 left-4 bg-[#121214] px-2 text-xs font-bold text-teal-500 uppercase">AI 해설</span>
-                    <p className="text-white/70 text-sm leading-relaxed mt-2 whitespace-pre-wrap">{q.explanation}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="pt-4 border-t border-white/10 text-center"><button onClick={resetExamTab} className="px-8 py-3 bg-white/5 text-white/50 border border-white/10 hover:bg-white/10 hover:text-white">처음으로</button></div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 };
