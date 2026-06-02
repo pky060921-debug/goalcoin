@@ -431,86 +431,37 @@ def delete_pending_exam():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ==========================================
-# 💡 [신규] 기존 모의고사 기반 CBT 자동 변환 & 해설 생성 엔진 (안정성 강화 버전)
-# ==========================================
-@api_bp.route('/upload-exam-cbt', methods=['POST'])
-def upload_exam_cbt():
+@api_bp.route('/upload-exam-coop', methods=['POST'])
+def upload_exam_coop():
     try:
         wallet_address = request.form.get('wallet_address')
-        file = request.files.get('file')
+        exam_file = request.files.get('exam_file')
+        answer_file = request.files.get('answer_file')
         
-        if not file or not wallet_address:
-            return jsonify({"error": "파일이나 인증 정보가 없습니다."}), 400
+        if not exam_file or not wallet_address: return jsonify({"error": "문제 파일이나 인증 정보가 없습니다."}), 400
+        
+        filename = exam_file.filename.lower()
+        exam_text = extract_exam_text_with_color(exam_file, is_answer=False)
+        answer_text = extract_exam_text_with_color(answer_file, is_answer=True)
+        
+        exam_text = re.sub(r'-\s*\d+\s*-', '', exam_text)
+        exam_text = re.sub(r'【[^】]+】', '', exam_text)
+        
+        if answer_text:
+            exam_text += "\n\n[정답 및 해설지 참고 (빨간색 텍스트는 🔴정답으로 표시됨)]\n" + answer_text
             
-        # 1. 업로드된 파일에서 텍스트 추출
-        exam_text = extract_text_from_file(file)
-        if not exam_text:
-            return jsonify({"error": "파일에서 텍스트를 추출하지 못했습니다."}), 400
+        chunks = re.split(r'(?m)^(?=\s*\d+\.\s)', exam_text)
+        valid_chunks = [c.strip() for c in chunks if c.strip() and len(c.strip()) > 10]
+
+        conn = get_db_connection()
+        conn.execute("INSERT INTO pending_exams (wallet_address, filename, chunks_json) VALUES (?, ?, ?)",
+                     (wallet_address, exam_file.filename, json.dumps(valid_chunks, ensure_ascii=False)))
+        conn.commit()
+        conn.close()
             
-        # 2. 로컬 AI(Gemma 26B) 프롬프트 고도화 
-        prompt = """당신은 법령 및 실무 승진 시험 전문 튜터입니다. 
-사용자가 '모의고사 문제와 정답'이 포함된 문서를 업로드했습니다. 
-당신의 임무는 이 문서에 있는 문제들을 분석하여 컴퓨터로 풀 수 있는 객관식 데이터로 분해하고, 각 문제마다 왜 그것이 정답인지 상세한 [해설]을 추가하는 것입니다.
-
-[🚨 절대 준수 규칙 🚨]
-1. 반드시 마크다운 JSON 코드블록(```json ... 
-```) 안에만 결과물을 작성하세요.
-2. 텍스트 내부(특히 해설 부분)에 줄바꿈(엔터)을 넣고 싶다면 절대 실제 엔터를 치지 말고, 반드시 '\\n' 문자를 사용하세요.
-3. 텍스트 내부에 큰따옴표(")가 있다면 구조가 깨지지 않도록 반드시 작은따옴표(')로 변경하세요.
-4. 너무 많은 문제를 한 번에 출력하면 잘릴 수 있으므로, 문서에서 최대 10문제까지만 완벽하게 추출하세요.
-
-[업로드된 문제 및 정답 문서 내용]
-{exam_text[:5000]}
-
-[출력할 JSON 구조 예시 (반드시 이 구조를 지키세요)]
-```json
-{{
-  "questions": [
-    {{
-      "id": 1,
-      "questionText": "다음 중 ~은?",
-      "choices": ["보기1 텍스트", "보기2 텍스트", "보기3 텍스트", "보기4 텍스트"],
-      "correctAnswer": 0,  
-      "explanation": "이 문제의 정답이 이것인 이유를 설명하는 해설입니다."
-    }}
-  ]
-}}
-
-# 3. Ollama API 직접 호출 
-    import requests
-    import sys
-    print("🤖 [gemma4:26b] 모의고사 파싱 및 해설 생성 중... (안정성 강화 모드)", file=sys.stderr)
-    
-    url = "http://localhost:11434/api/generate"
-    payload = {
-        "model": "gemma4:26b",
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": 0.1,
-            "num_ctx": 16384,
-            "num_predict": 4096, 
-            "top_k": 40,
-            "top_p": 0.9,
-            "repeat_penalty": 1.15
-        }
-    }
-    
-    resp = requests.post(url, json=payload, timeout=600)
-    resp.raise_for_status()
-    response_text = resp.json().get("response", "{}")
-    
-    # 4. JSON 파싱 후 프론트엔드로 전달
-    result = clean_and_parse_json(response_text)
-    return jsonify(result)
-    
-except Exception as e:
-    import traceback
-    import sys
-    print(f"\n[🔥 CBT 모의고사 변환 에러]\n{traceback.format_exc()}\n", file=sys.stderr)
-    return jsonify({"error": str(e)}), 500
-
+        return jsonify({"message": "대기열 DB 저장 완료"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/get-pending-exams', methods=['GET'])
 def get_pending_exams():
@@ -524,6 +475,7 @@ def get_pending_exams():
         return jsonify(results)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
@@ -1165,4 +1117,3 @@ def get_checkpoint():
         return jsonify({"last_id": last_id})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
