@@ -388,7 +388,7 @@ def delete_pending_exam():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# 💡 [신규] 기존 모의고사 기반 CBT 자동 변환 & 해설 생성 엔진
+# 💡 [신규] 기존 모의고사 기반 CBT 자동 변환 & 해설 생성 엔진 (침묵 방지 및 메모리 최적화 버전)
 # ==========================================
 @api_bp.route('/upload-exam-cbt', methods=['POST'])
 def upload_exam_cbt():
@@ -433,7 +433,9 @@ def upload_exam_cbt():
             "    }\n"
             "  ]\n"
             "}\n"
-            "```"
+            "```\n\n"
+            "💡 자, 이제 위의 예시를 참고하여 [업로드된 문서 내용]을 분석한 실제 결과물 출력을 시작하세요.\n" # <- AI를 깨우는 핵심 문장 추가!
+            "응답은 반드시 ```json 으로 시작해야 합니다.\n"
         )
 
         print("🤖 [gemma4:26b] 모의고사 파싱 및 해설 생성 시작...", file=sys.stderr)
@@ -444,8 +446,8 @@ def upload_exam_cbt():
             "stream": False,
             "options": {
                 "temperature": 0.1,
-                "num_ctx": 16384,
-                "num_predict": 4096, 
+                "num_ctx": 8192,     # 💡 [수정] 맥미니 메모리(RAM)가 버티도록 16384 -> 8192로 하향
+                "num_predict": 2048, # 💡 [수정] 모델이 너무 길게 뱉다 죽지 않도록 안전선 설정
                 "top_k": 40,
                 "top_p": 0.9,
                 "repeat_penalty": 1.15
@@ -455,7 +457,13 @@ def upload_exam_cbt():
         resp = requests.post(url, json=payload, timeout=600)
         resp.raise_for_status()
         
-        response_text = resp.json().get("response", "{}")
+        # 앞뒤 공백을 자르고 가져옵니다.
+        response_text = resp.json().get("response", "").strip()
+        
+        # 💡 [신규 방어] 모델이 또 침묵할 경우를 대비한 안전장치
+        if not response_text:
+            raise ValueError("AI가 빈 응답을 반환했습니다. (맥미니 메모리 부족 또는 모델 침묵 현상)")
+
         result = clean_and_parse_json(response_text)
         
         if isinstance(result, dict) and "questions" in result:
