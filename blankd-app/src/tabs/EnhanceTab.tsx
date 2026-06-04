@@ -179,45 +179,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             {safeCards
               .filter((c:any) => c && c.content && c.folder_name === folder)
-              .sort((a:any, b:any) => {
-                // 💡 카드 텍스트에서 조항 번호와 법/령/규칙 타입을 동시에 판독합니다.
-                const getScore = (card: any) => {
-                  const text = (card.content || "") + " " + (card.title || "");
-                  
-                  // 1. 조항 번호 판독 (제N조의M)
-                  let articleScore = 99999999;
-                  const match = text.match(/제\s*(\d+)\s*조(?:의\s*(\d+))?/);
-                  if (match) {
-                    articleScore = parseInt(match[1], 10) * 10000 + (match[2] ? parseInt(match[2], 10) : 0);
-                  }
-
-                  // 2. 위계질서(법/령/칙) 판독 (숫자가 작을수록 우선순위)
-                  let typeScore = 4; // 기본값 (기타)
-                  if (text.includes('[법]')) typeScore = 1;
-                  else if (text.includes('[령]') || text.includes('[영]') || text.includes('시행령')) typeScore = 2;
-                  else if (text.includes('[칙]') || text.includes('[규]') || text.includes('시행규칙')) typeScore = 3;
-
-                  return { article: articleScore, type: typeScore };
-                };
-
-                const scoreA = getScore(a);
-                const scoreB = getScore(b);
-
-                // 🥇 1순위 정렬: 무조건 조항 번호 순서대로 (제20조 -> 제21조)
-                if (scoreA.article !== scoreB.article) {
-                  return scoreA.article - scoreB.article;
-                }
-                
-                // 🥈 2순위 정렬: 조항 번호가 같다면, 법 -> 시행령 -> 시행규칙 순서대로!
-                if (scoreA.type !== scoreB.type) {
-                  return scoreA.type - scoreB.type;
-                }
-
-                // 🥉 3순위 정렬: 조항도 같고 위계도 같다면, 엉키지 않게 원래 생성된 순서대로
-                const origA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
-                const origB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
-                return origA - origB;
-              })
+              .sort((a:any, b:any) => a.id - b.id)
               .map((card: any) => {
                 
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
