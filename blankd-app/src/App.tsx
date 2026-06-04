@@ -11,10 +11,11 @@ import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
 // ── 인라인 빈칸 입력 컴포넌트 (부모 리렌더링 완전 격리) ─────────────────
-const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected }: {
+const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
   expected: string; 
+  abbrDict: Record<string, string>; // 💡 [추가] 약어 사전
 }) => {
   const [val, setVal] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -34,8 +35,16 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected }: {
     const cleanInput = newVal.replace(/\s+/g, '').toLowerCase();
     const cleanExpected = expected.replace(/\s+/g, '').toLowerCase();
 
-    // 💡 띄어쓰기를 뺀 진짜 알맹이 글자만 똑같다면 즉시 정답으로 처리하여 부모에게 보냅니다.
-    if (cleanInput === cleanExpected) {
+    let isMatch = (cleanInput === cleanExpected);
+
+    // 💡 [추가] 입력값이 약어 사전에 있고, 그 원래 뜻이 정답과 같으면 정답 처리
+    if (!isMatch && abbrDict && abbrDict[cleanInput]) {
+      if (abbrDict[cleanInput].replace(/\s+/g, '').toLowerCase() === cleanExpected) {
+        isMatch = true;
+      }
+    }
+
+    if (isMatch) {
       onSubmit(newVal);
     }
   };
@@ -62,7 +71,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected }: {
     />
   );
 }, (prevProps, nextProps) => {
-  return prevProps.inputStatus === nextProps.inputStatus && prevProps.expected === nextProps.expected;
+  return prevProps.inputStatus === nextProps.inputStatus && prevProps.expected === nextProps.expected && prevProps.abbrDict === nextProps.abbrDict;
 });
 
 class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
@@ -143,7 +152,20 @@ function MainApp() {
   
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
-  
+
+  // 💡 [추가] 스마트 약어 사전 상태 및 모달 제어
+  const [abbrDict, setAbbrDict] = useState<Record<string, string>>(() => {
+    try { const saved = localStorage.getItem('blankd_abbr_dict'); return saved ? JSON.parse(saved) : {}; }
+    catch { return {}; }
+  });
+  const [isAbbrModalOpen, setIsAbbrModalOpen] = useState(false);
+  const [tempAbbrKey, setTempAbbrKey] = useState("");
+  const [tempAbbrValue, setTempAbbrValue] = useState("");
+
+  const saveAbbrDict = (newDict: Record<string, string>) => {
+    setAbbrDict(newDict);
+    localStorage.setItem('blankd_abbr_dict', JSON.stringify(newDict));
+  };
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
 
@@ -463,7 +485,20 @@ function MainApp() {
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
     
-    if (expected === actual) {
+    // 💡 [추가된 부분] 1차 검사: 원본 그대로 일치하는지 확인
+    let isCorrect = (expected === actual);
+
+    // 💡 [추가된 부분] 2차 검사: 오답일 경우, 입력한 단어가 약어 사전에 등록되어 있는지 확인
+    if (!isCorrect && abbrDict && abbrDict[actual]) {
+      const mappedValue = abbrDict[actual].replace(/\s+/g, '').toLowerCase();
+      console.log(`[진단-약어] 입력:'${actual}' -> 매핑:'${mappedValue}' | 실제:'${expected}'`);
+      if (mappedValue === expected) {
+        isCorrect = true; // 약어의 원래 뜻이 정답과 같으면 정답 처리!
+      }
+    }
+
+    // 💡 [수정된 부분] expected === actual 대신 isCorrect 변수를 사용합니다.
+    if (isCorrect) {
       setInputStatus('correct');
       setBlanks(prev => {
         const nb = [...prev]; 
@@ -494,7 +529,7 @@ function MainApp() {
       setTimeout(() => setInputStatus('idle'), 500); 
     }
   };
-
+  
   const handleShowAnswer = () => {
     if (!blanks[currentBlankIdx]) return;
     setInputStatus('wrong'); 
@@ -682,6 +717,7 @@ function MainApp() {
                   key={`blank-${currentBlankIdx}`}
                   inputStatus={inputStatus}
                   expected={blanks[currentBlankIdx]?.answer || ""} // 💡 현재 빈칸의 정답을 전달
+                  abbrDict={abbrDict} // 💡 [추가] 약어 사전 전달
                   onSubmit={handleSequentialInput}
                 />
               );
@@ -832,8 +868,16 @@ function MainApp() {
                 <div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 완료</div>
               )}
             </div>
+
+            {/* 💡 [추가] 상단 단어장 메뉴 UI 추가 */}
+            <div className="flex items-center gap-2 shrink-0 ml-1 sm:ml-2 border-l border-white/10 pl-2 sm:pl-3">
+              <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 hidden sm:inline">단어:</span>
+              <button onClick={() => { setActiveTab('create'); alert('제외/포함 단어 설정은 만들기 탭(⚙️ 예외 단어)을 이용해주세요.'); }} className="text-[10px] bg-amber-900/30 text-amber-400 border border-amber-500/40 px-2 py-1 rounded-sm hover:bg-amber-900/50">제외/포함</button>
+              <button onClick={() => setIsAbbrModalOpen(true)} className="text-[10px] bg-indigo-900/30 text-indigo-400 border border-indigo-500/40 px-2 py-1 rounded-sm hover:bg-indigo-900/50">약어</button>
+            </div>
+
             {/* 구분선 */}
-            <div className="h-5 sm:h-6 w-px bg-white/10 shrink-0 hidden sm:block"></div>
+            <div className="h-5 sm:h-6 w-px bg-white/10 shrink-0 hidden sm:block ml-1 sm:ml-2"></div>
 
             {/* 통계 지표 및 로그아웃 */}
             {isLoggedIn && (
@@ -911,8 +955,43 @@ function MainApp() {
         </button>
       </div>
 
+      {/* 💡 [추가] 스마트 약어 등록 모달 */}
+      {isAbbrModalOpen && (
+        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4">
+          <div className="bg-[#121214] border border-indigo-500/50 p-6 w-full max-w-lg rounded-sm shadow-2xl">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-lg font-bold text-indigo-400">⚡ 스마트 약어 설정 (약어 = 정답 인정)</h3>
+              <button onClick={() => setIsAbbrModalOpen(false)} className="text-white/40 hover:text-white">✕</button>
+            </div>
+            <div className="flex gap-2 mb-4">
+              <input type="text" value={tempAbbrKey} onChange={(e) => setTempAbbrKey(e.target.value)} placeholder="약어 (예: 복정고)" className="flex-1 bg-black/50 border border-white/20 p-2 text-sm text-white/80 outline-none rounded-sm" />
+              <input type="text" value={tempAbbrValue} onChange={(e) => setTempAbbrValue(e.target.value)} onKeyDown={(e) => {
+                if(e.key === 'Enter' && tempAbbrKey && tempAbbrValue) {
+                  saveAbbrDict({ ...abbrDict, [tempAbbrKey.trim()]: tempAbbrValue.trim() });
+                  setTempAbbrKey(""); setTempAbbrValue("");
+                }
+              }} placeholder="원래 문장 (예: 보건복지부장관이 정하여 고시)" className="flex-[2] bg-black/50 border border-white/20 p-2 text-sm text-white/80 outline-none rounded-sm" />
+              <button onClick={() => { 
+                if(tempAbbrKey && tempAbbrValue) { 
+                  saveAbbrDict({ ...abbrDict, [tempAbbrKey.trim()]: tempAbbrValue.trim() });
+                  setTempAbbrKey(""); setTempAbbrValue("");
+                }
+              }} className="px-4 bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 text-xs font-bold rounded-sm hover:bg-indigo-600/40">등록</button>
+            </div>
+            <div className="max-h-40 overflow-y-auto space-y-2 custom-scrollbar pr-2">
+              {Object.entries(abbrDict).map(([abbr, full]) => (
+                <div key={abbr} className="flex justify-between items-center text-sm border-b border-white/5 pb-2">
+                  <div><span className="text-indigo-400 font-bold">{abbr}</span> <span className="text-white/30 mx-2">→</span> <span className="text-white/70">{full}</span></div>
+                  <button onClick={() => { const nw = {...abbrDict}; delete nw[abbr]; saveAbbrDict(nw); }} className="text-red-400/50 hover:text-red-400 text-xs">삭제</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeCard && (
-        <CardModal 
+        <CardModal
           activeCard={activeCard} 
           totalTimeLimit={totalTimeLimit} 
           elapsed={elapsed} 
