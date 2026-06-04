@@ -180,27 +180,40 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
             {safeCards
               .filter((c:any) => c && c.content && c.folder_name === folder)
               .sort((a:any, b:any) => {
-                // 💡 1차 정렬: 텍스트에서 '제N조'를 사람처럼 읽어내어 완벽한 조항 순서로 정렬합니다.
-                const getArticleScore = (text: string) => {
-                  // '제21조' 또는 '제21조의2' 같은 형식을 모두 감지합니다.
+                // 💡 카드 텍스트에서 조항 번호와 법/령/규칙 타입을 동시에 판독합니다.
+                const getScore = (card: any) => {
+                  const text = (card.content || "") + " " + (card.title || "");
+                  
+                  // 1. 조항 번호 판독 (제N조의M)
+                  let articleScore = 99999999;
                   const match = text.match(/제\s*(\d+)\s*조(?:의\s*(\d+))?/);
                   if (match) {
-                    // 제21조 = 21000점 / 제21조의2 = 21002점
-                    return parseInt(match[1], 10) * 1000 + (match[2] ? parseInt(match[2], 10) : 0);
+                    articleScore = parseInt(match[1], 10) * 10000 + (match[2] ? parseInt(match[2], 10) : 0);
                   }
-                  return 99999999; // 조항 번호가 없는 일반 텍스트는 맨 뒤로 보냅니다.
+
+                  // 2. 위계질서(법/령/칙) 판독 (숫자가 작을수록 우선순위)
+                  let typeScore = 4; // 기본값 (기타)
+                  if (text.includes('[법]')) typeScore = 1;
+                  else if (text.includes('[령]') || text.includes('[영]') || text.includes('시행령')) typeScore = 2;
+                  else if (text.includes('[칙]') || text.includes('[규]') || text.includes('시행규칙')) typeScore = 3;
+
+                  return { article: articleScore, type: typeScore };
                 };
 
-                const scoreA = getArticleScore(a.content || "");
-                const scoreB = getArticleScore(b.content || "");
+                const scoreA = getScore(a);
+                const scoreB = getScore(b);
 
-                // 조항 번호가 다르면 무조건 번호순(18조 -> 19조 -> 20조)으로 정렬!
-                if (scoreA !== scoreB) {
-                  return scoreA - scoreB; 
+                // 🥇 1순위 정렬: 무조건 조항 번호 순서대로 (제20조 -> 제21조)
+                if (scoreA.article !== scoreB.article) {
+                  return scoreA.article - scoreB.article;
+                }
+                
+                // 🥈 2순위 정렬: 조항 번호가 같다면, 법 -> 시행령 -> 시행규칙 순서대로!
+                if (scoreA.type !== scoreB.type) {
+                  return scoreA.type - scoreB.type;
                 }
 
-                // 💡 2차 정렬: 만약 같은 조항(예: 제20조가 너무 길어서 2개로 쪼갠 경우)이라면,
-                // 최초 부여된 ORIG_ID 또는 고유 생성 ID 순으로 정렬하여 엉키지 않게 합니다.
+                // 🥉 3순위 정렬: 조항도 같고 위계도 같다면, 엉키지 않게 원래 생성된 순서대로
                 const origA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
                 const origB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
                 return origA - origB;
