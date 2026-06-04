@@ -179,7 +179,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             {safeCards
               .filter((c:any) => c && c.content && c.folder_name === folder)
-              .sort((a:any, b:any) => a.id - b.id)
+              .sort((a:any, b:any) => {
+                // 💡 [핵심] 텍스트 안에 숨겨진 [[ORIG_ID:번호]]를 찾아내서 진짜 법령 순서대로 정렬합니다.
+                const origA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
+                const origB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
+                return origA - origB;
+              })
               .map((card: any) => {
                 
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
