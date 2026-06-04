@@ -338,36 +338,73 @@ def extract_text_from_file(file_obj):
         return file_obj.read().decode('utf-8', errors='ignore')
 
 def extract_exam_text_with_color(file_obj, is_answer=False):
+    """PDF/TXT에서 텍스트 추출. 테이블/박스 포함, 빨간색 텍스트는 🔴 마킹."""
     if not file_obj: return ""
     if file_obj.filename.lower().endswith('.pdf'):
         try:
             doc = fitz.open(stream=file_obj.read(), filetype="pdf")
             full_text = ""
             for page in doc:
-                if is_answer:
-                    dict_data = page.get_text("dict")
-                    for block in dict_data.get("blocks", []):
-                        if "lines" in block:
-                            for line in block["lines"]:
-                                for span in line["spans"]:
-                                    text = span.get("text", "")
-                                    color = span.get("color", 0)
-                                    r = (color >> 16) & 0xFF
-                                    g = (color >> 8) & 0xFF
-                                    b = color & 0xFF
-                                    if r > 130 and r > g * 1.5 and r > b * 1.5:
-                                        full_text += f" [🔴정답: {text}] "
-                                    else:
-                                        full_text += text
-                                full_text += "\n"
-                else:
-                    full_text += page.get_text("text") + "\n"
+                # blocks 방식: 테이블/박스 내용도 순서대로 추출
+                dict_data = page.get_text("dict", sort=True)
+                for block in dict_data.get("blocks", []):
+                    if block.get("type") == 1:  # 이미지 블록 스킵
+                        continue
+                    for line in block.get("lines", []):
+                        line_text = ""
+                        for span in line.get("spans", []):
+                            text = span.get("text", "").strip()
+                            if not text:
+                                continue
+                            color = span.get("color", 0)
+                            r = (color >> 16) & 0xFF
+                            g = (color >> 8) & 0xFF
+                            b = color & 0xFF
+                            # 빨간색 텍스트 감지
+                            if r > 130 and r > g * 1.5 and r > b * 1.5:
+                                line_text += f"[🔴{text}]"
+                            else:
+                                line_text += text
+                        if line_text:
+                            full_text += line_text + "\n"
+                full_text += "\n"
             doc.close()
             return full_text
         except Exception as e:
+            print(f"[PDF 추출 오류] {e}", file=sys.stderr)
             return ""
     else:
         return file_obj.read().decode('utf-8', errors='ignore')
+
+
+def parse_answers_from_text(text: str, question_count: int) -> list:
+    """텍스트에서 정답 파싱. 빨간색 마킹, 번호-정답 표 형태 모두 지원."""
+    ans_dict = {}
+    num_map = {'①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5',
+               '1': '1', '2': '2', '3': '3', '4': '4', '5': '5'}
+
+    # 1. 빨간색 마킹 파싱: [🔴①] 또는 [🔴3] 형태
+    red_matches = re.findall(r'\[🔴([①②③④⑤1-5])\]', text)
+    if red_matches:
+        # 빨간 텍스트가 문제 번호 순서대로 있다고 가정
+        for i, ans in enumerate(red_matches):
+            ans_dict[i + 1] = num_map.get(ans, ans)
+
+    # 2. "1. ③" 또는 "1) 2" 형태 파싱
+    table_matches = re.findall(r'(\d+)\s*[.)\s]\s*([①②③④⑤1-5])\b', text)
+    for num, ans in table_matches:
+        n = int(num)
+        if 1 <= n <= question_count + 5:
+            ans_dict[n] = num_map.get(ans, ans)
+
+    # 3. 붙어있는 정답표: "① ② ① ③ ..." 형태
+    if not ans_dict:
+        seq_matches = re.findall(r'[①②③④⑤]', text)
+        if len(seq_matches) >= question_count // 2:
+            for i, ans in enumerate(seq_matches[:question_count]):
+                ans_dict[i + 1] = num_map.get(ans, ans)
+
+    return [ans_dict.get(i + 1, '') for i in range(question_count)]
 
 
 
@@ -490,7 +527,7 @@ def upload_exam_coop():
         if not exam_file or not wallet_address:
             return jsonify({"error": "문제 파일이나 인증 정보가 없습니다."}), 400
 
-        exam_text = extract_exam_text_with_color(exam_file, is_answer=False)
+        exam_text = extract_exam_text_with_color(exam_file)
         exam_text = re.sub(r'-\s*\d+\s*-', '', exam_text)
         exam_text = re.sub(r'【[^】]+】', '', exam_text)
 
@@ -498,16 +535,17 @@ def upload_exam_coop():
         chunks = re.split(r'(?m)^(?=\s*(?:문\s*)?\d+\s*[.)]\s)', exam_text)
         valid_chunks = [c.strip() for c in chunks if c.strip() and len(c.strip()) > 10]
 
-        # 정답 파싱
+        # 정답 파싱 (정답 파일 우선, 없으면 문제 파일 끝에서 탐색)
         answers = []
         if answer_file:
-            answer_text = extract_exam_text_with_color(answer_file, is_answer=True)
-            ans_matches = re.findall(r'(\d+)[.\)번]\s*([①②③④⑤1-5])', answer_text)
-            ans_dict = {}
-            for num, ans in ans_matches:
-                num_map = {'①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5'}
-                ans_dict[int(num)] = num_map.get(ans, ans)
-            answers = [ans_dict.get(i + 1, '') for i in range(len(valid_chunks))]
+            answer_text = extract_exam_text_with_color(answer_file)
+            answers = parse_answers_from_text(answer_text, len(valid_chunks))
+            print(f"[정답 파싱 - 별도 파일] {answers}", file=sys.stderr)
+        else:
+            # 문제 파일 자체에서 정답 탐색 (빨간색 또는 파일 하단)
+            answers = parse_answers_from_text(exam_text, len(valid_chunks))
+            if any(answers):
+                print(f"[정답 파싱 - 문제 파일 내 감지] {answers}", file=sys.stderr)
 
         conn = get_db_connection()
         conn.execute(
@@ -518,8 +556,15 @@ def upload_exam_coop():
         )
         conn.commit()
         conn.close()
-        return jsonify({"message": "업로드 완료", "question_count": len(valid_chunks)})
+        has_answers = any(answers)
+        return jsonify({
+            "message": "업로드 완료",
+            "question_count": len(valid_chunks),
+            "answer_count": sum(1 for a in answers if a),
+            "has_answers": has_answers
+        })
     except Exception as e:
+        print(f"[업로드 오류] {traceback.format_exc()}", file=sys.stderr)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/get-pending-exams', methods=['GET'])

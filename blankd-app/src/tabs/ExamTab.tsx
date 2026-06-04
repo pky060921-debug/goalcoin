@@ -77,7 +77,10 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       const res = await fetch(`${BASE_URL}/upload-exam-coop`, { method: 'POST', body: fd });
       const data = await res.json();
       if (res.ok) {
-        alert(`업로드 완료! 총 ${data.question_count}문항이 파싱됐습니다.`);
+        const ansMsg = data.has_answers
+          ? `정답 ${data.answer_count}개 감지됨 ✓`
+          : '정답지 미감지 (CBT 후 수동 채점)';
+        alert(`업로드 완료!\n총 ${data.question_count}문항 · ${ansMsg}`);
         setExamFile(null); setAnswerFile(null);
         fetchPending();
       } else {
