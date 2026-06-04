@@ -180,7 +180,27 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
             {safeCards
               .filter((c:any) => c && c.content && c.folder_name === folder)
               .sort((a:any, b:any) => {
-                // 💡 [핵심] 텍스트 안에 숨겨진 [[ORIG_ID:번호]]를 찾아내서 진짜 법령 순서대로 정렬합니다.
+                // 💡 1차 정렬: 텍스트에서 '제N조'를 사람처럼 읽어내어 완벽한 조항 순서로 정렬합니다.
+                const getArticleScore = (text: string) => {
+                  // '제21조' 또는 '제21조의2' 같은 형식을 모두 감지합니다.
+                  const match = text.match(/제\s*(\d+)\s*조(?:의\s*(\d+))?/);
+                  if (match) {
+                    // 제21조 = 21000점 / 제21조의2 = 21002점
+                    return parseInt(match[1], 10) * 1000 + (match[2] ? parseInt(match[2], 10) : 0);
+                  }
+                  return 99999999; // 조항 번호가 없는 일반 텍스트는 맨 뒤로 보냅니다.
+                };
+
+                const scoreA = getArticleScore(a.content || "");
+                const scoreB = getArticleScore(b.content || "");
+
+                // 조항 번호가 다르면 무조건 번호순(18조 -> 19조 -> 20조)으로 정렬!
+                if (scoreA !== scoreB) {
+                  return scoreA - scoreB; 
+                }
+
+                // 💡 2차 정렬: 만약 같은 조항(예: 제20조가 너무 길어서 2개로 쪼갠 경우)이라면,
+                // 최초 부여된 ORIG_ID 또는 고유 생성 ID 순으로 정렬하여 엉키지 않게 합니다.
                 const origA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
                 const origB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
                 return origA - origB;
