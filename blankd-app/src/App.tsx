@@ -153,14 +153,29 @@ function MainApp() {
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
 
-  // 💡 [추가] 스마트 약어 사전 상태 및 모달 제어
-  const [abbrDict, setAbbrDict] = useState<Record<string, string>>(() => {
-    try { const saved = localStorage.getItem('blankd_abbr_dict'); return saved ? JSON.parse(saved) : {}; }
-    catch { return {}; }
-  });
-  const [isAbbrModalOpen, setIsAbbrModalOpen] = useState(false);
-  const [tempAbbrKey, setTempAbbrKey] = useState("");
-  const [tempAbbrValue, setTempAbbrValue] = useState("");
+  // 💡 [수정] 기존 localStorage 제거 및 전역 상태(약어, 제외, 포함) 추가
+  const [abbrDict, setAbbrDict] = useState<Record<string, string>>({});
+  const [stopwords, setStopwords] = useState<string[]>([]);
+  const [inclusions, setInclusions] = useState<string[]>([]);
+  
+  const [isDictModalOpen, setIsDictModalOpen] = useState(false);
+  const [dictTab, setDictTab] = useState<'stopwords'|'inclusions'>('stopwords');
+  const [tempWord, setTempWord] = useState("");
+
+  const saveGlobalDict = async (newAbbrs: Record<string, string>, newStops: string[], newIncs: string[]) => {
+    setAbbrDict(newAbbrs);
+    setStopwords(newStops);
+    setInclusions(newIncs);
+    try {
+      await fetch("https://api.blankd.top/api/update-global-dict", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, abbrs: newAbbrs, stopwords: newStops, inclusions: newIncs })
+      });
+    } catch(e) { console.error("DB 저장 실패", e); }
+  };
+
+  // 기존 모달에서 호출하던 함수 호환성 유지
+  const saveAbbrDict = (newDict: Record<string, string>) => { saveGlobalDict(newDict, stopwords, inclusions); };
 
   const saveAbbrDict = (newDict: Record<string, string>) => {
     setAbbrDict(newDict);
@@ -190,14 +205,24 @@ function MainApp() {
 
   const loadAllData = async () => {
     try {
-      const [catRes, cardRes, balance] = await Promise.all([
+            const [catRes, cardRes, balance, dictRes] = await Promise.all([
         fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r=>r.json()),
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`).then(r=>r.json()),
-        api.getGoalCoinBalance(safeAddress).catch(()=>0)
+        api.getGoalCoinBalance(safeAddress).catch(()=>0),
+        // 💡 [추가] DB에서 전역 사전 세트 불러오기
+        fetch(`https://api.blankd.top/api/get-global-dict?wallet_address=${safeAddress}`).then(r=>r.json()).catch(()=>null)
       ]);
       setCategories(catRes.categories || []); 
       setSavedCards(cardRes.cards || []); 
       setGoalBalance(balance);
+      
+      // 💡 [추가] 불러온 사전 상태에 적용
+      if(dictRes) {
+        setAbbrDict(dictRes.abbrs || {});
+        setStopwords(dictRes.stopwords || []);
+        setInclusions(dictRes.inclusions || []);
+      }
+
     } catch (e: any) { 
       addLog(`? 데이터 동기화 실패: ${e.message}`);
     }
