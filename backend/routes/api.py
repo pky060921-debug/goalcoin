@@ -243,6 +243,11 @@ def init_golden_db():
         except: pass
         try: conn.execute('ALTER TABLE pending_exams ADD COLUMN answers_json TEXT DEFAULT "[]"')
         except: pass
+        # 기존 코드 아래에 다음 2줄 추가
+        try: conn.execute('ALTER TABLE user_settings ADD COLUMN custom_abbrs TEXT DEFAULT "{}"')
+        except: pass
+        try: conn.execute('ALTER TABLE user_settings ADD COLUMN custom_inclusions TEXT DEFAULT "[]"')
+        except: pass
             
         conn.commit()
         conn.close()
@@ -1320,5 +1325,48 @@ def get_checkpoint():
             
         conn.close()
         return jsonify({"last_id": last_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/get-global-dict', methods=['GET'])
+def get_global_dict():
+    try:
+        wallet_address = request.args.get('wallet_address')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT custom_stopwords, custom_abbrs, custom_inclusions FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+        row = cursor.fetchone()
+        conn.close()
+        return jsonify({
+            "stopwords": json.loads(row[0]) if row and row[0] else [],
+            "abbrs": json.loads(row[1]) if row and row[1] else {},
+            "inclusions": json.loads(row[2]) if row and row[2] else []
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/update-global-dict', methods=['POST'])
+def update_global_dict():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+        if cursor.fetchone():
+            cursor.execute("UPDATE user_settings SET custom_stopwords = ?, custom_abbrs = ?, custom_inclusions = ? WHERE wallet_address = ?", 
+                (json.dumps(data.get('stopwords', []), ensure_ascii=False), 
+                 json.dumps(data.get('abbrs', {}), ensure_ascii=False),
+                 json.dumps(data.get('inclusions', []), ensure_ascii=False),
+                 wallet_address))
+        else:
+            cursor.execute("INSERT INTO user_settings (wallet_address, custom_stopwords, custom_abbrs, custom_inclusions) VALUES (?, ?, ?, ?)", 
+                (wallet_address, 
+                 json.dumps(data.get('stopwords', []), ensure_ascii=False), 
+                 json.dumps(data.get('abbrs', {}), ensure_ascii=False),
+                 json.dumps(data.get('inclusions', []), ensure_ascii=False)))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "전역 사전 DB 업데이트 완료"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
