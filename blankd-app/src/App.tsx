@@ -175,8 +175,6 @@ function MainApp() {
   };
 
   // 기존 모달에서 호출하던 함수 호환성 유지
-  const saveAbbrDict = (newDict: Record<string, string>) => { saveGlobalDict(newDict, stopwords, inclusions); };
-
   const saveAbbrDict = (newDict: Record<string, string>) => {
     setAbbrDict(newDict);
     localStorage.setItem('blankd_abbr_dict', JSON.stringify(newDict));
