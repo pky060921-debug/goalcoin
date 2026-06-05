@@ -531,9 +531,17 @@ def upload_exam_coop():
         exam_text = re.sub(r'-\s*\d+\s*-', '', exam_text)
         exam_text = re.sub(r'【[^】]+】', '', exam_text)
 
-        # 문제 파싱: 1. / 1) / 문1. 형식 모두 지원
-        chunks = re.split(r'(?m)^(?=\s*(?:문\s*)?\d+\s*[.)]\s)', exam_text)
-        valid_chunks = [c.strip() for c in chunks if c.strip() and len(c.strip()) > 10]
+        # 단답형 섹션 이후 제거 (CBT는 객관식만)
+        exam_text = re.split(r'[\*＊]?\s*단\s*답\s*형', exam_text)[0]
+
+        # 문제 파싱: 1. / 1) / 1)한글 / 문1. 형식 모두 지원
+        chunks = re.split(r'(?m)^(?=\s*(?:문\s*)?\d+\s*[.)]\s*[^\s\d])', exam_text)
+        # 최소 길이 + 객관식 보기(①②③④) 포함된 것만 유효 문항으로
+        valid_chunks = [
+            c.strip() for c in chunks
+            if c.strip() and len(c.strip()) > 10
+            and re.search(r'[①②③④⑤]', c)  # 객관식 보기 있어야 함
+        ]
 
         # 정답 파싱 (정답 파일 우선, 없으면 문제 파일 끝에서 탐색)
         answers = []
@@ -542,8 +550,9 @@ def upload_exam_coop():
             answers = parse_answers_from_text(answer_text, len(valid_chunks))
             print(f"[정답 파싱 - 별도 파일] {answers}", file=sys.stderr)
         else:
-            # 문제 파일 자체에서 정답 탐색 (빨간색 또는 파일 하단)
-            answers = parse_answers_from_text(exam_text, len(valid_chunks))
+            # 문제 파일에서 정답 탐색 (빨간색 마킹 또는 파일 하단 정답표)
+            answer_section = exam_text  # 전체 탐색 (빨간색은 어디든 있을 수 있음)
+            answers = parse_answers_from_text(answer_section, len(valid_chunks))
             if any(answers):
                 print(f"[정답 파싱 - 문제 파일 내 감지] {answers}", file=sys.stderr)
 
