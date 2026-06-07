@@ -27,18 +27,14 @@ const sortChapters = (folders: string[]): string[] => {
 
 type WordItem = { text: string; subWords: string[]; };
 
-// 💡 [수정] App.tsx에서 전역 사전 상태와 업데이트 함수를 Props로 내려받습니다.
-export const CraftTab = ({ 
-  categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, 
-  lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, 
-  handleDeleteCategory, loadAllData, expandedId, setExpandedId,
-  customStopWords = [], customIncludeWords = [], updateGlobalDict 
-}: any) => {
+export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory, loadAllData, expandedId, setExpandedId }: any) => {
   const safeCategories = Array.isArray(categories) ? categories : [];
   
+  // 💡 [오류 진단 코드 포함] 조항명 정밀 복구 로직
   const getDisplayTitle = (cat: any) => {
     try {
       const raw = cat.title || cat.content || "";
+      
       const match = raw.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
       if (match && match[2].trim() !== "내용") {
         return `${match[1].replace(/\s+/g, '')} ${match[2].trim()}`;
@@ -55,25 +51,31 @@ export const CraftTab = ({
       return fallbackTitle || "제목 없음";
       
     } catch (error) {
-      console.error("[Error Diagnosis] CraftTab 제목 추출 실패:", error, "데이터 원본:", cat);
+      console.error("[진단 오류] CraftTab 제목 추출 실패:", error, "데이터 원본:", cat);
       return "제목 추출 에러";
     }
   };
-
+// 💡 [해결] 괄호 안의 내용(목적, 정의 등)을 아예 삭제하여 시행규칙 불일치 문제 완벽 해결
   const checkIsCreated = (cat: any) => {
     if (!Array.isArray(savedCards)) return false;
+    
     return savedCards.some((c: any) => {
       if (!c || !c.content) return false;
       if (c.content.includes(`[[ORIG_ID:${cat.id}]]`)) return true;
       
       if (cat.title) {
         const cardFirstLine = c.content.split('\n')[0];
+        
+        // 1. (목적), [시행일] 등 괄호 안의 내용을 괄호째로 통째로 날림
         const removeBrackets = (text: string) => text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '');
+        // 2. 한글, 영문, 숫자, 한자만 남기고 싹 다 지움
         const onlyChars = (text: string) => text.replace(/[^가-힣a-zA-Z0-9一-龥]/g, '');
+        
         const cleanCardTitle = onlyChars(removeBrackets(cardFirstLine));
         const cleanCatTitle = onlyChars(removeBrackets(cat.title));
         
         if (cleanCardTitle && cleanCatTitle) {
+          // '제1조의2' 충돌을 막는 === 와 endsWith 사용!
           if (cleanCardTitle === cleanCatTitle || cleanCardTitle.endsWith(cleanCatTitle)) {
              return true;
           }
@@ -87,7 +89,7 @@ export const CraftTab = ({
     Array.from(new Set(safeCategories.map((c: any) => c.folder_name)))
       .filter(f => f && f !== '기본 폴더') as string[]
   );
-
+  
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>(() => {
     try { 
       const saved = localStorage.getItem('blankd_craft_folders'); 
@@ -116,71 +118,88 @@ export const CraftTab = ({
     }
   }, [expandedId, savedCards, safeCategories]);
   
+// 💡 [해결] 닫혀있는 폴더를 먼저 강제로 열고 스크롤하기!
   useEffect(() => {
     if (expandedId) {
+      // 1. 해당 조항이 어느 폴더에 있는지 찾기
       const targetCat = safeCategories.find((c: any) => c.id === expandedId);
+      
       if (targetCat && targetCat.folder_name) {
+        // 2. 해당 폴더를 강제로 열기 (setOpenFolders 상태 업데이트)
         setOpenFolders((prev: any) => ({ ...prev, [targetCat.folder_name]: true }));
       }
+
+      // 3. 폴더가 열리는 애니메이션(렌더링)을 기다린 후 스크롤!
       setTimeout(() => {
         const targetId = `category-${expandedId}`;
         const targetElement = document.getElementById(targetId);
+        
         if (targetElement) {
           targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       }, 500); 
     }
-  }, [expandedId, safeCategories]);
+  }, [expandedId, safeCategories]); // 의존성 배열 유지
   
   const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
+  const [customStopWords, setCustomStopWords] = useState<string[]>([]);
+  const [customIncludeWords, setCustomIncludeWords] = useState<string[]>([]);
   const [newStopWord, setNewStopWord] = useState("");
   const [newIncludeWord, setNewIncludeWord] = useState("");
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
-  // 💡 [수정] 자체 API 호출 로직 제거 후 updateGlobalDict 사용 및 오류 진단 추가
-  const handleAddStopWord = () => {
-    try {
-      if (!newStopWord.trim()) return;
-      const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
-      const nextList = Array.from(new Set([...customStopWords, ...words]));
-      if (updateGlobalDict) updateGlobalDict(nextList, customIncludeWords);
-      setNewStopWord("");
-    } catch (error) {
-      console.error("[Error Diagnosis] 예외 단어 추가 오류:", error);
-      addLog("⚠️ 예외 단어 추가 중 오류가 발생했습니다.");
+  useEffect(() => {
+    if (safeAddress) {
+      api.getStopwords(safeAddress).then(data => {
+        if (data && data.stopwords) {
+          if (Array.isArray(data.stopwords)) {
+            setCustomStopWords(data.stopwords);
+            setCustomIncludeWords([]);
+          } else {
+            setCustomStopWords(data.stopwords.stop || []);
+            setCustomIncludeWords(data.stopwords.include || []);
+          }
+        }
+      }).catch(err => addLog("⚠️ 단어 설정 DB 동기화 실패"));
     }
+  }, [safeAddress]);
+
+  const saveWordsToDB = async (stops: string[], includes: string[]) => {
+    try {
+      await api.updateStopwords(safeAddress, { stop: stops, include: includes });
+      addLog(`✅ 단어 설정 DB 동기화 완료`);
+    } catch(e) { alert("DB 저장 실패"); }
+  };
+
+  const handleAddStopWord = () => {
+    if (!newStopWord.trim()) return;
+    const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
+    const nextList = Array.from(new Set([...customStopWords, ...words]));
+    setCustomStopWords(nextList);
+    setNewStopWord("");
+    saveWordsToDB(nextList, customIncludeWords);
   };
 
   const handleRemoveStopWord = (wordToRemove: string) => {
-    try {
-      const nextList = customStopWords.filter((w: string) => w !== wordToRemove);
-      if (updateGlobalDict) updateGlobalDict(nextList, customIncludeWords);
-    } catch (error) {
-      console.error("[Error Diagnosis] 예외 단어 삭제 오류:", error);
-    }
+    const nextList = customStopWords.filter(w => w !== wordToRemove);
+    setCustomStopWords(nextList);
+    saveWordsToDB(nextList, customIncludeWords);
   };
 
   const handleAddIncludeWord = () => {
-    try {
-      if (!newIncludeWord.trim()) return;
-      const words = newIncludeWord.split(',').map(w => w.trim()).filter(w => w);
-      const nextList = Array.from(new Set([...customIncludeWords, ...words]));
-      if (updateGlobalDict) updateGlobalDict(customStopWords, nextList);
-      setNewIncludeWord("");
-    } catch (error) {
-      console.error("[Error Diagnosis] 포함 단어 추가 오류:", error);
-      addLog("⚠️ 포함 단어 추가 중 오류가 발생했습니다.");
-    }
+    if (!newIncludeWord.trim()) return;
+    const words = newIncludeWord.split(',').map(w => w.trim()).filter(w => w);
+    const nextList = Array.from(new Set([...customIncludeWords, ...words]));
+    setCustomIncludeWords(nextList);
+    setNewIncludeWord("");
+    saveWordsToDB(customStopWords, nextList);
   };
 
   const handleRemoveIncludeWord = (wordToRemove: string) => {
-    try {
-      const nextList = customIncludeWords.filter((w: string) => w !== wordToRemove);
-      if (updateGlobalDict) updateGlobalDict(customStopWords, nextList);
-    } catch (error) {
-      console.error("[Error Diagnosis] 포함 단어 삭제 오류:", error);
-    }
+    const nextList = customIncludeWords.filter(w => w !== wordToRemove);
+    setCustomIncludeWords(nextList);
+    saveWordsToDB(customStopWords, nextList);
   };
 
   useEffect(() => {
@@ -246,10 +265,7 @@ export const CraftTab = ({
         setCheckedIds(new Set());
         if (loadAllData) await loadAllData();
         else window.location.reload();
-      } catch (e) { 
-        console.error("[Error Diagnosis] 일괄 삭제 오류:", e);
-        alert("일괄 삭제 중 오류가 발생했습니다."); 
-      }
+      } catch (e) { alert("일괄 삭제 중 오류가 발생했습니다."); }
     }
   };
 
@@ -266,23 +282,28 @@ export const CraftTab = ({
   }, [expandedId, categories]);
 
   const applyTextToState = (textBody: string) => {
+    const currentCustomStopWords = customStopWords;
+    const currentCustomIncludeWords = customIncludeWords;
+
+    // 💡 조사 분리 기획 적용: 제외 단어(하여, 나 등)가 등록되면 형태소 가위로 강제 분리 실행
     let processedText = textBody;
-    
-    if (customStopWords.length > 0) {
-       const safeStops = customStopWords
-          .map((w: string) => w.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-          .filter((w: string) => w !== "");
+    if (currentCustomStopWords.length > 0) {
+       const safeStops = currentCustomStopWords
+          .map(w => w.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .filter(w => w !== "");
+          
        if (safeStops.length > 0) {
           const dynamicRegex = new RegExp(`([가-힣]+)(${safeStops.join('|')})([\\s,.)\\]]|$)`, 'g');
           processedText = processedText.replace(dynamicRegex, '$1 $2$3');
-          processedText = processedText.replace(dynamicRegex, '$1 $2$3');
+          processedText = processedText.replace(dynamicRegex, '$1 $2$3'); 
        }
     }
 
     const initialWords = processedText.split(SPLIT_REGEX).filter(w => w !== "");
     let currentWordArray = initialWords.map(w => ({ text: w, subWords: [w] }));
 
-    customIncludeWords.forEach((cw: string) => {
+    // 💡 필수 단어 단일 빈칸 처리 기획: 필수 단어 발견 시 하나의 덩어리로 사전 병합
+    currentCustomIncludeWords.forEach(cw => {
        const trimmedCw = cw.trim();
        if (!trimmedCw) return;
        const cwNoSpace = trimmedCw.replace(/\s+/g, ''); 
@@ -314,10 +335,10 @@ export const CraftTab = ({
 
     const initialSelected = new Set<number>();
     const protectedIndices = new Set<number>();
-    
+
     currentWordArray.forEach((wordObj, idx) => {
         const trimmed = wordObj.text.trim();
-        if (customIncludeWords.some((cw: string) => trimmed.replace(/\s+/g, '') === cw.replace(/\s+/g, ''))) {
+        if (currentCustomIncludeWords.some(cw => trimmed.replace(/\s+/g, '') === cw.replace(/\s+/g, ''))) {
             protectedIndices.add(idx);
             initialSelected.add(idx);
         }
@@ -333,7 +354,7 @@ export const CraftTab = ({
                              /^\(?(?:①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)\)?$/.test(trimmed);
                              
       const isStopWord = /^(은|는|이|가|을|를|의|에|에게|에서|로|으로|과|와|도|만|부터|까지|조차|마저|치고|및|등|또는|수|할|이하|이상|초과|미만|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여|바|것|자|경우|때|중)$/.test(trimmed);
-      const isCustomSingleStopWord = customStopWords.some((cw: string) => trimmed === cw || trimmed === cw + "." || trimmed === cw + ",");
+      const isCustomSingleStopWord = currentCustomStopWords.some(cw => trimmed === cw || trimmed === cw + "." || trimmed === cw + ",");
       
       if (!isSymbolOnly && !isArticleOrNum && !isStopWord && !isCustomSingleStopWord && trimmed.length > 0) {
         initialSelected.add(idx);
@@ -343,7 +364,6 @@ export const CraftTab = ({
     const fullText = currentWordArray.map(w => w.text).join("");
     const wordRanges: {start: number, end: number, wordIdx: number}[] = [];
     let currentPos = 0;
-    
     currentWordArray.forEach((w, idx) => {
        wordRanges.push({ start: currentPos, end: currentPos + w.text.length, wordIdx: idx });
        currentPos += w.text.length;
@@ -353,7 +373,7 @@ export const CraftTab = ({
       /(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)( Lifespan)?(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g
     ];
 
-    customStopWords.forEach((cw: string) => {
+    currentCustomStopWords.forEach(cw => {
        const trimmedCw = cw.trim();
        if (!trimmedCw) return;
        const regexStr = trimmedCw.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
@@ -374,6 +394,7 @@ export const CraftTab = ({
           });
        }
     });
+
     setSelectedWords(initialSelected);
   };
 
@@ -384,6 +405,7 @@ export const CraftTab = ({
     const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${targetCat.id}]]`));
     
     setPageBreaks(new Set());
+    
     if (existingCard) {
       const parsed = parseCardStats(existingCard.memo);
       setMemoInput(parsed.text);
@@ -435,7 +457,7 @@ export const CraftTab = ({
 
   const handleWordSplit = (idx: number, e: any) => {
     e.preventDefault(); 
-    if (isEraserMode) return;
+    if (isEraserMode) return; 
     const p = new Set(pageBreaks);
     if (p.has(idx)) p.delete(idx); else if (window.confirm("이 위치에서 페이지를 나누시겠습니까?")) p.add(idx);
     setPageBreaks(p);
@@ -444,6 +466,7 @@ export const CraftTab = ({
   const handleWordMerge = (idx: number) => {
     if (isEraserMode) return; 
     const current = wordArray[idx];
+
     if (current.subWords.length > 1) {
       const newArray = [...wordArray];
       const splitItems = current.subWords.map(w => ({ text: w, subWords: [w] }));
@@ -464,6 +487,7 @@ export const CraftTab = ({
 
     if (idx >= wordArray.length - 1) return;
     const next = wordArray[idx + 1];
+
     const isSymbol1 = !/[a-zA-Z0-9가-힣]/.test(current.text) && current.text.trim() !== "";
     const isSymbol2 = !/[a-zA-Z0-9가-힣]/.test(next.text) && next.text.trim() !== "";
     if (isSymbol1 || isSymbol2) return; 
@@ -509,7 +533,7 @@ export const CraftTab = ({
               <button onClick={handleAddStopWord} className="px-4 bg-amber-600/20 text-amber-400 border border-amber-500/30 text-xs font-bold rounded-sm hover:bg-amber-600/40 transition-colors">추가</button>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {customStopWords.map((word: string) => (
+              {customStopWords.map(word => (
                 <span key={word} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] sm:text-[11px] text-white/70 flex items-center gap-1.5">
                   {word} <button onClick={() => handleRemoveStopWord(word)} className="text-white/30 hover:text-red-400">✕</button>
                 </span>
@@ -525,7 +549,7 @@ export const CraftTab = ({
               <button onClick={handleAddIncludeWord} className="px-4 bg-teal-600/20 text-teal-400 border border-teal-500/30 text-xs font-bold rounded-sm hover:bg-teal-600/40 transition-colors">추가</button>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {customIncludeWords.map((word: string) => (
+              {customIncludeWords.map(word => (
                 <span key={word} className="px-2 py-1 bg-teal-900/30 border border-teal-500/30 rounded text-[10px] sm:text-[11px] text-teal-300 flex items-center gap-1.5">
                   {word} <button onClick={() => handleRemoveIncludeWord(word)} className="text-teal-500/50 hover:text-teal-300">✕</button>
                 </span>
@@ -559,6 +583,8 @@ export const CraftTab = ({
               {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
                   const isExpanded = expandedId === cat.id;
                   const isChecked = checkedIds.has(cat.id);
+                  
+                  // 💡 초정밀 고유 판별 로직 호출
                   const isCreated = checkIsCreated(cat);
                   const displayTitle = getDisplayTitle(cat);
                   
@@ -569,10 +595,15 @@ export const CraftTab = ({
                   if (checkText.includes('[법]')) titleColor = "text-red-500";
                   else if (checkText.includes('[령]')) titleColor = "text-blue-400";
                   else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
+                  
                   if (isExpanded) colClass = "col-span-full";
 
                   return (
-                    <div key={cat.id} id={`category-${cat.id}`} className={`relative transition-all w-full ${colClass}`}>
+                    <div 
+                      key={cat.id} 
+                      id={`category-${cat.id}`} // 💡 바로 이 부분을 추가했습니다!
+                      className={`relative transition-all w-full ${colClass}`}
+                    >
                       {!isExpanded ? (
                         <div className="relative group/card w-full flex items-center gap-2">
                           {isSelectMode && (
@@ -592,6 +623,7 @@ export const CraftTab = ({
                               <span className={`${isCreated ? 'text-white/30 font-medium' : `${titleColor} font-bold`} text-[11px] sm:text-[13px] leading-snug break-keep`}>{displayTitle}</span>
                               {isCreated && <span className="text-[9px] bg-white/5 text-white/30 px-1.5 py-0.5 rounded ml-2 whitespace-nowrap border border-white/10">제작됨</span>}
                             </div>
+                            
                             {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
                             
                             {!isSelectMode && (
@@ -606,6 +638,7 @@ export const CraftTab = ({
                               <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{displayTitle}</span>
                               {isCreated && <span className="text-[10px] text-amber-500 font-bold ml-2">⚠️ 저장하면 카드를 덮어씁니다</span>}
                             </div>
+                            
                             <div className="flex gap-2">
                               <button onClick={handleEditToggle} className={`px-3 py-1 text-[11px] font-bold rounded-sm border transition-all ${isEditingText ? 'bg-green-600 border-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.3)]' : 'bg-white/5 border-white/20 text-white/50 hover:bg-white/10'}`}>
                                 {isEditingText ? '✅ 텍스트 적용' : '✏️ 원본 텍스트 편집'}
@@ -632,6 +665,7 @@ export const CraftTab = ({
                                 const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(word) && word.trim() !== "";
                                 const isMerged = wordObj.subWords.length > 1;
                                 const isSelected = selectedWords.has(idx);
+
                                 return (
                                   <React.Fragment key={idx}>
                                     {pageBreaks.has(idx) && <div className="w-full border-t border-red-500/50 my-2 relative"><span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black px-1 text-[8px] text-red-400 font-bold uppercase tracking-tighter">Page Break</span></div>}
