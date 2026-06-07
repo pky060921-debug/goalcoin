@@ -154,48 +154,18 @@ function MainApp() {
   const recognitionRef = useRef<any>(null);
 
   // 💡 [추가] 스마트 약어 사전 상태 및 모달 제어
-    // 💡 [수정] 통합된 전역 사전 상태 관리
-  const [customStopWords, setCustomStopWords] = useState<string[]>([]);
-  const [customIncludeWords, setCustomIncludeWords] = useState<string[]>([]);
-  const [abbrDict, setAbbrDict] = useState<Record<string, string>>({});
+  const [abbrDict, setAbbrDict] = useState<Record<string, string>>(() => {
+    try { const saved = localStorage.getItem('blankd_abbr_dict'); return saved ? JSON.parse(saved) : {}; }
+    catch { return {}; }
+  });
+  const [isAbbrModalOpen, setIsAbbrModalOpen] = useState(false);
+  const [tempAbbrKey, setTempAbbrKey] = useState("");
+  const [tempAbbrValue, setTempAbbrValue] = useState("");
 
-  // 💡 [추가] 통합 로드 함수
-  const loadGlobalDict = async () => {
-    if (!safeAddress) return;
-    try {
-      const res = await fetch(`https://api.blankd.top/api/get-global-dict?wallet_address=${safeAddress}`);
-      if (res.ok) {
-        const data = await res.json();
-        setCustomStopWords(data.stopwords || []);
-        setCustomIncludeWords(data.inclusions || []);
-        setAbbrDict(data.abbrs || {});
-      }
-    } catch (e) {
-      addLog("⚠️ 전역 사전 동기화 실패");
-    }
-  };
-
-  // 💡 [수정] 약어 저장 시 백엔드 API와 동기화
-  const saveAbbrDict = async (newDict: Record<string, string>) => {
+  const saveAbbrDict = (newDict: Record<string, string>) => {
     setAbbrDict(newDict);
-    try {
-      await fetch("https://api.blankd.top/api/update-global-dict", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          wallet_address: safeAddress, 
-          stopwords: customStopWords, 
-          abbrs: newDict, 
-          inclusions: customIncludeWords 
-        })
-      });
-      addLog("✅ 약어사전 DB 동기화 완료");
-    } catch (e) {
-      addLog("⚠️ 약어 저장 중 DB 통신 에러");
-    }
+    localStorage.setItem('blankd_abbr_dict', JSON.stringify(newDict));
   };
-
-  // 기존 loadAllData() 함수 내부에 loadGlobalDict() 호출을 추가하세요.
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
 
