@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { formatCardText, parseCardStats, SPLIT_REGEX } from '../utils/constants';
+import { api } from '../services/api';
 
 const getGridClass = (cols: number) => {
   if(cols === 1) return "md:grid-cols-1";
@@ -10,12 +11,7 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-// 💡 [수정] customStopWords, customIncludeWords를 Props로 내려받습니다.
-export const EnhanceTab = ({ 
-  savedCards, colCount, viewMode, setActiveCard, setActiveTab, 
-  setExpandedId, handleDeleteCard,
-  customStopWords = [], customIncludeWords = [] 
-}: any) => {
+export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, handleDeleteCard }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
@@ -51,45 +47,16 @@ export const EnhanceTab = ({
     return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
   };
 
+  // --- 💡 새로 추가된 직접 수정(Edit) 모드 상태 ---
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editContent, setEditContent] = useState<string>("");
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  
+  // 💡 도구 상태: 'editor'(텍스트), 'include'(포함), 'exclude'(제외), null(비활성화/뷰어)
   const [activeTool, setActiveTool] = useState<'editor' | 'include' | 'exclude' | null>('include');
 
-  // 💡 [추가] 에디터를 열 때 전역 사전을 바탕으로 [ ] 괄호를 자동으로 제어하는 진단 및 보정 로직
-  const applyGlobalDictToContent = (content: string) => {
-    try {
-      let processed = content;
-      
-      // 1. 전역 포함 단어: 아직 괄호가 없으면 씌워줍니다. (간단한 정규식으로 괄호 여부 판별)
-      if (customIncludeWords && customIncludeWords.length > 0) {
-        customIncludeWords.forEach((word: string) => {
-          if (!word.trim()) return;
-          const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          // 앞에 '['가 없고, 뒤에 ']'가 없는 단어만 찾아서 치환
-          const regex = new RegExp(`(?<!\\[)${escaped}(?!\\])`, 'g');
-          processed = processed.replace(regex, `[${word}]`);
-        });
-      }
-
-      // 2. 전역 예외 단어: 괄호가 씌워져 있다면 벗겨냅니다.
-      if (customStopWords && customStopWords.length > 0) {
-        customStopWords.forEach((word: string) => {
-          if (!word.trim()) return;
-          const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          const regex = new RegExp(`\\[(${escaped})\\]`, 'g');
-          processed = processed.replace(regex, '$1');
-        });
-      }
-
-      return processed;
-    } catch (error) {
-      console.error("[Error Diagnosis] applyGlobalDictToContent 에러:", error);
-      return content; 
-    }
-  };
-
+    // --- 💡 저장 함수 (api.put 대신 올바른 save-card 엔드포인트 사용) ---
   const handleSaveEdit = async (card: any) => {
     setIsSaving(true);
     setErrorMsg(null);
@@ -99,20 +66,20 @@ export const EnhanceTab = ({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           wallet_address: card.wallet_address || "ENOKI_USER", 
-          card_id: card.id,
+          card_id: card.id, // 💡 기존 ID를 보내면 서버가 자동으로 덮어쓰기(UPDATE)를 수행합니다.
           card_content: editContent,
           answer_text: card.answer_text || "",
           folder_name: card.folder_name,
-          memo: card.memo 
+          memo: card.memo // 💡 학습 통계 데이터 그대로 유지!
         })
       });
 
       if (!res.ok) throw new Error("서버 통신에 실패했습니다.");
       
-      card.content = editContent;
+      card.content = editContent; // API 전체 재호출 없이 로컬에 즉시 반영 (API 절약)
       setEditingId(null);
     } catch (error: any) {
-      console.error("[Error Diagnosis] 수정 저장 실패:", error);
+      console.error("수정 저장 실패:", error);
       setErrorMsg(error.message || "서버 통신에 실패했습니다.");
     } finally {
       setIsSaving(false);
@@ -121,6 +88,7 @@ export const EnhanceTab = ({
 
   const renderInteractiveText = () => {
     const tokens = editContent.split(/(\s+|\n|---|\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g).filter(Boolean);
+    
     return (
       <div className={`w-full bg-black/40 p-4 rounded border border-white/10 leading-loose font-sans ${activeTool ? 'select-none' : ''} min-h-[160px] max-h-[400px] overflow-y-auto custom-scrollbar`}>
         {tokens.map((token, idx) => {
@@ -146,9 +114,10 @@ export const EnhanceTab = ({
           if (isWhitespace) return <span key={idx}>{token}</span>;
 
           let btnClass = "inline-block rounded px-1.5 py-0.5 mx-0.5 transition-all ";
+          
           if (activeTool === 'include') {
             if (isBracketed) {
-              btnClass += "bg-teal-900/20 text-teal-500/50 border border-teal-500/10 cursor-not-allowed";
+              btnClass += "bg-teal-900/20 text-teal-500/50 border border-teal-500/10 cursor-not-allowed"; 
             } else {
               btnClass += "text-white/80 cursor-pointer bg-white/5 hover:bg-teal-500/40 hover:text-white hover:scale-105 active:scale-95 border border-transparent hover:border-teal-400/50 shadow-sm";
             }
@@ -212,12 +181,15 @@ export const EnhanceTab = ({
               .filter((c:any) => c && c.content && c.folder_name === folder)
               .sort((a:any, b:any) => a.id - b.id)
               .map((card: any) => {
+                
                 const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+                
                 let displayTitle = (cleanContent.split('\n')[0] || "")
                     .replace(/\[.*?\]/g, '')
                     .replace(/\(\s*내용\s*\)/g, '')
                     .replace(/내용/g, '')
                     .trim();
+                
                 if (!displayTitle) displayTitle = "제목 없음";
 
                 const { body } = formatCardText(cleanContent);
@@ -227,6 +199,7 @@ export const EnhanceTab = ({
                 
                 let colClass = "";
                 let titleColor = "text-teal-400";
+                
                 if (viewMode === 'all' && colCount >= 3) {
                   if (cleanContent.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
                   else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
@@ -274,17 +247,18 @@ export const EnhanceTab = ({
                         </div>
                         
                         {activeTool === 'editor' ? (
-                          <textarea
-                            defaultValue={editContent} 
-                            onBlur={(e) => {
-                              setEditContent(e.target.value); 
-                            }}
-                            className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] sm:text-[13px] p-4 rounded border border-white/10 focus:border-amber-500/70 outline-none resize-none custom-scrollbar leading-relaxed font-sans"
-                            placeholder="여기에 텍스트를 직접 입력하거나 [ ] 기호로 감싸세요."
-                          />
-                        ) : (
-                          renderInteractiveText()
-                        )}
+                      <textarea
+                        defaultValue={editContent} // 💡 처음 열릴 때의 값만 넣어줍니다.
+                        onBlur={(e) => {
+                          // 💡 입력창 바깥이나 다른 버튼을 클릭해 포커스가 빠져나갈 때 딱 한 번만 상태를 저장합니다.
+                          setEditContent(e.target.value); 
+                        }}
+                        className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] sm:text-[13px] p-4 rounded border border-white/10 focus:border-amber-500/70 outline-none resize-none custom-scrollbar leading-relaxed font-sans"
+                        placeholder="여기에 텍스트를 직접 입력하거나 [ ] 기호로 감싸세요."
+                      />
+                    ) : (
+                      renderInteractiveText()
+                    )}
                         
                         {errorMsg && <div className="text-red-400 text-[10px] mt-3 font-bold">{errorMsg}</div>}
                         
@@ -317,11 +291,7 @@ export const EnhanceTab = ({
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setEditingId(card.id);
-                                
-                                // 💡 [추가] 에디터를 열 때 전역 사전에 맞게 텍스트 자동 보정 주입
-                                const autoCorrectedContent = applyGlobalDictToContent(card.content);
-                                setEditContent(autoCorrectedContent);
-                                
+                                setEditContent(card.content);
                                 setActiveTool('include');
                               }}
                               className="ml-1 px-1.5 py-0.5 bg-amber-900/40 text-amber-400 border border-amber-500/50 rounded font-mono text-[9px] hover:bg-amber-900/60 transition-colors cursor-pointer"
@@ -334,7 +304,7 @@ export const EnhanceTab = ({
                     )}
                   </div>
                 );
-              })}
+            })}
             </div>
           </div>
         ))}
