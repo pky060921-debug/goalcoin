@@ -1251,8 +1251,16 @@ def get_stopwords():
         cursor.execute("SELECT custom_stopwords FROM user_settings WHERE wallet_address = ?", (wallet_address,))
         row = cursor.fetchone()
         conn.close()
-        stopwords = json.loads(row[0]) if row and row[0] else []
-        return jsonify({"stopwords": stopwords})
+        
+        if row and row[0]:
+            data = json.loads(row[0])
+            # 💡 기존에 배열([])로만 저장되어 있던 구버전 데이터를 신규 객체 포맷으로 자동 변환하여 에러 방지
+            if isinstance(data, list):
+                return jsonify({"stopwords": {"stop": data, "include": [], "abbr": {}}})
+            return jsonify({"stopwords": data})
+            
+        # 💡 데이터가 아예 없을 때의 완벽한 기본 뼈대 반환
+        return jsonify({"stopwords": {"stop": [], "include": [], "abbr": {}}})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1261,7 +1269,9 @@ def update_stopwords():
     try:
         data = request.json
         wallet_address = data.get('wallet_address')
-        stopwords = data.get('stopwords', [])
+        # 💡 저장할 때도 기본값을 빈 배열이 아닌 통합 객체 뼈대로 변경
+        stopwords = data.get('stopwords', {"stop": [], "include": [], "abbr": {}})
+        
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT 1 FROM user_settings WHERE wallet_address = ?", (wallet_address,))
@@ -1271,10 +1281,9 @@ def update_stopwords():
             cursor.execute("INSERT INTO user_settings (wallet_address, custom_stopwords) VALUES (?, ?)", (wallet_address, json.dumps(stopwords, ensure_ascii=False)))
         conn.commit()
         conn.close()
-        return jsonify({"message": "예외 단어 DB 업데이트 완료"})
+        return jsonify({"message": "통합 단어장 DB 업데이트 완료"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 # ==========================================
 # 💡 사용자 체크포인트(진행 상태) 관리 API
 # ==========================================
