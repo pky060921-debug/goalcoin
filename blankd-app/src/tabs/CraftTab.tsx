@@ -148,30 +148,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [newIncludeWord, setNewIncludeWord] = useState("");
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
-
-  useEffect(() => {
-    if (safeAddress) {
-      api.getStopwords(safeAddress).then(data => {
-        if (data && data.stopwords) {
-          if (Array.isArray(data.stopwords)) {
-            setCustomStopWords(data.stopwords);
-            setCustomIncludeWords([]);
-          } else {
-            setCustomStopWords(data.stopwords.stop || []);
-            setCustomIncludeWords(data.stopwords.include || []);
-          }
-        }
-      }).catch(err => addLog("⚠️ 단어 설정 DB 동기화 실패"));
-    }
-  }, [safeAddress]);
-
-  const saveWordsToDB = async (stops: string[], includes: string[]) => {
-    try {
-      await api.updateStopwords(safeAddress, { stop: stops, include: includes });
-      addLog(`✅ 단어 설정 DB 동기화 완료`);
-    } catch(e) { alert("DB 저장 실패"); }
-  };
-
   const handleAddStopWord = () => {
     if (!newStopWord.trim()) return;
     const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
