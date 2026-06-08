@@ -163,12 +163,20 @@ function MainApp() {
   const [tempValue, setTempValue] = useState("");
 
   const saveGlobalDict = async (newDict: typeof globalDict) => {
-    setGlobalDict(newDict); // UI 즉시 반영 (낙관적 업데이트)
-    if (safeAddress) {
-      try { await api.updateGlobalDict(safeAddress, newDict); } 
-      catch (e) { addLog("⚠️ 글로벌 단어장 DB 동기화 실패"); }
-    }
-  };
+  setGlobalDict(newDict); // 낙관적 업데이트
+  if (!safeAddress) return; // 로그인 안 된 상태면 저장 시도 자체를 안 함
+
+  try {
+    await api.updateGlobalDict(safeAddress, newDict);
+  } catch (e: any) {
+    // ✅ 콘솔과 터미널 양쪽에 에러 기록
+    console.error("글로벌 단어장 저장 실패:", e);
+    addLog(`⚠️ 단어장 저장 실패: ${e?.message || '알 수 없는 오류'}`);
+    // ✅ 사용자에게 실패 알림 (롤백 옵션)
+    alert("단어 저장에 실패했습니다. 네트워크 상태를 확인해주세요.\n(터미널에서 자세한 오류를 확인하실 수 있습니다.)");
+    setGlobalDict(globalDict); // 롤백
+  }
+};
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
 
@@ -198,9 +206,8 @@ function MainApp() {
       fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`).then(r=>r.json()),
       api.getGoalCoinBalance(safeAddress).catch(()=>0),
       api.getGlobalDict(safeAddress).catch((e) => {
-        // ✅ 에러 원인을 콘솔에서 확인 가능하도록 수정
-        console.error('⚠️ 글로벌 단어장 로드 실패:', e);
-        addLog(`⚠️ 단어장 로드 실패: ${e?.message || '알 수 없는 오류'}`);
+        console.error("글로벌 단어장 로드 실패:", e); // ✅ 추가
+        addLog(`⚠️ 단어장 로드 실패: ${e?.message || '서버 오류'}`);
         return { stopwords: [], inclusions: [], abbrs: {} };
       })
     ]);
@@ -209,11 +216,12 @@ function MainApp() {
     setSavedCards(cardRes.cards || []); 
     setGoalBalance(balance);
 
-    // ✅ 백엔드가 이미 배열로 변환해서 줌 → 타입 검증만 하면 됨
-    const serverStopwords: string[] = Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [];
-    const serverInclusions: string[] = Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [];
-    let finalAbbrs: Record<string, string> = (dictRes.abbrs && typeof dictRes.abbrs === 'object' && !Array.isArray(dictRes.abbrs))
-      ? dictRes.abbrs : {};
+   // 기존의 복잡한 구형 복구 코드를 삭제하고 단순화
+   // (백엔드가 이미 force_repair_list로 처리해서 항상 배열로 옴)
+   const serverStopwords:  string[]             = Array.isArray(dictRes.stopwords)  ? dictRes.stopwords  : [];
+   const serverInclusions: string[]             = Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [];
+   let   finalAbbrs:       Record<string,string>= (dictRes.abbrs && typeof dictRes.abbrs === 'object' && !Array.isArray(dictRes.abbrs))
+                                                  ? dictRes.abbrs : {};
 
     // 로컬 약어 마이그레이션 (기존 코드 유지)
     try {
