@@ -1213,10 +1213,22 @@ def get_global_dict():
         cursor.execute("SELECT custom_stopwords, custom_abbrs, custom_inclusions FROM user_settings WHERE wallet_address = ?", (wallet_address,))
         row = cursor.fetchone()
         conn.close()
+
+        # 💡 [안전 파싱 함수] 과거의 깨진 데이터나 단순 텍스트가 들어있어도 백엔드가 절대 죽지 않게 방어합니다.
+        def safe_parse(val, default_type):
+            if not val: return default_type
+            try:
+                return json.loads(val)
+            except:
+                # JSON 파싱에 실패하면 일반 텍스트로 취급하여 강제로 리스트에 담아 구제합니다.
+                if isinstance(default_type, list):
+                    return [val]
+                return default_type
+
         return jsonify({
-            "stopwords": json.loads(row[0]) if row and row[0] else [],
-            "abbrs": json.loads(row[1]) if row and row[1] else {},
-            "inclusions": json.loads(row[2]) if row and row[2] else []
+            "stopwords": safe_parse(row[0] if row else None, []),
+            "abbrs": safe_parse(row[1] if row else None, {}),
+            "inclusions": safe_parse(row[2] if row else None, [])
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
