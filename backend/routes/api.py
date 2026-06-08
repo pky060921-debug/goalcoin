@@ -1214,21 +1214,30 @@ def get_global_dict():
         row = cursor.fetchone()
         conn.close()
 
-        # 💡 [안전 파싱 함수] 과거의 깨진 데이터나 단순 텍스트가 들어있어도 백엔드가 절대 죽지 않게 방어합니다.
-        def safe_parse(val, default_type):
-            if not val: return default_type
+        def force_repair(val):
+            if not val: return []
+            try:
+                # 1. 일단 JSON 파싱 시도
+                data = json.loads(val)
+                # 2. 만약 옛날 방식의 객체{"stop":[]}라면 배열로 변환
+                if isinstance(data, dict):
+                    return data.get('stop', []) if 'stop' in data else data.get('stopwords', [])
+                return data
+            except:
+                # 3. JSON이 아니면 그냥 텍스트로 보고 리스트화
+                return [val]
+
+        def force_repair_abbr(val):
+            if not val: return {}
             try:
                 return json.loads(val)
             except:
-                # JSON 파싱에 실패하면 일반 텍스트로 취급하여 강제로 리스트에 담아 구제합니다.
-                if isinstance(default_type, list):
-                    return [val]
-                return default_type
+                return {}
 
         return jsonify({
-            "stopwords": safe_parse(row[0] if row else None, []),
-            "abbrs": safe_parse(row[1] if row else None, {}),
-            "inclusions": safe_parse(row[2] if row else None, [])
+            "stopwords": force_repair(row[0] if row else None),
+            "abbrs": force_repair_abbr(row[1] if row else None),
+            "inclusions": force_repair(row[2] if row else None)
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
