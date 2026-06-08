@@ -1214,30 +1214,53 @@ def get_global_dict():
         row = cursor.fetchone()
         conn.close()
 
-        def force_repair(val):
-            if not val: return []
+        def force_repair_list(val, old_key=None):
+            """배열 형태의 컬럼 복구. old_key: 구형 dict에서 꺼낼 키 이름"""
+            if not val:
+                return []
             try:
-                # 1. 일단 JSON 파싱 시도
                 data = json.loads(val)
-                # 2. 만약 옛날 방식의 객체{"stop":[]}라면 배열로 변환
                 if isinstance(data, dict):
-                    return data.get('stop', []) if 'stop' in data else data.get('stopwords', [])
-                return data
+                    # 구형 통합 객체 {"stop":[], "include":[]} 형태
+                    if old_key and old_key in data:
+                        return data.get(old_key, [])
+                    # 그 외 dict는 stop → stopwords 순으로 시도
+                    if 'stop' in data:
+                        return data.get('stop', [])
+                    return data.get('stopwords', [])
+                return data if isinstance(data, list) else []
             except:
-                # 3. JSON이 아니면 그냥 텍스트로 보고 리스트화
-                return [val]
+                return [val] if val else []
 
         def force_repair_abbr(val):
-            if not val: return {}
+            if not val:
+                return {}
             try:
-                return json.loads(val)
+                result = json.loads(val)
+                return result if isinstance(result, dict) else {}
             except:
                 return {}
 
+        raw_stopwords = row[0] if row else None
+        raw_inclusions = row[2] if row else None
+
+        stopwords = force_repair_list(raw_stopwords, old_key='stop')
+        inclusions = force_repair_list(raw_inclusions, old_key='include')
+
+        # 💡 구형: custom_stopwords 하나에 {"stop":[], "include":[]} 다 넣었던 경우 복구
+        # force_repair_list가 'stop' 키를 반환했을 때, 'include' 데이터도 살려야 함
+        try:
+            if raw_stopwords:
+                old_data = json.loads(raw_stopwords)
+                if isinstance(old_data, dict) and 'include' in old_data and not inclusions:
+                    inclusions = old_data.get('include', [])
+        except:
+            pass
+
         return jsonify({
-            "stopwords": force_repair(row[0] if row else None),
+            "stopwords": stopwords,
             "abbrs": force_repair_abbr(row[1] if row else None),
-            "inclusions": force_repair(row[2] if row else None)
+            "inclusions": inclusions
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
