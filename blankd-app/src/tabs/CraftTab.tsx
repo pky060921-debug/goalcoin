@@ -151,17 +151,36 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
 
   useEffect(() => {
     if (safeAddress) {
-      // 💡 [강제 복구 모드] 데이터가 안 나오면 강제로 모든 데이터를 긁어와 현재 주소로 매핑합니다.
+      console.log("🔍 [진단] API 호출 시작: 지갑 주소 =", safeAddress);
+      
       api.getGlobalDict(safeAddress).then(data => {
-        if (data && (data.stopwords.length > 0 || Object.keys(data.abbrs).length > 0)) {
-           setCustomStopWords(Array.isArray(data.stopwords) ? data.stopwords : []);
-           setCustomIncludeWords(Array.isArray(data.inclusions) ? data.inclusions : []);
-        } else {
-           // 만약 현재 주소에 데이터가 없다면, DB 전체를 훑어서라도 예전 데이터를 찾아냅니다.
-           console.log("⚠️ 현재 주소에 데이터 없음. 복구 모드 가동.");
-           // 강제로 데이터를 로드하는 로직을 추가
+        console.log("🔍 [진단] 서버 응답 원본:", data);
+        
+        if (!data) {
+          console.error("🔍 [진단] 서버에서 null/undefined 응답을 받았습니다.");
+          return;
         }
-      }).catch(err => console.error("⚠️ 단어 설정 DB 동기화 실패", err));
+
+        // 각 데이터 형태별 상세 진단
+        const stops = data.stopwords;
+        const includes = data.inclusions;
+        
+        console.log(`🔍 [진단] stopwords 타입: ${typeof stops}, 값:`, stops);
+        console.log(`🔍 [진단] inclusions 타입: ${typeof includes}, 값:`, includes);
+
+        // 데이터 강제 반영 (어떤 형태든 배열로 변환 시도)
+        const finalStops = Array.isArray(stops) ? stops : (typeof stops === 'object' ? Object.values(stops) : []);
+        const finalIncludes = Array.isArray(includes) ? includes : (typeof includes === 'object' ? Object.values(includes) : []);
+        
+        setCustomStopWords(finalStops);
+        setCustomIncludeWords(finalIncludes);
+        
+        if (finalStops.length === 0 && finalIncludes.length === 0) {
+            console.warn("🔍 [진단] 데이터가 존재하지만 빈 배열로 판독되었습니다. DB 데이터 구조를 확인하세요.");
+        }
+      }).catch(err => {
+        console.error("🔍 [진단] API 호출 중 에러 발생:", err);
+      });
     }
   }, [safeAddress]);
 
