@@ -192,67 +192,58 @@ function MainApp() {
   }, [isLoggedIn, safeAddress, enokiFlow]);
 
   const loadAllData = async () => {
+  try {
+    const [catRes, cardRes, balance, dictRes] = await Promise.all([
+      fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r=>r.json()),
+      fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`).then(r=>r.json()),
+      api.getGoalCoinBalance(safeAddress).catch(()=>0),
+      api.getGlobalDict(safeAddress).catch((e) => {
+        // ✅ 에러 원인을 콘솔에서 확인 가능하도록 수정
+        console.error('⚠️ 글로벌 단어장 로드 실패:', e);
+        addLog(`⚠️ 단어장 로드 실패: ${e?.message || '알 수 없는 오류'}`);
+        return { stopwords: [], inclusions: [], abbrs: {} };
+      })
+    ]);
+    
+    setCategories(catRes.categories || []); 
+    setSavedCards(cardRes.cards || []); 
+    setGoalBalance(balance);
+
+    // ✅ 백엔드가 이미 배열로 변환해서 줌 → 타입 검증만 하면 됨
+    const serverStopwords: string[] = Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [];
+    const serverInclusions: string[] = Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [];
+    let finalAbbrs: Record<string, string> = (dictRes.abbrs && typeof dictRes.abbrs === 'object' && !Array.isArray(dictRes.abbrs))
+      ? dictRes.abbrs : {};
+
+    // 로컬 약어 마이그레이션 (기존 코드 유지)
     try {
-      const [catRes, cardRes, balance, dictRes] = await Promise.all([
-        fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r=>r.json()),
-        fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`).then(r=>r.json()),
-        api.getGoalCoinBalance(safeAddress).catch(()=>0),
-        api.getGlobalDict(safeAddress).catch(() => ({ stopwords: [], inclusions: [], abbrs: {} }))
-      ]);
-      
-      setCategories(catRes.categories || []); 
-      setSavedCards(cardRes.cards || []); 
-      setGoalBalance(balance);
-
-      // 💡 [구형 데이터 완벽 복구 및 병합 로직]
-      let serverStopwords: string[] = [];
-      let serverInclusions: string[] = [];
-
-      // 옛날에 쓰던 주머니(객체) 형태의 데이터가 발견되면 안전하게 꺼냅니다.
-      if (dictRes.stopwords && !Array.isArray(dictRes.stopwords) && typeof dictRes.stopwords === 'object') {
-        serverStopwords = dictRes.stopwords.stop || [];
-        serverInclusions = dictRes.stopwords.include || [];
-      } else if (Array.isArray(dictRes.stopwords)) {
-        serverStopwords = dictRes.stopwords;
-      }
-
-      if (Array.isArray(dictRes.inclusions)) {
-        serverInclusions = Array.from(new Set([...serverInclusions, ...dictRes.inclusions]));
-      }
-
-      let finalAbbrs = dictRes.abbrs || {};
-
-      // 💡 [로컬 약어 데이터 안전 마이그레이션]
-      try {
-        const localAbbrStr = localStorage.getItem('blankd_abbr_dict');
-        if (localAbbrStr) {
-          const localAbbrs = JSON.parse(localAbbrStr);
-          if (Object.keys(finalAbbrs).length === 0 && Object.keys(localAbbrs).length > 0) {
-            finalAbbrs = localAbbrs;
-            // 로컬 약어를 DB로 올리면서, 복구한 구형 예외단어까지 함께 신형 규격(배열)으로 DB에 영구 고정합니다.
-            api.updateGlobalDict(safeAddress, {
-              stopwords: serverStopwords,
-              inclusions: serverInclusions,
-              abbrs: finalAbbrs
-            }).then(() => {
-              localStorage.removeItem('blankd_abbr_dict'); 
-              addLog("📦 로컬 약어 데이터를 DB로 안전하게 이전했습니다.");
-            }).catch(() => {});
-          }
+      const localAbbrStr = localStorage.getItem('blankd_abbr_dict');
+      if (localAbbrStr) {
+        const localAbbrs = JSON.parse(localAbbrStr);
+        if (Object.keys(finalAbbrs).length === 0 && Object.keys(localAbbrs).length > 0) {
+          finalAbbrs = localAbbrs;
+          api.updateGlobalDict(safeAddress, {
+            stopwords: serverStopwords,
+            inclusions: serverInclusions,
+            abbrs: finalAbbrs
+          }).then(() => {
+            localStorage.removeItem('blankd_abbr_dict');
+            addLog("📦 로컬 약어 데이터를 DB로 안전하게 이전했습니다.");
+          }).catch(() => {});
         }
-      } catch (e) { console.error("약어 마이그레이션 에러", e); }
+      }
+    } catch (e) { console.error("약어 마이그레이션 에러", e); }
 
-      // 앱 전체 상태(글로벌 단어장)에 복구된 데이터를 장착합니다.
-      setGlobalDict({
-        stopwords: serverStopwords,
-        inclusions: serverInclusions,
-        abbrs: finalAbbrs
-      });
+    setGlobalDict({
+      stopwords: serverStopwords,
+      inclusions: serverInclusions,
+      abbrs: finalAbbrs
+    });
 
-    } catch (e: any) { 
-      addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
-    }
-  };
+  } catch (e: any) { 
+    addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
+  }
+};
 
   const flushQueue = async () => {
     if (!safeAddress) return;
