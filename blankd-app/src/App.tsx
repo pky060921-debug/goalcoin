@@ -202,10 +202,45 @@ function MainApp() {
       setCategories(catRes.categories || []); 
       setSavedCards(cardRes.cards || []); 
       setGoalBalance(balance);
+
+      // 💡 [데이터 구조 방어] 서버에서 받아온 기본 데이터 구조 정리
+      const serverStopwords = Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [];
+      const serverInclusions = Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [];
+      let finalAbbrs = dictRes.abbrs || {};
+
+      // 💡 [로컬 데이터 자동 이전 로직] 기존 브라우저에 저장되어 있던 약어 사전 구제
+      try {
+        const localAbbrStr = localStorage.getItem('blankd_abbr_dict');
+        if (localAbbrStr) {
+          const localAbbrs = JSON.parse(localAbbrStr);
+          
+          // 서버 DB가 비어있고 로컬에 기존에 쓰던 약어가 남아있다면 자동으로 병합 및 마이그레이션
+          if (Object.keys(finalAbbrs).length === 0 && Object.keys(localAbbrs).length > 0) {
+            finalAbbrs = localAbbrs;
+            
+            // 즉시 백엔드 글로벌 DB로 자동 백업 실행 (API 절약 및 영구 보존)
+            api.updateGlobalDict(safeAddress, {
+              stopwords: serverStopwords,
+              inclusions: serverInclusions,
+              abbrs: finalAbbrs
+            }).then(() => {
+              addLog("📦 로컬에 있던 기존 약어 데이터를 안전하게 클라우드 DB로 마이그레이션했습니다.");
+              // 중복 이전을 막기 위해 이전 완료 후 로컬 키는 깔끔하게 제거
+              localStorage.removeItem('blankd_abbr_dict'); 
+            }).catch(() => {
+              addLog("⚠️ 로컬 약어 자동 백업 중 일시적 통신 지연 발생 (다음 턴에 재시도)");
+            });
+          }
+        }
+      } catch (e) {
+        console.error("[진단] 기존 로컬 약어 파싱 실패:", e);
+      }
+
+      // 최종적으로 로컬 데이터가 보정된 객체로 상태 동기화
       setGlobalDict({
-        stopwords: Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [],
-        inclusions: Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [],
-        abbrs: dictRes.abbrs || {}
+        stopwords: serverStopwords,
+        inclusions: serverInclusions,
+        abbrs: finalAbbrs
       });
     } catch (e: any) { 
       addLog(`? 데이터 동기화 실패: ${e.message}`);
