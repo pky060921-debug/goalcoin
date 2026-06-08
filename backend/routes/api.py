@@ -1208,29 +1208,35 @@ def get_checkpoint():
 def get_global_dict():
     try:
         wallet_address = request.args.get('wallet_address')
+        if not wallet_address:
+            return jsonify({"stopwords": [], "abbrs": {}, "inclusions": [], "error": "wallet_address 누락"}), 400
+
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT custom_stopwords, custom_abbrs, custom_inclusions FROM user_settings WHERE wallet_address = ?", (wallet_address,))
         row = cursor.fetchone()
         conn.close()
 
-        def force_repair_list(val, old_key=None):
-            """배열 형태의 컬럼 복구. old_key: 구형 dict에서 꺼낼 키 이름"""
+        def force_repair_list(val, fallback_key=None):
+            """배열 형태 컬럼 복구. fallback_key: 구형 dict에서 꺼낼 키"""
             if not val:
                 return []
             try:
                 data = json.loads(val)
+                if isinstance(data, list):
+                    return data
                 if isinstance(data, dict):
-                    # 구형 통합 객체 {"stop":[], "include":[]} 형태
-                    if old_key and old_key in data:
-                        return data.get(old_key, [])
-                    # 그 외 dict는 stop → stopwords 순으로 시도
+                    # fallback_key 우선 (예: 'include', 'stop')
+                    if fallback_key and fallback_key in data:
+                        return data[fallback_key]
+                    # 구형 통합 포맷 {"stop":[], "include":[]} 처리
                     if 'stop' in data:
-                        return data.get('stop', [])
-                    return data.get('stopwords', [])
-                return data if isinstance(data, list) else []
-            except:
-                return [val] if val else []
+                        return data['stop']
+                    if 'stopwords' in data:
+                        return data['stopwords']
+                return []
+            except Exception:
+                return [val] if isinstance(val, str) and val else []
 
         def force_repair_abbr(val):
             if not val:
@@ -1238,31 +1244,33 @@ def get_global_dict():
             try:
                 result = json.loads(val)
                 return result if isinstance(result, dict) else {}
-            except:
+            except Exception:
                 return {}
 
-        raw_stopwords = row[0] if row else None
+        raw_stopwords  = row[0] if row else None
+        raw_abbrs      = row[1] if row else None
         raw_inclusions = row[2] if row else None
 
-        stopwords = force_repair_list(raw_stopwords, old_key='stop')
-        inclusions = force_repair_list(raw_inclusions, old_key='include')
+        stopwords  = force_repair_list(raw_stopwords,  fallback_key='stop')
+        inclusions = force_repair_list(raw_inclusions, fallback_key='include')
 
-        # 💡 구형: custom_stopwords 하나에 {"stop":[], "include":[]} 다 넣었던 경우 복구
-        # force_repair_list가 'stop' 키를 반환했을 때, 'include' 데이터도 살려야 함
-        try:
-            if raw_stopwords:
-                old_data = json.loads(raw_stopwords)
-                if isinstance(old_data, dict) and 'include' in old_data and not inclusions:
-                    inclusions = old_data.get('include', [])
-        except:
-            pass
+        # 💡 구형: custom_stopwords 하나에 {"stop":[], "include":[]} 통합 저장했던 경우
+        # inclusions가 비어 있고, 구형 stopwords에 include 키가 있으면 복구
+        if not inclusions and raw_stopwords:
+            try:
+                old = json.loads(raw_stopwords)
+                if isinstance(old, dict) and 'include' in old:
+                    inclusions = old['include']
+            except Exception:
+                pass
 
         return jsonify({
-            "stopwords": stopwords,
-            "abbrs": force_repair_abbr(row[1] if row else None),
+            "stopwords":  stopwords,
+            "abbrs":      force_repair_abbr(raw_abbrs),
             "inclusions": inclusions
         })
     except Exception as e:
+        logging.error(f"get_global_dict 오류: {e}")
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/update-global-dict', methods=['POST'])
