@@ -149,51 +149,19 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
-  // 💡 [기존의 api.getStopwords 를 호출하던 useEffect 전체를 아래로 교체]
+  // 💡 [유일한 글로벌 단어장 동기화 로직] 중복된 useEffect를 모두 지우고 이것 하나만 남겨주세요.
   useEffect(() => {
     if (safeAddress) {
       api.getGlobalDict(safeAddress).then(data => {
         if (data) {
-          // DB에 잠들어있던 예외단어를 다시 화면에 뿌려줌
           setCustomStopWords(Array.isArray(data.stopwords) ? data.stopwords : []);
-          
-          // (선택) 만약 포함 단어 state인 setCustomIncludeWords가 선언되어 있다면 아래 주석 해제
-          // if (typeof setCustomIncludeWords === 'function') setCustomIncludeWords(Array.isArray(data.inclusions) ? data.inclusions : []);
-        }
-      }).catch(err => console.error("단어 설정 DB 동기화 실패"));
-    }
-  }, [safeAddress]);
-  
-  // 💡 [새로운 통합 글로벌 DB 동기화 및 구형 데이터 구제 로직]
-  useEffect(() => {
-    if (safeAddress) {
-      api.getGlobalDict(safeAddress).then(data => {
-        if (data) {
-          let finalStops: string[] = [];
-          let finalIncludes: string[] = [];
-
-          // 1. 과거 데이터 구조 {"stop": [], "include": []} 호환성 처리
-          if (data.stopwords && !Array.isArray(data.stopwords) && typeof data.stopwords === 'object') {
-            finalStops = data.stopwords.stop || [];
-            finalIncludes = data.stopwords.include || [];
-          } else if (Array.isArray(data.stopwords)) {
-            finalStops = data.stopwords;
-          }
-
-          // 2. 신규 데이터 구조 처리 및 병합
-          if (Array.isArray(data.inclusions) && data.inclusions.length > 0) {
-            finalIncludes = Array.from(new Set([...finalIncludes, ...data.inclusions]));
-          }
-
-          // 3. 화면 상태 업데이트 (주석 해제됨)
-          setCustomStopWords(finalStops);
-          setCustomIncludeWords(finalIncludes);
+          setCustomIncludeWords(Array.isArray(data.inclusions) ? data.inclusions : []);
         }
       }).catch(err => console.error("⚠️ 단어 설정 DB 동기화 실패", err));
     }
   }, [safeAddress]);
 
-  // 💡 [저장 함수는 방금 작성하신 그대로 유지하시면 됩니다]
+  // 💡 [안전한 저장 로직]
   const saveWordsToDB = async (stops: string[], includes: string[]) => {
     try {
       const currentDictRes = await api.getGlobalDict(safeAddress);
