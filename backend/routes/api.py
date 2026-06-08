@@ -1242,39 +1242,68 @@ def update_card_memo():
     except Exception as e:
         return jsonify({"error": "메모 업데이트 실패"}), 500
 
-@api_bp.route('/get-stopwords', methods=['GET'])
-def get_stopwords():
+# ==========================================
+# 💡 [통합] 글로벌 단어장 관리 (제외 단어, 필수 포함, 약어)
+# ==========================================
+@api_bp.route('/get-global-dict', methods=['GET'])
+def get_global_dict():
     try:
         wallet_address = request.args.get('wallet_address')
+        if not wallet_address:
+            return jsonify({"error": "인증 정보가 없습니다."}), 400
+
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT custom_stopwords FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+        cursor.execute("SELECT custom_stopwords, custom_abbrs, custom_inclusions FROM user_settings WHERE wallet_address = ?", (wallet_address,))
         row = cursor.fetchone()
         conn.close()
-        stopwords = json.loads(row[0]) if row and row[0] else []
-        return jsonify({"stopwords": stopwords})
+
+        # 데이터가 없을 경우를 대비한 안전한 기본값 처리
+        return jsonify({
+            "stopwords": json.loads(row[0]) if row and row[0] else [],
+            "abbrs": json.loads(row[1]) if row and row[1] else {},
+            "inclusions": json.loads(row[2]) if row and row[2] else []
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@api_bp.route('/update-stopwords', methods=['POST'])
-def update_stopwords():
+@api_bp.route('/update-global-dict', methods=['POST'])
+def update_global_dict():
     try:
         data = request.json
         wallet_address = data.get('wallet_address')
-        stopwords = data.get('stopwords', [])
+        if not wallet_address:
+            return jsonify({"error": "인증 정보가 없습니다."}), 400
+
+        # 프론트엔드에서 넘어온 데이터를 안전하게 문자열(JSON)로 변환
+        stopwords_json = json.dumps(data.get('stopwords', []), ensure_ascii=False)
+        abbrs_json = json.dumps(data.get('abbrs', {}), ensure_ascii=False)
+        inclusions_json = json.dumps(data.get('inclusions', []), ensure_ascii=False)
+
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT 1 FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+        
         if cursor.fetchone():
-            cursor.execute("UPDATE user_settings SET custom_stopwords = ? WHERE wallet_address = ?", (json.dumps(stopwords, ensure_ascii=False), wallet_address))
+            # 기존 유저: UPDATE
+            cursor.execute("""
+                UPDATE user_settings 
+                SET custom_stopwords = ?, custom_abbrs = ?, custom_inclusions = ? 
+                WHERE wallet_address = ?
+            """, (stopwords_json, abbrs_json, inclusions_json, wallet_address))
         else:
-            cursor.execute("INSERT INTO user_settings (wallet_address, custom_stopwords) VALUES (?, ?)", (wallet_address, json.dumps(stopwords, ensure_ascii=False)))
+            # 신규 유저: INSERT
+            cursor.execute("""
+                INSERT INTO user_settings (wallet_address, custom_stopwords, custom_abbrs, custom_inclusions) 
+                VALUES (?, ?, ?, ?)
+            """, (wallet_address, stopwords_json, abbrs_json, inclusions_json))
+            
         conn.commit()
         conn.close()
-        return jsonify({"message": "예외 단어 DB 업데이트 완료"})
+        return jsonify({"message": "전역 사전 DB 업데이트 완료"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
+        
 # ==========================================
 # 💡 사용자 체크포인트(진행 상태) 관리 API
 # ==========================================
