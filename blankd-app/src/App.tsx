@@ -203,11 +203,7 @@ function MainApp() {
       setSavedCards(cardRes.cards || []); 
       setGoalBalance(balance);
 
-      setCategories(catRes.categories || []); 
-      setSavedCards(cardRes.cards || []); 
-      setGoalBalance(balance);
-
-      // 💡 [구형 데이터 완벽 복구 및 병합 로직]
+      // 💡 [구형 데이터 완벽 복구 및 병합 로직] (중복 변수 선언 완전 제거)
       let serverStopwords: string[] = [];
       let serverInclusions: string[] = [];
 
@@ -251,6 +247,11 @@ function MainApp() {
         inclusions: serverInclusions,
         abbrs: finalAbbrs
       });
+
+    } catch (e: any) { 
+      addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
+    }
+  };
       
       // 💡 [데이터 구조 방어] 서버에서 받아온 기본 데이터 구조 정리
       const serverStopwords = Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [];
