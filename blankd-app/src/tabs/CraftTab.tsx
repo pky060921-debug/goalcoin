@@ -164,10 +164,38 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     }
   }, [safeAddress]);
   
-  // 💡 [기존의 api.updateStopwords 를 호출하던 saveWordsToDB 함수 전체를 아래로 교체]
-  const saveWordsToDB = async (stops: string[], includes: string[] = []) => {
+  // 💡 [새로운 통합 글로벌 DB 동기화 및 구형 데이터 구제 로직]
+  useEffect(() => {
+    if (safeAddress) {
+      api.getGlobalDict(safeAddress).then(data => {
+        if (data) {
+          let finalStops: string[] = [];
+          let finalIncludes: string[] = [];
+
+          // 1. 과거 데이터 구조 {"stop": [], "include": []} 호환성 처리
+          if (data.stopwords && !Array.isArray(data.stopwords) && typeof data.stopwords === 'object') {
+            finalStops = data.stopwords.stop || [];
+            finalIncludes = data.stopwords.include || [];
+          } else if (Array.isArray(data.stopwords)) {
+            finalStops = data.stopwords;
+          }
+
+          // 2. 신규 데이터 구조 처리 및 병합
+          if (Array.isArray(data.inclusions) && data.inclusions.length > 0) {
+            finalIncludes = Array.from(new Set([...finalIncludes, ...data.inclusions]));
+          }
+
+          // 3. 화면 상태 업데이트 (주석 해제됨)
+          setCustomStopWords(finalStops);
+          setCustomIncludeWords(finalIncludes);
+        }
+      }).catch(err => console.error("⚠️ 단어 설정 DB 동기화 실패", err));
+    }
+  }, [safeAddress]);
+
+  // 💡 [저장 함수는 방금 작성하신 그대로 유지하시면 됩니다]
+  const saveWordsToDB = async (stops: string[], includes: string[]) => {
     try {
-      // 💡 [데이터 증발 방지] 방금 1단계에서 복구한 약어(abbrs)가 날아가지 않도록, DB에서 한 번 읽어와서 병합 저장
       const currentDictRes = await api.getGlobalDict(safeAddress);
       const safeAbbrs = currentDictRes.abbrs || {};
       
@@ -176,7 +204,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
         inclusions: includes,
         abbrs: safeAbbrs
       });
-      addLog(`✅ 통합 단어장 DB 동기화 완료`);
+      if (typeof addLog === 'function') addLog(`✅ 통합 단어장 DB 동기화 완료`);
     } catch(e) { 
       console.error("저장 실패:", e);
       alert("DB 저장 실패"); 
