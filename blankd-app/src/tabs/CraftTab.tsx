@@ -149,13 +149,28 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
-  // 💡 [유일한 글로벌 단어장 동기화 로직] 중복된 useEffect를 모두 지우고 이것 하나만 남겨주세요.
+  // 💡 [만들기 탭: 글로벌 단어장 동기화 및 구형 데이터 화면 출력]
   useEffect(() => {
     if (safeAddress) {
       api.getGlobalDict(safeAddress).then(data => {
         if (data) {
-          setCustomStopWords(Array.isArray(data.stopwords) ? data.stopwords : []);
-          setCustomIncludeWords(Array.isArray(data.inclusions) ? data.inclusions : []);
+          let finalStops: string[] = [];
+          let finalIncludes: string[] = [];
+
+          if (data.stopwords && !Array.isArray(data.stopwords) && typeof data.stopwords === 'object') {
+            finalStops = data.stopwords.stop || [];
+            finalIncludes = data.stopwords.include || [];
+          } else if (Array.isArray(data.stopwords)) {
+            finalStops = data.stopwords;
+          }
+
+          if (Array.isArray(data.inclusions)) {
+            finalIncludes = Array.from(new Set([...finalIncludes, ...data.inclusions]));
+          }
+
+          // 드디어 화면에 옛날 단어들을 출력합니다!
+          setCustomStopWords(finalStops);
+          setCustomIncludeWords(finalIncludes);
         }
       }).catch(err => console.error("⚠️ 단어 설정 DB 동기화 실패", err));
     }
