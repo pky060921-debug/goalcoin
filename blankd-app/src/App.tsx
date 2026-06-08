@@ -153,18 +153,21 @@ function MainApp() {
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
 
-  // 💡 [추가] 스마트 약어 사전 상태 및 모달 제어
-  const [abbrDict, setAbbrDict] = useState<Record<string, string>>(() => {
-    try { const saved = localStorage.getItem('blankd_abbr_dict'); return saved ? JSON.parse(saved) : {}; }
-    catch { return {}; }
+  // 💡 [통합] 글로벌 단어장 (제외/포함/약어) 상태 및 통합 모달 제어
+  const [globalDict, setGlobalDict] = useState<{ stopwords: string[], inclusions: string[], abbrs: Record<string, string> }>({
+    stopwords: [], inclusions: [], abbrs: {}
   });
-  const [isAbbrModalOpen, setIsAbbrModalOpen] = useState(false);
-  const [tempAbbrKey, setTempAbbrKey] = useState("");
-  const [tempAbbrValue, setTempAbbrValue] = useState("");
+  const [isDictModalOpen, setIsDictModalOpen] = useState(false);
+  const [dictTab, setDictTab] = useState<'stop'|'include'|'abbr'>('abbr');
+  const [tempKey, setTempKey] = useState("");
+  const [tempValue, setTempValue] = useState("");
 
-  const saveAbbrDict = (newDict: Record<string, string>) => {
-    setAbbrDict(newDict);
-    localStorage.setItem('blankd_abbr_dict', JSON.stringify(newDict));
+  const saveGlobalDict = async (newDict: typeof globalDict) => {
+    setGlobalDict(newDict); // UI 즉시 반영 (낙관적 업데이트)
+    if (safeAddress) {
+      try { await api.updateGlobalDict(safeAddress, newDict); } 
+      catch (e) { addLog("⚠️ 글로벌 단어장 DB 동기화 실패"); }
+    }
   };
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
@@ -190,14 +193,20 @@ function MainApp() {
 
   const loadAllData = async () => {
     try {
-      const [catRes, cardRes, balance] = await Promise.all([
+      const [catRes, cardRes, balance, dictRes] = await Promise.all([
         fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r=>r.json()),
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}`).then(r=>r.json()),
-        api.getGoalCoinBalance(safeAddress).catch(()=>0)
+        api.getGoalCoinBalance(safeAddress).catch(()=>0),
+        api.getGlobalDict(safeAddress).catch(() => ({ stopwords: [], inclusions: [], abbrs: {} }))
       ]);
       setCategories(catRes.categories || []); 
       setSavedCards(cardRes.cards || []); 
       setGoalBalance(balance);
+      setGlobalDict({
+        stopwords: Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [],
+        inclusions: Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [],
+        abbrs: dictRes.abbrs || {}
+      });
     } catch (e: any) { 
       addLog(`? 데이터 동기화 실패: ${e.message}`);
     }
@@ -489,8 +498,8 @@ function MainApp() {
     let isCorrect = (expected === actual);
 
     // 💡 [추가된 부분] 2차 검사: 오답일 경우, 입력한 단어가 약어 사전에 등록되어 있는지 확인
-    if (!isCorrect && abbrDict && abbrDict[actual]) {
-      const mappedValue = abbrDict[actual].replace(/\s+/g, '').toLowerCase();
+    if (!isCorrect && globalDict.abbrs && globalDict.abbrs[actual]) {
+      const mappedValue = globalDict.abbrs[actual].replace(/\s+/g, '').toLowerCase();
       console.log(`[진단-약어] 입력:'${actual}' -> 매핑:'${mappedValue}' | 실제:'${expected}'`);
       if (mappedValue === expected) {
         isCorrect = true; // 약어의 원래 뜻이 정답과 같으면 정답 처리!
@@ -717,7 +726,7 @@ function MainApp() {
                   key={`blank-${currentBlankIdx}`}
                   inputStatus={inputStatus}
                   expected={blanks[currentBlankIdx]?.answer || ""} // 💡 현재 빈칸의 정답을 전달
-                  abbrDict={abbrDict} // 💡 [추가] 약어 사전 전달
+                  abbrDict={globalDict.abbrs} // 💡 [추가] 약어 사전 전달
                   onSubmit={handleSequentialInput}
                 />
               );
@@ -869,11 +878,11 @@ function MainApp() {
               )}
             </div>
 
-            {/* 💡 [추가] 상단 단어장 메뉴 UI 추가 */}
+            {/* 💡 [통합] 상단 글로벌 사전 메뉴 UI */}
             <div className="flex items-center gap-2 shrink-0 ml-1 sm:ml-2 border-l border-white/10 pl-2 sm:pl-3">
-              <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 hidden sm:inline">단어:</span>
-              <button onClick={() => { setActiveTab('create'); alert('제외/포함 단어 설정은 만들기 탭(⚙️ 예외 단어)을 이용해주세요.'); }} className="text-[10px] bg-amber-900/30 text-amber-400 border border-amber-500/40 px-2 py-1 rounded-sm hover:bg-amber-900/50">제외/포함</button>
-              <button onClick={() => setIsAbbrModalOpen(true)} className="text-[10px] bg-indigo-900/30 text-indigo-400 border border-indigo-500/40 px-2 py-1 rounded-sm hover:bg-indigo-900/50">약어</button>
+              <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 hidden sm:inline">사전:</span>
+              <button onClick={() => { setDictTab('stop'); setIsDictModalOpen(true); }} className="text-[10px] bg-amber-900/30 text-amber-400 border border-amber-500/40 px-2 py-1 rounded-sm hover:bg-amber-900/50 transition-colors">제외/포함</button>
+              <button onClick={() => { setDictTab('abbr'); setIsDictModalOpen(true); }} className="text-[10px] bg-indigo-900/30 text-indigo-400 border border-indigo-500/40 px-2 py-1 rounded-sm hover:bg-indigo-900/50 transition-colors">약어 채점</button>
             </div>
 
             {/* 구분선 */}
@@ -955,36 +964,77 @@ function MainApp() {
         </button>
       </div>
 
-      {/* 💡 [추가] 스마트 약어 등록 모달 */}
-      {isAbbrModalOpen && (
-        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4">
-          <div className="bg-[#121214] border border-indigo-500/50 p-6 w-full max-w-lg rounded-sm shadow-2xl">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-lg font-bold text-indigo-400">⚡ 스마트 약어 설정 (약어 = 정답 인정)</h3>
-              <button onClick={() => setIsAbbrModalOpen(false)} className="text-white/40 hover:text-white">✕</button>
+      {/* 💡 [통합] 글로벌 단어장 (Zen Archive 스타일) */}
+      {isDictModalOpen && (
+        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 w-full max-w-lg rounded-sm shadow-2xl flex flex-col max-h-[85vh]">
+            <div className="flex justify-between items-start mb-6">
+              <div className="flex gap-4 border-b border-white/10 w-full pt-1">
+                <button onClick={() => setDictTab('abbr')} className={`text-xs sm:text-sm font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'abbr' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-white/40 hover:text-white/70'}`}>⚡ 스마트 약어</button>
+                <button onClick={() => setDictTab('include')} className={`text-xs sm:text-sm font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'include' ? 'text-teal-400 border-b-2 border-teal-400' : 'text-white/40 hover:text-white/70'}`}>✅ 필수 포함</button>
+                <button onClick={() => setDictTab('stop')} className={`text-xs sm:text-sm font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'stop' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-white/40 hover:text-white/70'}`}>❌ 제외 단어</button>
+              </div>
+              <button onClick={() => setIsDictModalOpen(false)} className="text-white/40 hover:text-white ml-6 text-lg font-bold">✕</button>
             </div>
-            <div className="flex gap-2 mb-4">
-              <input type="text" value={tempAbbrKey} onChange={(e) => setTempAbbrKey(e.target.value)} placeholder="약어 (예: 복정고)" className="flex-1 bg-black/50 border border-white/20 p-2 text-sm text-white/80 outline-none rounded-sm" />
-              <input type="text" value={tempAbbrValue} onChange={(e) => setTempAbbrValue(e.target.value)} onKeyDown={(e) => {
-                if(e.key === 'Enter' && tempAbbrKey && tempAbbrValue) {
-                  saveAbbrDict({ ...abbrDict, [tempAbbrKey.trim()]: tempAbbrValue.trim() });
-                  setTempAbbrKey(""); setTempAbbrValue("");
+            
+            <div className="flex gap-2 mb-5 shrink-0">
+              <input type="text" value={tempKey} onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                   if (dictTab === 'abbr' && tempKey && tempValue) {
+                     saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [tempKey.trim()]: tempValue.trim() } });
+                     setTempKey(""); setTempValue("");
+                   } else if (dictTab !== 'abbr' && tempKey) {
+                     const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
+                     const targetArray = dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions;
+                     saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words])) });
+                     setTempKey("");
+                   }
                 }
-              }} placeholder="원래 문장 (예: 보건복지부장관이 정하여 고시)" className="flex-[2] bg-black/50 border border-white/20 p-2 text-sm text-white/80 outline-none rounded-sm" />
-              <button onClick={() => { 
-                if(tempAbbrKey && tempAbbrValue) { 
-                  saveAbbrDict({ ...abbrDict, [tempAbbrKey.trim()]: tempAbbrValue.trim() });
-                  setTempAbbrKey(""); setTempAbbrValue("");
+              }} placeholder={dictTab === 'abbr' ? "약어 (예: 복정고)" : "단어 입력 (쉼표로 구분)"} className="flex-1 bg-black/50 border border-white/10 p-2.5 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-white/30 transition-colors" />
+              
+              {dictTab === 'abbr' && (
+                <input type="text" value={tempValue} onChange={(e) => setTempValue(e.target.value)} onKeyDown={(e) => {
+                   if (e.key === 'Enter' && tempKey && tempValue) {
+                     saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [tempKey.trim()]: tempValue.trim() } });
+                     setTempKey(""); setTempValue("");
+                   }
+                }} placeholder="원래 정답 (예: 보건복지부장관)" className="flex-[2] bg-black/50 border border-white/10 p-2.5 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-indigo-500/50 transition-colors" />
+              )}
+              
+              <button onClick={() => {
+                if (dictTab === 'abbr' && tempKey && tempValue) {
+                  saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [tempKey.trim()]: tempValue.trim() } });
+                  setTempKey(""); setTempValue("");
+                } else if (dictTab !== 'abbr' && tempKey) {
+                  const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
+                  const targetArray = dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions;
+                  saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words])) });
+                  setTempKey("");
                 }
-              }} className="px-4 bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 text-xs font-bold rounded-sm hover:bg-indigo-600/40">등록</button>
+              }} className="px-5 bg-white/5 text-white/80 border border-white/10 text-xs font-bold rounded-sm hover:bg-white/10 transition-colors">등록</button>
             </div>
-            <div className="max-h-40 overflow-y-auto space-y-2 custom-scrollbar pr-2">
-              {Object.entries(abbrDict).map(([abbr, full]) => (
-                <div key={abbr} className="flex justify-between items-center text-sm border-b border-white/5 pb-2">
-                  <div><span className="text-indigo-400 font-bold">{abbr}</span> <span className="text-white/30 mx-2">→</span> <span className="text-white/70">{full}</span></div>
-                  <button onClick={() => { const nw = {...abbrDict}; delete nw[abbr]; saveAbbrDict(nw); }} className="text-red-400/50 hover:text-red-400 text-xs">삭제</button>
+            
+            <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 min-h-[160px]">
+              {dictTab === 'abbr' && Object.entries(globalDict.abbrs).map(([abbr, full]) => (
+                <div key={abbr} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
+                  <div className="flex items-center gap-3"><span className="text-indigo-400 font-bold px-2 py-0.5 bg-indigo-900/20 rounded-sm border border-indigo-500/20">{abbr}</span> <span className="text-white/30 text-[10px]">→</span> <span className="text-white/70">{full}</span></div>
+                  <button onClick={() => { const nw = {...globalDict.abbrs}; delete nw[abbr]; saveGlobalDict({...globalDict, abbrs: nw}); }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors">✕</button>
                 </div>
               ))}
+              {dictTab !== 'abbr' && (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions).map((word) => (
+                <div key={word} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
+                  <span className={`px-2 py-0.5 rounded-sm border ${dictTab === 'stop' ? 'text-amber-400 bg-amber-900/10 border-amber-500/20' : 'text-teal-400 bg-teal-900/10 border-teal-500/20'}`}>{word}</span>
+                  <button onClick={() => {
+                    const targetArray = (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions).filter(w => w !== word);
+                    saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: targetArray });
+                  }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors">✕</button>
+                </div>
+              ))}
+              
+              {/* 항목이 없을 때의 플레이스홀더 */}
+              {((dictTab === 'abbr' && Object.keys(globalDict.abbrs).length === 0) || (dictTab === 'stop' && globalDict.stopwords.length === 0) || (dictTab === 'include' && globalDict.inclusions.length === 0)) && (
+                <div className="text-center py-8 text-white/20 text-xs">등록된 단어가 없습니다.</div>
+              )}
             </div>
           </div>
         </div>
