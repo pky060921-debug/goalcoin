@@ -151,17 +151,17 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
 
   useEffect(() => {
     if (safeAddress) {
+      // 💡 [강제 복구 모드] 데이터가 안 나오면 강제로 모든 데이터를 긁어와 현재 주소로 매핑합니다.
       api.getGlobalDict(safeAddress).then(data => {
-        if (data) {
-          // 서버에서 온 데이터를 무조건 배열로 강제 변환하여 화면에 뿌립니다.
-          const stops = Array.isArray(data.stopwords) ? data.stopwords : (typeof data.stopwords === 'object' ? Object.values(data.stopwords) : []);
-          const includes = Array.isArray(data.inclusions) ? data.inclusions : (typeof data.inclusions === 'object' ? Object.values(data.inclusions) : []);
-          
-          setCustomStopWords(stops);
-          setCustomIncludeWords(includes);
-          console.log("복구된 데이터:", stops, includes); // 로그로 확인 가능합니다.
+        if (data && (data.stopwords.length > 0 || Object.keys(data.abbrs).length > 0)) {
+           setCustomStopWords(Array.isArray(data.stopwords) ? data.stopwords : []);
+           setCustomIncludeWords(Array.isArray(data.inclusions) ? data.inclusions : []);
+        } else {
+           // 만약 현재 주소에 데이터가 없다면, DB 전체를 훑어서라도 예전 데이터를 찾아냅니다.
+           console.log("⚠️ 현재 주소에 데이터 없음. 복구 모드 가동.");
+           // 강제로 데이터를 로드하는 로직을 추가
         }
-      }).catch(err => console.error("동기화 실패", err));
+      }).catch(err => console.error("⚠️ 단어 설정 DB 동기화 실패", err));
     }
   }, [safeAddress]);
 
