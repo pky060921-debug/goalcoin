@@ -149,27 +149,38 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
+  // 💡 [기존의 api.getStopwords 를 호출하던 useEffect 전체를 아래로 교체]
   useEffect(() => {
     if (safeAddress) {
-      api.getStopwords(safeAddress).then(data => {
-        if (data && data.stopwords) {
-          if (Array.isArray(data.stopwords)) {
-            setCustomStopWords(data.stopwords);
-            setCustomIncludeWords([]);
-          } else {
-            setCustomStopWords(data.stopwords.stop || []);
-            setCustomIncludeWords(data.stopwords.include || []);
-          }
+      api.getGlobalDict(safeAddress).then(data => {
+        if (data) {
+          // DB에 잠들어있던 예외단어를 다시 화면에 뿌려줌
+          setCustomStopWords(Array.isArray(data.stopwords) ? data.stopwords : []);
+          
+          // (선택) 만약 포함 단어 state인 setCustomIncludeWords가 선언되어 있다면 아래 주석 해제
+          // if (typeof setCustomIncludeWords === 'function') setCustomIncludeWords(Array.isArray(data.inclusions) ? data.inclusions : []);
         }
-      }).catch(err => addLog("⚠️ 단어 설정 DB 동기화 실패"));
+      }).catch(err => console.error("단어 설정 DB 동기화 실패"));
     }
   }, [safeAddress]);
-
-  const saveWordsToDB = async (stops: string[], includes: string[]) => {
+  
+  // 💡 [기존의 api.updateStopwords 를 호출하던 saveWordsToDB 함수 전체를 아래로 교체]
+  const saveWordsToDB = async (stops: string[], includes: string[] = []) => {
     try {
-      await api.updateStopwords(safeAddress, { stop: stops, include: includes });
-      addLog(`✅ 단어 설정 DB 동기화 완료`);
-    } catch(e) { alert("DB 저장 실패"); }
+      // 💡 [데이터 증발 방지] 방금 1단계에서 복구한 약어(abbrs)가 날아가지 않도록, DB에서 한 번 읽어와서 병합 저장
+      const currentDictRes = await api.getGlobalDict(safeAddress);
+      const safeAbbrs = currentDictRes.abbrs || {};
+      
+      await api.updateGlobalDict(safeAddress, {
+        stopwords: stops,
+        inclusions: includes,
+        abbrs: safeAbbrs
+      });
+      addLog(`✅ 통합 단어장 DB 동기화 완료`);
+    } catch(e) { 
+      console.error("저장 실패:", e);
+      alert("DB 저장 실패"); 
+    }
   };
 
   const handleAddStopWord = () => {
