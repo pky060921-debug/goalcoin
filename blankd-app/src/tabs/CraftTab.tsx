@@ -149,31 +149,19 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
-  // 💡 [만들기 탭: 글로벌 단어장 동기화 및 구형 데이터 화면 출력]
   useEffect(() => {
     if (safeAddress) {
       api.getGlobalDict(safeAddress).then(data => {
         if (data) {
-          let finalStops: string[] = [];
-          let finalIncludes: string[] = [];
-
-          // 1. 과거 주머니(객체) 데이터 완벽 구제
-          if (data.stopwords && !Array.isArray(data.stopwords) && typeof data.stopwords === 'object') {
-            finalStops = data.stopwords.stop || [];
-            finalIncludes = data.stopwords.include || [];
-          } else if (Array.isArray(data.stopwords)) {
-            finalStops = data.stopwords;
-          }
-
-          // 2. 신규 필수 포함 단어 병합
-          if (Array.isArray(data.inclusions) && data.inclusions.length > 0) {
-            finalIncludes = Array.from(new Set([...finalIncludes, ...data.inclusions]));
-          }
-
-          setCustomStopWords(finalStops);
-          setCustomIncludeWords(finalIncludes);
+          // 서버에서 온 데이터를 무조건 배열로 강제 변환하여 화면에 뿌립니다.
+          const stops = Array.isArray(data.stopwords) ? data.stopwords : (typeof data.stopwords === 'object' ? Object.values(data.stopwords) : []);
+          const includes = Array.isArray(data.inclusions) ? data.inclusions : (typeof data.inclusions === 'object' ? Object.values(data.inclusions) : []);
+          
+          setCustomStopWords(stops);
+          setCustomIncludeWords(includes);
+          console.log("복구된 데이터:", stops, includes); // 로그로 확인 가능합니다.
         }
-      }).catch(err => console.error("⚠️ 단어 설정 DB 동기화 실패", err));
+      }).catch(err => console.error("동기화 실패", err));
     }
   }, [safeAddress]);
 
