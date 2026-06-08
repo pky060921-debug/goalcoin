@@ -149,11 +149,9 @@ def sanitize_json_string_values(text):
 def clean_and_parse_json(response_text):
     try:
         text = response_text.strip()
-        # 마크다운 코드블록 제거
         text = re.sub(r'```json\s*', '', text)
         text = re.sub(r'```\s*', '', text).strip()
 
-        # JSON 객체/배열 범위 추출
         start_idx_arr = text.find('[')
         end_idx_arr = text.rfind(']')
         start_idx_obj = text.find('{')
@@ -166,20 +164,17 @@ def clean_and_parse_json(response_text):
         else:
             clean_text = text
 
-        # 1차 시도: 그대로 파싱
         try:
             return json.loads(clean_text)
         except json.decoder.JSONDecodeError:
             pass
 
-        # 2차 시도: 문자열 값 안의 raw 개행만 이스케이프
         try:
             sanitized = sanitize_json_string_values(clean_text)
             return json.loads(sanitized)
         except json.decoder.JSONDecodeError:
             pass
 
-        # 3차 시도: 작은따옴표 → 큰따옴표 변환
         try:
             fixed = re.sub(r"([{,]\s*)'([^']+)'(\s*:)", r'\1"\2"\3', clean_text)
             sanitized = sanitize_json_string_values(fixed)
@@ -187,7 +182,6 @@ def clean_and_parse_json(response_text):
         except Exception:
             pass
 
-        # 4차 시도: ast.literal_eval
         try:
             python_dict = ast.literal_eval(clean_text)
             return json.loads(json.dumps(python_dict, ensure_ascii=False))
@@ -243,7 +237,6 @@ def init_golden_db():
         except: pass
         try: conn.execute('ALTER TABLE pending_exams ADD COLUMN answers_json TEXT DEFAULT "[]"')
         except: pass
-        # 기존 코드 아래에 다음 2줄 추가
         try: conn.execute('ALTER TABLE user_settings ADD COLUMN custom_abbrs TEXT DEFAULT "{}"')
         except: pass
         try: conn.execute('ALTER TABLE user_settings ADD COLUMN custom_inclusions TEXT DEFAULT "[]"')
@@ -343,17 +336,15 @@ def extract_text_from_file(file_obj):
         return file_obj.read().decode('utf-8', errors='ignore')
 
 def extract_exam_text_with_color(file_obj, is_answer=False):
-    """PDF/TXT에서 텍스트 추출. 테이블/박스 포함, 빨간색 텍스트는 🔴 마킹."""
     if not file_obj: return ""
     if file_obj.filename.lower().endswith('.pdf'):
         try:
             doc = fitz.open(stream=file_obj.read(), filetype="pdf")
             full_text = ""
             for page in doc:
-                # blocks 방식: 테이블/박스 내용도 순서대로 추출
                 dict_data = page.get_text("dict", sort=True)
                 for block in dict_data.get("blocks", []):
-                    if block.get("type") == 1:  # 이미지 블록 스킵
+                    if block.get("type") == 1: 
                         continue
                     for line in block.get("lines", []):
                         line_text = ""
@@ -365,7 +356,6 @@ def extract_exam_text_with_color(file_obj, is_answer=False):
                             r = (color >> 16) & 0xFF
                             g = (color >> 8) & 0xFF
                             b = color & 0xFF
-                            # 빨간색 텍스트 감지
                             if r > 130 and r > g * 1.5 and r > b * 1.5:
                                 line_text += f"[🔴{text}]"
                             else:
@@ -381,28 +371,22 @@ def extract_exam_text_with_color(file_obj, is_answer=False):
     else:
         return file_obj.read().decode('utf-8', errors='ignore')
 
-
 def parse_answers_from_text(text: str, question_count: int) -> list:
-    """텍스트에서 정답 파싱. 빨간색 마킹, 번호-정답 표 형태 모두 지원."""
     ans_dict = {}
     num_map = {'①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5',
                '1': '1', '2': '2', '3': '3', '4': '4', '5': '5'}
 
-    # 1. 빨간색 마킹 파싱: [🔴①] 또는 [🔴3] 형태
     red_matches = re.findall(r'\[🔴([①②③④⑤1-5])\]', text)
     if red_matches:
-        # 빨간 텍스트가 문제 번호 순서대로 있다고 가정
         for i, ans in enumerate(red_matches):
             ans_dict[i + 1] = num_map.get(ans, ans)
 
-    # 2. "1. ③" 또는 "1) 2" 형태 파싱
     table_matches = re.findall(r'(\d+)\s*[.)\s]\s*([①②③④⑤1-5])\b', text)
     for num, ans in table_matches:
         n = int(num)
         if 1 <= n <= question_count + 5:
             ans_dict[n] = num_map.get(ans, ans)
 
-    # 3. 붙어있는 정답표: "① ② ① ③ ..." 형태
     if not ans_dict:
         seq_matches = re.findall(r'[①②③④⑤]', text)
         if len(seq_matches) >= question_count // 2:
@@ -410,9 +394,6 @@ def parse_answers_from_text(text: str, question_count: int) -> list:
                 ans_dict[i + 1] = num_map.get(ans, ans)
 
     return [ans_dict.get(i + 1, '') for i in range(question_count)]
-
-
-
 
 @api_bp.route('/delete-pending-exam', methods=['POST'])
 def delete_pending_exam():
@@ -432,7 +413,7 @@ def delete_pending_exam():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# 💡 [신규] 모의고사 CBT 변환 엔진 (초경량 다이어트 & 강제 시작 버전)
+# 💡 모의고사 CBT 변환 엔진
 # ==========================================
 @api_bp.route('/upload-exam-cbt', methods=['POST'])
 def upload_exam_cbt():
@@ -452,10 +433,8 @@ def upload_exam_cbt():
         if not exam_text:
             return jsonify({"error": "파일에서 텍스트를 추출하지 못했습니다."}), 400
             
-        # 💡 [핵심 1] 텍스트 입력량 다이어트: 5000자 -> 2500자로 대폭 줄여서 메모리 폭발 방지
         safe_exam_text = exam_text[:2500].replace('"', "'")
         
-        # 💡 [핵심 2] 프롬프트 단순화: AI가 헷갈릴 여지를 모두 없앰
         prompt = (
             "당신은 아주 정확한 데이터 추출기입니다.\n"
             "아래 [문서 내용]을 읽고, 최대 5개의 객관식 문제를 찾아 JSON 배열로만 출력하세요.\n\n"
@@ -489,7 +468,6 @@ def upload_exam_cbt():
             "stream": False,
             "options": {
                 "temperature": 0.1,
-                # 💡 [핵심 3] 맥미니 RAM 사수: 컨텍스트를 4096으로 제한
                 "num_ctx": 4096,     
                 "num_predict": 1500, 
                 "top_k": 40,
@@ -536,30 +514,22 @@ def upload_exam_coop():
         exam_text = re.sub(r'-\s*\d+\s*-', '', exam_text)
         exam_text = re.sub(r'【[^】]+】', '', exam_text)
 
-        # 단답형 섹션 이후 제거 (CBT는 객관식만)
         exam_text = re.split(r'[\*＊]?\s*단\s*답\s*형', exam_text)[0]
 
-        # 문제 파싱: 1. / 1) / 1)한글 / 문1. 형식 모두 지원
         chunks = re.split(r'(?m)^(?=\s*(?:문\s*)?\d+\s*[.)]\s*[^\s\d])', exam_text)
-        # 최소 길이 + 객관식 보기(①②③④) 포함된 것만 유효 문항으로
         valid_chunks = [
             c.strip() for c in chunks
             if c.strip() and len(c.strip()) > 10
-            and re.search(r'[①②③④⑤]', c)  # 객관식 보기 있어야 함
+            and re.search(r'[①②③④⑤]', c)
         ]
 
-        # 정답 파싱 (정답 파일 우선, 없으면 문제 파일 끝에서 탐색)
         answers = []
         if answer_file:
             answer_text = extract_exam_text_with_color(answer_file)
             answers = parse_answers_from_text(answer_text, len(valid_chunks))
-            print(f"[정답 파싱 - 별도 파일] {answers}", file=sys.stderr)
         else:
-            # 문제 파일에서 정답 탐색 (빨간색 마킹 또는 파일 하단 정답표)
-            answer_section = exam_text  # 전체 탐색 (빨간색은 어디든 있을 수 있음)
+            answer_section = exam_text 
             answers = parse_answers_from_text(answer_section, len(valid_chunks))
-            if any(answers):
-                print(f"[정답 파싱 - 문제 파일 내 감지] {answers}", file=sys.stderr)
 
         conn = get_db_connection()
         conn.execute(
@@ -604,10 +574,8 @@ def get_pending_exams():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 @api_bp.route('/cbt-explain', methods=['POST'])
 def cbt_explain():
-    """CBT 완료 후 문항별 AI 해설 생성."""
     try:
         data = request.json
         question_text = data.get('question', '')[:1500]
@@ -623,7 +591,6 @@ def cbt_explain():
         for s, d in char_map.items():
             question_text = question_text.replace(s, d)
 
-        # DB 관련 법령 검색
         db_context = ""
         if wallet_address:
             try:
@@ -686,7 +653,6 @@ def cbt_explain():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 @api_bp.route('/analyze-chunk', methods=['POST'])
 def analyze_chunk():
     try:
@@ -695,7 +661,6 @@ def analyze_chunk():
         user_feedback = data.get('user_feedback', '')
         chat_history = data.get('chat_history', [])
 
-        # ── 특수문자 및 제어문자 정규화 ──────────────────────────────
         char_map = {
             '㉠': '(가)', '㉡': '(나)', '㉢': '(다)', '㉣': '(라)',
             '㉤': '(마)', '㉥': '(바)', '㉦': '(사)', '㉧': '(아)',
@@ -707,9 +672,7 @@ def analyze_chunk():
         def clean_text(text):
             for src, dst in char_map.items():
                 text = text.replace(src, dst)
-            # 출력 불가 제어문자 제거 (탭·줄바꿈은 유지)
             text = ''.join(ch if ch == '\n' or ch == '\t' or ch >= ' ' else ' ' for ch in text)
-            # 연속 공백 정리
             import re as _re
             text = _re.sub(r'[ \t]{3,}', '  ', text)
             return text.strip()
@@ -717,7 +680,6 @@ def analyze_chunk():
         chunk_text = clean_text(chunk_text)
         user_feedback = clean_text(user_feedback)
 
-        # ── blankd.db categories 참조 ─────────────────────────────────
         wallet_address = data.get('wallet_address', '')
         db_context = ""
         if wallet_address:
@@ -730,17 +692,11 @@ def analyze_chunk():
                 )
                 rows = cursor.fetchall()
                 conn.close()
-                print(f"[DB 조회] wallet={wallet_address[:10]}... | 총 {len(rows)}건", file=sys.stderr)
 
                 if rows:
                     query_words = set(re.findall(r'[가-힣]{2,}', chunk_text + user_feedback))
-                    # 조문 번호 추출 (예: 제1조, 제4조, 제62조)
                     article_nums = set(re.findall(r'제\s*\d+조', chunk_text + user_feedback))
-                    # 법령명 추출 (예: 국민건강보험법, 노인장기요양보험법)
                     law_names = set(re.findall(r'[가-힣]+법', chunk_text))
-                    print(f"[DB 키워드] {list(query_words)[:10]}", file=sys.stderr)
-                    print(f"[DB 조문번호] {article_nums}", file=sys.stderr)
-                    print(f"[DB 법령명] {law_names}", file=sys.stderr)
 
                     scored = []
                     for folder, title, content in rows:
@@ -752,13 +708,11 @@ def analyze_chunk():
                         title_words = set(re.findall(r'[가-힣]{2,}', clean_title))
                         score = len(query_words & content_words) + len(query_words & title_words) * 3
 
-                        # 조문 번호 제목 일치 시 +20
                         for art in article_nums:
                             art_clean = re.sub(r'\s', '', art)
                             if art_clean in re.sub(r'\s', '', clean_title):
                                 score += 20
 
-                        # 법령명이 폴더명에 포함되면 +30 (핵심 수정)
                         for law in law_names:
                             if law in clean_folder:
                                 score += 30
@@ -768,27 +722,20 @@ def analyze_chunk():
 
                     scored.sort(reverse=True)
                     top = scored[:10]
-                    print(f"[DB 매칭 상위10] {[(s, t) for s,f,t,_ in top]}", file=sys.stderr)
 
                     if top:
                         db_context = "\n\n[참고 DB 자료 - 아래 원문을 최우선으로 참고하세요]\n"
                         for _, folder, title, content in top:
                             db_context += f"---\n[{folder} / {title}]\n{content}\n"
-                else:
-                    print(f"[DB 조회] 매칭 결과 없음 - wallet_address 불일치 가능성", file=sys.stderr)
             except Exception as e:
                 print(f"[DB 조회 오류] {e}", file=sys.stderr)
-        else:
-            print(f"[DB 조회] wallet_address 없음 - 프론트에서 미전송", file=sys.stderr)
 
-        # 최근 4턴 대화 이력 (너무 길면 모델 혼란)
         history_lines = []
         for msg in chat_history[-4:]:
             role = "사용자" if msg['sender'] == 'user' else "AI"
             history_lines.append(f"{role}: {msg['text'][:200]}")
         history_str = "\n".join(history_lines)
 
-        # 프롬프트: 최대한 단순하게
         history_context = f"\n이전 대화:\n{history_str}\n" if history_str else ""
         user_content = (
             f"당신은 시험 문제 해설 전문가입니다.\n"
@@ -802,12 +749,6 @@ def analyze_chunk():
             f"{history_context}\n"
             f"질문: {user_feedback}"
         )
-
-        print(f"[전송 프롬프트 길이] {len(user_content)} chars", file=sys.stderr)
-        print(f"[프롬프트 앞 200자]\n{user_content[:200]}", file=sys.stderr)
-        print(f"[hex 샘플] {user_content[:50].encode('utf-8').hex()}", file=sys.stderr)
-
-        print(f"🤖 [gemma4:26b] 응답 생성 중...", file=sys.stderr, flush=True)
 
         try:
             url = "http://localhost:11434/api/chat"
@@ -826,26 +767,17 @@ def analyze_chunk():
             resp = requests.post(url, json=payload, timeout=300)
             resp.raise_for_status()
             ollama_resp = resp.json()
-            done_reason = ollama_resp.get("done_reason", "unknown")
-            eval_count = ollama_resp.get("eval_count", -1)
-            prompt_eval_count = ollama_resp.get("prompt_eval_count", -1)
-            print(f"[Ollama] done_reason={done_reason} | prompt_tokens={prompt_eval_count} | generated_tokens={eval_count}", file=sys.stderr)
             raw_text = (ollama_resp.get("message") or {}).get("content", "").strip()
             raw_text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL).strip()
-            print(f"[Ollama 응답 repr] {repr(raw_text[:300])}", file=sys.stderr)
         except Exception as e:
             return jsonify({"error": f"AI 통신 오류: {str(e)}"}), 500
-
-        print(f"[AI 응답]\n{raw_text[:500]}", file=sys.stderr)
 
         if not raw_text:
             return jsonify({"error": "AI가 빈 응답을 반환했습니다."}), 500
 
-        # 반복 루프 감지 (같은 단어가 5번 이상 연속이면 비정상)
         if re.search(r'(\b\w+\b)(?:\s+\1){4,}', raw_text):
             return jsonify({"error": "AI가 비정상적인 응답을 생성했습니다. 다시 시도해주세요."}), 500
 
-        # 정답 번호 추출 시도 (예: "정답은 3번", "3번", "③")
         answer = "확인 필요"
         ans_match = re.search(r'정답[은이]?\s*[:\：]?\s*([①②③④⑤1-5]번?|확인\s*필요)', raw_text)
         if ans_match:
@@ -858,10 +790,6 @@ def analyze_chunk():
         }})
 
     except Exception as e:
-        print(f"\n[🔥 분석 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
-        return jsonify({"error": str(e)}), 500
-    except Exception as e:
-        print(f"\n[🔥 문단 분석 에러]\n{traceback.format_exc()}\n", file=sys.stderr, flush=True)
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/save-golden-exam', methods=['POST'])
@@ -928,9 +856,6 @@ def get_cbt_session():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ==========================================
-# 💡 대표님의 완벽한 PDF 파서 등 기존 기능 100% 보존 구역
-# ==========================================
 @api_bp.route('/upload-pdf', methods=['POST'])
 def upload_pdf():
     file = request.files.get('file')
@@ -944,7 +869,6 @@ def upload_pdf():
     original_filename = file.filename if file else "일반 규정"
     folder_name = re.sub(r'\.(pdf|txt)$', '', original_filename, flags=re.IGNORECASE)
 
-# === [api.py 내의 process_file 함수 내부 저장 구역 수정] ===
     def process_file():
         try:
             raw_text = ""
@@ -956,10 +880,7 @@ def upload_pdf():
                 doc = fitz.open(stream=file.read(), filetype="pdf")
                 for page in doc: raw_text += page.get_text()
             
-            # 💡 [초강력 정규식 3.0] PDF 괄호는 물론 HTML의 '&lt;' 기호와 줄바꿈까지 모조리 추적해서 삭제합니다.
             raw_text = re.sub(r'(?:<|&lt;|〈|＜|\[)\s*(?:신설|개정|삭제|단서신설|전문개정|본조신설|일부개정)[\s\S]*?(?:>|&gt;|〉|＞|\])', '', raw_text)
-            
-            # 종전제00조 등 다른 불필요한 메타데이터 삭제 (기존 유지)
             raw_text = re.sub(r'(?:\[|［|【)\s*(?:전문개정|본조신설|제목개정|종전제\d+조는|제\d+조에서 이동)[\s\S]*?(?:\]|］|】)', '', raw_text)
 
             cleaned_text = clean_korean_law_text(raw_text)
@@ -987,28 +908,21 @@ def upload_pdf():
                     for idx, p in enumerate(paragraphs):
                         blocks.append({"title": f"문서 조각 {idx+1}", "content": p})
             
-            # 💡 [여기서부터 수정 추가] 장별 폴더명을 안전하게 반영하도록 교체합니다.
             conn = get_db_connection()
             cursor = conn.cursor()
             for block in blocks:
-                # 파서가 전달해 준 폴더명(folder_name)이 존재하면 그것을 쓰고, 
-                # 일반 문서 파서 등으로 인해 없을 때만 상위의 기본 folder_name(파일명 등)을 사용합니다.
                 block_folder = block.get('folder_name', folder_name)
-                
                 cursor.execute(
                     "INSERT INTO categories (wallet_address, title, content, folder_name) VALUES (?, ?, ?, ?)", 
                     (wallet_address, block['title'], block['content'], block_folder)
                 )
             conn.commit()
             conn.close()
-            # 💡 [여기까지 수정 추가끝]
-            
             TASK_STATUS[task_id] = "완료"
         except Exception as e:
             logging.error(f"분석 에러: {traceback.format_exc()}")
             TASK_STATUS[task_id] = f"에러: {str(e)}"
 
-    # [기존 스레드 및 리턴 로직 유지]
     threading.Thread(target=process_file).start()
     return jsonify({"message": f"{folder_name} 분석 시작", "task_id": task_id})
     
@@ -1046,7 +960,7 @@ def split_category():
     except Exception as e:
         return jsonify({"error": "분할 실패"}), 500
 
-@api_bp.route('/save-card', methods=['POST'])
+# 💡 [핵심 버그 수정] 라우팅 중복 선언 방지
 @api_bp.route('/save-card', methods=['POST'])
 def save_card():
     try:
@@ -1058,7 +972,6 @@ def save_card():
         folder_name = data.get('folder_name', '기본 폴더')
         memo = data.get('memo', '')
         
-        # 지갑 주소 누락 방지
         if not wallet_address:
             return jsonify({"error": "지갑 주소가 없습니다."}), 400
 
@@ -1066,12 +979,10 @@ def save_card():
         cursor = conn.cursor()
         
         if card_id:
-            # 💡 기존 ID가 있으면 덮어쓰기(UPDATE)
             cursor.execute('''UPDATE cards SET card_content=?, answer_text=?, folder_name=?, memo=? 
                               WHERE id=? AND wallet_address=?''', 
                               (card_content, answer_text, folder_name, memo, card_id, wallet_address))
         else:
-            # 💡 기존 ID가 없으면 신규 생성(INSERT)
             cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo) 
                               VALUES (?, 0, ?, ?, '[]', 0, ?, 'OWNED', NULL, ?, ?)''', 
                               (wallet_address, card_content, answer_text, get_next_review_time(0), folder_name, memo))
@@ -1081,10 +992,10 @@ def save_card():
         return jsonify({"message": "카드 저장 완료"}), 200
         
     except Exception as e:
-        # 💡 [핵심] "저장 실패"라고 숨기지 않고, 데이터베이스의 진짜 에러를 터미널과 프론트로 보냅니다.
         import traceback
         traceback.print_exc()
         return jsonify({"error": f"DB 에러: {str(e)}"}), 500
+
 @api_bp.route('/my-cards')
 def get_my_cards():
     try:
@@ -1242,50 +1153,23 @@ def update_card_memo():
     except Exception as e:
         return jsonify({"error": "메모 업데이트 실패"}), 500
 
-# ==========================================
-# 💡 [통합] 글로벌 단어장 관리 (제외 단어, 필수 포함, 약어)
-# ==========================================
-@api_bp.route('/get-global-dict', methods=['GET'])
-def get_global_dict():
-    try:
-        wallet_address = request.args.get('wallet_address')
-        if not wallet_address:
-            return jsonify({"error": "인증 정보가 없습니다."}), 400
+# 💡 [핵심 버그 수정] 사용하지 않거나 충돌을 유발하는 낡은 단어장 함수들(get_stopwords, update_stopwords) 완전히 제거 완료
 
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT custom_stopwords, custom_abbrs, custom_inclusions FROM user_settings WHERE wallet_address = ?", (wallet_address,))
-        row = cursor.fetchone()
-        conn.close()
-
-        # 데이터가 없을 경우를 대비한 안전한 기본값 처리
-        return jsonify({
-            "stopwords": json.loads(row[0]) if row and row[0] else [],
-            "abbrs": json.loads(row[1]) if row and row[1] else {},
-            "inclusions": json.loads(row[2]) if row and row[2] else []
-        })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-        
-# ==========================================
-# 💡 사용자 체크포인트(진행 상태) 관리 API
-# ==========================================
 @api_bp.route('/save-checkpoint', methods=['POST'])
 def save_checkpoint():
     try:
         data = request.json
         wallet_address = data.get('wallet_address')
-        tab = data.get('tab') # 'craft' 또는 'enhance'
+        tab = data.get('tab') 
         last_id = data.get('last_id')
         
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # user_settings 테이블에 last_craft_id, last_enhance_id 컬럼이 필요함 (없으면 생성)
         try:
             cursor.execute(f"ALTER TABLE user_settings ADD COLUMN last_{tab}_id INTEGER")
         except sqlite3.OperationalError:
-            pass # 이미 존재함
+            pass 
             
         cursor.execute("SELECT 1 FROM user_settings WHERE wallet_address = ?", (wallet_address,))
         if cursor.fetchone():
