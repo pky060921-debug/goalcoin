@@ -203,12 +203,55 @@ function MainApp() {
       setSavedCards(cardRes.cards || []); 
       setGoalBalance(balance);
 
-      // 💡 [수정] DB를 멋대로 덮어씌우는 자동 백업 로직을 완전히 삭제하고, 오직 상태 반영만 수행합니다.
+      setCategories(catRes.categories || []); 
+      setSavedCards(cardRes.cards || []); 
+      setGoalBalance(balance);
+
+      // 💡 [구형 데이터 완벽 복구 및 병합 로직]
+      let serverStopwords: string[] = [];
+      let serverInclusions: string[] = [];
+
+      // 옛날에 쓰던 주머니(객체) 형태의 데이터가 발견되면 안전하게 꺼냅니다.
+      if (dictRes.stopwords && !Array.isArray(dictRes.stopwords) && typeof dictRes.stopwords === 'object') {
+        serverStopwords = dictRes.stopwords.stop || [];
+        serverInclusions = dictRes.stopwords.include || [];
+      } else if (Array.isArray(dictRes.stopwords)) {
+        serverStopwords = dictRes.stopwords;
+      }
+
+      if (Array.isArray(dictRes.inclusions)) {
+        serverInclusions = Array.from(new Set([...serverInclusions, ...dictRes.inclusions]));
+      }
+
+      let finalAbbrs = dictRes.abbrs || {};
+
+      // 💡 [로컬 약어 데이터 안전 마이그레이션]
+      try {
+        const localAbbrStr = localStorage.getItem('blankd_abbr_dict');
+        if (localAbbrStr) {
+          const localAbbrs = JSON.parse(localAbbrStr);
+          if (Object.keys(finalAbbrs).length === 0 && Object.keys(localAbbrs).length > 0) {
+            finalAbbrs = localAbbrs;
+            // 로컬 약어를 DB로 올리면서, 복구한 구형 예외단어까지 함께 신형 규격(배열)으로 DB에 영구 고정합니다.
+            api.updateGlobalDict(safeAddress, {
+              stopwords: serverStopwords,
+              inclusions: serverInclusions,
+              abbrs: finalAbbrs
+            }).then(() => {
+              localStorage.removeItem('blankd_abbr_dict'); 
+              addLog("📦 로컬 약어 데이터를 DB로 안전하게 이전했습니다.");
+            }).catch(() => {});
+          }
+        }
+      } catch (e) { console.error("약어 마이그레이션 에러", e); }
+
+      // 앱 전체 상태(글로벌 단어장)에 복구된 데이터를 장착합니다.
       setGlobalDict({
-        stopwords: Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [],
-        inclusions: Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [],
-        abbrs: dictRes.abbrs || {}
+        stopwords: serverStopwords,
+        inclusions: serverInclusions,
+        abbrs: finalAbbrs
       });
+      
       // 💡 [데이터 구조 방어] 서버에서 받아온 기본 데이터 구조 정리
       const serverStopwords = Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [];
       const serverInclusions = Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [];
