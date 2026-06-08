@@ -292,7 +292,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                 e.stopPropagation();
                                 setEditingId(card.id);
                                 setEditContent(card.content);
-                                setActiveTool('include');
+                                setActiveTool('editor');
                               }}
                               className="ml-1 px-1.5 py-0.5 bg-amber-900/40 text-amber-400 border border-amber-500/50 rounded font-mono text-[9px] hover:bg-amber-900/60 transition-colors cursor-pointer"
                             >
