@@ -124,6 +124,23 @@ export const api = {
     if (!res.ok) throw new Error("항목 이동 실패");
     return res.json();
   },
+  
+  // 💡 [신규 추가] 통합 글로벌 단어장 API (제외 단어, 필수 단어, 약어)
+  async getGlobalDict(address: string) {
+    const res = await fetch(`${BASE_URL}/get-global-dict?wallet_address=${address}`);
+    if (!res.ok) throw new Error("글로벌 사전 동기화 실패");
+    return res.json();
+  },
+  async updateGlobalDict(address: string, dictData: any) {
+    const res = await fetch(`${BASE_URL}/update-global-dict`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ wallet_address: address, ...dictData })
+    });
+    if (!res.ok) throw new Error("글로벌 사전 업데이트 실패");
+    return res.json();
+  },
+
+  // 💡 [컴파일 에러 방지용] 기존 하위 호환성 임시 복구 함수
   async getStopwords(address: string) {
     const res = await fetch(`${BASE_URL}/get-stopwords?wallet_address=${address}`);
     return res.json();
