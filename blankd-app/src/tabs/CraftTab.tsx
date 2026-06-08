@@ -157,6 +157,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           let finalStops: string[] = [];
           let finalIncludes: string[] = [];
 
+          // 1. 과거 주머니(객체) 데이터 완벽 구제
           if (data.stopwords && !Array.isArray(data.stopwords) && typeof data.stopwords === 'object') {
             finalStops = data.stopwords.stop || [];
             finalIncludes = data.stopwords.include || [];
@@ -164,11 +165,11 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
             finalStops = data.stopwords;
           }
 
-          if (Array.isArray(data.inclusions)) {
+          // 2. 신규 필수 포함 단어 병합
+          if (Array.isArray(data.inclusions) && data.inclusions.length > 0) {
             finalIncludes = Array.from(new Set([...finalIncludes, ...data.inclusions]));
           }
 
-          // 드디어 화면에 옛날 단어들을 출력합니다!
           setCustomStopWords(finalStops);
           setCustomIncludeWords(finalIncludes);
         }
