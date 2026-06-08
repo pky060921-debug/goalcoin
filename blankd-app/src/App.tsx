@@ -203,6 +203,12 @@ function MainApp() {
       setSavedCards(cardRes.cards || []); 
       setGoalBalance(balance);
 
+      // 💡 [수정] DB를 멋대로 덮어씌우는 자동 백업 로직을 완전히 삭제하고, 오직 상태 반영만 수행합니다.
+      setGlobalDict({
+        stopwords: Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [],
+        inclusions: Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [],
+        abbrs: dictRes.abbrs || {}
+      });
       // 💡 [데이터 구조 방어] 서버에서 받아온 기본 데이터 구조 정리
       const serverStopwords = Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [];
       const serverInclusions = Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [];
