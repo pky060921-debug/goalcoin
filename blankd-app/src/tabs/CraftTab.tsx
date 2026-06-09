@@ -27,9 +27,8 @@ const sortChapters = (folders: string[]): string[] => {
 
 type WordItem = { text: string; subWords: string[]; };
 
-export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory, loadAllData, expandedId, setExpandedId }: any) => {
-  const safeCategories = Array.isArray(categories) ? categories : [];
-  
+// 💡 [수정 2] 맨 끝에 globalDict, saveGlobalDict 를 추가합니다.
+export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory, loadAllData, expandedId, setExpandedId, globalDict, saveGlobalDict }: any) => {  const safeCategories = Array.isArray(categories) ? categories : [];
   // 💡 [오류 진단 코드 포함] 조항명 정밀 복구 로직
   const getDisplayTitle = (cat: any) => {
     try {
@@ -142,94 +141,36 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   }, [expandedId, safeCategories]); // 의존성 배열 유지
   
   const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
-  const [customStopWords, setCustomStopWords] = useState<string[]>([]);
-  const [customIncludeWords, setCustomIncludeWords] = useState<string[]>([]);
   const [newStopWord, setNewStopWord] = useState("");
   const [newIncludeWord, setNewIncludeWord] = useState("");
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
-  useEffect(() => {
-    if (safeAddress) {
-      console.log("🔍 [진단] API 호출 시작: 지갑 주소 =", safeAddress);
-      
-      api.getGlobalDict(safeAddress).then(data => {
-        console.log("🔍 [진단] 서버 응답 원본:", data);
-        
-        if (!data) {
-          console.error("🔍 [진단] 서버에서 null/undefined 응답을 받았습니다.");
-          return;
-        }
-
-        // 각 데이터 형태별 상세 진단
-        const stops = data.stopwords;
-        const includes = data.inclusions;
-        
-        console.log(`🔍 [진단] stopwords 타입: ${typeof stops}, 값:`, stops);
-        console.log(`🔍 [진단] inclusions 타입: ${typeof includes}, 값:`, includes);
-
-        // 데이터 강제 반영 (어떤 형태든 배열로 변환 시도)
-        const finalStops = Array.isArray(stops) ? stops : (typeof stops === 'object' ? Object.values(stops) : []);
-        const finalIncludes = Array.isArray(includes) ? includes : (typeof includes === 'object' ? Object.values(includes) : []);
-        
-        setCustomStopWords(finalStops);
-        setCustomIncludeWords(finalIncludes);
-        
-        if (finalStops.length === 0 && finalIncludes.length === 0) {
-            console.warn("🔍 [진단] 데이터가 존재하지만 빈 배열로 판독되었습니다. DB 데이터 구조를 확인하세요.");
-        }
-      }).catch(err => {
-        console.error("🔍 [진단] API 호출 중 에러 발생:", err);
-      });
-    }
-  }, [safeAddress]);
-
-  // 💡 [안전한 저장 로직]
-  const saveWordsToDB = async (stops: string[], includes: string[]) => {
-    try {
-      const currentDictRes = await api.getGlobalDict(safeAddress);
-      const safeAbbrs = currentDictRes.abbrs || {};
-      
-      await api.updateGlobalDict(safeAddress, {
-        stopwords: stops,
-        inclusions: includes,
-        abbrs: safeAbbrs
-      });
-      if (typeof addLog === 'function') addLog(`✅ 통합 단어장 DB 동기화 완료`);
-    } catch(e) { 
-      console.error("저장 실패:", e);
-      alert("DB 저장 실패"); 
-    }
-  };
-
+  // 💡 [수정 3] 고립된 단어장 코드를 지우고, App.tsx의 전역 사전을 직접 업데이트합니다. (덮어쓰기 멸망 버그 완벽 해결)
   const handleAddStopWord = () => {
     if (!newStopWord.trim()) return;
     const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
-    const nextList = Array.from(new Set([...customStopWords, ...words]));
-    setCustomStopWords(nextList);
+    const nextList = Array.from(new Set([...(globalDict?.stopwords || []), ...words]));
+    saveGlobalDict({ ...globalDict, stopwords: nextList });
     setNewStopWord("");
-    saveWordsToDB(nextList, customIncludeWords);
   };
 
   const handleRemoveStopWord = (wordToRemove: string) => {
-    const nextList = customStopWords.filter(w => w !== wordToRemove);
-    setCustomStopWords(nextList);
-    saveWordsToDB(nextList, customIncludeWords);
+    const nextList = (globalDict?.stopwords || []).filter((w: string) => w !== wordToRemove);
+    saveGlobalDict({ ...globalDict, stopwords: nextList });
   };
 
   const handleAddIncludeWord = () => {
     if (!newIncludeWord.trim()) return;
     const words = newIncludeWord.split(',').map(w => w.trim()).filter(w => w);
-    const nextList = Array.from(new Set([...customIncludeWords, ...words]));
-    setCustomIncludeWords(nextList);
+    const nextList = Array.from(new Set([...(globalDict?.inclusions || []), ...words]));
+    saveGlobalDict({ ...globalDict, inclusions: nextList });
     setNewIncludeWord("");
-    saveWordsToDB(customStopWords, nextList);
   };
 
   const handleRemoveIncludeWord = (wordToRemove: string) => {
-    const nextList = customIncludeWords.filter(w => w !== wordToRemove);
-    setCustomIncludeWords(nextList);
-    saveWordsToDB(customStopWords, nextList);
+    const nextList = (globalDict?.inclusions || []).filter((w: string) => w !== wordToRemove);
+    saveGlobalDict({ ...globalDict, inclusions: nextList });
   };
 
   useEffect(() => {
