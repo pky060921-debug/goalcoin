@@ -972,19 +972,20 @@ function MainApp() {
 
             <div className="h-5 sm:h-6 w-px bg-white/10 shrink-0 hidden sm:block ml-1 sm:ml-2"></div>
 
+                        {/* 통계 지표 및 로그아웃 */}
             {isLoggedIn && (
               <div className="flex items-center gap-3 sm:gap-4 shrink-0 font-mono">
                 <div className="text-right">
-                  <span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest uppercase">Rotation</span>
+                  <span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">누적 회독수</span>
                   <span className="text-[10px] sm:text-xs font-bold text-amber-400">{minFilledCount} 회독</span>
                 </div>
                 <div className="h-5 sm:h-6 w-px bg-white/10"></div>
                 <div className="text-right">
-                  <span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest uppercase">Pass Rate</span>
+                  <span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">예상 합격률</span>
                   <span className="text-[10px] sm:text-xs font-bold text-indigo-400">{passProbability}%</span>
                 </div>
                 <div className="h-5 sm:h-6 w-px bg-white/10 hidden sm:block"></div>
-                <button onClick={async () => { await enokiFlow.logout(); localStorage.clear(); window.location.reload(); }} className="border border-white/20 px-2 py-1 text-[9px] sm:text-[10px] hover:bg-white/10 tracking-wider font-mono rounded-sm text-white/70 whitespace-nowrap shrink-0">LOGOUT</button>
+                <button onClick={async () => { await enokiFlow.logout(); localStorage.clear(); window.location.reload(); }} className="border border-white/20 px-2 py-1 text-[9px] sm:text-[10px] hover:bg-white/10 tracking-wider font-mono rounded-sm text-white/70 whitespace-nowrap shrink-0">로그아웃</button>
               </div>
             )}
           </div>
