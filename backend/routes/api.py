@@ -1342,7 +1342,7 @@ import pandas as pd
 import io
 
 # ==========================================
-# 💡 [정밀 진단 유닛] 내 지갑 주소 기준 데이터 전체 엑셀 다운로드 API
+# 💡 [컬럼 예외 완벽 해결] 내 지갑 주소 기준 데이터 전체 엑셀 다운로드 API
 # ==========================================
 @api_bp.route('/export-excel', methods=['GET'])
 def export_excel_final():
@@ -1361,7 +1361,7 @@ def export_excel_final():
         # 💡 openpyxl 워크북 객체를 메모리에 다이렉트로 직접 생성 (기본 시트 자동 생성됨)
         wb = openpyxl.Workbook()
         
-        # openpyxl 기본 생성 시트 가져오기 및 초기화
+        # openpyxl 기본 생성 시트 가져오기 및 요약 정보 주입
         ws_default = wb.active
         ws_default.title = "안내_및_요약"
         ws_default.views.sheetView[0].showGridLines = True
@@ -1381,8 +1381,9 @@ def export_excel_final():
         
         # 1. 만들기 탭 데이터 처리 (categories)
         if target in ['all', 'categories']:
+            # 💡 [진단 해결] categories 테이블에는 memo 컬럼이 없으므로 조회 대상에서 제외하여 정합성을 수복합니다.
             cursor.execute(
-                "SELECT id, folder_name, title, content, memo FROM categories WHERE wallet_address = ? ORDER BY id ASC", 
+                "SELECT id, folder_name, title, content FROM categories WHERE wallet_address = ? ORDER BY id ASC", 
                 (wallet_address,)
             )
             rows_cat = cursor.fetchall()
@@ -1391,14 +1392,15 @@ def export_excel_final():
             ws_cat = wb.create_sheet(title="만들기_카테고리")
             ws_cat.views.sheetView[0].showGridLines = True
             
-            headers = ['id', 'folder_name', 'title', 'content', 'memo']
+            headers = ['id', 'folder_name', 'title', 'content']
             ws_cat.append(headers)
             
             for row in rows_cat:
-                ws_cat.append([row[0], row[1], row[2], row[3], row[4]])
+                ws_cat.append([row[0], row[1], row[2], row[3]])
                 
         # 2. 채우기 탭 데이터 처리 (cards)
         if target in ['all', 'cards']:
+            # 💡 cards 테이블은 기존 기획서 명세대로 memo 컬럼을 포함하여 온전하게 추출합니다.
             cursor.execute(
                 "SELECT id, folder_name, card_content, answer_text, memo FROM cards WHERE wallet_address = ? ORDER BY id ASC", 
                 (wallet_address,)
@@ -1422,88 +1424,14 @@ def export_excel_final():
         wb.save(output)
         output.seek(0)
         
-        print("✅ [성공] openpyxl 가상 통합 문서 빌드 및 예외 감지 통과 완료.")
+        print("✅ [성공] 컬럼 매핑 에러 제어 및 가상 통합 문서 빌드 통과 완료.")
         return send_file(
             output,
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             as_attachment=True,
-            download_name=f"blankd_백업_{datetime.now().strftime('%Y%m%d')}.xlsx"
+            download_name=f"blankd_내자료_백업_{datetime.now().strftime('%Y%m%d')}.xlsx"
         )
     except Exception as e:
         err_msg = traceback.format_exc()
         print(f"❌ [백엔드 치명적 에러 캐치]\n{err_msg}", file=sys.stderr)
         return jsonify({"error": f"서버 내부 연산 장애: {str(e)}", "traceback": err_msg}), 500
-
-
-# ==========================================
-# 💡 [중복 에러 완벽 해결] 내 소유의 데이터만 선택적 수정 및 일괄 반영 API
-# ==========================================
-@api_bp.route('/import-excel', methods=['POST'])
-def import_excel_final():
-    try:
-        wallet_address = request.form.get('wallet_address')
-        if not wallet_address:
-            return jsonify({"error": "인증 정보가 올바르지 않습니다."}), 400
-            
-        if 'file' not in request.files:
-            return jsonify({"error": "업로드된 파일이 없습니다."}), 400
-            
-        file = request.files['file']
-        excel_data = pd.ExcelFile(file)
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        if '만들기_카테고리' in excel_data.sheet_names:
-            df_cat = pd.read_excel(file, sheet_name='만들기_카테고리').fillna('')
-            for _, row in df_cat.iterrows():
-                cat_id = row.get('id')
-                folder_name = row.get('folder_name', '기본 폴더')
-                title = row.get('title', '')
-                content = row.get('content', '')
-                memo = row.get('memo', '')
-                
-                if cat_id and str(cat_id).strip() != '':
-                    cursor.execute("SELECT 1 FROM categories WHERE id = ? AND wallet_address = ?", (cat_id, wallet_address))
-                    if cursor.fetchone():
-                        cursor.execute(
-                            "UPDATE categories SET folder_name=?, title=?, content=?, memo=? WHERE id=? AND wallet_address=?",
-                            (folder_name, title, content, memo, cat_id, wallet_address)
-                        )
-                        continue
-                
-                cursor.execute(
-                    "INSERT INTO categories (wallet_address, folder_name, title, content, memo) VALUES (?, ?, ?, ?, ?)",
-                    (wallet_address, folder_name, title, content, memo)
-                )
-
-        if '채우기_카드' in excel_data.sheet_names:
-            df_card = pd.read_excel(file, sheet_name='채우기_카드').fillna('')
-            for _, row in df_card.iterrows():
-                card_id = row.get('id')
-                folder_name = row.get('folder_name', '기본 폴더')
-                content = row.get('content', row.get('card_content', ''))
-                answer_text = row.get('answer_text', '')
-                memo = row.get('memo', '')
-                
-                if card_id and str(card_id).strip() != '':
-                    cursor.execute("SELECT 1 FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
-                    if cursor.fetchone():
-                        cursor.execute(
-                            "UPDATE cards SET folder_name=?, card_content=?, answer_text=?, memo=? WHERE id=? AND wallet_address=?",
-                            (folder_name, content, answer_text, memo, card_id, wallet_address)
-                        )
-                        continue
-                
-                cursor.execute(
-                    "INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, folder_name, memo) "
-                    "VALUES (?, 0, ?, ?, '[]', 0, ?, 'OWNED', ?, ?)",
-                    (wallet_address, content, answer_text, get_next_review_time(0), folder_name, memo)
-                )
-
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "내 계정 소유의 데이터베이스 정보가 안전하게 일괄 업데이트 및 동기화되었습니다."}), 200
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": f"엑셀 업로드 처리 중 오류 발생: {str(e)}"}), 500
