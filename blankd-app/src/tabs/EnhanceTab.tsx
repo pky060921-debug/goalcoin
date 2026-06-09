@@ -11,16 +11,17 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-export const EnhanceTab = ({ savedCards, ... }: any) => {
-  // 💡 부모의 savedCards가 바뀔 때마다 EnhanceTab도 알아채도록 합니다.
-  useEffect(() => {
-    if (editingId) {
-      const updatedCard = savedCards.find((c: any) => c.id === editingId);
-      if (updatedCard) setEditContent(updatedCard.content);
-    }
-  }, [savedCards]);
-
+// 💡 단 하나의 완전한 컴포넌트로 병합! (인자에 loadAllData 포함)
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, loadAllData }: any) => {
+  
+  // 1. 컴포넌트 내부에서 사용할 상태(State)들을 최상단에 먼저 선언해야 에러가 나지 않습니다.
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editContent, setEditContent] = useState<string>("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [activeTool, setActiveTool] = useState<'editor' | 'include' | 'exclude' | null>('include');
+
+  // 2. 부모로부터 받은 데이터 가공
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
@@ -28,12 +29,21 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     try { const saved = localStorage.getItem('blankd_enhance_folders'); return saved ? JSON.parse(saved) : {}; } 
     catch(e) { return {}; }
   });
-  
-// EnhanceTab.tsx 내부
+
+  // 3. 💡 부모의 savedCards가 바뀔 때 현재 수정 중인 창(editor)의 내용도 실시간으로 동기화합니다.
   useEffect(() => {
-  console.log("EnhanceTab이 받은 savedCards:", savedCards);
+    if (editingId) {
+      const updatedCard = safeCards.find((c: any) => c.id === editingId);
+      if (updatedCard) setEditContent(updatedCard.content);
+    }
+  }, [savedCards, editingId]);
+  
+  // 4. 데이터 로드 확인용 디버깅 로그
+  useEffect(() => {
+    console.log("EnhanceTab이 받은 savedCards:", savedCards);
   }, [savedCards]);
   
+  // 5. 폴더 열림/닫힘 상태 동기화
   useEffect(() => {
     setOpenFolders(prev => {
       const next = { ...prev };
@@ -45,6 +55,8 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
       return next;
     });
   }, [savedCards]);
+
+  // ... (이 아래로는 const handleToggleFolder = ... 등 기존 코드가 쭉 이어지면 됩니다!)
 
   const handleToggleFolder = (f: string) => {
     setOpenFolders(prev => {
