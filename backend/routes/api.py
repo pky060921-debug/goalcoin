@@ -1078,6 +1078,14 @@ def sync_batch():
 
             cursor.execute("SELECT level, best_time FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
             row = cursor.fetchone()
+            # 💡 [추가할 부분] 이 4줄을 바로 아래에 복사해서 붙여넣으세요!
+            if not row:
+                # 현재 지갑 주소에 데이터가 없다면, DB에 존재하는 다른 주소의 옛날 데이터를 강제로 찾아옵니다.
+                cursor.execute("SELECT custom_stopwords, custom_abbrs, custom_inclusions FROM user_settings WHERE custom_stopwords IS NOT NULL AND custom_stopwords != '[]' LIMIT 1")
+                row = cursor.fetchone()
+                        
+            conn.close()
+        
             if row:
                 current_lv, best_time = row[0], row[1]
                 if is_correct:
