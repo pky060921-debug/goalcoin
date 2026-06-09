@@ -162,37 +162,6 @@ function MainApp() {
   const [dictTab, setDictTab] = useState<'stop'|'include'|'abbr'>('abbr');
   const [tempKey, setTempKey] = useState("");
   const [tempValue, setTempValue] = useState("");
-
-  const saveGlobalDict = async (newDict: any) => {
-  setGlobalDict(newDict); // 1. 화면 즉시 반영
-  try {
-    await api.updateGlobalDict(safeAddress, newDict); // 2. DB로 전송!
-  } catch (err) {
-    console.error("단어장 DB 동기화 실패:", err);
-  }
-};
-  const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
-  const isClosingRef = useRef(false);
-
-  const [expandedId, setExpandedId] = useState<number | null>(() => {
-    const saved = localStorage.getItem('blankd_craft_expanded');
-    return saved ? parseInt(saved, 10) : null;
-  });
-
-  const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-40));
-
-  useEffect(() => { document.title = "BlankD | 인지 과학 기반 학습"; }, []);
-
-  useEffect(() => {
-    if (window.location.hash) {
-      enokiFlow.handleAuthCallback().then(() => { 
-        window.history.replaceState(null, '', window.location.pathname); 
-        addLog("? 로그인 콜백 처리 완료"); 
-      }).catch((err: any) => addLog(`? 인증 실패: ${err.message}`));
-    }
-    if (isLoggedIn) loadAllData();
-  }, [isLoggedIn, safeAddress, enokiFlow]);
-
   const loadAllData = async () => {
     try {
       // 1. 모든 데이터 비동기 일괄 로드
@@ -227,7 +196,37 @@ function MainApp() {
       addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
     }
   };
-    
+  
+  const saveGlobalDict = async (newDict: any) => {
+  setGlobalDict(newDict); // 1. 화면 즉시 반영
+  try {
+    await api.updateGlobalDict(safeAddress, newDict); // 2. DB로 전송!
+  } catch (err) {
+    console.error("단어장 DB 동기화 실패:", err);
+  }
+};
+  const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
+  const isClosingRef = useRef(false);
+
+  const [expandedId, setExpandedId] = useState<number | null>(() => {
+    const saved = localStorage.getItem('blankd_craft_expanded');
+    return saved ? parseInt(saved, 10) : null;
+  });
+
+  const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-40));
+
+  useEffect(() => { document.title = "BlankD | 인지 과학 기반 학습"; }, []);
+
+  useEffect(() => {
+    if (window.location.hash) {
+      enokiFlow.handleAuthCallback().then(() => { 
+        window.history.replaceState(null, '', window.location.pathname); 
+        addLog("? 로그인 콜백 처리 완료"); 
+      }).catch((err: any) => addLog(`? 인증 실패: ${err.message}`));
+    }
+    if (isLoggedIn) loadAllData();
+  }, [isLoggedIn, safeAddress, enokiFlow]);
+   
     setCategories(catRes.categories || []); 
     setSavedCards(cardRes.cards || []); 
     setGoalBalance(balance);
