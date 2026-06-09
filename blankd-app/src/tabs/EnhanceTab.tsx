@@ -12,7 +12,7 @@ const getGridClass = (cols: number) => {
 };
 
 // 💡 단 하나의 완전한 컴포넌트로 병합! (인자에 loadAllData 포함)
-export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, loadAllData }: any) => {
+export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, loadAllData, safeAddress }: any) => {
   
   // 1. 컴포넌트 내부에서 사용할 상태(State)들을 최상단에 먼저 선언해야 에러가 나지 않습니다.
   const [editingId, setEditingId] = useState<number | null>(null);
