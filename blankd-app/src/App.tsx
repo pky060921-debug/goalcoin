@@ -162,9 +162,9 @@ function MainApp() {
   const [dictTab, setDictTab] = useState<'stop'|'include'|'abbr'>('abbr');
   const [tempKey, setTempKey] = useState("");
   const [tempValue, setTempValue] = useState("");
+  
   const loadAllData = async () => {
     try {
-      // 1. 모든 데이터 비동기 일괄 로드
       const [catRes, cardRes, balance, dictRes] = await Promise.all([
         fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r => r.json()),
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
@@ -175,7 +175,6 @@ function MainApp() {
         })
       ]);
 
-      // 2. 상태 즉시 갱신 (스프레드 연산자로 새로운 배열 할당)
       setCategories([...(catRes.categories || [])]);
       setSavedCards([...(cardRes.cards || [])]);
       setGoalBalance(balance);
@@ -189,13 +188,11 @@ function MainApp() {
         inclusions: serverInclusions,
         abbrs: finalAbbrs
       });
-
     } catch (e: any) {
-      // 💡 여기서 에러를 잡습니다. try 바로 다음에 catch가 오도록 확인하세요.
       console.error("데이터 동기화 실패:", e);
       addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
     }
-  };
+  }; // 💡 여기서 loadAllData가 안전하게 종료됩니다.
   
   const saveGlobalDict = async (newDict: any) => {
   setGlobalDict(newDict); // 1. 화면 즉시 반영
