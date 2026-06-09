@@ -21,19 +21,23 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
       const blankCount = blanks.length;
       
       const stats = parseCardStats(card.memo);
+      
+      // 💡 [핵심 버그 수정] stats.filled는 조항을 학습한 '회독수'입니다. 
+      // 따라서 빈칸을 채운 개수는 '학습한 적이 있다면(stats.filled > 0) 해당 조항의 빈칸 개수 전체'로 계산합니다.
+      const memorizedBlanks = stats.filled > 0 ? blankCount : 0;
+
       totalBlanks += blankCount;
-      totalFilled += stats.filled;
+      totalFilled += memorizedBlanks; // 💡 회독수가 아닌 실제 빈칸 개수를 더합니다.
       totalWrong += stats.wrongIndices.length;
 
       folderStats[folder].total += blankCount;
-      folderStats[folder].filled += stats.filled;
+      folderStats[folder].filled += memorizedBlanks; // 💡 폴더별 통계도 수정
       folderStats[folder].wrong += stats.wrongIndices.length;
     } catch (err) {
       console.error("[Dashboard 진단 오류] 카드 데이터 파싱 실패:", err, card);
     }
   });
 
-  // 💡 [수정 완료] 조항 수 기준이 아닌 순수 '빈칸 채운 총 개수' 기준으로 진척도 지표 수정
   const fillProgress = totalBlanks > 0 ? Math.round((totalFilled / totalBlanks) * 100) : 0;
   const craftProgress = safeCategories.length > 0 ? Math.round((safeCards.length / safeCategories.length) * 100) : 0;
 
@@ -66,7 +70,7 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
         {/* 만들기 진척도 */}
         <div className="bg-[#0a0a0c] border border-white/10 p-5 rounded-sm flex flex-col justify-between">
           <div>
-            <div className="text-xs text-white/40 font-mono uppercase tracking-wider">Craft Progress</div>
+            <div className="text-xs text-white/40 font-mono tracking-wider">제작 진척도</div>
             <div className="text-2xl font-serif text-amber-400 mt-2 font-bold">{craftProgress}%</div>
             <div className="text-[11px] text-white/50 mt-1">원본 대비 빈칸카드 제작률</div>
           </div>
@@ -75,10 +79,10 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
           </div>
         </div>
 
-        {/* 채우기 진척도 (빈칸채운 횟수 기준으로 전면 수정) */}
+        {/* 채우기 진척도 */}
         <div className="bg-[#0a0a0c] border border-white/10 p-5 rounded-sm flex flex-col justify-between">
           <div>
-            <div className="text-xs text-white/40 font-mono uppercase tracking-wider">Fill Progress (Blanks)</div>
+            <div className="text-xs text-white/40 font-mono tracking-wider">학습 진척도 (빈칸 기준)</div>
             <div className="text-2xl font-serif text-indigo-400 mt-2 font-bold">{fillProgress}%</div>
             <div className="text-[11px] text-white/50 mt-1">전체 빈칸 개수 기준 암기 진척도 ({totalFilled} / {totalBlanks})</div>
           </div>
@@ -90,7 +94,7 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
         {/* 실시간 오답 현황 */}
         <div className="bg-[#0a0a0c] border border-white/10 p-5 rounded-sm flex flex-col justify-between">
           <div>
-            <div className="text-xs text-white/40 font-mono uppercase tracking-wider">Wrong Answers</div>
+            <div className="text-xs text-white/40 font-mono tracking-wider">오답 빈칸 수</div>
             <div className="text-2xl font-serif text-red-400 mt-2 font-bold">{totalWrong}개</div>
             <div className="text-[11px] text-white/50 mt-1">현재 집중 반복이 필요한 빈칸 개수</div>
           </div>
