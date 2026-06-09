@@ -197,7 +197,7 @@ function MainApp() {
   try {
     const [catRes, cardRes, balance, dictRes] = await Promise.all([
       fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r=>r.json()),
-      const res = await fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`),
+      fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
       api.getGoalCoinBalance(safeAddress).catch(()=>0),
       api.getGlobalDict(safeAddress).catch((e) => {
         console.error("글로벌 단어장 로드 실패:", e); // ✅ 추가
