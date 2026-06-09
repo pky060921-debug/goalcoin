@@ -66,7 +66,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
         const cleanCardTitle = onlyChars(removeBrackets(cardFirstLine));
         const cleanCatTitle = onlyChars(removeBrackets(cat.title));
         if (cleanCardTitle && cleanCatTitle) {
-          if (cleanCardTitle === cleanCatTitle || cleanCardTitle.endsWith(cleanCatTitle)) {
+          if (cleanCardTitle === cleanCardTitle || cleanCardTitle.endsWith(cleanCatTitle)) {
              return true;
           }
         }
@@ -97,9 +97,10 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
 
   const handleSaveEditedText = async (catId: number) => {
     try {
-      console.log(`[Craft 진단] 원본 텍스트 직접 변경사항 서버 전송. ID: ${catId}`);
-      // 💡 저장할 때도 괄호를 완전히 소거하여 순수 텍스트 본문만 DB 카테고리에 할당합니다.
-      const sanitizedSubmitText = editArticleText.replace(/\[|\]/g, '');
+      print("[Craft 진단] 원본 직접 타이핑 변경사항 디스크 동기화 유닛 진입. ID:", catId);
+      
+      // 💡 [버그 원인 교정 1] 무조건 괄호를 다 지우면 안 되고, 중복 겹침인 [[ ]] 만 단일 [ ] 로 실시간 완화 변환 처리합니다.
+      const sanitizedSubmitText = editArticleText.replace(/\[+/g, '[').replace(/\]+/g, ']');
 
       const res = await fetch(`https://api.blankd.top/api/update-category-text`, {
         method: 'POST',
@@ -246,7 +247,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           })
         );
         await Promise.all(deletePromises);
-        addLog(`✅ ${checkedIds.size}개 조항 일괄 삭제 완료`);
+        addLog("✅ 일괄 삭제 완료 패킷 전송 성공.");
         setIsSelectMode(false);
         setCheckedIds(new Set());
         if (loadAllData) await loadAllData();
@@ -271,12 +272,12 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     const currentCustomStopWords = globalDict?.stopwords || globalDict?.custom_stopwords || [];
     const currentCustomIncludeWords = globalDict?.inclusions || globalDict?.custom_inclusions || [];
     
-    // 💡 [자가 치료 디톡스] 기존 데이터베이스에 혼입된 대괄호([, ]) 오염을 분석 시작 단계에서 완전 소거합니다.
-    let processedText = textBody.replace(/\[|\]/g, '');
+    // 💡 [버그 원인 교정 2] 기존 괄호 소거 로직을 비활성화하고 본문을 토큰 단위 분해 배열 구조로 안전하게 이관합니다.
+    let processedText = textBody;
     
     if (currentCustomStopWords.length > 0) {
        const safeStops = currentCustomStopWords
-          .map((w: string) => w.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .map((w: string) => w.trim().replace(/[.*+?^${}()|[\]\\ packs]/g, '\\$&'))
           .filter((w: string) => w !== "");
        if (safeStops.length > 0) {
           const dynamicRegex = new RegExp(`([가-힣]+)(${safeStops.join('|')})([\\s,.)\\]]|$)`, 'g');
@@ -285,6 +286,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
        }
     }
 
+    // 💡 토큰 배열 분리 시 본문에 기지정된 대괄호 속 내용물 구조도 무너지지 않도록 동기화합니다.
     const initialWords = processedText.split(SPLIT_REGEX).filter(w => w !== "");
     let currentWordArray = initialWords.map(w => ({ text: w, subWords: [w] }));
     
@@ -322,9 +324,17 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     const initialSelected = new Set<number>();
     const protectedIndices = new Set<number>();
     
+    // 💡 사용자가 텍스트 수정을 통해 직접 [ ]로 감싸 놓은 토큰 영역을 감지하여 실시간 인터랙션 선택 상태(주황색 채우기)로 보존 복구합니다.
     currentWordArray.forEach((wordObj, idx) => {
         const trimmed = wordObj.text.trim();
-        if (currentCustomIncludeWords.some((cw: string) => trimmed.replace(/\s+/g, '') === cw.replace(/\s+/g, ''))) {
+        const isUserPreBracketed = trimmed.startsWith('[') && trimmed.endsWith(']');
+        
+        if (isUserPreBracketed) {
+          // 상태 구조물 동기화를 위해 단어 내부 알맹이 텍스트 형태로 수복하고 선택 인덱스로 밀어 넣습니다.
+          wordObj.text = trimmed.slice(1, -1);
+          initialSelected.add(idx);
+          protectedIndices.add(idx);
+        } else if (currentCustomIncludeWords.some((cw: string) => trimmed.replace(/\s+/g, '') === cw.replace(/\s+/g, ''))) {
             protectedIndices.add(idx);
             initialSelected.add(idx);
         }
@@ -393,7 +403,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
         applyTextToState(body);
       }
     }
-  }, [globalDict, expandedId, safeCategories]);
+  }, [globalDict, expandedId, safeCategories, editingCatId]);
 
   const openCategory = (targetCat: any, bypassToggle = false) => {
     if (isSelectMode) { 
@@ -598,9 +608,9 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                                   <button 
                                     onClick={() => { 
                                       setEditingCatId(cat.id); 
-                                      // 💡 [중복 방어] 수정 창을 켤 때 대괄호 오염이 차단된 순수한 원본 텍스트만 공급하여 중복 괄호를 사전에 차단합니다.
-                                      const pureText = (cat.content || cat.title || "").replace(/\[|\]/g, '');
-                                      setEditArticleText(pureText); 
+                                      // 💡 직접 편집 시 기존의 대괄호 배치 형태를 훼손 없이 유지 공급하여 타이핑 수정을 시작하게 합니다.
+                                      const editableRawText = cat.content || cat.title || "";
+                                      setEditArticleText(editableRawText); 
                                     }} 
                                     className="px-3 py-1 text-[11px] font-bold rounded-sm border bg-white/5 border-white/20 text-white/50 hover:bg-white/10"
                                   >
