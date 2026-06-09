@@ -203,6 +203,7 @@ function MainApp() {
         console.error("글로벌 단어장 로드 실패:", e); // ✅ 추가
         addLog(`⚠️ 단어장 로드 실패: ${e?.message || '서버 오류'}`);
         return { stopwords: [], inclusions: [], abbrs: {} };
+        console.log("서버에서 받아온 카드 목록:", cardRes); // 💡 이 줄을 추가하세요
       })
     ]);
     
