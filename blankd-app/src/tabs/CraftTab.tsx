@@ -576,9 +576,12 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                                 <button 
                                   onClick={() => { 
                                     setEditingCatId(cat.id); 
-                                    // 💡 기존처럼 안전하게 텍스트를 추출해서 에디터에 꽉 채워줍니다!
-                                    const { body } = formatCardText(cat.content || cat.title || "");
-                                    setEditArticleText(cat.article_text || body); 
+                                    // 💡 화면에 렌더링된 단어 배열과 선택된 빈칸 인덱스를 매칭하여 [ ] 를 씌워줍니다.
+                                    const textWithBlanks = wordArray.map((w, idx) => {
+                                      return selectedWords.has(idx) ? `[${w.text}]` : w.text;
+                                    }).join('');
+                                    
+                                    setEditArticleText(textWithBlanks); 
                                   }} 
                                   className="px-3 py-1 text-[11px] font-bold rounded-sm border bg-white/5 border-white/20 text-white/50 hover:bg-white/10"
                                 >
