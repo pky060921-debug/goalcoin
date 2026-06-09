@@ -74,12 +74,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         })
       });
       console.log("서버 응답 상태:", res.status); // 💡 이 줄을 추가하세요
-      if (!res.ok) throw new Error("서버 통신에 실패했습니다.");
-      
-      // 💡 [핵심] 서버 저장 성공 후 부모의 데이터를 새로 가져와서 상태를 최신화합니다.
-      // 이렇게 해야 F5를 눌러도 서버에서 수정된 최신 데이터를 가져오게 됩니다.
-      if (typeof loadAllData === 'function') {
-        await loadAllData(); 
+      if (res.ok) {
+        // 서버 저장 성공 후, 부모에게 알림
+        if (typeof loadAllData === 'function') {
+           await loadAllData(); // 💡 DB에서 수정된 최신본을 다시 가져옴
+        }
+        setEditingId(null);
       }
       
       setEditingId(null);
