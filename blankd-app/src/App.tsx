@@ -134,6 +134,7 @@ function MainApp() {
   const [viewMode, setViewMode] = useState('all');
   const [colCount, setColCount] = useState(3);
   const [useAiRecommend, setUseAiRecommend] = useState(true);
+  const [studyMode, setStudyMode] = useState('일반');
   
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
