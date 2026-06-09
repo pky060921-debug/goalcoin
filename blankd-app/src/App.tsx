@@ -871,8 +871,20 @@ function MainApp() {
           <ExamTab walletAddress={safeAddress} address={safeAddress} />
         </div>
         
-        <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
-          <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} viewMode={viewMode} setViewMode={setViewMode} colCount={colCount} updateColCount={setColCount} handleDeleteAll={async () => { if(confirm('전체 초기화하시겠습니까?')) { await api.deleteAll(safeAddress); loadAllData(); } }} />
+        <div className={activeTab === 'mypage' ? 'block' : 'hidden'}>
+          <MypageTab 
+            safeAddress={safeAddress} 
+            enokiFlow={enokiFlow} 
+            useAiRecommend={useAiRecommend} 
+            setUseAiRecommend={setUseAiRecommend} 
+            studyMode={studyMode} 
+            setStudyMode={setStudyMode} 
+            handleDeleteAll={handleDeleteAll} 
+            
+            {/* 💡 [추가] DB 설정을 MypageTab으로 넘겨줍니다. */}
+            globalDict={globalDict} 
+            saveGlobalDict={saveGlobalDict} 
+          />
         </div>
       </>
     );
