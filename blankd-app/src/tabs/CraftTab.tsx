@@ -158,14 +158,32 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const handleAddStopWord = () => {
     if (!newStopWord.trim()) return;
     const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
-    const nextList = Array.from(new Set([...(globalDict?.stopwords || []), ...words]));
-    saveGlobalDict({ ...globalDict, stopwords: nextList });
+    // 💡 프론트엔드용(stopwords)과 DB용(custom_stopwords) 이름표를 모두 맞춰서 전송합니다.
+    const currentList = globalDict?.custom_stopwords || globalDict?.stopwords || [];
+    const nextList = Array.from(new Set([...currentList, ...words]));
+    saveGlobalDict({ ...globalDict, custom_stopwords: nextList, stopwords: nextList });
     setNewStopWord("");
   };
 
   const handleRemoveStopWord = (wordToRemove: string) => {
-    const nextList = (globalDict?.stopwords || []).filter((w: string) => w !== wordToRemove);
-    saveGlobalDict({ ...globalDict, stopwords: nextList });
+    const currentList = globalDict?.custom_stopwords || globalDict?.stopwords || [];
+    const nextList = currentList.filter((w: string) => w !== wordToRemove);
+    saveGlobalDict({ ...globalDict, custom_stopwords: nextList, stopwords: nextList });
+  };
+
+  const handleAddIncludeWord = () => {
+    if (!newIncludeWord.trim()) return;
+    const words = newIncludeWord.split(',').map(w => w.trim()).filter(w => w);
+    const currentList = globalDict?.custom_inclusions || globalDict?.inclusions || [];
+    const nextList = Array.from(new Set([...currentList, ...words]));
+    saveGlobalDict({ ...globalDict, custom_inclusions: nextList, inclusions: nextList });
+    setNewIncludeWord("");
+  };
+
+  const handleRemoveIncludeWord = (wordToRemove: string) => {
+    const currentList = globalDict?.custom_inclusions || globalDict?.inclusions || [];
+    const nextList = currentList.filter((w: string) => w !== wordToRemove);
+    saveGlobalDict({ ...globalDict, custom_inclusions: nextList, inclusions: nextList });
   };
 
   const handleAddIncludeWord = () => {
@@ -485,7 +503,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
               <button onClick={handleAddStopWord} className="px-4 bg-amber-600/20 text-amber-400 border border-amber-500/30 text-xs font-bold rounded-sm hover:bg-amber-600/40 transition-colors">추가</button>
             </div>
             <div className="flex flex-wrap gap-1.5">
-                {(globalDict?.stopwords || []).map((word: string) => (
+                {(globalDict?.custom_stopwords || globalDict?.stopwords || []).map((word: string) => (
                   <span key={word} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] sm:text-[11px] text-white/70 flex items-center gap-1.5">
                     {word} <button onClick={() => handleRemoveStopWord(word)} className="text-white/30 hover:text-red-400">✕</button>
                   </span>
@@ -501,7 +519,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
               <button onClick={handleAddIncludeWord} className="px-4 bg-teal-600/20 text-teal-400 border border-teal-500/30 text-xs font-bold rounded-sm hover:bg-teal-600/40 transition-colors">추가</button>
             </div>
             <div className="flex flex-wrap gap-1.5">
-                {(globalDict?.inclusions || []).map((word: string) => (
+                {(globalDict?.custom_inclusions || globalDict?.inclusions || []).map((word: string) => (
                   <span key={word} className="px-2 py-1 bg-teal-900/30 border border-teal-500/30 rounded text-[10px] sm:text-[11px] text-teal-300 flex items-center gap-1.5">
                     {word} <button onClick={() => handleRemoveIncludeWord(word)} className="text-teal-500/50 hover:text-teal-300">✕</button>
                   </span>
