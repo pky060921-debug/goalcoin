@@ -9,7 +9,10 @@ import { EnokiFlowProvider } from '@mysten/enoki/react'
 const queryClient = new QueryClient()
 
 // 💡 403 에러 방지를 위해 테스트넷 공식 주소를 직접 입력합니다.
-const networks = { testnet: { url: 'https://fullnode.testnet.sui.io:443' } }
+const networks = {
+  // 💡 CORS 차단이 없는 안정적인 퍼블릭 노드 주소로 문자열을 직접 넣어줍니다.
+  testnet: { url: 'https://sui-testnet-endpoint.blockvision.org' }, 
+};
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
