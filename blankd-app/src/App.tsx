@@ -15,14 +15,13 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
   inputStatus: string;
   onSubmit: (val: string) => void;
   expected: string; 
-  abbrDict: Record<string, string>; // 💡 [추가] 약어 사전
+  abbrDict: Record<string, string>;
 }) => {
   const [val, setVal] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { inputRef.current?.focus(); }, []);
   
-  // 상태가 초기화되어야 할 때만 값을 비움
   useEffect(() => { 
     if (inputStatus === 'correct' || inputStatus === 'idle') setVal(''); 
   }, [inputStatus]);
@@ -31,13 +30,10 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
     const newVal = e.target.value;
     setVal(newVal);
 
-    // 💡 [핵심 수정] 사용자가 친 글자와 정답에서 모든 띄어쓰기를 완전히 제거합니다.
     const cleanInput = newVal.replace(/\s+/g, '').toLowerCase();
     const cleanExpected = expected.replace(/\s+/g, '').toLowerCase();
-
     let isMatch = (cleanInput === cleanExpected);
 
-    // 💡 [추가] 입력값이 약어 사전에 있고, 그 원래 뜻이 정답과 같으면 정답 처리
     if (!isMatch && abbrDict && abbrDict[cleanInput]) {
       if (abbrDict[cleanInput].replace(/\s+/g, '').toLowerCase() === cleanExpected) {
         isMatch = true;
@@ -83,12 +79,12 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
     return { hasError: true, errorMessage: error.message };
   }
   componentDidCatch(error: any, errorInfo: any) { 
-    this.props.fallbackLog(`? 런타임 에러: ${error.message}`);
+    this.props.fallbackLog(`🚨 런타임 에러: ${error.message}`);
   }
   render() {
     if (this.state.hasError) return (
       <div className="p-6 text-red-400 font-mono border border-red-500/30 bg-red-900/10 rounded-sm shadow-xl">
-        <h3 className="text-lg font-bold mb-2">?? 시스템 치명적 오류</h3>
+        <h3 className="text-lg font-bold mb-2">🔥 시스템 치명적 오류</h3>
         <p className="text-sm opacity-80">{this.state.errorMessage}</p>
       </div>
     );
@@ -139,7 +135,6 @@ function MainApp() {
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
-  
   const [isMemoOpen, setIsMemoOpen] = useState(false);
 
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
@@ -150,11 +145,9 @@ function MainApp() {
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
-  
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
 
-  // 💡 [통합] 글로벌 단어장 (제외/포함/약어) 상태 및 통합 모달 제어
   const [globalDict, setGlobalDict] = useState<{ stopwords: string[], inclusions: string[], abbrs: Record<string, string> }>({
     stopwords: [], inclusions: [], abbrs: {}
   });
@@ -162,13 +155,13 @@ function MainApp() {
   const [dictTab, setDictTab] = useState<'stop'|'include'|'abbr'>('abbr');
   const [tempKey, setTempKey] = useState("");
   const [tempValue, setTempValue] = useState("");
-  
+
   const loadAllData = async () => {
     try {
+      // 💡 [수정 완료] 시간(Date.now) 대신 진짜 지갑 주소를 API에 넘깁니다.
       const [catRes, cardRes, balance, dictRes] = await Promise.all([
         fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
-
         api.getGoalCoinBalance(safeAddress).catch(() => 0),
         api.getGlobalDict(safeAddress).catch((e) => {
           console.error("글로벌 단어장 로드 실패:", e);
@@ -189,20 +182,25 @@ function MainApp() {
         inclusions: serverInclusions,
         abbrs: finalAbbrs
       });
+
+      // 💡 [수정 완료] try 구문 안에 존재하므로 에러가 발생하지 않습니다.
+      console.log("새로 불러온 카드 데이터:", cardRes.cards);
+
     } catch (e: any) {
       console.error("데이터 동기화 실패:", e);
       addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
     }
-  }; // 💡 여기서 loadAllData가 안전하게 종료됩니다.
-  
+  };
+
   const saveGlobalDict = async (newDict: any) => {
-  setGlobalDict(newDict); // 1. 화면 즉시 반영
-  try {
-    await api.updateGlobalDict(safeAddress, newDict); // 2. DB로 전송!
-  } catch (err) {
-    console.error("단어장 DB 동기화 실패:", err);
-  }
-};
+    setGlobalDict(newDict);
+    try {
+      await api.updateGlobalDict(safeAddress, newDict);
+    } catch (err) {
+      console.error("단어장 DB 동기화 실패:", err);
+    }
+  };
+
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
 
@@ -219,8 +217,8 @@ function MainApp() {
     if (window.location.hash) {
       enokiFlow.handleAuthCallback().then(() => { 
         window.history.replaceState(null, '', window.location.pathname); 
-        addLog("? 로그인 콜백 처리 완료"); 
-      }).catch((err: any) => addLog(`? 인증 실패: ${err.message}`));
+        addLog("✅ 로그인 콜백 처리 완료"); 
+      }).catch((err: any) => addLog(`🚨 인증 실패: ${err.message}`));
     }
     if (isLoggedIn) loadAllData();
   }, [isLoggedIn, safeAddress, enokiFlow]);
@@ -239,12 +237,12 @@ function MainApp() {
       });
       if (res.ok) {
         localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
-        addLog(`?? 백그라운드 동기화 완료 (M:${q.memos.length}, A:${q.answers.length})`);
+        addLog(`✅ 백그라운드 동기화 완료 (M:${q.memos.length}, A:${q.answers.length})`);
         const newBalance = await api.getGoalCoinBalance(safeAddress).catch(()=>goalBalance);
         setGoalBalance(newBalance);
       }
     } catch (e) { 
-      addLog("?? 오프라인 감지: 데이터는 로컬에 안전하게 보관 중입니다.");
+      addLog("⚠️ 오프라인 감지: 데이터는 로컬에 안전하게 보관 중입니다.");
     }
   };
 
@@ -258,12 +256,12 @@ function MainApp() {
 
   const uploadLaw = async () => {
     if (!lawFile) return alert("파일을 선택해주세요.");
-    addLog("▶? 법령 텍스트 분석 업로드 시작...");
+    addLog("▶️ 법령 텍스트 분석 업로드 시작...");
     const fd = new FormData(); fd.append("file", lawFile); fd.append("wallet_address", safeAddress);
     const res = await fetch(`https://api.blankd.top/api/upload-pdf`, { method: "POST", body: fd });
     if (res.ok) { 
       setLawFile(null);
-      addLog("? 업로드 완료. AI 아카이빙 중..."); 
+      addLog("✅ 업로드 완료. AI 아카이빙 중..."); 
       setTimeout(() => loadAllData(), 2500);
     }
   };
@@ -275,15 +273,14 @@ function MainApp() {
             body: JSON.stringify({ wallet_address: safeAddress, id: cat.id, text1, text2, title1, title2, folder_name: cat.folder_name })
         });
         if (res.ok) { 
-          addLog(`?? [${title1}] 분할 완료`); 
+          addLog(`✅ [${title1}] 분할 완료`); 
           await loadAllData();
         }
     } catch (e: any) { 
-      addLog(`? 분할 처리 통신 에러`);
+      addLog(`🚨 분할 처리 통신 에러`);
     }
   };
 
-// ?? [수정] 옛날에 만든 카드도 완벽하게 찾아서 덮어쓰기!
   const handleMakeBlankCard = async (
     cat: any, 
     wordsArray: string[], 
@@ -309,15 +306,12 @@ function MainApp() {
     });
     if (isBlanking) bodyContent += " ]";
     
-    // ?? [핵심 원인 해결] 꼬리표(ORIG_ID)가 없어도, 카드의 첫 시작이 '조항 제목'과 똑같으면 같은 카드로 인식합니다!
     const existingCard = savedCards.find((c: any) => 
       c && c.content && (
         c.content.includes(`[[ORIG_ID:${cat.id}]]`) || 
         c.content.trim().startsWith(cat.title.trim())
       )
     );
-    
-    // 찾아낸 기존 카드의 ID를 타겟으로 설정합니다.
     const targetCardId = existingCard ? existingCard.id : null; 
 
     const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n[[ORIG_ID:${cat.id}]]`;
@@ -327,22 +321,22 @@ function MainApp() {
       method: "POST", headers: { "Content-Type": "application/json" }, 
       body: JSON.stringify({ 
           wallet_address: safeAddress, 
-          card_id: targetCardId, // ?? 이제 진짜 카드 ID가 전달되어 완벽한 덮어쓰기(UPDATE)가 실행됩니다!
+          card_id: targetCardId, 
           card_content: finalCardContent, 
           answer_text: answerText, 
           folder_name: cat.folder_name, 
           memo: initialMemo 
       }) 
     });
-    
     if (res.ok) {
       localStorage.setItem('blankd_last_crafted_id', cat.id.toString());
       localStorage.setItem('blankd_last_crafted_title', cat.title);
-      addLog(targetCardId ? "? 덮어쓰기 완료" : "? 신규 생성 완료");
+      addLog(targetCardId ? "✅ 덮어쓰기 완료" : "✅ 신규 생성 완료");
       await loadAllData(); 
       onComplete(); 
     }
   };
+
   const handleUpdateMemoBackground = (id: number, memo: string) => {
     setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
     pushToQueue('MEMO', { id, memo });
@@ -399,7 +393,6 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // ?? [수정] 복습 주기 자율 선택 기능을 위해 customDays 매개변수를 추가했습니다.
   const finishCard = (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
@@ -411,8 +404,6 @@ function MainApp() {
     const isCorrect = wrongArr.length === 0;
 
     let daysInterval = customDays;
-    
-    // 자동 계산 (직접 선택하지 않은 경우)
     if (daysInterval === undefined) {
       const wrongCount = wrongArr.length;
       const totalBlanks = blanks.length;
@@ -437,7 +428,6 @@ function MainApp() {
         else daysInterval = Math.ceil((currentRepetitions - 1) * easiness);
       }
     } else {
-      // ?? [추가] 사용자가 복습 주기를 강제 지정한 경우에도 알고리즘 난이도는 내부적으로 보정
       let quality = 3;
       if (daysInterval === 1) quality = 1;
       else if (daysInterval === 4) quality = 2;
@@ -464,16 +454,12 @@ function MainApp() {
 
     setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
-    
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
-    
-    // 로그 문구 추가 수정
-    addLog(`? 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
+    addLog(`✅ 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
     flushQueue();
   };
 
-  // ?? [추가] 카드 모달에서 복습 주기 버튼(1일, 4일, 7일, 14일)을 눌렀을 때 실행되는 함수
   const handleReviewSelect = (days: number) => {
     if (!activeCard) return;
     statsRef.current.filled += 1;
@@ -506,20 +492,15 @@ function MainApp() {
     if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
-    
-    // 💡 [추가된 부분] 1차 검사: 원본 그대로 일치하는지 확인
     let isCorrect = (expected === actual);
 
-    // 💡 [추가된 부분] 2차 검사: 오답일 경우, 입력한 단어가 약어 사전에 등록되어 있는지 확인
     if (!isCorrect && globalDict.abbrs && globalDict.abbrs[actual]) {
       const mappedValue = globalDict.abbrs[actual].replace(/\s+/g, '').toLowerCase();
-      console.log(`[진단-약어] 입력:'${actual}' -> 매핑:'${mappedValue}' | 실제:'${expected}'`);
       if (mappedValue === expected) {
-        isCorrect = true; // 약어의 원래 뜻이 정답과 같으면 정답 처리!
+        isCorrect = true;
       }
     }
 
-    // 💡 [수정된 부분] expected === actual 대신 isCorrect 변수를 사용합니다.
     if (isCorrect) {
       setInputStatus('correct');
       setBlanks(prev => {
@@ -548,14 +529,14 @@ function MainApp() {
     } else { 
       setInputStatus('wrong'); 
       statsRef.current.wrongIndices.add(currentBlankIdx); 
-      setTimeout(() => setInputStatus('idle'), 500); 
+      setTimeout(() => setInputStatus('idle'), 500);
     }
   };
   
   const handleShowAnswer = () => {
     if (!blanks[currentBlankIdx]) return;
     setInputStatus('wrong'); 
-    statsRef.current.wrongIndices.add(currentBlankIdx); 
+    statsRef.current.wrongIndices.add(currentBlankIdx);
     setBlanks(prev => {
       const nb = [...prev];
       if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; 
@@ -588,14 +569,12 @@ function MainApp() {
         recognitionRef.current.stop();
         recognitionRef.current = null;
       }
-      addLog("??? 음성 인식 종료됨");
+      addLog("🎤 음성 인식 종료됨");
       return;
     }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다.");
-      return; 
-    }
+    if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다."); return; }
     
     const recognition = new SpeechRecognition();
     recognition.lang = 'ko-KR'; 
@@ -605,16 +584,17 @@ function MainApp() {
 
     recognition.onstart = () => { 
       setIsListening(true);
-      addLog("??? 음성 인식 활성화됨 (계속 듣는 중...)");
+      addLog("🎙️ 음성 인식 활성화됨 (계속 듣는 중...)");
     };
     
     recognition.onresult = (event: any) => {
       const last = event.results.length - 1;
       const transcript = event.results[last][0].transcript;
       const cleanText = transcript.replace(/\s+/g, '').replace(/[.,!?]/g, '');
-      addLog(`??? 인식: "${transcript}"`);
+      addLog(`💬 인식: "${transcript}"`);
       setTimeout(() => handleSequentialInput(cleanText), 300);
     };
+    
     recognition.onerror = (err: any) => { 
       if (err.error !== 'no-speech') {
         setIsListening(false);
@@ -624,8 +604,7 @@ function MainApp() {
     
     recognition.onend = () => { 
       if (recognitionRef.current) {
-         try { recognitionRef.current.start();
-         } catch(e) {}
+         try { recognitionRef.current.start(); } catch(e) {}
       } else {
          setIsListening(false);
       }
@@ -635,37 +614,31 @@ function MainApp() {
     recognition.start();
   };
 
-// ?? [추가] 전체 카드의 최소 회독수 (모두 1이상이면 1, 모두 2이상이면 2) 계산
   const minFilledCount = savedCards.length > 0 
     ? Math.min(...savedCards.map((card: any) => {
         const stats = parseCardStats(card.memo || "");
         return stats.filled || 0;
       }))
     : 0;
-
-  // ?? [추가] 합격률 로직: 최소 회독수 1회당 2%씩 상승 (최대 100%)
+    
   const passProbability = Math.min(minFilledCount * 2, 100);
 
-    // 💡 [렉 완전 박멸] 1초마다 돌아가는 타이머나 키보드 입력에 의해 무거운 연산이 반복되지 않도록 완벽히 가둡니다.
   const { nextCatToCraft, nextStudyCard } = useMemo(() => {
     let craftTarget = null;
     let studyTarget = null;
 
     if (!isLoggedIn) return { nextCatToCraft: null, nextStudyCard: null };
 
-    // 1. 만들기 상단 버튼 로직 (괄호 날리기 및 필터링)
     if (categories && categories.length > 0) {
       const craftedOrigIds = new Set();
       const craftedTitles: string[] = [];
       const cleanText = (text: string) => text ? text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '').replace(/[^가-힣a-zA-Z0-9一-龥]/g, '') : "";
-
       savedCards.forEach((c: any) => {
         const match = c.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
         if (match) craftedOrigIds.add(parseInt(match[1], 10));
         const firstLine = c.content.split('\n')[0];
         if (firstLine) craftedTitles.push(cleanText(firstLine));
       });
-
       const sortedCats = [...categories].sort((a: any, b: any) => a.id - b.id);
       craftTarget = sortedCats.find((cat: any) => {
         const cleanTitle = cleanText(cat.title || "");
@@ -673,24 +646,19 @@ function MainApp() {
       });
     }
 
-    // 2. 채우기 상단 버튼 로직 (순서대로 1조부터 + 최소 반복 횟수)
     if (savedCards && savedCards.length > 0) {
       const cardsWithStatus = savedCards.map(c => {
          const stats = parseCardStats(c.memo);
          const origId = parseInt((c.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || c.id, 10);
          return { ...c, repetitions: stats.filled || 0, origId };
       }).sort((a, b) => a.origId - b.origId);
-
       const minReps = Math.min(...cardsWithStatus.map(c => c.repetitions));
       studyTarget = cardsWithStatus.find(c => c.repetitions === minReps) || cardsWithStatus[0];
     }
 
-    // 계산이 완료된 결과만 내보냅니다.
     return { nextCatToCraft: craftTarget, nextStudyCard: studyTarget };
-  }, [isLoggedIn, categories, savedCards]); 
-  // 💡 [핵심] 오직 '카드 목록'이 업데이트될 때만 단 1번 연산됩니다. 타자를 칠 때는 절대 실행되지 않습니다!
+  }, [isLoggedIn, categories, savedCards]);
 
-  // renderContent를 useCallback으로 메모이제이션 (Hook 규칙: return 전에 선언)
   const renderContent = React.useCallback(() => {
     if (!activeCard) return null;
     const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
@@ -738,8 +706,8 @@ function MainApp() {
                 <InlineBlankInput                  
                   key={`blank-${currentBlankIdx}`}
                   inputStatus={inputStatus}
-                  expected={blanks[currentBlankIdx]?.answer || ""} // 💡 현재 빈칸의 정답을 전달
-                  abbrDict={globalDict.abbrs} // 💡 [추가] 약어 사전 전달
+                  expected={blanks[currentBlankIdx]?.answer || ""} 
+                  abbrDict={globalDict.abbrs} 
                   onSubmit={handleSequentialInput}
                 />
               );
@@ -766,7 +734,7 @@ function MainApp() {
         <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
         <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
           <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
-            {isMemoOpen ? '닫기 ?' : '메모 열기'}
+            {isMemoOpen ? '닫기 ✕' : '메모 열기'}
           </button>
           <button 
             onClick={toggleVoiceRecognition} 
@@ -780,17 +748,16 @@ function MainApp() {
           </button>
           
             <button 
-              id="show-answer-btn" // 💡 이 이름표가 있어야 엔터키 단축키가 작동합니다!
+              id="show-answer-btn" 
               onClick={handleShowAnswer} 
-              className="px-3 py-1.5 bg-red-900/30 text-red-400 border ..."
+              className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md"
             >
               정답 보기 (오답 처리)
             </button>
-
         </div>
         {isMemoOpen && (
           <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
-            <input 
+             <input 
               defaultValue={statsRef.current.text || ""} 
               placeholder="학습 인사이트 기록..." 
               onBlur={(e) => { 
@@ -805,7 +772,7 @@ function MainApp() {
       </div>
     );
   }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening]);
-    // 💡 [궁극의 최적화] 1초 타이머와 상관없이 탭을 한 번 만들어 캐싱(기억)합니다.
+
   const memoizedTabs = useMemo(() => {
     return (
       <>
@@ -836,7 +803,18 @@ function MainApp() {
         </div>
         
         <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
-          <EnhanceTab loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} handleDeleteCard={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); setActiveCard(null); loadAllData(); } }} />
+          <EnhanceTab 
+            safeAddress={safeAddress} // 💡 핵심 해결책: EnhanceTab에 지갑 주소를 전달합니다!
+            loadAllData={loadAllData} 
+            categories={categories} 
+            savedCards={savedCards} 
+            colCount={colCount} 
+            viewMode={viewMode} 
+            setActiveCard={setActiveCard} 
+            setActiveTab={setActiveTab} 
+            setExpandedId={setExpandedId} 
+            handleDeleteCard={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); setActiveCard(null); loadAllData(); } }} 
+          />
         </div>
         
         <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
@@ -858,7 +836,7 @@ function MainApp() {
       </>
     );
   }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, studyMode, setStudyMode]);
-  // 💡 [단어장 UI 분리] PC 사이드바와 모바일 모달에서 똑같은 코드를 재사용하기 위한 함수입니다.
+
   const renderDictionaryUI = (isMobile: boolean) => (
     <div className={`flex flex-col w-full h-full ${isMobile ? 'bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 rounded-sm' : 'bg-[#08080a]/80 border border-white/10 p-5 rounded-sm shadow-xl backdrop-blur-sm'}`}>
       <div className="flex justify-between items-start mb-6">
@@ -867,14 +845,13 @@ function MainApp() {
           <button onClick={() => setDictTab('include')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'include' ? 'text-teal-400 border-b-2 border-teal-400' : 'text-white/40 hover:text-white/70'}`}>✅ 필수 포함</button>
           <button onClick={() => setDictTab('stop')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'stop' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-white/40 hover:text-white/70'}`}>❌ 제외 단어</button>
         </div>
-        {/* 모바일에서만 닫기 버튼 표시 */}
         {isMobile && <button onClick={() => setIsDictModalOpen(false)} className="text-white/40 hover:text-white ml-6 text-lg font-bold">✕</button>}
       </div>
       
       <div className="flex gap-2 mb-5 shrink-0">
         <input type="text" value={tempKey} 
           onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => {
-          if (e.key === 'Enter') {
+            if (e.key === 'Enter') {
              if (dictTab === 'abbr' && tempKey && tempValue) {
                saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [tempKey.trim()]: tempValue.trim() } });
                setTempKey(""); setTempValue("");
@@ -909,7 +886,6 @@ function MainApp() {
         }} className="px-3 sm:px-4 bg-white/5 text-white/80 border border-white/10 text-xs font-bold rounded-sm hover:bg-white/10 transition-colors shrink-0">등록</button>
       </div>
       
-      {/* 💡 개별 스크롤 영역 적용 */}
       <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 min-h-[160px]">
         {dictTab === 'abbr' && Object.entries(globalDict.abbrs).map(([abbr, full]) => (
           <div key={abbr} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
@@ -930,21 +906,19 @@ function MainApp() {
             }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors">✕</button>
           </div>
         ))}
-        
-        {((dictTab === 'abbr' && Object.keys(globalDict.abbrs).length === 0) || (dictTab === 'stop' && globalDict.stopwords.length === 0) || (dictTab === 'include' && globalDict.inclusions.length === 0)) && (
+         
+        {((dictTab === 'abbr' && Object.keys(globalDict.abbrs).length === 0) ||
+         (dictTab === 'stop' && globalDict.stopwords.length === 0) || (dictTab === 'include' && globalDict.inclusions.length === 0)) && (
           <div className="text-center py-8 text-white/20 text-[11px] sm:text-xs">등록된 단어가 없습니다.</div>
         )}
       </div>
     </div>
   );
-  
+
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
-{/* ?? 여기서부터 복사해서 기존 <header>...</header>가 있던 자리에 붙여넣으세요 */}
       <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
-          
-          {/* 왼쪽 영역: BlankD 로고 (클릭 시 최근 진행했던 탭으로 즉시 복귀) */}
           <div className="flex items-center justify-between w-full md:w-auto">
             <button 
               onClick={() => {
@@ -957,19 +931,13 @@ function MainApp() {
             </button>
           </div>
 
-          {/* 오른쪽 영역: 이어서 하기 버튼들 + 통계 지표 + 로그아웃 */}
           <div className="flex items-center justify-start md:justify-end gap-3 sm:gap-4 shrink-0 overflow-x-auto custom-scrollbar pb-1 md:pb-0 w-full md:w-auto">
-            
-            {/* 이어서 하기 (만들기 / 채우기) */}
             <div className="flex items-center gap-2 shrink-0">
               <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 uppercase hidden sm:inline">이어하기:</span>
               
               {nextCatToCraft ? (
                 <button 
-                  onClick={() => { 
-                    setActiveTab('create'); 
-                    setExpandedId(nextCatToCraft.id); 
-                  }}
+                  onClick={() => { setActiveTab('create'); setExpandedId(nextCatToCraft.id); }}
                   className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
                 >
                   <span className="text-[9px] sm:text-[10px] text-amber-400 font-bold whitespace-nowrap">▶ 만들기</span>
@@ -996,17 +964,14 @@ function MainApp() {
               )}
             </div>
 
-            {/* 💡 [통합] 상단 글로벌 사전 메뉴 UI */}
             <div className="flex items-center gap-2 shrink-0 ml-1 sm:ml-2 border-l border-white/10 pl-2 sm:pl-3">
               <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 hidden sm:inline">사전:</span>
               <button onClick={() => { setDictTab('stop'); setIsDictModalOpen(true); }} className="text-[10px] bg-amber-900/30 text-amber-400 border border-amber-500/40 px-2 py-1 rounded-sm hover:bg-amber-900/50 transition-colors">제외/포함</button>
               <button onClick={() => { setDictTab('abbr'); setIsDictModalOpen(true); }} className="text-[10px] bg-indigo-900/30 text-indigo-400 border border-indigo-500/40 px-2 py-1 rounded-sm hover:bg-indigo-900/50 transition-colors">약어 채점</button>
             </div>
 
-            {/* 구분선 */}
             <div className="h-5 sm:h-6 w-px bg-white/10 shrink-0 hidden sm:block ml-1 sm:ml-2"></div>
 
-            {/* 통계 지표 및 로그아웃 */}
             {isLoggedIn && (
               <div className="flex items-center gap-3 sm:gap-4 shrink-0 font-mono">
                 <div className="text-right">
@@ -1022,13 +987,10 @@ function MainApp() {
                 <button onClick={async () => { await enokiFlow.logout(); localStorage.clear(); window.location.reload(); }} className="border border-white/20 px-2 py-1 text-[9px] sm:text-[10px] hover:bg-white/10 tracking-wider font-mono rounded-sm text-white/70 whitespace-nowrap shrink-0">LOGOUT</button>
               </div>
             )}
-
           </div>
         </div>
       </header>
-      {/* ?? 여기까지 복사! (이 아래의 <nav> 부분은 그대로 두시면 됩니다.) */}
 
-      {/* ?? 한 줄 아래로 독립적으로 분리된 탭 네비게이션 바 */}
       {isLoggedIn && (
         <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="max-w-6xl mx-auto flex items-center justify-start gap-1 sm:gap-2">
@@ -1044,6 +1006,7 @@ function MainApp() {
           </div>
         </nav>
       )}
+
       {!isLoggedIn ? (
         <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
           <h2 className="text-xl sm:text-2xl font-serif text-white mb-4 tracking-tight">빈칸개발 (BlankD)</h2>
@@ -1051,16 +1014,12 @@ function MainApp() {
           <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-white text-black text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
         </main>
       ) : (
-        // 💡 [레이아웃 분할] 전체 너비를 키우고, 화면을 메인과 우측 패널로 나눕니다.
         <div className="max-w-[1500px] mx-auto w-full flex gap-4 sm:gap-6 px-4 lg:px-6 items-start pb-10">
-          {/* 왼쪽 메인 탭 컨텐츠 영역 */}
           <main className="flex-1 w-full min-w-0">
             <ErrorBoundary fallbackLog={addLog}>
               {memoizedTabs}
             </ErrorBoundary>
           </main>
-
-          {/* 💡 오른쪽 플로팅(Sticky) 단어장 - PC/태블릿(lg) 환경에서만 렌더링되며, 스크롤을 따라다닙니다. */}
           <aside className="hidden lg:flex flex-col w-[320px] xl:w-[360px] shrink-0 sticky top-[100px] h-[calc(100vh-140px)]">
             {renderDictionaryUI(false)}
           </aside>
@@ -1088,7 +1047,6 @@ function MainApp() {
         </button>
       </div>
 
-      {/* 💡 [모바일 전용 단어장 모달] 데스크탑(lg)에서는 숨김 처리하고 모바일에서만 팝업으로 띄웁니다. */}
       {isDictModalOpen && (
         <div className="lg:hidden fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh]">
