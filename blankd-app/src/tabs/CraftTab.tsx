@@ -261,9 +261,10 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   }, [expandedId, categories]);
 
   const applyTextToState = (textBody: string) => {
-    const currentCustomStopWords = globalDict?.stopwords || [];
-    const currentCustomIncludeWords = globalDict?.inclusions || [];
-
+    // 💡 [안전장치 추가] 혹시 모를 변수명 충돌(stopwords vs custom_stopwords)을 모두 방어합니다!
+    const currentCustomStopWords = globalDict?.stopwords || globalDict?.custom_stopwords || [];
+    const currentCustomIncludeWords = globalDict?.inclusions || globalDict?.custom_inclusions || [];
+    
     let processedText = textBody;
     if (currentCustomStopWords.length > 0) {
        const safeStops = currentCustomStopWords
@@ -372,6 +373,22 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     setSelectedWords(initialSelected);
   };
 
+  // 💡 [실시간 감지 엔진] 단어장이 변경될 때마다 열려있는 조항의 빈칸을 즉시 갱신합니다.
+  useEffect(() => {
+    if (expandedId !== null && editingCatId === null) {
+      const targetCat = safeCategories.find((c: any) => c.id === expandedId);
+      if (targetCat) {
+        // 단어장 규칙을 적용하여 화면 즉각 새로고침!
+        const { body } = formatCardText(targetCat.content || targetCat.title || "");
+        applyTextToState(body);
+      }
+    }
+  }, [globalDict, expandedId, safeCategories]); 
+  // 👆 globalDict가 변할 때마다 이 로직이 자동으로 실행됩니다.
+
+  const openCategory = (targetCat: any, bypassToggle = false) => {
+      // ... (기존 openCategory 코드들)
+  
   const openCategory = (targetCat: any, bypassToggle = false) => {
     if (isSelectMode) { handleToggleCheck(targetCat.id); return; }
     if (!bypassToggle) setExpandedId(targetCat.id);
