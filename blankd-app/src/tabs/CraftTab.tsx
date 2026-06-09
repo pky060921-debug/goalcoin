@@ -713,4 +713,3 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     </div>
   );
 };
-};
