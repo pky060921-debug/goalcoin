@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { SPLIT_REGEX } from '../utils/constants';
+import { formatCardText, getStrictTitleOnly, SPLIT_REGEX, parseCardStats } from '../utils/constants';
+import { api } from '../services/api';
 
 const getGridClass = (cols: number) => {
   if (cols === 1) return "md:grid-cols-1";
@@ -14,7 +15,10 @@ const sortChapters = (folders: string[]): string[] => {
   return folders.sort((a, b) => {
     const matchA = a.match(/^제\s*(\d+)\s*장/);
     const matchB = b.match(/^제\s*(\d+)\s*장/);
-    if (matchA && matchB) return parseInt(matchA[1]) - parseInt(matchB[1]);
+    
+    if (matchA && matchB) {
+      return parseInt(matchA[1]) - parseInt(matchB[1]);
+    }
     if (matchA) return -1;
     if (matchB) return 1;
     return a.localeCompare(b, 'ko');
@@ -23,318 +27,666 @@ const sortChapters = (folders: string[]): string[] => {
 
 type WordItem = { text: string; subWords: string[]; };
 
-export const CraftTab = ({ categories, savedCards, colCount, viewMode, safeAddress, setCategories, setExpandedId, expandedId, setSavedCards }: any) => {
-  const safeCategories = Array.isArray(categories) ? categories : [];
-  const safeCards = Array.isArray(savedCards) ? savedCards : [];
+// 💡 [수정 2] 맨 끝에 globalDict, saveGlobalDict 를 추가합니다.
+export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, setLawFile, uploadLaw, handleMakeBlankCard, addLog, handleDeleteCategory, loadAllData, expandedId, setExpandedId, globalDict, saveGlobalDict }: any) => {  const safeCategories = Array.isArray(categories) ? categories : [];
+  // 💡 [오류 진단 코드 포함] 조항명 정밀 복구 로직
+  const getDisplayTitle = (cat: any) => {
+    try {
+      const raw = cat.title || cat.content || "";
+      
+      const match = raw.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
+      if (match && match[2].trim() !== "내용") {
+        return `${match[1].replace(/\s+/g, '')} ${match[2].trim()}`;
+      }
+      
+      if (cat.content) {
+        const bodyMatch = cat.content.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
+        if (bodyMatch && bodyMatch[2].trim() !== "내용") {
+          return `${bodyMatch[1].replace(/\s+/g, '')} ${bodyMatch[2].trim()}`;
+        }
+      }
 
-  const folders = Array.from(new Set(safeCategories.map((c: any) => c.folder_name))).filter(f => f).sort() as string[];
-  const sortedFolders = sortChapters(folders);
+      const fallbackTitle = raw.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').replace(/내용/g, '').trim();
+      return fallbackTitle || "제목 없음";
+      
+    } catch (error) {
+      console.error("[진단 오류] CraftTab 제목 추출 실패:", error, "데이터 원본:", cat);
+      return "제목 추출 에러";
+    }
+  };
+// 💡 [해결] 괄호 안의 내용(목적, 정의 등)을 아예 삭제하여 시행규칙 불일치 문제 완벽 해결
+  const checkIsCreated = (cat: any) => {
+    if (!Array.isArray(savedCards)) return false;
+    
+    return savedCards.some((c: any) => {
+      if (!c || !c.content) return false;
+      if (c.content.includes(`[[ORIG_ID:${cat.id}]]`)) return true;
+      
+      if (cat.title) {
+        const cardFirstLine = c.content.split('\n')[0];
+        
+        // 1. (목적), [시행일] 등 괄호 안의 내용을 괄호째로 통째로 날림
+        const removeBrackets = (text: string) => text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '');
+        // 2. 한글, 영문, 숫자, 한자만 남기고 싹 다 지움
+        const onlyChars = (text: string) => text.replace(/[^가-힣a-zA-Z0-9一-龥]/g, '');
+        
+        const cleanCardTitle = onlyChars(removeBrackets(cardFirstLine));
+        const cleanCatTitle = onlyChars(removeBrackets(cat.title));
+        
+        if (cleanCardTitle && cleanCatTitle) {
+          // '제1조의2' 충돌을 막는 === 와 endsWith 사용!
+          if (cleanCardTitle === cleanCatTitle || cleanCardTitle.endsWith(cleanCatTitle)) {
+             return true;
+          }
+        }
+      }
+      return false;
+    });
+  };
+  
+  const craftFolders = sortChapters(
+    Array.from(new Set(safeCategories.map((c: any) => c.folder_name)))
+      .filter(f => f && f !== '기본 폴더') as string[]
+  );
+  
+  const [openFolders, setOpenFolders] = useState<Record<string, boolean>>(() => {
+    try { 
+      const saved = localStorage.getItem('blankd_craft_folders'); 
+      return saved ? JSON.parse(saved) : {}; 
+    } catch(e) { return {}; }
+  });
 
   const [wordArray, setWordArray] = useState<WordItem[]>([]);
-  const [selectedWords, setSelectedWords] = useState<number[]>([]);
-  const [pageBreaks, setPageBreaks] = useState<number[]>([]);
-  const [memoInput, setMemoInput] = useState('');
-  
-  // 💡 [신규 추가] 원본 소스 직접 편집을 위한 상태 엔진 (EnhanceTab 양식 이식)
-  const [editingCatId, setEditingCatId] = useState<number | null>(null);
-  const [editArticleText, setEditArticleText] = useState('');
+  const [selectedWords, setSelectedWords] = useState<Set<number>>(new Set());
+  const [pageBreaks, setPageBreaks] = useState<Set<number>>(new Set());
+  const [memoInput, setMemoInput] = useState(""); 
+  const [isEraserMode, setIsEraserMode] = useState(false);
+  const [isEditingText, setIsEditingText] = useState(false);
+  const [editingContent, setEditingContent] = useState("");
 
   useEffect(() => {
     if (expandedId) {
-      try {
-        const cat = safeCategories.find((c: any) => c.id === expandedId);
-        if (cat) {
-          console.log("[Craft 진단] 아코디언 토글 파싱 시작. ID:", expandedId);
-          const textToParse = cat.article_text || "";
-          
-          const rawTokens = textToParse.split(SPLIT_REGEX).filter((t: string) => t !== undefined);
-          const processed: WordItem[] = [];
-          rawTokens.forEach((token: string) => {
-            if (!token) return;
-            if (/\s+/.test(token)) {
-              processed.push({ text: token, subWords: [] });
-            } else {
-              const sub = token.split(/([,.:;()\[\]{}""''])/).filter(Boolean);
-              if (sub.length > 1) {
-                sub.forEach(s => processed.push({ text: s, subWords: [] }));
-              } else {
-                processed.push({ text: token, subWords: [] });
-              }
-            }
-          });
-
-          setWordArray(processed);
-          setSelectedWords([]);
-          setPageBreaks([]);
-          setMemoInput("");
-          setEditArticleText(textToParse);
-          setEditingCatId(null);
-        }
-      } catch (err) {
-        console.error("[Craft 진단 오류] 토글 컴포넌트 마운트 실패:", err);
+      const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${expandedId}]]`));
+      if (existingCard) {
+        const parsed = parseCardStats(existingCard.memo);
+        setMemoInput(parsed.text);
+      } else {
+        const targetCat = safeCategories.find((c: any) => c.id === expandedId);
+        setMemoInput(targetCat ? (targetCat.memo || "") : "");
       }
+    }
+  }, [expandedId, savedCards, safeCategories]);
+  
+// 💡 [해결] 닫혀있는 폴더를 먼저 강제로 열고 스크롤하기!
+  useEffect(() => {
+    if (expandedId) {
+      // 1. 해당 조항이 어느 폴더에 있는지 찾기
+      const targetCat = safeCategories.find((c: any) => c.id === expandedId);
+      
+      if (targetCat && targetCat.folder_name) {
+        // 2. 해당 폴더를 강제로 열기 (setOpenFolders 상태 업데이트)
+        setOpenFolders((prev: any) => ({ ...prev, [targetCat.folder_name]: true }));
+      }
+
+      // 3. 폴더가 열리는 애니메이션(렌더링)을 기다린 후 스크롤!
+      setTimeout(() => {
+        const targetId = `category-${expandedId}`;
+        const targetElement = document.getElementById(targetId);
+        
+        if (targetElement) {
+          targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 500); 
+    }
+  }, [expandedId, safeCategories]); // 의존성 배열 유지
+  
+  const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
+  const [newStopWord, setNewStopWord] = useState("");
+  const [newIncludeWord, setNewIncludeWord] = useState("");
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
+
+  // 💡 [수정 3] 고립된 단어장 코드를 지우고, App.tsx의 전역 사전을 직접 업데이트합니다. (덮어쓰기 멸망 버그 완벽 해결)
+  const handleAddStopWord = () => {
+    if (!newStopWord.trim()) return;
+    const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
+    const nextList = Array.from(new Set([...(globalDict?.stopwords || []), ...words]));
+    saveGlobalDict({ ...globalDict, stopwords: nextList });
+    setNewStopWord("");
+  };
+
+  const handleRemoveStopWord = (wordToRemove: string) => {
+    const nextList = (globalDict?.stopwords || []).filter((w: string) => w !== wordToRemove);
+    saveGlobalDict({ ...globalDict, stopwords: nextList });
+  };
+
+  const handleAddIncludeWord = () => {
+    if (!newIncludeWord.trim()) return;
+    const words = newIncludeWord.split(',').map(w => w.trim()).filter(w => w);
+    const nextList = Array.from(new Set([...(globalDict?.inclusions || []), ...words]));
+    saveGlobalDict({ ...globalDict, inclusions: nextList });
+    setNewIncludeWord("");
+  };
+
+  const handleRemoveIncludeWord = (wordToRemove: string) => {
+    const nextList = (globalDict?.inclusions || []).filter((w: string) => w !== wordToRemove);
+    saveGlobalDict({ ...globalDict, inclusions: nextList });
+  };
+
+  useEffect(() => {
+    setOpenFolders(prev => {
+      const next = { ...prev };
+      let changed = false;
+      craftFolders.forEach(f => {
+        if (next[f] === undefined) { next[f] = true; changed = true; }
+      });
+      if (changed) localStorage.setItem('blankd_craft_folders', JSON.stringify(next));
+      return next;
+    });
+  }, [categories]);
+
+  const handleToggleFolder = (f: string) => {
+    setOpenFolders(prev => {
+      const next = { ...prev, [f]: !prev[f] };
+      localStorage.setItem('blankd_craft_folders', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const createLongPressHandlers = (catId: number) => {
+    let timer: any;
+    const start = () => {
+      timer = setTimeout(() => {
+        if (!isSelectMode) {
+          setIsSelectMode(true);
+          setCheckedIds(new Set([catId]));
+          addLog("📦 일괄 선택 모드가 활성화되었습니다.");
+        }
+      }, 700);
+    };
+    const clear = () => { clearTimeout(timer); };
+    return {
+      onTouchStart: start, onTouchEnd: clear,
+      onMouseDown: start, onMouseUp: clear, onMouseLeave: clear,
+      onContextMenu: (e: any) => { e.preventDefault(); }
+    };
+  };
+
+  const handleToggleCheck = (catId: number) => {
+    const next = new Set(checkedIds);
+    if (next.has(catId)) next.delete(catId); else next.add(catId);
+    setCheckedIds(next);
+    if (next.size === 0) setIsSelectMode(false);
+  };
+
+  const handleBatchDelete = async () => {
+    if (checkedIds.size === 0) return;
+    if (window.confirm(`선택한 ${checkedIds.size}개의 조항을 일괄 삭제하시겠습니까?`)) {
+      addLog(`🗑️ ${checkedIds.size}개 조항 일괄 삭제 시작...`);
+      try {
+        const deletePromises = Array.from(checkedIds).map(id =>
+          fetch("https://api.blankd.top/api/delete-category", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet_address: safeAddress, id })
+          })
+        );
+        await Promise.all(deletePromises);
+        addLog(`✅ ${checkedIds.size}개 조항 일괄 삭제 완료`);
+        setIsSelectMode(false);
+        setCheckedIds(new Set());
+        if (loadAllData) await loadAllData();
+        else window.location.reload();
+      } catch (e) { alert("일괄 삭제 중 오류가 발생했습니다."); }
+    }
+  };
+
+  useEffect(() => {
+    if (expandedId !== null) {
+      localStorage.setItem('blankd_craft_expanded', expandedId.toString());
+      const targetCat = safeCategories.find((c: any) => c.id === expandedId);
+      if (targetCat) {
+        openCategory(targetCat, true); 
+      }
+    } else {
+      localStorage.removeItem('blankd_craft_expanded');
     }
   }, [expandedId, categories]);
 
-  // 💡 원본 데이터 직접 타이핑 편집 완료 및 API 서버 저장 핸들러
-  const handleSaveEditedText = async (catId: number) => {
-    try {
-      console.log(`[Craft 진단] 원본 텍스트 직접 변경사항 서버 전송 시도. ID: ${catId}`);
-      const res = await fetch(`https://api.blankd.top/api/update-category-text`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          wallet_address: safeAddress,
-          id: catId,
-          article_text: editArticleText
-        })
-      });
-      if (!res.ok) throw new Error("원본 텍스트 수정 반영에 실패했습니다.");
+  const applyTextToState = (textBody: string) => {
+    // 💡 [수정 4] 텅 비어있던 개별 state 대신, 실시간 글로벌 사전을 참조합니다.
+    const currentCustomStopWords = globalDict?.stopwords || [];
+    const currentCustomIncludeWords = globalDict?.inclusions || [];
+    
+    // ... 아래 로직은 그대로 유지 ...
+
+    // 💡 조사 분리 기획 적용: 제외 단어(하여, 나 등)가 등록되면 형태소 가위로 강제 분리 실행
+    let processedText = textBody;
+    if (currentCustomStopWords.length > 0) {
+       const safeStops = currentCustomStopWords
+          .map(w => w.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .filter(w => w !== "");
+          
+       if (safeStops.length > 0) {
+          const dynamicRegex = new RegExp(`([가-힣]+)(${safeStops.join('|')})([\\s,.)\\]]|$)`, 'g');
+          processedText = processedText.replace(dynamicRegex, '$1 $2$3');
+          processedText = processedText.replace(dynamicRegex, '$1 $2$3'); 
+       }
+    }
+
+    const initialWords = processedText.split(SPLIT_REGEX).filter(w => w !== "");
+    let currentWordArray = initialWords.map(w => ({ text: w, subWords: [w] }));
+
+    // 💡 필수 단어 단일 빈칸 처리 기획: 필수 단어 발견 시 하나의 덩어리로 사전 병합
+    currentCustomIncludeWords.forEach(cw => {
+       const trimmedCw = cw.trim();
+       if (!trimmedCw) return;
+       const cwNoSpace = trimmedCw.replace(/\s+/g, ''); 
+
+       let i = 0;
+       while (i < currentWordArray.length) {
+          let tempStr = "";
+          let matchCount = 0;
+          for (let j = i; j < currentWordArray.length; j++) {
+             tempStr += currentWordArray[j].text.replace(/\s+/g, '');
+             matchCount++;
+             
+             if (tempStr === cwNoSpace) {
+                if (matchCount > 1) {
+                   const mergedText = currentWordArray.slice(i, j + 1).map(w => w.text).join("");
+                   const mergedSubWords = currentWordArray.slice(i, j + 1).flatMap(w => w.subWords);
+                   currentWordArray.splice(i, matchCount, { text: mergedText, subWords: mergedSubWords });
+                }
+                break;
+             } else if (tempStr.length > cwNoSpace.length) {
+                break;
+             }
+          }
+          i++;
+       }
+    });
+
+    setWordArray(currentWordArray);
+
+    const initialSelected = new Set<number>();
+    const protectedIndices = new Set<number>();
+
+    currentWordArray.forEach((wordObj, idx) => {
+        const trimmed = wordObj.text.trim();
+        if (currentCustomIncludeWords.some(cw => trimmed.replace(/\s+/g, '') === cw.replace(/\s+/g, ''))) {
+            protectedIndices.add(idx);
+            initialSelected.add(idx);
+        }
+    });
+
+    currentWordArray.forEach((wordObj, idx) => {
+      if (protectedIndices.has(idx)) return;
+
+      const trimmed = wordObj.text.trim();
+      const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(trimmed) && trimmed !== "";
+      const isArticleOrNum = /^(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조)(?:의\s*\d+)?/.test(trimmed) || 
+                             /^\(?\d+(?:항|호|목)?\)?$/.test(trimmed) || 
+                             /^\(?(?:①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)\)?$/.test(trimmed);
+                             
+      const isStopWord = /^(은|는|이|가|을|를|의|에|에게|에서|로|으로|과|와|도|만|부터|까지|조차|마저|치고|및|등|또는|수|할|이하|이상|초과|미만|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여|바|것|자|경우|때|중)$/.test(trimmed);
+      const isCustomSingleStopWord = currentCustomStopWords.some(cw => trimmed === cw || trimmed === cw + "." || trimmed === cw + ",");
       
-      setCategories((prev: any[]) => prev.map(c => c.id === catId ? { ...c, article_text: editArticleText } : c));
-      setEditingCatId(null);
-      console.log("[Craft 진단] 원본 직접 편집 동기화 100% 완료");
-    } catch (err) {
-      console.error("[Craft 진단 오류] 원본 수정 데이터 덤프 에러:", err);
-      alert("서버 연결 불안정으로 원본 텍스트 수정에 실패했습니다.");
+      if (!isSymbolOnly && !isArticleOrNum && !isStopWord && !isCustomSingleStopWord && trimmed.length > 0) {
+        initialSelected.add(idx);
+      }
+    });
+
+    const fullText = currentWordArray.map(w => w.text).join("");
+    const wordRanges: {start: number, end: number, wordIdx: number}[] = [];
+    let currentPos = 0;
+    currentWordArray.forEach((w, idx) => {
+       wordRanges.push({ start: currentPos, end: currentPos + w.text.length, wordIdx: idx });
+       currentPos += w.text.length;
+    });
+
+    const patternsToExclude: RegExp[] = [
+      /(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)( Lifespan)?(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g
+    ];
+
+    currentCustomStopWords.forEach(cw => {
+       const trimmedCw = cw.trim();
+       if (!trimmedCw) return;
+       const regexStr = trimmedCw.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+       patternsToExclude.push(new RegExp(regexStr, 'g'));
+    });
+
+    patternsToExclude.forEach(regex => {
+       let match;
+       while ((match = regex.exec(fullText)) !== null) {
+          const matchStart = match.index;
+          const matchEnd = matchStart + match[0].length;
+          wordRanges.forEach(wr => {
+             if (wr.start < matchEnd && wr.end > matchStart) {
+                if (!protectedIndices.has(wr.wordIdx)) {
+                    initialSelected.delete(wr.wordIdx);
+                }
+             }
+          });
+       }
+    });
+
+    setSelectedWords(initialSelected);
+  };
+
+  const openCategory = (targetCat: any, bypassToggle = false) => {
+    if (isSelectMode) { handleToggleCheck(targetCat.id); return; }
+    if (!bypassToggle) setExpandedId(targetCat.id);
+    
+    const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${targetCat.id}]]`));
+    
+    setPageBreaks(new Set());
+    
+    if (existingCard) {
+      const parsed = parseCardStats(existingCard.memo);
+      setMemoInput(parsed.text);
+    } else {
+      setMemoInput(targetCat.memo || "");
+    }
+    
+    setIsEraserMode(false);
+    const { body } = formatCardText(targetCat.content || targetCat.title || "");
+    setIsEditingText(false);
+    setEditingContent(body);
+    applyTextToState(body);
+  };
+
+  const handleEditToggle = () => {
+    if (!isEditingText) {
+      if (selectedWords.size > 0 || pageBreaks.size > 0) {
+        if (!window.confirm("텍스트를 다시 편집하면 현재 수동으로 합친 단어들과 지정된 빈칸이 모두 초기화됩니다. 편집하시겠습니까?")) return;
+      }
+      setIsEditingText(true);
+      setIsEraserMode(false);
+    } else {
+      applyTextToState(editingContent);
+      setPageBreaks(new Set());
+      setIsEditingText(false);
     }
   };
 
-  const handleMakeBlankCard = async (cat: any, tokens: string[], blankIndices: number[], breaks: number[], memoStr: string, catId: number, onSuccess?: () => void) => {
-    try {
-      if (blankIndices.length === 0) {
-        alert("빈칸으로 지정할 형태소를 한 개 이상 마킹하세요.");
-        return;
-      }
-
-      console.log("[Craft 진단] 빈칸 인지 데이터 빌드 가동");
-      let formattedContent = `▶ ${cat.title}\n`;
-      let currentLine = "";
-
-      tokens.forEach((token, idx) => {
-        let wordStr = token;
-        if (blankIndices.includes(idx)) {
-          wordStr = `[${wordStr}]`;
-        }
-        currentLine += wordStr;
-        if (breaks.includes(idx) || token.includes('\n')) {
-          formattedContent += currentLine.trim() + "\n";
-          currentLine = "";
-        }
-      });
-      if (currentLine.trim()) {
-        formattedContent += currentLine.trim() + "\n";
-      }
-
-      const res = await fetch(`https://api.blankd.top/api/create-card`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          wallet_address: safeAddress,
-          category_id: catId,
-          card_content: formattedContent.trim(),
-          answer_text: "", 
-          options_json: JSON.stringify([]),
-          level: 0,
-          memo: memoStr || "[]"
-        })
-      });
-
-      if (!res.ok) throw new Error("서버 카드 인덱싱 실패");
-      const newCard = await res.json();
+  const handleWordClick = (idx: number) => {
+    if (isEraserMode) {
+      const newArray = [...wordArray];
+      newArray.splice(idx, 1); 
+      setWordArray(newArray);
       
-      setSavedCards((prev: any[]) => [...prev, newCard]);
-      console.log("[Craft 진단] 신규 빈칸 노드 안착 완료:", newCard.id);
-      if (onSuccess) onSuccess();
-    } catch (err) {
-      console.error("[Craft 진단 오류] 카드 인클루전 빌드 실패:", err);
+      const newSelected = new Set<number>();
+      selectedWords.forEach(i => { if (i < idx) newSelected.add(i); else if (i > idx) newSelected.add(i - 1); });
+      setSelectedWords(newSelected);
+      
+      const newPageBreaks = new Set<number>();
+      pageBreaks.forEach(i => { if (i < idx) newPageBreaks.add(i); else if (i > idx) newPageBreaks.add(i - 1); });
+      setPageBreaks(newPageBreaks);
+      return; 
     }
+    
+    const s = new Set(selectedWords);
+    if(s.has(idx)) s.delete(idx); else s.add(idx);
+    setSelectedWords(s);
   };
 
-  const filteredCategories = safeCategories.filter((cat: any) => {
-    const isCreated = safeCards.some((c: any) => c.category_id === cat.id);
-    if (viewMode === 'all') return true;
-    if (viewMode === 'pending') return !isCreated;
-    if (viewMode === 'completed') return isCreated;
-    return true;
-  });
+  const handleWordSplit = (idx: number, e: any) => {
+    e.preventDefault(); 
+    if (isEraserMode) return; 
+    const p = new Set(pageBreaks);
+    if (p.has(idx)) p.delete(idx); else if (window.confirm("이 위치에서 페이지를 나누시겠습니까?")) p.add(idx);
+    setPageBreaks(p);
+  };
+
+  const handleWordMerge = (idx: number) => {
+    if (isEraserMode) return; 
+    const current = wordArray[idx];
+
+    if (current.subWords.length > 1) {
+      const newArray = [...wordArray];
+      const splitItems = current.subWords.map(w => ({ text: w, subWords: [w] }));
+      newArray.splice(idx, 1, ...splitItems);
+      setWordArray(newArray);
+      
+      const shiftAmount = splitItems.length - 1;
+      const newSelected = new Set<number>();
+      selectedWords.forEach(i => { if (i < idx) newSelected.add(i); else if (i > idx) newSelected.add(i + shiftAmount); });
+      if (selectedWords.has(idx)) { for(let k = 0; k <= shiftAmount; k++) newSelected.add(idx + k); }
+      setSelectedWords(newSelected);
+
+      const newPageBreaks = new Set<number>();
+      pageBreaks.forEach(i => { if (i < idx) newPageBreaks.add(i); else if (i > idx) newPageBreaks.add(i + shiftAmount); });
+      setPageBreaks(newPageBreaks);
+      return;
+    }
+
+    if (idx >= wordArray.length - 1) return;
+    const next = wordArray[idx + 1];
+
+    const isSymbol1 = !/[a-zA-Z0-9가-힣]/.test(current.text) && current.text.trim() !== "";
+    const isSymbol2 = !/[a-zA-Z0-9가-힣]/.test(next.text) && next.text.trim() !== "";
+    if (isSymbol1 || isSymbol2) return; 
+
+    const newArray = [...wordArray];
+    newArray[idx] = { text: current.text + next.text, subWords: [...current.subWords, ...next.subWords] };
+    newArray.splice(idx + 1, 1);
+    setWordArray(newArray);
+
+    const newSelected = new Set<number>();
+    selectedWords.forEach(i => { if (i < idx) newSelected.add(i); else if (i > idx) newSelected.add(i - 1); });
+    if (selectedWords.has(idx) || selectedWords.has(idx + 1)) newSelected.add(idx);
+    setSelectedWords(newSelected);
+
+    const newPageBreaks = new Set<number>();
+    pageBreaks.forEach(i => { if (i < idx) newPageBreaks.add(i); else if (i > idx) newPageBreaks.add(i - 1); });
+    setPageBreaks(newPageBreaks);
+  };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 py-4 px-4 animate-in fade-in duration-300">
-      <div className="text-white/40 text-xs font-mono">
-        💡 대기열 조항을 선택하여 단어를 터치바인딩하고, 필요 시 원본 소스를 타이핑 편집하여 수정한 뒤 카드를 배포하세요.
+    <div className="space-y-6 sm:space-y-8 animate-in fade-in w-full">
+      <div className="flex gap-2 mb-2 sm:mb-4">
+        <label className="flex-1 border border-white/20 p-2 sm:p-2.5 text-center text-[10px] sm:text-xs hover:bg-white/10 cursor-pointer text-white/80 rounded-sm transition-colors">
+          <input type="file" accept=".pdf,.txt,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 학습자료 업로드'}
+        </label>
+        <button onClick={uploadLaw} className="px-3 sm:px-4 border border-white/20 text-[10px] sm:text-xs hover:bg-white/10 transition-colors rounded-sm">전송</button>
+        
+        {isSelectMode && (
+          <div className="flex gap-1 animate-in fade-in zoom-in-95">
+            <button onClick={handleBatchDelete} className="px-3 sm:px-4 bg-red-600/20 border border-red-500 text-red-400 text-[10px] sm:text-xs font-bold rounded-sm hover:bg-red-600/40 transition-colors">🗑️ 일괄삭제 ({checkedIds.size})</button>
+            <button onClick={() => { setIsSelectMode(false); setCheckedIds(new Set()); }} className="px-2 border border-white/10 text-white/40 text-[10px] sm:text-xs rounded-sm hover:bg-white/5">취소</button>
+          </div>
+        )}
       </div>
 
-      <div className="space-y-8">
-      {sortedFolders.map(folderName => {
-        const folderCats = filteredCategories.filter((c: any) => c.folder_name === folderName).sort((a: any, b: any) => a.id - b.id);
-        if (folderCats.length === 0) return null;
-
-        return (
-          <div key={folderName} className="space-y-3">
-            <div className="text-xs font-bold text-amber-500 bg-amber-500/5 px-3 py-1.5 border border-amber-500/10 rounded-sm font-serif tracking-wide">
-              {folderName}
+      {showStopWordsSettings && (
+        <div className="p-4 sm:p-5 bg-[#0a0a0c] border border-amber-500/30 rounded-sm mb-6 flex flex-col sm:flex-row gap-6 animate-in slide-in-from-top-2">
+          <div className="flex-1">
+            <div className="text-xs sm:text-sm text-amber-400 font-bold mb-3">❌ 제외 단어 (빈칸 X)</div>
+            <div className="flex gap-2 mb-3">
+              <input type="text" value={newStopWord} onChange={(e) => setNewStopWord(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddStopWord(); }} placeholder="예: 각 호의 외의 부분 (쉼표로 구분)" className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-amber-400/50" />
+              <button onClick={handleAddStopWord} className="px-4 bg-amber-600/20 text-amber-400 border border-amber-500/30 text-xs font-bold rounded-sm hover:bg-amber-600/40 transition-colors">추가</button>
             </div>
-            <div className={`grid gap-3 ${getGridClass(colCount)}`}>
-              {folderCats.map((cat: any) => {
-                const isExpanded = expandedId === cat.id;
-                const isAlreadyCreated = safeCards.some((c: any) => c.category_id === cat.id);
+            <div className="flex flex-wrap gap-1.5">
+                {/* 💡 [수정 5-1] */}
+                {(globalDict?.stopwords || []).map((word: string) => (
+                  <span key={word} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] sm:text-[11px] text-white/70 flex items-center gap-1.5">
+                    {word} <button onClick={() => handleRemoveStopWord(word)} className="text-white/30 hover:text-red-400">✕</button>
+                  </span>
+                ))}
+              </div>
+          </div>
+          <div className="hidden sm:block w-px bg-white/10 mx-2"></div>
+          <div className="sm:hidden h-px w-full bg-white/10 my-2"></div>
+          <div className="flex-1">
+            <div className="text-xs sm:text-sm text-teal-400 font-bold mb-3">✅ 필수 포함 단어 (무조건 빈칸 O)</div>
+            <div className="flex gap-2 mb-3">
+              <input type="text" value={newIncludeWord} onChange={(e) => setNewIncludeWord(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddIncludeWord(); }} placeholder="예: 또는, 및, 할 수 있다 (쉼표로 구분)" className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-teal-400/50" />
+              <button onClick={handleAddIncludeWord} className="px-4 bg-teal-600/20 text-teal-400 border border-teal-500/30 text-xs font-bold rounded-sm hover:bg-teal-600/40 transition-colors">추가</button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+                {/* 💡 [수정 5-2] */}
+                {(globalDict?.inclusions || []).map((word: string) => (
+                  <span key={word} className="px-2 py-1 bg-teal-900/30 border border-teal-500/30 rounded text-[10px] sm:text-[11px] text-teal-300 flex items-center gap-1.5">
+                    {word} <button onClick={() => handleRemoveIncludeWord(word)} className="text-teal-500/50 hover:text-teal-300">✕</button>
+                  </span>
+                ))}
+              </div>
+          </div>
+        </div>
+      )}
 
-                return (
-                  <div 
-                    key={cat.id} 
-                    className={`border rounded-sm transition-all flex flex-col justify-between ${isExpanded ? 'border-amber-500 bg-[#0c0c0e] shadow-xl md:col-span-full' : isAlreadyCreated ? 'border-white/5 bg-white/[0.02] opacity-60 hover:opacity-100' : 'border-white/10 bg-[#08080a] hover:border-white/20'}`}
-                  >
-                    <button 
-                      onClick={() => {
-                        console.log("[Craft 진단] 아코디언 토글 제어:", cat.id);
-                        setExpandedId(isExpanded ? null : cat.id);
-                      }}
-                      className="w-full text-left p-4 flex justify-between items-start gap-2 cursor-pointer"
+      <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-4 sm:mb-6">
+        {craftFolders.map((f: string) => (
+          <div key={f} className="relative group flex items-center">
+            <button onClick={() => handleToggleFolder(f)} className={`pl-2.5 pr-14 py-1.5 sm:py-2 text-[10px] sm:text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-indigo-600 border-indigo-500 text-white shadow-sm' : 'bg-indigo-900/40 text-indigo-300 border-indigo-500/30'}`}>
+              📁 {f}
+            </button>
+            <button onClick={async (e) => { e.stopPropagation(); const newName = prompt(`'${f}' 폴더의 새로운 이름을 입력하세요:`, f); if(newName && newName.trim() !== "" && newName !== f) { try { await api.renameFolder(safeAddress, f, newName.trim()); addLog(`✏️ 폴더명 변경 완료.`); window.location.reload(); } catch (err) { alert("변경 실패"); } } }} className="absolute right-6 top-1/2 -translate-y-1/2 text-white/30 hover:text-blue-400 px-1.5 py-1 text-[10px] transition-colors">✏️</button>
+            <button onClick={async (e) => { e.stopPropagation(); if(confirm(`'${f}' 폴더를 모두 삭제하시겠습니까?`)) { try { await api.deleteFolder(safeAddress, f); addLog(`🗑️ 삭제 완료`); window.location.reload(); } catch (err) { alert("삭제 실패"); } } }} className="absolute right-1 top-1/2 -translate-y-1/2 text-white/30 hover:text-red-400 px-1.5 py-1 text-[10px] transition-colors">✕</button>
+          </div>
+        ))}
+      </div>
+      
+      {/* 💡 [스크롤 추가 1] 맵핑 시작 전에 스크롤 기능을 가진 div를 엽니다. */}
+      <div className="overflow-y-auto max-h-[60vh] custom-scrollbar pr-2 pb-10">      
+        {craftFolders.map((folder: string) => {
+          const isChapterFolder = /^제\s*\d+\s*장/.test(folder);
+          return openFolders[folder] && (
+          <div key={folder} className={`mb-6 sm:mb-8 border-l rounded-l-sm pl-3 sm:pl-4 transition-all ${isChapterFolder ? 'border-blue-500/50' : 'border-white/5'}`}>
+            <div className={`text-xs sm:text-sm mb-2 sm:mb-3 border-b pb-1.5 sm:pb-2 font-bold transition-all ${isChapterFolder ? 'text-blue-400 border-blue-500/30' : 'text-white/50 border-white/10'}`}>
+              {folder}
+            </div>
+
+            <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
+              {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
+                  const isExpanded = expandedId === cat.id;
+                  const isChecked = checkedIds.has(cat.id);
+                  
+                  // 💡 초정밀 고유 판별 로직 호출
+                  const isCreated = checkIsCreated(cat);
+                  const displayTitle = getDisplayTitle(cat);
+                  
+                  let colClass = ""; 
+                  let titleColor = "text-amber-400";
+                  
+                  const checkText = `${cat.title || ''} ${cat.content || ''}`;
+                  if (checkText.includes('[법]')) titleColor = "text-red-500";
+                  else if (checkText.includes('[령]')) titleColor = "text-blue-400";
+                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
+                  
+                  if (isExpanded) colClass = "col-span-full";
+
+                  return (
+                    <div 
+                      key={cat.id} 
+                      id={`category-${cat.id}`} // 💡 바로 이 부분을 추가했습니다!
+                      className={`relative transition-all w-full ${colClass}`}
                     >
-                      <div>
-                        <div className="text-xs font-bold text-white/80 group-hover:text-white leading-tight font-serif">{cat.title}</div>
-                        {!isExpanded && <p className="text-[11px] text-white/40 line-clamp-2 mt-1 leading-relaxed">{cat.article_text}</p>}
-                      </div>
-                      <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded shrink-0 ${isAlreadyCreated ? 'bg-indigo-950 text-indigo-400 border border-indigo-900/40' : 'bg-amber-950 text-amber-400 border border-amber-900/40'}`}>
-                        {isAlreadyCreated ? "제작됨" : "대기"}
-                      </span>
-                    </button>
-
-                    {isExpanded && (
-                      <div className="p-4 pt-0 border-t border-white/5 bg-black/30 space-y-4 animate-in slide-in-from-top-2 duration-200">
-                        
-                        {/* 💡 [수정 사항] EnhanceTab과 완벽 일치시킨 직접 타이핑 편집 폼 셋업 */}
-                        <div className="bg-black/40 border border-white/5 p-3 rounded-sm space-y-2">
-                          <div className="flex justify-between items-center">
-                            <span className="text-[10px] text-white/40 font-mono">ORIGINAL SOURCE TEXT EDIT</span>
-                            {editingCatId !== cat.id ? (
-                              <button 
-                                onClick={() => {
-                                  setEditingCatId(cat.id);
-                                  setEditArticleText(cat.article_text || "");
-                                }}
-                                className="px-2 py-0.5 bg-amber-900/40 text-amber-400 border border-amber-500/30 rounded font-mono text-[10px] hover:bg-amber-900/60 cursor-pointer"
-                              >
-                                ✏️ 원본 직접수정
-                              </button>
-                            ) : (
-                              <div className="flex gap-2">
-                                <button 
-                                  onClick={() => handleSaveEditedText(cat.id)}
-                                  className="px-2 py-0.5 bg-teal-900/60 text-teal-300 border border-teal-500/50 rounded font-mono text-[10px] hover:bg-teal-900/80 cursor-pointer font-bold"
-                                >
-                                  💾 저장
-                                </button>
-                                <button 
-                                  onClick={() => setEditingCatId(null)}
-                                  className="px-2 py-0.5 bg-white/5 text-white/40 border border-white/10 rounded font-mono text-[10px] hover:bg-white/10 cursor-pointer"
-                                >
-                                  취소
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                          
-                          {editingCatId === cat.id ? (
-                            <textarea
-                              value={editArticleText}
-                              onChange={(e) => setEditArticleText(e.target.value)}
-                              className="w-full min-h-[120px] bg-[#050507] border border-amber-500/30 text-xs text-amber-100 p-2.5 rounded focus:outline-none focus:border-amber-500 font-sans leading-relaxed"
-                            />
-                          ) : (
-                            <div className="text-xs text-white/70 leading-relaxed font-sans whitespace-pre-wrap select-none p-1">
-                              {cat.article_text}
-                            </div>
+                      {!isExpanded ? (
+                        <div className="relative group/card w-full flex items-center gap-2">
+                          {isSelectMode && (
+                            <input type="checkbox" checked={isChecked} onChange={() => handleToggleCheck(cat.id)} className="w-4 h-4 rounded border-white/20 bg-black accent-amber-500 cursor-pointer shrink-0 transition-all"/>
                           )}
-                        </div>
 
-                        {/* 💡 [지우개 모드 완전 삭제] 퓨어 마킹 영역 구성 */}
-                        {editingCatId !== cat.id && (
-                          <div className="space-y-3">
-                            <div className="text-[10px] text-amber-400/70 font-bold font-mono">🎯 빈칸 마킹 터치 채널</div>
-                            <div className="flex flex-wrap gap-x-1.5 gap-y-2 p-3 bg-black/60 rounded-sm border border-white/5 leading-relaxed select-none">
-                              {wordArray.map((word, idx) => {
-                                const isSelected = selectedWords.includes(idx);
-                                const isBreak = pageBreaks.includes(idx);
-                                if (/\s+/.test(word.text)) {
-                                  return <span key={idx} className="w-1" />;
-                                }
+                          <button 
+                            {...createLongPressHandlers(cat.id)}
+                            onClick={() => openCategory(cat)} 
+                            className={`flex-1 min-h-[60px] p-3 sm:p-4 border rounded-sm transition-colors flex flex-col gap-1.5 sm:gap-2 text-left relative pr-10 ${
+                              isChecked ? 'border-amber-500/50 bg-amber-950/10' : 
+                              isCreated ? 'border-white/5 bg-black/40 hover:bg-white/5' : 
+                              'border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40'
+                            }`}
+                          >
+                            <div className="flex justify-between items-center w-full">
+                              <span className={`${isCreated ? 'text-white/30 font-medium' : `${titleColor} font-bold`} text-[11px] sm:text-[13px] leading-snug break-keep`}>{displayTitle}</span>
+                              {isCreated && <span className="text-[9px] bg-white/5 text-white/30 px-1.5 py-0.5 rounded ml-2 whitespace-nowrap border border-white/10">제작됨</span>}
+                            </div>
+                            
+                            {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
+                            
+                            {!isSelectMode && (
+                              <span onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 조항을 대기열에서 즉시 삭제하시겠습니까?`)) { await handleDeleteCategory(cat.id); } }} className="absolute top-1/2 -translate-y-1/2 right-3 w-5 h-5 flex items-center justify-center border border-white/10 text-white/30 hover:text-red-400 hover:border-red-500/30 rounded-full text-[10px] bg-black/40 md:opacity-0 group-hover/card:opacity-100 transition-all duration-150 cursor-pointer" title="즉시 삭제">✕</span>
+                            )}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="w-full p-4 sm:p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-3 shadow-xl z-20 relative animate-in zoom-in-95">
+                          <div className="flex justify-between items-center mb-1 flex-wrap gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{displayTitle}</span>
+                              {isCreated && <span className="text-[10px] text-amber-500 font-bold ml-2">⚠️ 저장하면 카드를 덮어씁니다</span>}
+                            </div>
+                            
+                            <div className="flex gap-2">
+                              <button onClick={handleEditToggle} className={`px-3 py-1 text-[11px] font-bold rounded-sm border transition-all ${isEditingText ? 'bg-green-600 border-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.3)]' : 'bg-white/5 border-white/20 text-white/50 hover:bg-white/10'}`}>
+                                {isEditingText ? '✅ 텍스트 적용' : '✏️ 원본 텍스트 편집'}
+                              </button>
+                              {!isEditingText && (
+                                <button onClick={() => setIsEraserMode(!isEraserMode)} className={`px-3 py-1 text-[11px] font-bold rounded-sm border transition-all ${isEraserMode ? 'bg-red-600 border-red-500 text-white animate-pulse' : 'bg-white/5 border-white/20 text-white/50 hover:bg-white/10'}`}>
+                                  {isEraserMode ? '🗑️ 지우개 켜짐' : '🧹 지우개 모드'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-2 text-xs text-teal-200 outline-none rounded-sm" />
+                          
+                          {isEditingText ? (
+                            <div className="w-full relative mt-2 animate-in fade-in zoom-in-95">
+                              <textarea value={editingContent} onChange={(e) => setEditingContent(e.target.value)} className="w-full h-48 bg-black border border-green-500/50 p-4 text-green-100 text-[13px] sm:text-[15px] leading-loose rounded outline-none resize-y custom-scrollbar" placeholder="원하는 대로 내용을 지우거나 띄어쓰기를 수정하세요..." />
+                              <div className="absolute top-2 right-2 text-[10px] text-green-400 bg-black/50 px-2 py-1 rounded">수정 후 [✅ 텍스트 적용] 버튼 클릭</div>
+                            </div>
+                          ) : (
+                            <div className={`font-serif mt-2 text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative transition-all ${isEraserMode ? 'border-red-500/50 ring-1 ring-red-500/30' : 'border-white/10'}`}>
+                              {wordArray.map((wordObj, idx) => {
+                                const word = wordObj.text;
+                                const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(word) && word.trim() !== "";
+                                const isMerged = wordObj.subWords.length > 1;
+                                const isSelected = selectedWords.has(idx);
+
                                 return (
-                                  <span key={idx} className="inline-flex items-center gap-0.5">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (selectedWords.includes(idx)) {
-                                          setSelectedWords(prev => prev.filter(i => i !== idx));
-                                        } else {
-                                          setSelectedWords(prev => [...prev, idx]);
-                                        }
-                                      }}
-                                      className={`px-1 py-0.5 rounded-sm text-xs font-medium font-sans cursor-pointer transition-all ${isSelected ? 'bg-amber-500 text-black font-bold shadow-md shadow-amber-500/20' : 'bg-white/5 text-white/80 hover:bg-white/10 border border-white/5'}`}
-                                    >
-                                      {word.text}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (pageBreaks.includes(idx)) {
-                                          setPageBreaks(prev => prev.filter(i => i !== idx));
-                                        } else {
-                                          setPageBreaks(prev => [...prev, idx]);
-                                        }
-                                      }}
-                                      className={`text-[9px] px-0.5 font-mono opacity-30 hover:opacity-100 transition-opacity ${isBreak ? 'text-red-500 opacity-100 font-bold' : 'text-white/40'}`}
-                                      title="줄바꿈 토글"
-                                    >
-                                      ↵
-                                    </button>
-                                  </span>
+                                  <React.Fragment key={idx}>
+                                    {pageBreaks.has(idx) && <div className="w-full border-t border-red-500/50 my-2 relative"><span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black px-1 text-[8px] text-red-400 font-bold uppercase tracking-tighter">Page Break</span></div>}
+                                    <span onClick={() => { if (isEraserMode || !isSymbolOnly) handleWordClick(idx); }} onContextMenu={(e) => handleWordSplit(idx, e)} onDoubleClick={() => { if (!isSymbolOnly || isMerged) handleWordMerge(idx); }} className={`px-[1px] rounded transition-colors ${isSelected ? 'bg-amber-500 text-black font-bold cursor-pointer' : isEraserMode ? 'hover:bg-red-500/50 hover:text-white text-red-100 cursor-pointer' : isSymbolOnly ? 'text-white/30 cursor-default' : isMerged ? 'bg-indigo-900/30 border-b border-indigo-500/50 hover:bg-indigo-800/40 cursor-pointer' : 'hover:bg-white/10 cursor-pointer'}`} title={isSelected ? "클릭하여 빈칸에서 해제" : "클릭하여 빈칸으로 지정"}>
+                                      {word}
+                                    </span>
+                                  </React.Fragment>
                                 );
                               })}
                             </div>
-                          </div>
-                        )}
-
-                        {editingCatId !== cat.id && (
-                          <div className="pt-2 border-t border-white/5 flex flex-col gap-2">
-                            <input
-                              type="text"
-                              value={memoInput}
-                              onChange={(e) => setMemoInput(e.target.value)}
-                              placeholder="기억 연상 기법용 힌트 텍스트 입력 (선택사항)"
-                              className="w-full bg-[#050507] border border-white/10 text-xs text-white/80 px-3 py-2 rounded focus:outline-none focus:border-white/20 font-sans"
-                            />
-                            <button 
-                              onClick={() => {
-                                const folderCats = safeCategories.filter((c: any) => c.folder_name === cat.folder_name).sort((a: any, b: any) => a.id - b.id);
-                                const currentIdx = folderCats.findIndex(c => c.id === cat.id);
-                                const nextCat = folderCats[currentIdx + 1];
-                                
-                                handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, cat.id, () => {
-                                    if (nextCat) {
-                                        setExpandedId(nextCat.id);
-                                    } else {
-                                        setExpandedId(null);
-                                    }
-                                });
-                              }} 
-                              className="w-full py-2.5 text-xs sm:text-sm font-bold rounded-sm mt-1 transition-all bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30 cursor-pointer"
-                            >
-                              ✨ 빈칸 카드 완성 및 보관 배포
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
+                          )}
+                          
+                          <button 
+                            disabled={isEditingText}
+                            onClick={() => {
+                              const folderCats = safeCategories.filter((c:any) => c.folder_name === cat.folder_name).sort((a:any, b:any) => a.id - b.id);
+                              const currentIdx = folderCats.findIndex(c => c.id === cat.id);
+                              const nextCat = folderCats[currentIdx + 1];
+                              
+                              handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, cat.id, () => {
+                                  if (nextCat) {
+                                      setExpandedId(nextCat.id);
+                                  } else {
+                                      setExpandedId(null);
+                                  }
+                              });
+                            }} 
+                            className={`w-full py-2.5 text-xs sm:text-sm font-bold rounded-sm mt-2 transition-all ${isEditingText ? 'bg-white/5 text-white/30 border border-white/10 cursor-not-allowed' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'}`}
+                          >
+                            만들기
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
               })}
             </div>
           </div>
         );
       })}
+      
+      {/* 💡 [스크롤 추가 2] 맵핑이 끝난 직후 위에서 열었던 스크롤 div를 닫아줍니다. */}
       </div> 
+      
     </div>
   );
 };
