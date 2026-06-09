@@ -11,7 +11,7 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, handleDeleteCard }: any) => {
+export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId,  }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
@@ -61,25 +61,30 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     setIsSaving(true);
     setErrorMsg(null);
     try {
+      // 💡 저장 전, 현재 textarea에 입력된 값이 확실히 editContent에 있는지 한 번 더 동기화하거나
+      // 버튼 클릭 시점에 입력값을 직접 가져오는 것이 안전합니다.
       const res = await fetch("https://api.blankd.top/api/save-card", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           wallet_address: card.wallet_address || "ENOKI_USER", 
-          card_id: card.id, // 💡 기존 ID를 보내면 서버가 자동으로 덮어쓰기(UPDATE)를 수행합니다.
-          card_content: editContent,
+          card_id: card.id,
+          card_content: editContent, // 💡 최신 상태가 여기서 사용됨
           answer_text: card.answer_text || "",
           folder_name: card.folder_name,
-          memo: card.memo // 💡 학습 통계 데이터 그대로 유지!
+          memo: card.memo 
         })
       });
 
       if (!res.ok) throw new Error("서버 통신에 실패했습니다.");
       
-      card.content = editContent; // API 전체 재호출 없이 로컬에 즉시 반영 (API 절약)
+      // 💡 핵심: 저장 성공 후 부모의 상태를 갱신해야 탭 전환 시 초기화되지 않습니다.
+      if (typeof loadAllData === 'function') {
+        await loadAllData(); 
+      }
+      
       setEditingId(null);
     } catch (error: any) {
-      console.error("수정 저장 실패:", error);
       setErrorMsg(error.message || "서버 통신에 실패했습니다.");
     } finally {
       setIsSaving(false);
@@ -280,7 +285,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                         </div>
                       </div>
                     ) : (
-                      <button {...createLongPressHandlers(() => handleDeleteCard(card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
+                      <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
                         <div className="flex flex-row justify-between items-center w-full gap-2">
                           <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{displayTitle}</div>
                           <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
