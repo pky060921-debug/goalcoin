@@ -95,26 +95,28 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [editingCatId, setEditingCatId] = useState<number | null>(null);
   const [editArticleText, setEditArticleText] = useState('');
 
-    // 💡 원본 데이터 직접 타이핑 편집 완료 및 저장 핸들러
   const handleSaveEditedText = async (catId: number) => {
     try {
       console.log(`[Craft 진단] 원본 텍스트 직접 변경사항 서버 전송. ID: ${catId}`);
+      // 💡 저장할 때도 괄호를 완전히 소거하여 순수 텍스트 본문만 DB 카테고리에 할당합니다.
+      const sanitizedSubmitText = editArticleText.replace(/\[|\]/g, '');
+
       const res = await fetch(`https://api.blankd.top/api/update-category-text`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           wallet_address: safeAddress, 
           id: catId, 
-          content: editArticleText
+          content: sanitizedSubmitText 
         })
       });
       if (!res.ok) throw new Error("원본 수정 반영 실패");
       
       if (setCategories) {
-        setCategories((prev: any[]) => prev.map(c => c.id === catId ? { ...c, content: editArticleText } : c));
+        setCategories((prev: any[]) => prev.map(c => c.id === catId ? { ...c, content: sanitizedSubmitText } : c));
       }
       setEditingCatId(null);
-      applyTextToState(editArticleText);
+      applyTextToState(sanitizedSubmitText);
     } catch (err) {
       console.error("[Craft 진단 오류] 저장 실패:", err);
       alert("서버 연결 불안정으로 원본 텍스트 수정에 실패했습니다.");
@@ -269,7 +271,9 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     const currentCustomStopWords = globalDict?.stopwords || globalDict?.custom_stopwords || [];
     const currentCustomIncludeWords = globalDict?.inclusions || globalDict?.custom_inclusions || [];
     
-    let processedText = textBody;
+    // 💡 [자가 치료 디톡스] 기존 데이터베이스에 혼입된 대괄호([, ]) 오염을 분석 시작 단계에서 완전 소거합니다.
+    let processedText = textBody.replace(/\[|\]/g, '');
+    
     if (currentCustomStopWords.length > 0) {
        const safeStops = currentCustomStopWords
           .map((w: string) => w.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
@@ -594,10 +598,9 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                                   <button 
                                     onClick={() => { 
                                       setEditingCatId(cat.id); 
-                                      const textWithBlanks = wordArray.map((w, idx) => {
-                                        return selectedWords.has(idx) ? `[${w.text}]` : w.text;
-                                      }).join('');
-                                      setEditArticleText(textWithBlanks); 
+                                      // 💡 [중복 방어] 수정 창을 켤 때 대괄호 오염이 차단된 순수한 원본 텍스트만 공급하여 중복 괄호를 사전에 차단합니다.
+                                      const pureText = (cat.content || cat.title || "").replace(/\[|\]/g, '');
+                                      setEditArticleText(pureText); 
                                     }} 
                                     className="px-3 py-1 text-[11px] font-bold rounded-sm border bg-white/5 border-white/20 text-white/50 hover:bg-white/10"
                                   >
