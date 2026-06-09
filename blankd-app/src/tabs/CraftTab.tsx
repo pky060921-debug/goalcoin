@@ -253,8 +253,11 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   }, [expandedId, categories]);
 
   const applyTextToState = (textBody: string) => {
-    const currentCustomStopWords = customStopWords;
-    const currentCustomIncludeWords = customIncludeWords;
+    // 💡 [수정 4] 텅 비어있던 개별 state 대신, 실시간 글로벌 사전을 참조합니다.
+    const currentCustomStopWords = globalDict?.stopwords || [];
+    const currentCustomIncludeWords = globalDict?.inclusions || [];
+    
+    // ... 아래 로직은 그대로 유지 ...
 
     // 💡 조사 분리 기획 적용: 제외 단어(하여, 나 등)가 등록되면 형태소 가위로 강제 분리 실행
     let processedText = textBody;
@@ -504,12 +507,13 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
               <button onClick={handleAddStopWord} className="px-4 bg-amber-600/20 text-amber-400 border border-amber-500/30 text-xs font-bold rounded-sm hover:bg-amber-600/40 transition-colors">추가</button>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {customStopWords.map(word => (
-                <span key={word} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] sm:text-[11px] text-white/70 flex items-center gap-1.5">
-                  {word} <button onClick={() => handleRemoveStopWord(word)} className="text-white/30 hover:text-red-400">✕</button>
-                </span>
-              ))}
-            </div>
+                {/* 💡 [수정 5-1] */}
+                {(globalDict?.stopwords || []).map((word: string) => (
+                  <span key={word} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] sm:text-[11px] text-white/70 flex items-center gap-1.5">
+                    {word} <button onClick={() => handleRemoveStopWord(word)} className="text-white/30 hover:text-red-400">✕</button>
+                  </span>
+                ))}
+              </div>
           </div>
           <div className="hidden sm:block w-px bg-white/10 mx-2"></div>
           <div className="sm:hidden h-px w-full bg-white/10 my-2"></div>
@@ -520,12 +524,13 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
               <button onClick={handleAddIncludeWord} className="px-4 bg-teal-600/20 text-teal-400 border border-teal-500/30 text-xs font-bold rounded-sm hover:bg-teal-600/40 transition-colors">추가</button>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {customIncludeWords.map(word => (
-                <span key={word} className="px-2 py-1 bg-teal-900/30 border border-teal-500/30 rounded text-[10px] sm:text-[11px] text-teal-300 flex items-center gap-1.5">
-                  {word} <button onClick={() => handleRemoveIncludeWord(word)} className="text-teal-500/50 hover:text-teal-300">✕</button>
-                </span>
-              ))}
-            </div>
+                {/* 💡 [수정 5-2] */}
+                {(globalDict?.inclusions || []).map((word: string) => (
+                  <span key={word} className="px-2 py-1 bg-teal-900/30 border border-teal-500/30 rounded text-[10px] sm:text-[11px] text-teal-300 flex items-center gap-1.5">
+                    {word} <button onClick={() => handleRemoveIncludeWord(word)} className="text-teal-500/50 hover:text-teal-300">✕</button>
+                  </span>
+                ))}
+              </div>
           </div>
         </div>
       )}
