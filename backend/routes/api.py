@@ -1337,3 +1337,139 @@ def update_global_dict():
         return jsonify({"message": "전역 사전 DB 업데이트 완료"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+import pandas as pd
+import io
+
+# ==========================================
+# 💡 [추가] 만들기(Categories) / 채우기(Cards) 엑셀 다운로드 API
+# ==========================================
+@api_bp.route('/export-excel', methods=['GET'])
+def export_excel():
+    try:
+        wallet_address = request.args.get('wallet_address')
+        target = request.args.get('target', 'all') # 'all', 'categories', 'cards'
+        
+        if not wallet_address:
+            return jsonify({"error": "지갑 주소가 필요합니다."}), 400
+
+        conn = get_db_connection()
+        
+        # 엑셀의 여러 시트(Sheet)에 데이터를 나누어 담기 위한 버퍼 생성
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            
+            # 1. 만들기 탭 데이터 (categories)
+            if target in ['all', 'categories']:
+                df_cat = pd.read_sql_query(
+                    "SELECT id, folder_name, title, content, memo FROM categories WHERE wallet_address = ?", 
+                    conn, params=(wallet_address,)
+                )
+                df_cat.to_excel(writer, sheet_name='만들기_카테고리', index=False)
+                
+            # 2. 채우기 탭 데이터 (cards)
+            if target in ['all', 'cards']:
+                df_card = pd.read_sql_query(
+                    "SELECT id, folder_name, content, answer_text, memo FROM cards WHERE wallet_address = ?", 
+                    conn, params=(wallet_address,)
+                )
+                df_card.to_excel(writer, sheet_name='채우기_카드', index=False)
+
+        conn.close()
+        output.seek(0)
+        
+        # 생성된 엑셀 파일을 프론트엔드로 전송
+        return send_file(
+            output,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=f"blankd_backup_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        )
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"엑셀 추출 중 에러 발생: {str(e)}"}), 500
+
+
+# ==========================================
+# 💡 [추가] 엑셀 업로드 및 DB 일괄 동기화(덮어쓰기/추가) API
+# ==========================================
+@api_bp.route('/import-excel', methods=['POST'])
+def import_excel():
+    try:
+        wallet_address = request.form.get('wallet_address')
+        if not wallet_address:
+            return jsonify({"error": "지갑 주소가 필요합니다."}), 400
+            
+        if 'file' not in request.files:
+            return jsonify({"error": "업로드할 엑셀 파일이 없습니다."}), 400
+            
+        file = request.files['file']
+        
+        # 메모리상에서 엑셀 전체 시트 읽기
+        excel_data = pd.ExcelFile(file)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 1. 만들기 시트 처리
+        if '만들기_카테고리' in excel_data.sheet_names:
+            df_cat = pd.read_excel(file, sheet_name='만들기_카테고리')
+            # 결측치(NaN)를 빈 문자열이나 기본값으로 처리
+            df_cat = df_cat.fillna('')
+            
+            for _, row in df_cat.iterrows():
+                cat_id = row.get('id')
+                folder_name = row.get('folder_name', '기본 폴더')
+                title = row.get('title', '')
+                content = row.get('content', '')
+                memo = row.get('memo', '')
+                
+                # ID가 존재하고 해당 지갑 소유가 맞다면 UPDATE, 없으면 INSERT
+                if cat_id and str(cat_id).strip() != '':
+                    cursor.execute("SELECT 1 FROM categories WHERE id = ? AND wallet_address = ?", (cat_id, wallet_address))
+                    if cursor.fetchone():
+                        cursor.execute(
+                            "UPDATE categories SET folder_name=?, title=?, content=?, memo=? WHERE id=? AND wallet_address=?",
+                            (folder_name, title, content, memo, cat_id, wallet_address)
+                        )
+                        continue
+                
+                # 신규 삽입
+                cursor.execute(
+                    "INSERT INTO categories (wallet_address, folder_name, title, content, memo) VALUES (?, ?, ?, ?, ?)",
+                    (wallet_address, folder_name, title, content, memo)
+                )
+
+        # 2. 채우기 시트 처리
+        if '채우기_카드' in excel_data.sheet_names:
+            df_card = pd.read_excel(file, sheet_name='채우기_카드')
+            df_card = df_card.fillna('')
+            
+            for _, row in df_card.iterrows():
+                card_id = row.get('id')
+                folder_name = row.get('folder_name', '기본 폴더')
+                content = row.get('content', '')
+                answer_text = row.get('answer_text', '')
+                memo = row.get('memo', '')
+                
+                if card_id and str(card_id).strip() != '':
+                    cursor.execute("SELECT 1 FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
+                    if cursor.fetchone():
+                        cursor.execute(
+                            "UPDATE cards SET folder_name=?, content=?, answer_text=?, memo=? WHERE id=? AND wallet_address=?",
+                            (folder_name, content, answer_text, memo, card_id, wallet_address)
+                        )
+                        continue
+                
+                # 신규 카드 삽입 (기본 데이터 구조 매핑)
+                cursor.execute(
+                    "INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, folder_name, memo) "
+                    "VALUES (?, 0, ?, ?, '[]', 0, ?, 'OWNED', ?, ?)",
+                    (wallet_address, content, answer_text, get_next_review_time(0), folder_name, memo)
+                )
+
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "엑셀 데이터를 기반으로 DB 일괄 동기화가 완료되었습니다."}), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"엑셀 업로드 중 오류 발생: {str(e)}"}), 500
