@@ -197,15 +197,21 @@ function MainApp() {
   try {
     const [catRes, cardRes, balance, dictRes] = await Promise.all([
       fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r=>r.json()),
-      fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
+      fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r=>r.json()),
       api.getGoalCoinBalance(safeAddress).catch(()=>0),
-      api.getGlobalDict(safeAddress).catch((e) => {
-        console.error("글로벌 단어장 로드 실패:", e); // ✅ 추가
-        addLog(`⚠️ 단어장 로드 실패: ${e?.message || '서버 오류'}`);
-        return { stopwords: [], inclusions: [], abbrs: {} };
-        console.log("서버에서 받아온 카드 목록:", cardRes); // 💡 이 줄을 추가하세요
-      })
+      api.getGlobalDict(safeAddress).catch(() => ({ stopwords: [], inclusions: [], abbrs: {} }))
     ]);
+    
+    // 💡 핵심: 기존 배열을 참조하지 말고 서버에서 받은 데이터로 완전히 교체합니다.
+    setCategories([...(catRes.categories || [])]); 
+    setSavedCards([...(cardRes.cards || [])]); // [...array]를 써서 완전히 새로운 메모리 주소 할당
+    
+    setGoalBalance(balance);
+    // ... 나머지 코드
+  } catch (e: any) { 
+    addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
+  }
+};
     
     setCategories(catRes.categories || []); 
     setSavedCards(cardRes.cards || []); 
