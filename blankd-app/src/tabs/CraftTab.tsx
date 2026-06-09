@@ -186,19 +186,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     saveGlobalDict({ ...globalDict, custom_inclusions: nextList, inclusions: nextList });
   };
 
-  const handleAddIncludeWord = () => {
-    if (!newIncludeWord.trim()) return;
-    const words = newIncludeWord.split(',').map(w => w.trim()).filter(w => w);
-    const nextList = Array.from(new Set([...(globalDict?.inclusions || []), ...words]));
-    saveGlobalDict({ ...globalDict, inclusions: nextList });
-    setNewIncludeWord("");
-  };
-
-  const handleRemoveIncludeWord = (wordToRemove: string) => {
-    const nextList = (globalDict?.inclusions || []).filter((w: string) => w !== wordToRemove);
-    saveGlobalDict({ ...globalDict, inclusions: nextList });
-  };
-
   useEffect(() => {
     setOpenFolders(prev => {
       const next = { ...prev };
