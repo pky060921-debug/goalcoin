@@ -30,7 +30,6 @@ type WordItem = { text: string; subWords: string[]; };
 export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, handleMakeBlankCard, addLog, handleDeleteCategory, loadAllData, expandedId, setExpandedId, globalDict, saveGlobalDict, setCategories }: any) => {  
   const safeCategories = Array.isArray(categories) ? categories : [];
   
-  // 💡 [오류 진단 코드 포함] 조항명 정밀 복구 로직
   const getDisplayTitle = (cat: any) => {
     try {
       const raw = cat.title || cat.content || "";
@@ -66,7 +65,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
         const onlyChars = (text: string) => text.replace(/[^가-힣a-zA-Z0-9一-龥]/g, '');
         const cleanCardTitle = onlyChars(removeBrackets(cardFirstLine));
         const cleanCatTitle = onlyChars(removeBrackets(cat.title));
-        
         if (cleanCardTitle && cleanCatTitle) {
           if (cleanCardTitle === cleanCatTitle || cleanCardTitle.endsWith(cleanCatTitle)) {
              return true;
@@ -94,11 +92,9 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [pageBreaks, setPageBreaks] = useState<Set<number>>(new Set());
   const [memoInput, setMemoInput] = useState(""); 
   
-  // 💡 [수정됨] isEditingText, isEraserMode 완전 삭제 후 직접 편집 상태 추가
   const [editingCatId, setEditingCatId] = useState<number | null>(null);
   const [editArticleText, setEditArticleText] = useState('');
 
-  // 💡 [추가됨] 원본 데이터 직접 타이핑 편집 완료 및 저장 핸들러
   const handleSaveEditedText = async (catId: number) => {
     try {
       console.log(`[Craft 진단] 원본 텍스트 직접 변경사항 서버 전송. ID: ${catId}`);
@@ -148,7 +144,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       }, 500); 
     }
   }, [expandedId, safeCategories]);
-  
+
   const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
   const [newStopWord, setNewStopWord] = useState("");
   const [newIncludeWord, setNewIncludeWord] = useState("");
@@ -158,7 +154,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const handleAddStopWord = () => {
     if (!newStopWord.trim()) return;
     const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
-    // 💡 프론트엔드용(stopwords)과 DB용(custom_stopwords) 이름표를 모두 맞춰서 전송합니다.
     const currentList = globalDict?.custom_stopwords || globalDict?.stopwords || [];
     const nextList = Array.from(new Set([...currentList, ...words]));
     saveGlobalDict({ ...globalDict, custom_stopwords: nextList, stopwords: nextList });
@@ -266,7 +261,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   }, [expandedId, categories]);
 
   const applyTextToState = (textBody: string) => {
-    // 💡 [안전장치 추가] 혹시 모를 변수명 충돌(stopwords vs custom_stopwords)을 모두 방어합니다!
     const currentCustomStopWords = globalDict?.stopwords || globalDict?.custom_stopwords || [];
     const currentCustomIncludeWords = globalDict?.inclusions || globalDict?.custom_inclusions || [];
     
@@ -284,7 +278,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
 
     const initialWords = processedText.split(SPLIT_REGEX).filter(w => w !== "");
     let currentWordArray = initialWords.map(w => ({ text: w, subWords: [w] }));
-
+    
     currentCustomIncludeWords.forEach((cw: string) => {
        const trimmedCw = cw.trim();
        if (!trimmedCw) return;
@@ -318,6 +312,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
 
     const initialSelected = new Set<number>();
     const protectedIndices = new Set<number>();
+    
     currentWordArray.forEach((wordObj, idx) => {
         const trimmed = wordObj.text.trim();
         if (currentCustomIncludeWords.some((cw: string) => trimmed.replace(/\s+/g, '') === cw.replace(/\s+/g, ''))) {
@@ -325,7 +320,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
             initialSelected.add(idx);
         }
     });
-
+    
     currentWordArray.forEach((wordObj, idx) => {
       if (protectedIndices.has(idx)) return;
 
@@ -346,21 +341,23 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     const fullText = currentWordArray.map(w => w.text).join("");
     const wordRanges: {start: number, end: number, wordIdx: number}[] = [];
     let currentPos = 0;
+    
     currentWordArray.forEach((w, idx) => {
        wordRanges.push({ start: currentPos, end: currentPos + w.text.length, wordIdx: idx });
        currentPos += w.text.length;
     });
-
+    
     const patternsToExclude: RegExp[] = [
       /(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)( Lifespan)?(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g
     ];
+    
     currentCustomStopWords.forEach((cw: string) => {
        const trimmedCw = cw.trim();
        if (!trimmedCw) return;
        const regexStr = trimmedCw.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
        patternsToExclude.push(new RegExp(regexStr, 'g'));
     });
-
+    
     patternsToExclude.forEach(regex => {
        let match;
        while ((match = regex.exec(fullText)) !== null) {
@@ -375,27 +372,25 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           });
        }
     });
+    
     setSelectedWords(initialSelected);
   };
 
-  // 💡 [실시간 감지 엔진] 단어장이 변경될 때마다 열려있는 조항의 빈칸을 즉시 갱신합니다.
   useEffect(() => {
     if (expandedId !== null && editingCatId === null) {
       const targetCat = safeCategories.find((c: any) => c.id === expandedId);
       if (targetCat) {
-        // 단어장 규칙을 적용하여 화면 즉각 새로고침!
         const { body } = formatCardText(targetCat.content || targetCat.title || "");
         applyTextToState(body);
       }
     }
-  }, [globalDict, expandedId, safeCategories]); 
-  // 👆 globalDict가 변할 때마다 이 로직이 자동으로 실행됩니다.
+  }, [globalDict, expandedId, safeCategories]);
 
   const openCategory = (targetCat: any, bypassToggle = false) => {
-      // ... (기존 openCategory 코드들)
-  
-  const openCategory = (targetCat: any, bypassToggle = false) => {
-    if (isSelectMode) { handleToggleCheck(targetCat.id); return; }
+    if (isSelectMode) { 
+        handleToggleCheck(targetCat.id);
+        return; 
+    }
     if (!bypassToggle) setExpandedId(targetCat.id);
     
     const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${targetCat.id}]]`));
@@ -408,13 +403,11 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       setMemoInput(targetCat.memo || "");
     }
     
-    // 💡 열 때 잔재 상태 초기화
     setEditingCatId(null);
     const { body } = formatCardText(targetCat.content || targetCat.title || "");
     applyTextToState(body);
   };
 
-  // 💡 [수정됨] 지우개 로직 완전히 걷어낸 깔끔한 핸들러들
   const handleWordClick = (idx: number) => {
     const s = new Set(selectedWords);
     if(s.has(idx)) s.delete(idx); else s.add(idx);
@@ -422,7 +415,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   };
 
   const handleWordSplit = (idx: number, e: any) => {
-    e.preventDefault(); 
+    e.preventDefault();
     const p = new Set(pageBreaks);
     if (p.has(idx)) p.delete(idx); else if (window.confirm("이 위치에서 페이지를 나누시겠습니까?")) p.add(idx);
     setPageBreaks(p);
@@ -472,7 +465,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in w-full">
       <div className="flex gap-2 mb-2 sm:mb-4 justify-end">
-        {/* 💡 업로드/전송 UI는 MypageTab으로 이동됨. 일괄삭제 버튼만 유지 */}
         {isSelectMode && (
           <div className="flex gap-1 animate-in fade-in zoom-in-95">
             <button onClick={handleBatchDelete} className="px-3 sm:px-4 bg-red-600/20 border border-red-500 text-red-400 text-[10px] sm:text-xs font-bold rounded-sm hover:bg-red-600/40 transition-colors">🗑️ 일괄삭제 ({checkedIds.size})</button>
@@ -502,7 +494,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           <div className="flex-1">
             <div className="text-xs sm:text-sm text-teal-400 font-bold mb-3">✅ 필수 포함 단어 (무조건 빈칸 O)</div>
             <div className="flex gap-2 mb-3">
-               <input type="text" value={newIncludeWord} onChange={(e) => setNewIncludeWord(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddIncludeWord(); }} placeholder="예: 또는, 및, 할 수 있다 (쉼표로 구분)" className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-teal-400/50" />
+              <input type="text" value={newIncludeWord} onChange={(e) => setNewIncludeWord(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddIncludeWord(); }} placeholder="예: 또는, 및, 할 수 있다 (쉼표로 구분)" className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-teal-400/50" />
               <button onClick={handleAddIncludeWord} className="px-4 bg-teal-600/20 text-teal-400 border border-teal-500/30 text-xs font-bold rounded-sm hover:bg-teal-600/40 transition-colors">추가</button>
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -532,148 +524,146 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
         {craftFolders.map((folder: string) => {
           const isChapterFolder = /^제\s*\d+\s*장/.test(folder);
           return openFolders[folder] && (
-          <div key={folder} className={`mb-6 sm:mb-8 border-l rounded-l-sm pl-3 sm:pl-4 transition-all ${isChapterFolder ? 'border-blue-500/50' : 'border-white/5'}`}>
-            <div className={`text-xs sm:text-sm mb-2 sm:mb-3 border-b pb-1.5 sm:pb-2 font-bold transition-all ${isChapterFolder ? 'text-blue-400 border-blue-500/30' : 'text-white/50 border-white/10'}`}>
-              {folder}
-            </div>
+            <div key={folder} className={`mb-6 sm:mb-8 border-l rounded-l-sm pl-3 sm:pl-4 transition-all ${isChapterFolder ? 'border-blue-500/50' : 'border-white/5'}`}>
+              <div className={`text-xs sm:text-sm mb-2 sm:mb-3 border-b pb-1.5 sm:pb-2 font-bold transition-all ${isChapterFolder ? 'text-blue-400 border-blue-500/30' : 'text-white/50 border-white/10'}`}>
+                {folder}
+              </div>
 
-            <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
-              {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
-                  const isExpanded = expandedId === cat.id;
-                  const isChecked = checkedIds.has(cat.id);
-                  const isCreated = checkIsCreated(cat);
-                  const displayTitle = getDisplayTitle(cat);
-                  
-                  let colClass = ""; 
-                  let titleColor = "text-amber-400";
-                  
-                  const checkText = `${cat.title || ''} ${cat.content || ''}`;
-                  if (checkText.includes('[법]')) titleColor = "text-red-500";
-                  else if (checkText.includes('[령]')) titleColor = "text-blue-400";
-                  else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
-                  
-                  if (isExpanded) colClass = "col-span-full";
-
-                  return (
-                    <div 
-                      key={cat.id} 
-                      id={`category-${cat.id}`}
-                      className={`relative transition-all w-full ${colClass}`}
-                    >
-                      {!isExpanded ? (
-                        <div className="relative group/card w-full flex items-center gap-2">
-                           {isSelectMode && (
-                            <input type="checkbox" checked={isChecked} onChange={() => handleToggleCheck(cat.id)} className="w-4 h-4 rounded border-white/20 bg-black accent-amber-500 cursor-pointer shrink-0 transition-all"/>
-                          )}
-                          <button 
-                            {...createLongPressHandlers(cat.id)}
-                            onClick={() => openCategory(cat)} 
-                            className={`flex-1 min-h-[60px] p-3 sm:p-4 border rounded-sm transition-colors flex flex-col gap-1.5 sm:gap-2 text-left relative pr-10 ${
-                              isChecked ? 'border-amber-500/50 bg-amber-950/10' : 
-                              isCreated ? 'border-white/5 bg-black/40 hover:bg-white/5' : 
-                              'border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40'
-                            }`}
-                          >
-                            <div className="flex justify-between items-center w-full">
-                              <span className={`${isCreated ? 'text-white/30 font-medium' : `${titleColor} font-bold`} text-[11px] sm:text-[13px] leading-snug break-keep`}>{displayTitle}</span>
-                              {isCreated && <span className="text-[9px] bg-white/5 text-white/30 px-1.5 py-0.5 rounded ml-2 whitespace-nowrap border border-white/10">제작됨</span>}
-                            </div>
-                            {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
-                            
-                            {!isSelectMode && (
-                              <span onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 조항을 대기열에서 즉시 삭제하시겠습니까?`)) { await handleDeleteCategory(cat.id); } }} className="absolute top-1/2 -translate-y-1/2 right-3 w-5 h-5 flex items-center justify-center border border-white/10 text-white/30 hover:text-red-400 hover:border-red-500/30 rounded-full text-[10px] bg-black/40 md:opacity-0 group-hover/card:opacity-100 transition-all duration-150 cursor-pointer" title="즉시 삭제">✕</span>
+              <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
+                {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
+                    const isExpanded = expandedId === cat.id;
+                    const isChecked = checkedIds.has(cat.id);
+                    const isCreated = checkIsCreated(cat);
+                    const displayTitle = getDisplayTitle(cat);
+                    
+                    let colClass = ""; 
+                    let titleColor = "text-amber-400";
+                    const checkText = `${cat.title || ''} ${cat.content || ''}`;
+                    if (checkText.includes('[법]')) titleColor = "text-red-500";
+                    else if (checkText.includes('[령]')) titleColor = "text-blue-400";
+                    else if (checkText.includes('[칙]') || checkText.includes('[규]')) titleColor = "text-green-500";
+                    
+                    if (isExpanded) colClass = "col-span-full";
+                    
+                    return (
+                      <div 
+                        key={cat.id} 
+                        id={`category-${cat.id}`}
+                        className={`relative transition-all w-full ${colClass}`}
+                      >
+                        {!isExpanded ? (
+                          <div className="relative group/card w-full flex items-center gap-2">
+                             {isSelectMode && (
+                               <input type="checkbox" checked={isChecked} onChange={() => handleToggleCheck(cat.id)} className="w-4 h-4 rounded border-white/20 bg-black accent-amber-500 cursor-pointer shrink-0 transition-all"/>
                             )}
-                          </button>
-                        </div>
-                      ) : (
-                         <div className="w-full p-4 sm:p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-3 shadow-xl z-20 relative animate-in zoom-in-95">
-                          <div className="flex justify-between items-center mb-1 flex-wrap gap-2">
-                            <div className="flex items-center gap-2">
-                               <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{displayTitle}</span>
-                              {isCreated && <span className="text-[10px] text-amber-500 font-bold ml-2">⚠️ 저장하면 카드를 덮어씁니다</span>}
-                            </div>
-                            
-                            <div className="flex gap-2">
-                              {editingCatId !== cat.id ? (
-                                <button 
-                                  onClick={() => { 
-                                    setEditingCatId(cat.id); 
-                                    // 💡 화면에 렌더링된 단어 배열과 선택된 빈칸 인덱스를 매칭하여 [ ] 를 씌워줍니다.
-                                    const textWithBlanks = wordArray.map((w, idx) => {
-                                      return selectedWords.has(idx) ? `[${w.text}]` : w.text;
-                                    }).join('');
-                                    
-                                    setEditArticleText(textWithBlanks); 
-                                  }} 
-                                  className="px-3 py-1 text-[11px] font-bold rounded-sm border bg-white/5 border-white/20 text-white/50 hover:bg-white/10"
-                                >
-                                  ✏️ 원본 텍스트 직접수정
-                                </button>
-                              ) : (
-                                <>
-                                  <button onClick={() => handleSaveEditedText(cat.id)} className="px-3 py-1 text-[11px] font-bold rounded-sm border bg-teal-900/60 border-teal-500/50 text-teal-300">
-                                    💾 저장
-                                  </button>
-                                  <button onClick={() => setEditingCatId(null)} className="px-3 py-1 text-[11px] font-bold rounded-sm border bg-white/5 border-white/10 text-white/40">
-                                    취소
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </div>
-
-                          <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-2 text-xs text-teal-200 outline-none rounded-sm" />
-                          
-                          {editingCatId === cat.id ? (
-                            <div className="w-full relative mt-2 animate-in fade-in zoom-in-95">
-                              <textarea value={editArticleText} onChange={(e) => setEditArticleText(e.target.value)} className="w-full h-48 bg-black border border-amber-500/50 p-4 text-amber-100 text-[13px] sm:text-[15px] leading-loose rounded outline-none resize-y custom-scrollbar" placeholder="수정할 원본 텍스트를 자유롭게 편집하세요..." />
-                            </div>
-                          ) : (
-                            <div className="font-serif mt-2 text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border border-white/10 max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative transition-all">
-                              {wordArray.map((wordObj, idx) => {
-                                const word = wordObj.text;
-                                const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(word) && word.trim() !== "";
-                                const isMerged = wordObj.subWords.length > 1;
-                                const isSelected = selectedWords.has(idx);
-                                return (
-                                  <React.Fragment key={idx}>
-                                    {pageBreaks.has(idx) && <div className="w-full border-t border-red-500/50 my-2 relative"><span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black px-1 text-[8px] text-red-400 font-bold uppercase tracking-tighter">Page Break</span></div>}
-                                     <span onClick={() => { if (!isSymbolOnly) handleWordClick(idx); }} onContextMenu={(e) => handleWordSplit(idx, e)} onDoubleClick={() => { if (!isSymbolOnly || isMerged) handleWordMerge(idx); }} className={`px-[1px] rounded transition-colors ${isSelected ? 'bg-amber-500 text-black font-bold cursor-pointer' : isSymbolOnly ? 'text-white/30 cursor-default' : isMerged ? 'bg-indigo-900/30 border-b border-indigo-500/50 hover:bg-indigo-800/40 cursor-pointer' : 'hover:bg-white/10 cursor-pointer'}`} title={isSelected ? "클릭하여 빈칸에서 해제" : "클릭하여 빈칸으로 지정"}>
-                                      {word}
-                                    </span>
-                                  </React.Fragment>
-                                );
-                              })}
-                            </div>
-                          )}
-                          
-                          <button 
-                            disabled={editingCatId === cat.id}
-                            onClick={() => {
-                              const folderCats = safeCategories.filter((c:any) => c.folder_name === cat.folder_name).sort((a:any, b:any) => a.id - b.id);
-                              const currentIdx = folderCats.findIndex(c => c.id === cat.id);
-                              const nextCat = folderCats[currentIdx + 1];
+                            <button 
+                              {...createLongPressHandlers(cat.id)}
+                              onClick={() => openCategory(cat)} 
+                              className={`flex-1 min-h-[60px] p-3 sm:p-4 border rounded-sm transition-colors flex flex-col gap-1.5 sm:gap-2 text-left relative pr-10 ${
+                                isChecked ? 'border-amber-500/50 bg-amber-950/10' : 
+                                isCreated ? 'border-white/5 bg-black/40 hover:bg-white/5' : 
+                                'border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40'
+                              }`}
+                            >
+                              <div className="flex justify-between items-center w-full">
+                                <span className={`${isCreated ? 'text-white/30 font-medium' : `${titleColor} font-bold`} text-[11px] sm:text-[13px] leading-snug break-keep`}>{displayTitle}</span>
+                                {isCreated && <span className="text-[9px] bg-white/5 text-white/30 px-1.5 py-0.5 rounded ml-2 whitespace-nowrap border border-white/10">제작됨</span>}
+                              </div>
+                              {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
                               
-                              handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, cat.id, () => {
-                                  if (nextCat) {
-                                      setExpandedId(nextCat.id);
-                                  } else {
-                                      setExpandedId(null);
-                                  }
-                              });
-                            }} 
-                            className={`w-full py-2.5 text-xs sm:text-sm font-bold rounded-sm mt-2 transition-all ${editingCatId === cat.id ? 'bg-white/5 text-white/30 border border-white/10 cursor-not-allowed' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'}`}
-                          >
-                            만들기
-                          </button>
+                              {!isSelectMode && (
+                                <span onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 조항을 대기열에서 즉시 삭제하시겠습니까?`)) { await handleDeleteCategory(cat.id); } }} className="absolute top-1/2 -translate-y-1/2 right-3 w-5 h-5 flex items-center justify-center border border-white/10 text-white/30 hover:text-red-400 hover:border-red-500/30 rounded-full text-[10px] bg-black/40 md:opacity-0 group-hover/card:opacity-100 transition-all duration-150 cursor-pointer" title="즉시 삭제">✕</span>
+                              )}
+                            </button>
+                          </div>
+                        ) : (
+                           <div className="w-full p-4 sm:p-6 bg-[#0a0a0c] border border-indigo-500/50 rounded-sm space-y-3 shadow-xl z-20 relative animate-in zoom-in-95">
+                              <div className="flex justify-between items-center mb-1 flex-wrap gap-2">
+                              <div className="flex items-center gap-2">
+                                 <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{displayTitle}</span>
+                                 {isCreated && <span className="text-[10px] text-amber-500 font-bold ml-2">⚠️ 저장하면 카드를 덮어씁니다</span>}
+                              </div>
+                              
+                              <div className="flex gap-2">
+                                {editingCatId !== cat.id ? (
+                                  <button 
+                                    onClick={() => { 
+                                      setEditingCatId(cat.id); 
+                                      const textWithBlanks = wordArray.map((w, idx) => {
+                                        return selectedWords.has(idx) ? `[${w.text}]` : w.text;
+                                      }).join('');
+                                      setEditArticleText(textWithBlanks); 
+                                    }} 
+                                    className="px-3 py-1 text-[11px] font-bold rounded-sm border bg-white/5 border-white/20 text-white/50 hover:bg-white/10"
+                                  >
+                                    ✏️ 원본 텍스트 직접수정
+                                  </button>
+                                ) : (
+                                  <>
+                                    <button onClick={() => handleSaveEditedText(cat.id)} className="px-3 py-1 text-[11px] font-bold rounded-sm border bg-teal-900/60 border-teal-500/50 text-teal-300">
+                                      💾 저장
+                                    </button>
+                                    <button onClick={() => setEditingCatId(null)} className="px-3 py-1 text-[11px] font-bold rounded-sm border bg-white/5 border-white/10 text-white/40">
+                                      취소
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-2 text-xs text-teal-200 outline-none rounded-sm" />
+                            
+                            {editingCatId === cat.id ? (
+                              <div className="w-full relative mt-2 animate-in fade-in zoom-in-95">
+                                <textarea value={editArticleText} onChange={(e) => setEditArticleText(e.target.value)} className="w-full h-48 bg-black border border-amber-500/50 p-4 text-amber-100 text-[13px] sm:text-[15px] leading-loose rounded outline-none resize-y custom-scrollbar" placeholder="수정할 원본 텍스트를 자유롭게 편집하세요..." />
+                              </div>
+                            ) : (
+                              <div className="font-serif mt-2 text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border border-white/10 max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative transition-all">
+                                {wordArray.map((wordObj, idx) => {
+                                  const word = wordObj.text;
+                                  const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(word) && word.trim() !== "";
+                                  const isMerged = wordObj.subWords.length > 1;
+                                  const isSelected = selectedWords.has(idx);
+                                  
+                                  return (
+                                    <React.Fragment key={idx}>
+                                      {pageBreaks.has(idx) && <div className="w-full border-t border-red-500/50 my-2 relative"><span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black px-1 text-[8px] text-red-400 font-bold uppercase tracking-tighter">Page Break</span></div>}
+                                      <span onClick={() => { if (!isSymbolOnly) handleWordClick(idx); }} onContextMenu={(e) => handleWordSplit(idx, e)} onDoubleClick={() => { if (!isSymbolOnly || isMerged) handleWordMerge(idx); }} className={`px-[1px] rounded transition-colors ${isSelected ? 'bg-amber-500 text-black font-bold cursor-pointer' : isSymbolOnly ? 'text-white/30 cursor-default' : isMerged ? 'bg-indigo-900/30 border-b border-indigo-500/50 hover:bg-indigo-800/40 cursor-pointer' : 'hover:bg-white/10 cursor-pointer'}`} title={isSelected ? "클릭하여 빈칸에서 해제" : "클릭하여 빈칸으로 지정"}>
+                                        {word}
+                                      </span>
+                                    </React.Fragment>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            
+                            <button 
+                              disabled={editingCatId === cat.id}
+                              onClick={() => {
+                                const folderCats = safeCategories.filter((c:any) => c.folder_name === cat.folder_name).sort((a:any, b:any) => a.id - b.id);
+                                const currentIdx = folderCats.findIndex(c => c.id === cat.id);
+                                const nextCat = folderCats[currentIdx + 1];
+                                
+                                handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, cat.id, () => {
+                                    if (nextCat) {
+                                        setExpandedId(nextCat.id);
+                                    } else {
+                                        setExpandedId(null);
+                                    }
+                                });
+                              }} 
+                              className={`w-full py-2.5 text-xs sm:text-sm font-bold rounded-sm mt-2 transition-all ${editingCatId === cat.id ? 'bg-white/5 text-white/30 border border-white/10 cursor-not-allowed' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30'}`}
+                            >
+                              만들기
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      )}
-                    </div>
-                  );
-              })}
+                    );
+                })}
+              </div>
             </div>
-          </div>
-        );
+          );
         })}
       </div> 
     </div>
