@@ -319,6 +319,33 @@ def update_category_folder():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@api_bp.route('/update-category-text', methods=['POST'])
+def update_category_text():
+    try:
+        data = request.json or {}
+        wallet_address = data.get('wallet_address')
+        cat_id = data.get('id')
+        content = data.get('content') # 필드명을 DB 컬럼과 맞춰 content로 수신
+        
+        if not wallet_address or not cat_id:
+            return jsonify({"error": "필수 정보가 누락되었습니다."}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 데이터베이스의 categories 테이블 내 content 컬럼을 업데이트합니다.
+        cursor.execute(
+            "UPDATE categories SET content = ? WHERE id = ? AND wallet_address = ?",
+            (content, cat_id, wallet_address)
+        )
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "원본 텍스트 수정 완료"}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"DB 에러: {str(e)}"}), 500
+
 # ==========================================
 # 💡 텍스트 추출 및 정답(빨간색) 자동 감지 엔진
 # ==========================================
