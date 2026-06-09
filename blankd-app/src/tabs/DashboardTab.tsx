@@ -12,124 +12,127 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
   const folderStats: Record<string, { total: number; filled: number; wrong: number }> = {};
   
   safeCards.forEach((card: any) => {
-    const folder = card.folder_name || '기본 폴더';
-    if (!folderStats[folder]) folderStats[folder] = { total: 0, filled: 0, wrong: 0 };
+    try {
+      const folder = card.folder_name || '기본 폴더';
+      if (!folderStats[folder]) folderStats[folder] = { total: 0, filled: 0, wrong: 0 };
 
-    const { body } = formatCardText(card.content);
-    const blanks = body.match(/\[\s*(.*?)\s*\]/g) || [];
-    const blankCount = blanks.length;
-    
-    const stats = parseCardStats(card.memo);
-    totalBlanks += blankCount;
-    totalFilled += stats.filled;
-    totalWrong += stats.wrongIndices.length;
+      const { body } = formatCardText(card.content);
+      const blanks = body.match(/\[\s*(.*?)\s*\]/g) || [];
+      const blankCount = blanks.length;
+      
+      const stats = parseCardStats(card.memo);
+      totalBlanks += blankCount;
+      totalFilled += stats.filled;
+      totalWrong += stats.wrongIndices.length;
 
-    folderStats[folder].total += blankCount;
-    folderStats[folder].filled += stats.filled;
-    folderStats[folder].wrong += stats.wrongIndices.length;
+      folderStats[folder].total += blankCount;
+      folderStats[folder].filled += stats.filled;
+      folderStats[folder].wrong += stats.wrongIndices.length;
+    } catch (err) {
+      console.error("[Dashboard 진단 오류] 카드 데이터 파싱 실패:", err, card);
+    }
   });
 
+  // 💡 [수정 완료] 조항 수 기준이 아닌 순수 '빈칸 채운 총 개수' 기준으로 진척도 지표 수정
+  const fillProgress = totalBlanks > 0 ? Math.round((totalFilled / totalBlanks) * 100) : 0;
   const craftProgress = safeCategories.length > 0 ? Math.round((safeCards.length / safeCategories.length) * 100) : 0;
-  const enhanceProgress = totalBlanks > 0 ? Math.round((totalFilled / totalBlanks) * 100) : 0;
-
-  const [recentCraftId, setRecentCraftId] = useState<number | null>(null);
-  const [recentCraftTitle, setRecentCraftTitle] = useState("");
-  const [recentEnhanceId, setRecentEnhanceId] = useState<number | null>(null);
-  const [recentEnhanceTitle, setRecentEnhanceTitle] = useState("");
-
-  // 💡 [수정됨] 이어서 하기 상태 불러오기 로직 (새로고침 대응)
-  useEffect(() => {
-    const loadResumeData = () => {
-      const cId = localStorage.getItem('blankd_last_crafted_id');
-      const cTitle = localStorage.getItem('blankd_last_crafted_title');
-      const eId = localStorage.getItem('blankd_last_enhanced_id');
-      const eTitle = localStorage.getItem('blankd_last_enhanced_title');
-
-      if (cId) setRecentCraftId(parseInt(cId, 10));
-      setRecentCraftTitle(cTitle || "");
-      if (eId) setRecentEnhanceId(parseInt(eId, 10));
-      setRecentEnhanceTitle(eTitle || "");
-    };
-
-    loadResumeData();
-    window.addEventListener('storage', loadResumeData);
-    const timeoutId = setTimeout(() => loadResumeData(), 500);
-
-    return () => {
-      window.removeEventListener('storage', loadResumeData);
-      clearTimeout(timeoutId);
-    };
-  }, [savedCards]);
 
   const sortedFolders = Object.keys(folderStats).sort((a, b) => {
-    if (a === '기본 폴더') return 1;
-    if (b === '기본 폴더') return -1;
-    const matchA = a.match(/제\s*(\d+)\s*장/);
-    const matchB = b.match(/제\s*(\d+)\s*장/);
+    const matchA = a.match(/^제\s*(\d+)\s*장/);
+    const matchB = b.match(/^제\s*(\d+)\s*장/);
     if (matchA && matchB) return parseInt(matchA[1]) - parseInt(matchB[1]);
+    if (matchA) return -1;
+    if (matchB) return 1;
     return a.localeCompare(b, 'ko');
   });
 
+  const recentWrongCards = safeCards.filter((c: any) => {
+    const stats = parseCardStats(c.memo);
+    return stats.wrongIndices && stats.wrongIndices.length > 0;
+  }).slice(0, 3);
+
+  const recentEnhanceCard = safeCards.length > 0 ? safeCards[safeCards.length - 1] : null;
+  const recentEnhanceTitle = recentEnhanceCard ? getStrictTitleOnly(recentEnhanceCard.content) : "";
+
+  function getStrictTitleOnly(content: string) {
+    if (!content) return "";
+    const firstLine = content.split('\n')[0] || "";
+    return firstLine.replace(/▶/g, '').trim();
+  }
+
   return (
-    <div className="max-w-4xl mx-auto space-y-6 sm:space-y-8 py-4 sm:py-8 px-2 sm:px-0 animate-in fade-in">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-8">
-        <div className="bg-[#0a0a0c] border border-amber-500/20 p-5 sm:p-6 rounded-sm shadow-xl relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl group-hover:bg-amber-500/10 transition-all duration-700"></div>
-          <h2 className="text-amber-500 font-bold mb-4 flex justify-between items-end relative z-10">
-            <span className="text-lg sm:text-xl tracking-widest">만들기 진척도</span>
-            <span className="text-3xl sm:text-4xl font-mono text-amber-400">{craftProgress}%</span>
-          </h2>
-          <div className="w-full bg-black/60 h-2 sm:h-3 rounded-full mb-3 overflow-hidden shadow-inner relative z-10 border border-white/5">
-            <div className="bg-gradient-to-r from-amber-600 to-amber-400 h-full transition-all duration-1000 ease-out" style={{ width: `${craftProgress}%` }} />
+    <div className="max-w-6xl mx-auto space-y-8 py-6 px-4 animate-in fade-in duration-300">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {/* 만들기 진척도 */}
+        <div className="bg-[#0a0a0c] border border-white/10 p-5 rounded-sm flex flex-col justify-between">
+          <div>
+            <div className="text-xs text-white/40 font-mono uppercase tracking-wider">Craft Progress</div>
+            <div className="text-2xl font-serif text-amber-400 mt-2 font-bold">{craftProgress}%</div>
+            <div className="text-[11px] text-white/50 mt-1">원본 대비 빈칸카드 제작률</div>
           </div>
-          <p className="text-xs sm:text-sm text-amber-500/60 font-mono relative z-10 tracking-wider">
-            {safeCards.length} / {safeCategories.length} 조항 생성됨
-          </p>
+          <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden mt-4">
+            <div className="bg-amber-500 h-full transition-all duration-500" style={{ width: `${craftProgress}%` }}></div>
+          </div>
         </div>
 
-        <div className="bg-[#0a0a0c] border border-teal-500/20 p-5 sm:p-6 rounded-sm shadow-xl relative overflow-hidden group">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-teal-500/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl group-hover:bg-teal-500/10 transition-all duration-700"></div>
-          <h2 className="text-teal-500 font-bold mb-4 flex justify-between items-end relative z-10">
-            <span className="text-lg sm:text-xl tracking-widest">채우기 진척도</span>
-            <span className="text-3xl sm:text-4xl font-mono text-teal-400">{enhanceProgress}%</span>
-          </h2>
-          <div className="w-full bg-black/60 h-2 sm:h-3 rounded-full mb-3 overflow-hidden shadow-inner relative z-10 border border-white/5">
-            <div className="bg-gradient-to-r from-teal-600 to-teal-400 h-full transition-all duration-1000 ease-out" style={{ width: `${enhanceProgress}%` }} />
+        {/* 채우기 진척도 (빈칸채운 횟수 기준으로 전면 수정) */}
+        <div className="bg-[#0a0a0c] border border-white/10 p-5 rounded-sm flex flex-col justify-between">
+          <div>
+            <div className="text-xs text-white/40 font-mono uppercase tracking-wider">Fill Progress (Blanks)</div>
+            <div className="text-2xl font-serif text-indigo-400 mt-2 font-bold">{fillProgress}%</div>
+            <div className="text-[11px] text-white/50 mt-1">전체 빈칸 개수 기준 암기 진척도 ({totalFilled} / {totalBlanks})</div>
           </div>
-          <div className="flex justify-between items-center relative z-10">
-            <p className="text-xs sm:text-sm text-teal-500/60 font-mono tracking-wider">
-              {totalFilled} / {totalBlanks} 빈칸 채움
-            </p>
-            <p className="text-[10px] sm:text-xs text-red-400/80 font-mono bg-red-900/20 px-2 py-1 rounded border border-red-500/20">
-              오답: {totalWrong}
-            </p>
+          <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden mt-4">
+            <div className="bg-indigo-500 h-full transition-all duration-500" style={{ width: `${fillProgress}%` }}></div>
+          </div>
+        </div>
+
+        {/* 실시간 오답 현황 */}
+        <div className="bg-[#0a0a0c] border border-white/10 p-5 rounded-sm flex flex-col justify-between">
+          <div>
+            <div className="text-xs text-white/40 font-mono uppercase tracking-wider">Wrong Answers</div>
+            <div className="text-2xl font-serif text-red-400 mt-2 font-bold">{totalWrong}개</div>
+            <div className="text-[11px] text-white/50 mt-1">현재 집중 반복이 필요한 빈칸 개수</div>
+          </div>
+          <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden mt-4">
+            <div className="bg-red-500 h-full transition-all duration-300" style={{ width: `${totalWrong > 0 ? Math.min(100, totalWrong * 5) : 0}%` }}></div>
           </div>
         </div>
       </div>
 
-      {/* 💡 [복구됨] 이어서 하기 버튼 UI 영역 */}
-      {(recentCraftId || recentEnhanceId) && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
-          {recentCraftId && (
-            <button 
-              onClick={() => { setActiveTab('create'); setExpandedId(recentCraftId); }}
-              className="bg-amber-900/20 border border-amber-500/30 p-4 rounded-sm flex flex-col items-start hover:bg-amber-900/40 transition-colors text-left"
-            >
-              <span className="text-[10px] text-amber-500 mb-1 font-bold tracking-widest">▶️ 이어서 만들기</span>
-              <span className="text-xs font-bold text-amber-100 truncate w-full">{recentCraftTitle || "최근 작업 조항"}</span>
-            </button>
+      {(recentWrongCards.length > 0 || recentEnhanceCard) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {recentWrongCards.length > 0 && (
+            <div className="border border-white/10 p-4 rounded-sm bg-[#08080a]">
+              <div className="text-xs text-red-400 font-bold mb-3 tracking-wider font-mono">⚠️ 취약 조항 리스트</div>
+              <div className="space-y-2">
+                {recentWrongCards.map((card: any) => (
+                  <button
+                    key={card.id}
+                    onClick={() => {
+                      console.log("[Dashboard 진단] 오답 카드 선택:", card.id);
+                      setActiveCard(card);
+                    }}
+                    className="w-full text-left p-2.5 bg-red-950/20 border border-red-900/30 rounded-sm hover:bg-red-950/40 transition-all flex justify-between items-center group"
+                  >
+                    <span className="text-xs text-white/80 font-bold truncate max-w-[80%] group-hover:text-white">{getStrictTitleOnly(card.content)}</span>
+                    <span className="text-[10px] font-mono text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded bg-red-950/50">틀림</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
-          {recentEnhanceId && (
-            <button 
+
+          {recentEnhanceCard && (
+            <button
               onClick={() => {
-                const targetCard = safeCards.find((c:any) => c.id === recentEnhanceId);
-                if (targetCard) setActiveCard(targetCard);
-                else setActiveTab('enhance');
+                console.log("[Dashboard 진단] 이어하기 클릭:", recentEnhanceCard.id);
+                setActiveTab('enhance');
               }}
-              className="bg-teal-900/20 border border-teal-500/30 p-4 rounded-sm flex flex-col items-start hover:bg-teal-900/40 transition-colors text-left"
+              className="border border-white/10 p-5 rounded-sm bg-[#08080a] flex flex-col justify-center items-center hover:border-teal-500/40 transition-all text-center group cursor-pointer"
             >
               <span className="text-[10px] text-teal-500 mb-1 font-bold tracking-widest">▶️ 이어서 채우기</span>
-              <span className="text-xs font-bold text-teal-100 truncate w-full">{recentEnhanceTitle || "최근 학습 카드"}</span>
+              <span className="text-xs font-bold text-teal-100 truncate w-full group-hover:text-white">{recentEnhanceTitle || "최근 학습 카드"}</span>
             </button>
           )}
         </div>
@@ -144,10 +147,14 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
             <div key={folder} className="bg-white/5 border border-white/5 p-2 sm:p-3 rounded-sm hover:bg-white/10 transition-colors flex flex-col gap-1.5 sm:gap-2">
               <div className="flex justify-between items-start">
                 <span className="text-[10px] sm:text-[11px] font-bold text-amber-500/80 truncate pr-1 flex-1 leading-tight">{folder}</span>
-                <span className="text-[9px] sm:text-[10px] text-white/40 font-mono">{fp}%</span>
+                <span className="text-[9px] sm:text-[10px] text-white/60 font-mono font-bold">{fp}%</span>
               </div>
-              <div className="w-full bg-black/40 h-1 rounded-full overflow-hidden">
-                <div className="bg-amber-500/60 h-full transition-all duration-700" style={{ width: `${Math.min(fp, 100)}%` }} />
+              <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
+                <div className="bg-indigo-500 h-full" style={{ width: `${fp}%` }}></div>
+              </div>
+              <div className="flex justify-between items-center text-[9px] sm:text-[10px] font-mono text-white/30 pt-0.5 border-t border-white/5 mt-0.5">
+                <span>완료:{fs.filled}/{fs.total}</span>
+                {fs.wrong > 0 && <span className="text-red-400 font-bold">오답:{fs.wrong}</span>}
               </div>
             </div>
           );
