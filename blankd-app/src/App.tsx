@@ -886,9 +886,8 @@ function MainApp() {
         </div>
       </>
     );
-  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, studyMode, setStudyMode]); // 💡 추가됨
-  // 💡 [핵심 방어막] 타이머(elapsed)가 감시 대상에서 빠져 있으므로 1초마다 화면이 새로고침되지 않습니다!
-// 💡 [단어장 UI 분리] PC 사이드바와 모바일 모달에서 똑같은 코드를 재사용하기 위한 함수입니다.
+  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, studyMode, setStudyMode]);
+  // 💡 [단어장 UI 분리] PC 사이드바와 모바일 모달에서 똑같은 코드를 재사용하기 위한 함수입니다.
   const renderDictionaryUI = (isMobile: boolean) => (
     <div className={`flex flex-col w-full h-full ${isMobile ? 'bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 rounded-sm' : 'bg-[#08080a]/80 border border-white/10 p-5 rounded-sm shadow-xl backdrop-blur-sm'}`}>
       <div className="flex justify-between items-start mb-6">
