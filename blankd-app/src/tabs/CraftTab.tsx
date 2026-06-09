@@ -488,7 +488,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           <input type="file" accept=".pdf,.txt,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 학습자료 업로드'}
         </label>
         <button onClick={uploadLaw} className="px-3 sm:px-4 border border-white/20 text-[10px] sm:text-xs hover:bg-white/10 transition-colors rounded-sm">전송</button>
-        <button onClick={() => setShowStopWordsSettings(!showStopWordsSettings)} className={`px-3 sm:px-4 border rounded-sm text-[10px] sm:text-xs transition-colors ${showStopWordsSettings ? 'bg-amber-600/30 border-amber-500/50 text-amber-300' : 'border-white/20 text-white/50 hover:bg-white/10'}`}>⚙️ 예외 단어 (DB)</button>
         
         {isSelectMode && (
           <div className="flex gap-1 animate-in fade-in zoom-in-95">
@@ -547,9 +546,11 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
         ))}
       </div>
       
-      {craftFolders.map((folder: string) => {
-        const isChapterFolder = /^제\s*\d+\s*장/.test(folder);
-        return openFolders[folder] && (
+      {/* 💡 [스크롤 추가 1] 맵핑 시작 전에 스크롤 기능을 가진 div를 엽니다. */}
+      <div className="overflow-y-auto max-h-[60vh] custom-scrollbar pr-2 pb-10">      
+        {craftFolders.map((folder: string) => {
+          const isChapterFolder = /^제\s*\d+\s*장/.test(folder);
+          return openFolders[folder] && (
           <div key={folder} className={`mb-6 sm:mb-8 border-l rounded-l-sm pl-3 sm:pl-4 transition-all ${isChapterFolder ? 'border-blue-500/50' : 'border-white/5'}`}>
             <div className={`text-xs sm:text-sm mb-2 sm:mb-3 border-b pb-1.5 sm:pb-2 font-bold transition-all ${isChapterFolder ? 'text-blue-400 border-blue-500/30' : 'text-white/50 border-white/10'}`}>
               {folder}
@@ -682,6 +683,10 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           </div>
         );
       })}
+      
+      {/* 💡 [스크롤 추가 2] 맵핑이 끝난 직후 위에서 열었던 스크롤 div를 닫아줍니다. */}
+      </div> 
+      
     </div>
   );
 };
