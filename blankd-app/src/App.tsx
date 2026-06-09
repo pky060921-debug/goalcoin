@@ -192,6 +192,7 @@ function MainApp() {
       console.error("데이터 동기화 실패:", e);
       addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
     }
+    console.log("새로 불러온 카드 데이터:", cardRes.cards);
   }; // 💡 여기서 loadAllData가 안전하게 종료됩니다.
   
   const saveGlobalDict = async (newDict: any) => {
