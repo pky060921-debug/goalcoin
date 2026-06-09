@@ -872,7 +872,7 @@ function MainApp() {
           <ExamTab walletAddress={safeAddress} address={safeAddress} />
         </div>
         
-        <div className="block">
+        <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
           <MypageTab 
             safeAddress={safeAddress} 
             enokiFlow={enokiFlow} 
