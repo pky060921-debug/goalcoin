@@ -72,35 +72,53 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     const clear = () => { clearTimeout(timer); };
     return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
   };
-    // --- 💡 저장 함수 (api.put 대신 올바른 save-card 엔드포인트 사용) ---
+  // --- 💡 여기서부터 덮어쓰기 ---
   const handleSaveEdit = async (card: any) => {
     setIsSaving(true);
     setErrorMsg(null);
     try {
+      // 💡 1. 사용자가 직접 타이핑한 내용에서 [ ] 안의 새로운 빈칸 정답들을 자동으로 추출합니다.
+      const newAnswers = (editContent.match(/\[\s*(.*?)\s*\]/g) || [])
+        .map(b => b.replace(/\[|\]/g, '').trim())
+        .filter(Boolean)
+        .join(", ");
+
+      const payload = {
+        wallet_address: safeAddress, // App.tsx에서 넘겨준 지갑 주소 강제 적용
+        card_id: parseInt(card.id, 10),
+        card_content: editContent,
+        answer_text: newAnswers, // 💡 새롭게 갱신된 정답 전송
+        folder_name: card.folder_name,
+        memo: card.memo
+      };
+
+      console.log("🚀 [서버로 전송하는 수정 데이터]:", payload);
+
       const res = await fetch("https://api.blankd.top/api/save-card", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          wallet_address: card.wallet_address || "ENOKI_USER", 
-          card_id: card.id,
-          card_content: editContent,
-          answer_text: card.answer_text || "",
-          folder_name: card.folder_name,
-          memo: card.memo
-        })
+        body: JSON.stringify(payload)
       });
-      console.log("서버 응답 상태:", res.status); // 💡 이 줄을 추가하세요
-      if (res.ok) {
-        // 서버 저장 성공 후, 부모에게 알림
-        if (typeof loadAllData === 'function') {
-           await loadAllData(); // 💡 DB에서 수정된 최신본을 다시 가져옴
-        }
-        setEditingId(null);
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "서버 저장 실패");
+      }
+
+      // 💡 2. 화면 렉(지연) 방지: 서버 데이터를 기다리기 전에 내 화면의 카드를 먼저 바꿔치기 합니다.
+      card.content = editContent;
+      card.answer_text = newAnswers;
+
+      // 💡 3. 서버 백그라운드 동기화
+      if (typeof loadAllData === 'function') {
+         await loadAllData();
       }
       
       setEditingId(null);
+      alert("✅ 카드 내용이 성공적으로 수정되었습니다!"); // 정상 작동 확인용 알림
+
     } catch (error: any) {
-      console.error("수정 저장 실패:", error);
+      console.error("❌ 수정 저장 실패:", error);
       setErrorMsg(error.message || "서버 통신에 실패했습니다.");
     } finally {
       setIsSaving(false);
