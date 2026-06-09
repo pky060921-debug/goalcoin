@@ -72,16 +72,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     const clear = () => { clearTimeout(timer); };
     return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
   };
-
-  // --- 💡 새로 추가된 직접 수정(Edit) 모드 상태 ---
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editContent, setEditContent] = useState<string>("");
-  const [isSaving, setIsSaving] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  
-  // 💡 도구 상태: 'editor'(텍스트), 'include'(포함), 'exclude'(제외), null(비활성화/뷰어)
-  const [activeTool, setActiveTool] = useState<'editor' | 'include' | 'exclude' | null>('include');
-
     // --- 💡 저장 함수 (api.put 대신 올바른 save-card 엔드포인트 사용) ---
   const handleSaveEdit = async (card: any) => {
     setIsSaving(true);
