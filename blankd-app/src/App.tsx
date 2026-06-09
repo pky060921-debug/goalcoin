@@ -195,7 +195,7 @@ function MainApp() {
 
   const loadAllData = async () => {
     try {
-      // Promise.all로 데이터 일괄 로드
+      // 1. 모든 데이터 비동기 일괄 로드
       const [catRes, cardRes, balance, dictRes] = await Promise.all([
         fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r => r.json()),
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
@@ -206,7 +206,7 @@ function MainApp() {
         })
       ]);
 
-      // 상태 업데이트 (스프레드 연산자로 참조값 변경)
+      // 2. 상태 즉시 갱신 (스프레드 연산자로 새로운 배열 할당)
       setCategories([...(catRes.categories || [])]);
       setSavedCards([...(cardRes.cards || [])]);
       setGoalBalance(balance);
@@ -222,7 +222,7 @@ function MainApp() {
       });
 
     } catch (e: any) {
-      // 💡 여기가 올바르게 try와 짝을 이룹니다.
+      // 💡 여기서 에러를 잡습니다. try 바로 다음에 catch가 오도록 확인하세요.
       console.error("데이터 동기화 실패:", e);
       addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
     }
