@@ -6,12 +6,12 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   
-  // 💡 [추가] 엑셀 입출력 전용 상태 관리 모듈
+  // 💡 엑셀 입출력 전용 상태 관리 모듈
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [uploadLog, setUploadLog] = useState<string | null>(null);
 
-  // 💡 [진단 해결] 에노키 비동기 세션에서 사용자 이메일을 안전하게 격리 추출하기 위한 동적 상태
+  // 💡 에노키 비동기 세션에서 사용자 이메일을 안전하게 격리 추출하기 위한 동적 상태
   const [userEmail, setUserEmail] = useState("설계자 계정 (이메일 정보 불러오는 중...)");
 
   useEffect(() => {
@@ -21,7 +21,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
           setUserEmail(zkLogin.userEmail);
           return;
         }
-        // 에노키 프레임워크의 비동기 상태 구조를 파싱하여 메일 정보를 강제 동기화합니다.
         if (enokiFlow && typeof enokiFlow.getUserInfo === 'function') {
           const userInfo = await enokiFlow.getUserInfo();
           if (userInfo && userInfo.email) {
@@ -29,7 +28,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
             return;
           }
         }
-        // 프로토콜 객체 내부의 다이렉트 유저 세션 탐색
         if (enokiFlow?.user?.email) {
           setUserEmail(enokiFlow.user.email);
           return;
@@ -73,28 +71,51 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
     }
   };
 
-  // 📥 [추가] 데이터베이스 내부 상태를 통째로 백업하는 엑셀 다운로드 연동 모듈
+  // 📥 [정밀 진단 코드 주입] 데이터베이스 내부 상태를 통째로 백업하는 엑셀 다운로드 연동 모듈
   const handleExportExcel = async () => {
     if (!safeAddress) return alert("로그인 세션이 만료되었습니다.");
     setIsExporting(true);
+    
+    const downloadUrl = `https://api.blankd.top/api/export-excel?wallet_address=${safeAddress}&t=${Date.now()}`;
+    if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[엑셀] 주소: ${safeAddress} 기반 다운로드 정밀 진단 통신 시작.`]);
+
     try {
-      const downloadUrl = `https://api.blankd.top/api/export-excel?wallet_address=${safeAddress}&t=${Date.now()}`;
+      // 💡 [원인 분석용 프리플라이트 검사] 바로 링크 다운로드를 하지 않고 서버 상태를 먼저 체크합니다.
+      const checkRes = await fetch(downloadUrl, { method: 'GET' });
       
+      // 서버가 정상적인 파일(200 OK)을 주지 않고 에러(404, 500 등)를 리턴한 경우
+      if (!checkRes.ok) {
+        const errorJson = await checkRes.json().catch(() => ({}));
+        const serverErrorMsg = errorJson.error || `서버 에러 코드: ${checkRes.status}`;
+        
+        console.error("❌ 엑셀 내보내기 다운로드 실패 원인 진단:", serverErrorMsg);
+        if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `❌ [에러] 엑셀 다운로드 거부 원인: ${serverErrorMsg}`]);
+        
+        // 유저에게 실패 원인을 정확히 알림창으로 표출합니다.
+        alert(`❌ 엑셀 다운로드 실패 원인 진단:\n\n${serverErrorMsg}`);
+        setIsExporting(false);
+        return;
+      }
+
+      // 서버 검증 통과 시 안전하게 다운로드 창 트리거 수행
       const link = document.createElement('a');
       link.href = downloadUrl;
       link.setAttribute('download', `blankd_데이터베이스_백업.xlsx`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      
+      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `✅ [완료] 엑셀 백업 스트리밍 다운로드 요청 완료.`]);
     } catch (err: any) {
-      console.error("[Mypage 진단 오류] 엑셀 내보내기 통신 실패:", err);
-      alert("백엔드 엔진 오류로 인해 엑셀 파일을 빌드하지 못했습니다.");
+      console.error("[Mypage 진단 오류] 엑셀 내보내기 물리 네트워크 통신 실패:", err);
+      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `❌ [통신에러] 서버 접속 불가: ${err.message}`]);
+      alert(`❌ 서버 접속 불안정으로 다운로드 요청을 보낼 수 없습니다.\n오류 내용: ${err.message}`);
     } finally {
       setIsExporting(false);
     }
   };
 
-  // 📤 [추가] 사용자가 수정 완료한 엑셀 파일을 업로드하여 DB를 통째로 바꾸는 연동 모듈
+  // 📤 사용자가 수정 완료한 엑셀 파일을 업로드하여 DB를 통째로 바꾸는 연동 모듈
   const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !safeAddress) return;
@@ -122,7 +143,7 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
       if (res.ok) {
         setUploadLog("✅ 성공: 데이터베이스 일괄 동기화 및 갱신이 완료되었습니다!");
         if (typeof loadAllData === 'function') {
-          await loadAllData(); // 대시보드 리액트 상태 즉시 동기화 강제 명령
+          await loadAllData(); 
         }
       } else {
         throw new Error(result.error || "엑셀 파일 가공 동기화 실패");
@@ -145,7 +166,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
           <div className="text-xs text-white/40 mb-2 font-mono uppercase tracking-wider">연결된 계정 식별자 (이메일 주소)</div>
           <button 
             onClick={() => {
-              console.log("[Mypage 진단] 지갑 노드 주소창 토글:", !showWallet);
               setShowWallet(!showWallet);
             }}
             className="w-full text-left p-3 bg-black/50 border border-white/5 rounded-sm transition-all hover:bg-white/[0.02] cursor-pointer group"
@@ -166,7 +186,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
         <button 
           onClick={() => { 
-            console.log("[Mypage 진단] 시스템 커넥션 안전 종료 해제");
             enokiFlow?.logout(); 
             window.location.reload(); 
           }} 
@@ -177,7 +196,7 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
         <div className="border-t border-white/10"></div>
 
-        {/* 📥 📤 [신규 추가] 엑셀 다운로드 / 일괄 수정 업로드 제어 인터페이스 */}
+        {/* 엑셀 다운로드 / 일괄 수정 업로드 제어 인터페이스 */}
         <div className="space-y-3">
           <div className="text-xs text-white/50 font-bold tracking-wider font-mono uppercase">📊 데이터베이스 엑셀 통합 관리 (일괄 수정)</div>
           <div className="p-4 bg-black/40 border border-white/5 rounded-sm space-y-4">
@@ -195,7 +214,7 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
                     : "bg-indigo-600/20 border-indigo-500 text-indigo-400 hover:bg-indigo-600/30 cursor-pointer"
                 }`}
               >
-                {isExporting ? "⏳ 엑셀 파일 조립 중..." : "📥 전체 DB 엑셀 다운로드"}
+                {isExporting ? "⏳ 에러 검증 분석 중..." : "📥 전체 DB 엑셀 다운로드"}
               </button>
 
               <div className="relative">
@@ -234,7 +253,7 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
         <div className="border-t border-white/10"></div>
 
-        {/* 📖 기존에 잘 쓰고 계시던 원본 학습자료 문서 주입 인터페이스 (유지) */}
+        {/* 원본 학습자료 문서 주입 인터페이스 */}
         <div className="space-y-3">
           <div className="text-xs text-white/50 font-bold tracking-wider font-mono uppercase">📖 원본 학습자료 텍스트 소스 공급부</div>
           <div className="space-y-4 bg-black/40 border border-white/5 p-4 rounded-sm">
@@ -244,7 +263,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
                 accept=".txt"
                 onChange={(e) => {
                   const file = e.target.files?.[0] || null;
-                  console.log("[Mypage 진단] 원본 자료 파일 타겟팅 캐시:", file?.name);
                   setLawFile(file);
                 }}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
