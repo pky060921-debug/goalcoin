@@ -253,8 +253,8 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                         
                         {activeTool === 'editor' ? (
                       <textarea
-                        defaultValue={editContent} // 💡 처음 열릴 때의 값만 넣어줍니다.
-                        onBlur={(e) => {
+                        Value={editContent} // 💡 처음 열릴 때의 값만 넣어줍니다.
+                        onChange={(e) => {
                           // 💡 입력창 바깥이나 다른 버튼을 클릭해 포커스가 빠져나갈 때 딱 한 번만 상태를 저장합니다.
                           setEditContent(e.target.value); 
                         }}
