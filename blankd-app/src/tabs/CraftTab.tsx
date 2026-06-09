@@ -100,10 +100,29 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [selectedWords, setSelectedWords] = useState<Set<number>>(new Set());
   const [pageBreaks, setPageBreaks] = useState<Set<number>>(new Set());
   const [memoInput, setMemoInput] = useState(""); 
-  const [isEraserMode, setIsEraserMode] = useState(false);
-  const [isEditingText, setIsEditingText] = useState(false);
-  const [editingContent, setEditingContent] = useState("");
+  // 💡 EnhanceTab 방식의 직접 편집 상태
+  const [editingCatId, setEditingCatId] = useState<number | null>(null);
+  const [editArticleText, setEditArticleText] = useState('');
 
+  // 💡 원본 직접 타이핑 편집 완료 및 API 서버 저장 핸들러
+  const handleSaveEditedText = async (catId: number) => {
+    try {
+      const res = await fetch(`https://api.blankd.top/api/update-category-text`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wallet_address: safeAddress, id: catId, article_text: editArticleText })
+      });
+      if (!res.ok) throw new Error("원본 텍스트 수정 반영에 실패했습니다.");
+      
+      // 화면 상태 즉각 반영
+      if (setCategories) {
+        setCategories((prev: any[]) => prev.map(c => c.id === catId ? { ...c, article_text: editArticleText } : c));
+      }
+      setEditingCatId(null);
+    } catch (err) {
+      alert("서버 연결 불안정으로 원본 텍스트 수정에 실패했습니다.");
+    }
+  };
   useEffect(() => {
     if (expandedId) {
       const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${expandedId}]]`));
@@ -483,11 +502,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in w-full">
-      <div className="flex gap-2 mb-2 sm:mb-4">
-        <label className="flex-1 border border-white/20 p-2 sm:p-2.5 text-center text-[10px] sm:text-xs hover:bg-white/10 cursor-pointer text-white/80 rounded-sm transition-colors">
-          <input type="file" accept=".pdf,.txt,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 학습자료 업로드'}
-        </label>
-        <button onClick={uploadLaw} className="px-3 sm:px-4 border border-white/20 text-[10px] sm:text-xs hover:bg-white/10 transition-colors rounded-sm">전송</button>
+      <div className="flex gap-2 mb-2 sm:mb-4">    
         
         {isSelectMode && (
           <div className="flex gap-1 animate-in fade-in zoom-in-95">
@@ -617,26 +632,31 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                             </div>
                             
                             <div className="flex gap-2">
-                              <button onClick={handleEditToggle} className={`px-3 py-1 text-[11px] font-bold rounded-sm border transition-all ${isEditingText ? 'bg-green-600 border-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.3)]' : 'bg-white/5 border-white/20 text-white/50 hover:bg-white/10'}`}>
-                                {isEditingText ? '✅ 텍스트 적용' : '✏️ 원본 텍스트 편집'}
-                              </button>
-                              {!isEditingText && (
-                                <button onClick={() => setIsEraserMode(!isEraserMode)} className={`px-3 py-1 text-[11px] font-bold rounded-sm border transition-all ${isEraserMode ? 'bg-red-600 border-red-500 text-white animate-pulse' : 'bg-white/5 border-white/20 text-white/50 hover:bg-white/10'}`}>
-                                  {isEraserMode ? '🗑️ 지우개 켜짐' : '🧹 지우개 모드'}
+                              {editingCatId !== cat.id ? (
+                                <button onClick={() => { setEditingCatId(cat.id); setEditArticleText(cat.article_text || ""); }} className="px-3 py-1 text-[11px] font-bold rounded-sm border bg-white/5 border-white/20 text-white/50 hover:bg-white/10">
+                                  ✏️ 원본 텍스트 직접수정
                                 </button>
+                              ) : (
+                                <>
+                                  <button onClick={() => handleSaveEditedText(cat.id)} className="px-3 py-1 text-[11px] font-bold rounded-sm border bg-teal-900/60 border-teal-500/50 text-teal-300">
+                                    💾 저장
+                                  </button>
+                                  <button onClick={() => setEditingCatId(null)} className="px-3 py-1 text-[11px] font-bold rounded-sm border bg-white/5 border-white/10 text-white/40">
+                                    취소
+                                  </button>
+                                </>
                               )}
                             </div>
                           </div>
 
                           <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-2 text-xs text-teal-200 outline-none rounded-sm" />
                           
-                          {isEditingText ? (
+                          {editingCatId === cat.id ? (
                             <div className="w-full relative mt-2 animate-in fade-in zoom-in-95">
-                              <textarea value={editingContent} onChange={(e) => setEditingContent(e.target.value)} className="w-full h-48 bg-black border border-green-500/50 p-4 text-green-100 text-[13px] sm:text-[15px] leading-loose rounded outline-none resize-y custom-scrollbar" placeholder="원하는 대로 내용을 지우거나 띄어쓰기를 수정하세요..." />
-                              <div className="absolute top-2 right-2 text-[10px] text-green-400 bg-black/50 px-2 py-1 rounded">수정 후 [✅ 텍스트 적용] 버튼 클릭</div>
+                              <textarea value={editArticleText} onChange={(e) => setEditArticleText(e.target.value)} className="w-full h-48 bg-black border border-amber-500/50 p-4 text-amber-100 text-[13px] sm:text-[15px] leading-loose rounded outline-none resize-y custom-scrollbar" placeholder="수정할 원본 텍스트를 자유롭게 편집하세요..." />
                             </div>
                           ) : (
-                            <div className={`font-serif mt-2 text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative transition-all ${isEraserMode ? 'border-red-500/50 ring-1 ring-red-500/30' : 'border-white/10'}`}>
+                            <div className="font-serif mt-2 text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border border-white/10 max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative transition-all">
                               {wordArray.map((wordObj, idx) => {
                                 const word = wordObj.text;
                                 const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(word) && word.trim() !== "";
@@ -646,7 +666,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                                 return (
                                   <React.Fragment key={idx}>
                                     {pageBreaks.has(idx) && <div className="w-full border-t border-red-500/50 my-2 relative"><span className="absolute -top-2 left-1/2 -translate-x-1/2 bg-black px-1 text-[8px] text-red-400 font-bold uppercase tracking-tighter">Page Break</span></div>}
-                                    <span onClick={() => { if (isEraserMode || !isSymbolOnly) handleWordClick(idx); }} onContextMenu={(e) => handleWordSplit(idx, e)} onDoubleClick={() => { if (!isSymbolOnly || isMerged) handleWordMerge(idx); }} className={`px-[1px] rounded transition-colors ${isSelected ? 'bg-amber-500 text-black font-bold cursor-pointer' : isEraserMode ? 'hover:bg-red-500/50 hover:text-white text-red-100 cursor-pointer' : isSymbolOnly ? 'text-white/30 cursor-default' : isMerged ? 'bg-indigo-900/30 border-b border-indigo-500/50 hover:bg-indigo-800/40 cursor-pointer' : 'hover:bg-white/10 cursor-pointer'}`} title={isSelected ? "클릭하여 빈칸에서 해제" : "클릭하여 빈칸으로 지정"}>
+                                    <span onClick={() => { if (!isSymbolOnly) handleWordClick(idx); }} onContextMenu={(e) => handleWordSplit(idx, e)} onDoubleClick={() => { if (!isSymbolOnly || isMerged) handleWordMerge(idx); }} className={`px-[1px] rounded transition-colors ${isSelected ? 'bg-amber-500 text-black font-bold cursor-pointer' : isSymbolOnly ? 'text-white/30 cursor-default' : isMerged ? 'bg-indigo-900/30 border-b border-indigo-500/50 hover:bg-indigo-800/40 cursor-pointer' : 'hover:bg-white/10 cursor-pointer'}`} title={isSelected ? "클릭하여 빈칸에서 해제" : "클릭하여 빈칸으로 지정"}>
                                       {word}
                                     </span>
                                   </React.Fragment>
