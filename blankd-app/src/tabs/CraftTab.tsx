@@ -95,24 +95,30 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [editingCatId, setEditingCatId] = useState<number | null>(null);
   const [editArticleText, setEditArticleText] = useState('');
 
+    [span_4](start_span)// 💡 원본 데이터 직접 타이핑 편집 완료 및 저장 핸들러 교정[span_4](end_span)
   const handleSaveEditedText = async (catId: number) => {
     try {
       console.log(`[Craft 진단] 원본 텍스트 직접 변경사항 서버 전송. ID: ${catId}`);
       const res = await fetch(`https://api.blankd.top/api/update-category-text`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet_address: safeAddress, id: catId, article_text: editArticleText })
+        body: JSON.stringify({ 
+          wallet_address: safeAddress, 
+          id: catId, 
+          [span_5](start_span)content: editArticleText // 💡 [교정] article_text 대신 content 필드로 매핑하여 전송[span_5](end_span)
+        })
       });
       if (!res.ok) throw new Error("원본 수정 반영 실패");
       
       if (setCategories) {
-        setCategories((prev: any[]) => prev.map(c => c.id === catId ? { ...c, article_text: editArticleText } : c));
+        [span_6](start_span)// 💡 [교정] 리액트 상태 구조체 내에서도 다른 연산들과 충돌하지 않도록 content 필드를 업데이트합니다[span_6](end_span).
+        setCategories((prev: any[]) => prev.map(c => c.id === catId ? { ...c, content: editArticleText } : c));
       }
       setEditingCatId(null);
       applyTextToState(editArticleText);
     } catch (err) {
       console.error("[Craft 진단 오류] 저장 실패:", err);
-      alert("서버 연결 불안정으로 원본 텍스트 수정에 실패했습니다.");
+      alert("서버 연결 불안정으로 원본 텍스트 수정에 실패했습니다."); [span_7](start_span)//[span_7](end_span)
     }
   };
 
