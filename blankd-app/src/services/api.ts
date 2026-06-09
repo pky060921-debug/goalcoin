@@ -79,7 +79,8 @@ export const api = {
   },
   async getGoalCoinBalance(address: string) {
     try {
-      const res = await fetch('https://fullnode.testnet.sui.io/', {
+      // 💡 차단당하는 공식 노드 대신 안정적인 퍼블릭 노드로 교체했습니다.
+      const res = await fetch('https://sui-testnet.nodeinfra.com', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -96,7 +97,8 @@ export const api = {
       }
       return 0;
     } catch (e) {
-      console.error("잔고 조회 실패", e);
+      // 💡 에러가 나더라도 앱이 죽지 않고 0을 반환하도록 방어합니다.
+      console.error("[진단] 잔고 조회 실패, 0으로 대체합니다:", e);
       return 0;
     }
   },
