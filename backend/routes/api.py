@@ -1342,7 +1342,7 @@ import pandas as pd
 import io
 
 # ==========================================
-# 💡 [보안 강화] 내 지갑 주소 기준 데이터 전체 엑셀 다운로드 API
+# 💡 [최종 완벽 조치] 내 지갑 주소 기준 데이터 전체 엑셀 다운로드 API
 # ==========================================
 @api_bp.route('/export-excel', methods=['GET'])
 def export_excel():
@@ -1359,14 +1359,14 @@ def export_excel():
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             # 1. 만들기 탭 데이터 처리 (categories)
             if target in ['all', 'categories']:
-                # 💡 내 아이디(지갑주소)에 해당하는 데이터만 정확하게 쿼리
                 df_cat = pd.read_sql_query(
                     "SELECT id, folder_name, title, content, memo FROM categories WHERE wallet_address = ?", 
                     conn, params=(wallet_address,)
                 )
-                # 데이터가 존재할 때만 엑셀 시트로 빌드 (없으면 시트 생성을 건너뜀)
-                if not df_cat.empty:
-                    df_cat.to_excel(writer, sheet_name='만들기_카테고리', index=False)
+                if df_cat.empty:
+                    df_cat = pd.DataFrame(columns=['id', 'folder_name', 'title', 'content', 'memo'])
+                
+                df_cat.to_excel(writer, sheet_name='만들기_카테고리', index=False)
                 
             # 2. 채우기 탭 데이터 처리 (cards)
             if target in ['all', 'cards']:
@@ -1374,15 +1374,13 @@ def export_excel():
                     "SELECT id, folder_name, card_content, answer_text, memo FROM cards WHERE wallet_address = ?", 
                     conn, params=(wallet_address,)
                 )
-                if not df_card.empty:
-                    # card_content 컬럼명을 사용자가 보기 편하게 content로 변환
+                
+                if df_card.empty:
+                    df_card = pd.DataFrame(columns=['id', 'folder_name', 'content', 'answer_text', 'memo'])
+                else:
                     df_card.rename(columns={'card_content': 'content'}, inplace=True)
-                    df_card.to_excel(writer, sheet_name='채우기_카드', index=False)
-
-        # 💡 [진단] 두 테이블 모두 데이터가 한 건도 없을 경우 예외 처리 조치
-        if len(writer.book.sheetnames) == 0:
-            conn.close()
-            return jsonify({"error": "데이터베이스에 내 계정 명의로 등록된 자료가 존재하지 않아 엑셀을 출력할 수 없습니다."}), 404
+                    
+                df_card.to_excel(writer, sheet_name='채우기_카드', index=False)
 
         conn.close()
         output.seek(0)
@@ -1397,7 +1395,6 @@ def export_excel():
         import traceback
         traceback.print_exc()
         return jsonify({"error": f"엑셀 추출 중 에러 발생: {str(e)}"}), 500
-
 
 # ==========================================
 # 💡 [최종 완벽 조치] 내 지갑 주소 기준 데이터 전체 엑셀 다운로드 API
