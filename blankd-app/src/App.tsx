@@ -225,47 +225,6 @@ function MainApp() {
     }
     if (isLoggedIn) loadAllData();
   }, [isLoggedIn, safeAddress, enokiFlow]);
-   
-    setCategories(catRes.categories || []); 
-    setSavedCards([...(cardRes.cards || [])]); 
-    setGoalBalance(balance);
-
-   // 기존의 복잡한 구형 복구 코드를 삭제하고 단순화
-   // (백엔드가 이미 force_repair_list로 처리해서 항상 배열로 옴)
-   const serverStopwords:  string[]             = Array.isArray(dictRes.stopwords)  ? dictRes.stopwords  : [];
-   const serverInclusions: string[]             = Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [];
-   let   finalAbbrs:       Record<string,string>= (dictRes.abbrs && typeof dictRes.abbrs === 'object' && !Array.isArray(dictRes.abbrs))
-                                                  ? dictRes.abbrs : {};
-
-    // 로컬 약어 마이그레이션 (기존 코드 유지)
-    try {
-      const localAbbrStr = localStorage.getItem('blankd_abbr_dict');
-      if (localAbbrStr) {
-        const localAbbrs = JSON.parse(localAbbrStr);
-        if (Object.keys(finalAbbrs).length === 0 && Object.keys(localAbbrs).length > 0) {
-          finalAbbrs = localAbbrs;
-          api.updateGlobalDict(safeAddress, {
-            stopwords: serverStopwords,
-            inclusions: serverInclusions,
-            abbrs: finalAbbrs
-          }).then(() => {
-            localStorage.removeItem('blankd_abbr_dict');
-            addLog("📦 로컬 약어 데이터를 DB로 안전하게 이전했습니다.");
-          }).catch(() => {});
-        }
-      }
-    } catch (e) { console.error("약어 마이그레이션 에러", e); }
-
-    setGlobalDict({
-      stopwords: serverStopwords,
-      inclusions: serverInclusions,
-      abbrs: finalAbbrs
-    });
-
-  } catch (e: any) { 
-    addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
-  }
-};
 
   const flushQueue = async () => {
     if (!safeAddress) return;
