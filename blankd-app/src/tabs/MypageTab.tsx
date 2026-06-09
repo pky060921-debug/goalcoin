@@ -2,6 +2,15 @@ import React from 'react';
 
 export const MypageTab = ({ safeAddress, enokiFlow, useAiRecommend, setUseAiRecommend, studyMode, setStudyMode, handleDeleteAll, globalDict, saveGlobalDict }: any) => {
   
+  // 💡 [초강력 방어벽 추가] 서버에서 전역 사전을 아직 불러오지 못했거나 초기화 중일 때 화면이 깨지는 것을 막아줍니다.
+  if (!globalDict) {
+    return (
+      <div className="max-w-md mx-auto py-16 text-center text-white/40 text-xs">
+        ⚙️ 설정을 불러오는 중입니다... 잠시만 기다려주세요.
+      </div>
+    );
+  }
+  
   // 💡 DB에서 설정값(ai_rules)을 읽어옵니다. 없으면 빈 객체 반환.
   const aiRules = globalDict?.ai_rules || {};
 
