@@ -508,6 +508,22 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
         )}
       </div>
 
+      {/* 💡 [추가] AI 및 화면 설정 토글 (DB 연동) */}
+      <div className="flex flex-col sm:flex-row flex-wrap gap-4 mb-4 sm:mb-6 p-4 bg-black/40 border border-white/10 rounded-sm">
+        <label className="flex items-center gap-2 cursor-pointer group">
+          <input type="checkbox" checked={aiRules.useAiRecommend || false} onChange={() => handleToggleRule('useAiRecommend')} className="w-4 h-4 accent-amber-500 rounded bg-black border-white/20 cursor-pointer" />
+          <span className="text-xs sm:text-sm text-white/70 group-hover:text-white transition-colors">숫자, 영문 빈칸 추천</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer group">
+          <input type="checkbox" checked={aiRules.aiPrior || false} onChange={() => handleToggleRule('aiPrior')} className="w-4 h-4 accent-amber-500 rounded bg-black border-white/20 cursor-pointer" />
+          <span className="text-xs sm:text-sm text-white/70 group-hover:text-white transition-colors">AI 추천 빈칸 우선적용</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer group">
+          <input type="checkbox" checked={aiRules.boldLaw || false} onChange={() => handleToggleRule('boldLaw')} className="w-4 h-4 accent-amber-500 rounded bg-black border-white/20 cursor-pointer" />
+          <span className="text-xs sm:text-sm text-white/70 group-hover:text-white transition-colors">법조항 (제X조)만 굵게 표시</span>
+        </label>
+      </div>
+
       {showStopWordsSettings && (
         <div className="p-4 sm:p-5 bg-[#0a0a0c] border border-amber-500/30 rounded-sm mb-6 flex flex-col sm:flex-row gap-6 animate-in slide-in-from-top-2">
           <div className="flex-1">
@@ -556,7 +572,8 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           </div>
         ))}
       </div>
-      
+   {/* 💡 [스크롤 추가] 전체 목록을 감싸고 높이 제한(max-h-[60vh]) 및 스크롤을 생성합니다. */}
+    <div className="overflow-y-auto max-h-[60vh] custom-scrollbar pr-2 pb-10">
       {craftFolders.map((folder: string) => {
         const isChapterFolder = /^제\s*\d+\s*장/.test(folder);
         return openFolders[folder] && (
@@ -692,6 +709,8 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           </div>
         );
       })}
+      </div> {/* 💡 [스크롤 추가] 위에서 연 스크롤 박스를 여기서 닫습니다 */}
     </div>
   );
+};
 };
