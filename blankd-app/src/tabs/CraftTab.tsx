@@ -145,7 +145,18 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [newIncludeWord, setNewIncludeWord] = useState("");
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
+                                                                                                                                                                                                                                                                      
+// 💡 [여기에 추가] DB에서 ai_rules(설정값)를 꺼내옵니다. 없으면 빈 객체({})를 사용합니다.
+  const aiRules = globalDict?.ai_rules || {};
 
+  // 💡 [여기에 추가] 스위치를 누를 때마다 실행되어 DB에 저장하는 리모컨 함수입니다.
+  const handleToggleRule = (ruleKey: string) => {
+    // 현재 상태를 반대로 뒤집습니다. (켜져있으면 끄고, 꺼져있으면 켭니다)
+    const nextRules = { ...aiRules, [ruleKey]: !aiRules[ruleKey] };
+    // 바뀐 상태를 DB로 통째로 전송하여 저장합니다.
+    saveGlobalDict({ ...globalDict, ai_rules: nextRules });
+  };
+                                                                                                                                                                                                                                                                      
   // 💡 [수정 3] 고립된 단어장 코드를 지우고, App.tsx의 전역 사전을 직접 업데이트합니다. (덮어쓰기 멸망 버그 완벽 해결)
   const handleAddStopWord = () => {
     if (!newStopWord.trim()) return;
@@ -488,8 +499,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           <input type="file" accept=".pdf,.txt,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 학습자료 업로드'}
         </label>
         <button onClick={uploadLaw} className="px-3 sm:px-4 border border-white/20 text-[10px] sm:text-xs hover:bg-white/10 transition-colors rounded-sm">전송</button>
-        <button onClick={() => setShowStopWordsSettings(!showStopWordsSettings)} className={`px-3 sm:px-4 border rounded-sm text-[10px] sm:text-xs transition-colors ${showStopWordsSettings ? 'bg-amber-600/30 border-amber-500/50 text-amber-300' : 'border-white/20 text-white/50 hover:bg-white/10'}`}>⚙️ 예외 단어 (DB)</button>
-        
+       
         {isSelectMode && (
           <div className="flex gap-1 animate-in fade-in zoom-in-95">
             <button onClick={handleBatchDelete} className="px-3 sm:px-4 bg-red-600/20 border border-red-500 text-red-400 text-[10px] sm:text-xs font-bold rounded-sm hover:bg-red-600/40 transition-colors">🗑️ 일괄삭제 ({checkedIds.size})</button>
