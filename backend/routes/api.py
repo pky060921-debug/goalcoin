@@ -979,10 +979,14 @@ def save_card():
         cursor = conn.cursor()
         
         if card_id:
+            print(f"DEBUG: 카드 수정 시도 - ID: {card_id}, wallet: {wallet_address}")
             cursor.execute('''UPDATE cards SET card_content=?, answer_text=?, folder_name=?, memo=? 
                               WHERE id=? AND wallet_address=?''', 
                               (card_content, answer_text, folder_name, memo, card_id, wallet_address))
+            # 💡 수정된 행이 있는지 확인
+            print(f"DEBUG: 수정된 행의 수: {cursor.rowcount}")
         else:
+            print("DEBUG: 카드 신규 생성 시도")
             cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo) 
                               VALUES (?, 0, ?, ?, '[]', 0, ?, 'OWNED', NULL, ?, ?)''', 
                               (wallet_address, card_content, answer_text, get_next_review_time(0), folder_name, memo))
