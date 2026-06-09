@@ -166,8 +166,9 @@ function MainApp() {
   const loadAllData = async () => {
     try {
       const [catRes, cardRes, balance, dictRes] = await Promise.all([
-        fetch(`https://api.blankd.top/api/get-categories?wallet_address=${Date.now()}`).then(r => r.json()),
-        fetch(`https://api.blankd.top/api/my-cards?wallet_address=${Date.now()}&t=${Date.now()}`).then(r => r.json()),
+        fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
+        fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
+
         api.getGoalCoinBalance(safeAddress).catch(() => 0),
         api.getGlobalDict(safeAddress).catch((e) => {
           console.error("글로벌 단어장 로드 실패:", e);
