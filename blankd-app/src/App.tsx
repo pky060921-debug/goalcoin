@@ -886,7 +886,7 @@ function MainApp() {
         </div>
       </>
     );
-  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow]); 
+  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, studyMode, setStudyMode]); // 💡 추가됨
   // 💡 [핵심 방어막] 타이머(elapsed)가 감시 대상에서 빠져 있으므로 1초마다 화면이 새로고침되지 않습니다!
 // 💡 [단어장 UI 분리] PC 사이드바와 모바일 모달에서 똑같은 코드를 재사용하기 위한 함수입니다.
   const renderDictionaryUI = (isMobile: boolean) => (
