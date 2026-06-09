@@ -194,24 +194,39 @@ function MainApp() {
   }, [isLoggedIn, safeAddress, enokiFlow]);
 
   const loadAllData = async () => {
-  try {
-    const [catRes, cardRes, balance, dictRes] = await Promise.all([
-      fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r=>r.json()),
-      fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r=>r.json()),
-      api.getGoalCoinBalance(safeAddress).catch(()=>0),
-      api.getGlobalDict(safeAddress).catch(() => ({ stopwords: [], inclusions: [], abbrs: {} }))
-    ]);
-    
-    // 💡 핵심: 기존 배열을 참조하지 말고 서버에서 받은 데이터로 완전히 교체합니다.
-    setCategories([...(catRes.categories || [])]); 
-    setSavedCards([...(cardRes.cards || [])]); // [...array]를 써서 완전히 새로운 메모리 주소 할당
-    
-    setGoalBalance(balance);
-    // ... 나머지 코드
-  } catch (e: any) { 
-    addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
-  }
-};
+    try {
+      // Promise.all로 데이터 일괄 로드
+      const [catRes, cardRes, balance, dictRes] = await Promise.all([
+        fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}`).then(r => r.json()),
+        fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
+        api.getGoalCoinBalance(safeAddress).catch(() => 0),
+        api.getGlobalDict(safeAddress).catch((e) => {
+          console.error("글로벌 단어장 로드 실패:", e);
+          return { stopwords: [], inclusions: [], abbrs: {} };
+        })
+      ]);
+
+      // 상태 업데이트 (스프레드 연산자로 참조값 변경)
+      setCategories([...(catRes.categories || [])]);
+      setSavedCards([...(cardRes.cards || [])]);
+      setGoalBalance(balance);
+
+      const serverStopwords = Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [];
+      const serverInclusions = Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [];
+      let finalAbbrs = (dictRes.abbrs && typeof dictRes.abbrs === 'object' && !Array.isArray(dictRes.abbrs)) ? dictRes.abbrs : {};
+
+      setGlobalDict({
+        stopwords: serverStopwords,
+        inclusions: serverInclusions,
+        abbrs: finalAbbrs
+      });
+
+    } catch (e: any) {
+      // 💡 여기가 올바르게 try와 짝을 이룹니다.
+      console.error("데이터 동기화 실패:", e);
+      addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
+    }
+  };
     
     setCategories(catRes.categories || []); 
     setSavedCards(cardRes.cards || []); 
