@@ -1214,28 +1214,16 @@ def get_checkpoint():
 
 @api_bp.route('/get-global-dict', methods=['GET'])
 def get_global_dict():
-    wallet_address = request.args.get('wallet_address')
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        wallet_address = request.args.get('wallet_address')
+        if not wallet_address:
+            return jsonify({"stopwords": [], "abbrs": {}, "inclusions": [], "error": "wallet_address 누락"}), 400
 
-    # 💡 ai_rules 컬럼을 함께 가져옵니다.
-    cursor.execute("SELECT custom_stopwords, custom_abbrs, custom_inclusions, ai_rules FROM user_settings WHERE wallet_address = ?", (wallet_address,))
-    row = cursor.fetchone()
-
-    if not row:
-        cursor.execute("SELECT custom_stopwords, custom_abbrs, custom_inclusions, ai_rules FROM user_settings WHERE custom_stopwords IS NOT NULL AND custom_stopwords != '[]' LIMIT 1")
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT custom_stopwords, custom_abbrs, custom_inclusions FROM user_settings WHERE wallet_address = ?", (wallet_address,))
         row = cursor.fetchone()
-        
-    conn.close()
-
-    if row:
-        return jsonify({
-            "stopwords": json.loads(row[0]) if row[0] else [],
-            "abbrs": json.loads(row[1]) if row[1] else {},
-            "inclusions": json.loads(row[2]) if row[2] else [],
-            "ai_rules": json.loads(row[3]) if len(row) > 3 and row[3] else {} # 💡 상태값 반환
-        })
-    return jsonify({"stopwords": [], "abbrs": {}, "inclusions": [], "ai_rules": {}})
+        conn.close()
 
         def force_repair_list(val, fallback_key=None):
             """배열 형태 컬럼 복구. fallback_key: 구형 dict에서 꺼낼 키"""
@@ -1300,27 +1288,21 @@ def update_global_dict():
         wallet_address = data.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
-        
         cursor.execute("SELECT 1 FROM user_settings WHERE wallet_address = ?", (wallet_address,))
         if cursor.fetchone():
-            # 💡 UPDATE 구문에 ai_rules 추가
-            cursor.execute("UPDATE user_settings SET custom_stopwords = ?, custom_abbrs = ?, custom_inclusions = ?, ai_rules = ? WHERE wallet_address = ?", 
+            cursor.execute("UPDATE user_settings SET custom_stopwords = ?, custom_abbrs = ?, custom_inclusions = ? WHERE wallet_address = ?", 
                 (json.dumps(data.get('stopwords', []), ensure_ascii=False), 
                  json.dumps(data.get('abbrs', {}), ensure_ascii=False),
                  json.dumps(data.get('inclusions', []), ensure_ascii=False),
-                 json.dumps(data.get('ai_rules', {}), ensure_ascii=False),
                  wallet_address))
         else:
-            # 💡 INSERT 구문에 ai_rules 추가
-            cursor.execute("INSERT INTO user_settings (wallet_address, custom_stopwords, custom_abbrs, custom_inclusions, ai_rules) VALUES (?, ?, ?, ?, ?)", 
+            cursor.execute("INSERT INTO user_settings (wallet_address, custom_stopwords, custom_abbrs, custom_inclusions) VALUES (?, ?, ?, ?)", 
                 (wallet_address, 
                  json.dumps(data.get('stopwords', []), ensure_ascii=False), 
                  json.dumps(data.get('abbrs', {}), ensure_ascii=False),
-                 json.dumps(data.get('inclusions', []), ensure_ascii=False),
-                 json.dumps(data.get('ai_rules', {}), ensure_ascii=False)))
-                 
+                 json.dumps(data.get('inclusions', []), ensure_ascii=False)))
         conn.commit()
         conn.close()
-        return jsonify({"message": "전역 사전 및 설정 저장 성공"}), 200
+        return jsonify({"message": "전역 사전 DB 업데이트 완료"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
