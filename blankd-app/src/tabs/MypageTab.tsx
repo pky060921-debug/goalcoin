@@ -69,18 +69,15 @@ export const MypageTab = ({ safeAddress, enokiFlow, useAiRecommend, setUseAiReco
         <div className="space-y-4 mb-8 bg-[#0a0a0c] border border-white/10 p-5 rounded-sm shadow-inner">
           <label className="flex items-center justify-between cursor-pointer group">
             <span className="text-xs sm:text-sm text-white/70 group-hover:text-amber-400 transition-colors">숫자, 영문 빈칸 추천</span>
-            <input type="checkbox" checked={aiRules.useAiRecommend || false} onChange={() => handleToggleRule('useAiRecommend')} className="w-5 h-5 accent-amber-500 rounded bg-black border-white/20 cursor-pointer" />
-          </label>
+            <input type="checkbox" id="useAiRecommend" name="useAiRecommend" checked={aiRules.useAiRecommend || false} onChange={() => handleToggleRule('useAiRecommend')} className="..." />          </label>
           
           <label className="flex items-center justify-between cursor-pointer group">
             <span className="text-xs sm:text-sm text-white/70 group-hover:text-amber-400 transition-colors">AI 추천 빈칸 우선적용</span>
-            <input type="checkbox" checked={aiRules.aiPrior || false} onChange={() => handleToggleRule('aiPrior')} className="w-5 h-5 accent-amber-500 rounded bg-black border-white/20 cursor-pointer" />
-          </label>
+            <input type="checkbox" id="aiPrior" name="aiPrior" checked={aiRules.aiPrior || false} onChange={() => handleToggleRule('aiPrior')} className="..." />          </label>
 
           <label className="flex items-center justify-between cursor-pointer group">
             <span className="text-xs sm:text-sm text-white/70 group-hover:text-amber-400 transition-colors">법조항 (제X조)만 굵게 표시</span>
-            <input type="checkbox" checked={aiRules.boldLaw || false} onChange={() => handleToggleRule('boldLaw')} className="w-5 h-5 accent-amber-500 rounded bg-black border-white/20 cursor-pointer" />
-          </label>
+            <input type="checkbox" id="boldLaw" name="boldLaw" checked={aiRules.boldLaw || false} onChange={() => handleToggleRule('boldLaw')} className="..." />          </label>
         </div>
 
         <div className="border-t border-white/10 my-6"></div>
