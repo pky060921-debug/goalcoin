@@ -163,19 +163,12 @@ function MainApp() {
   const [tempKey, setTempKey] = useState("");
   const [tempValue, setTempValue] = useState("");
 
-  const saveGlobalDict = async (newDict: typeof globalDict) => {
-  setGlobalDict(newDict); // 낙관적 업데이트
-  if (!safeAddress) return; // 로그인 안 된 상태면 저장 시도 자체를 안 함
-
+  const saveGlobalDict = async (newDict: any) => {
+  setGlobalDict(newDict); // 1. 화면 즉시 반영
   try {
-    await api.updateGlobalDict(safeAddress, newDict);
-  } catch (e: any) {
-    // ✅ 콘솔과 터미널 양쪽에 에러 기록
-    console.error("글로벌 단어장 저장 실패:", e);
-    addLog(`⚠️ 단어장 저장 실패: ${e?.message || '알 수 없는 오류'}`);
-    // ✅ 사용자에게 실패 알림 (롤백 옵션)
-    alert("단어 저장에 실패했습니다. 네트워크 상태를 확인해주세요.\n(터미널에서 자세한 오류를 확인하실 수 있습니다.)");
-    setGlobalDict(globalDict); // 롤백
+    await api.updateGlobalDict(safeAddress, newDict); // 2. DB로 전송!
+  } catch (err) {
+    console.error("단어장 DB 동기화 실패:", err);
   }
 };
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
