@@ -880,8 +880,6 @@ function MainApp() {
             studyMode={studyMode} 
             setStudyMode={setStudyMode} 
             handleDeleteAll={handleDeleteAll} 
-            
-            {/* 💡 [추가] DB 설정을 MypageTab으로 넘겨줍니다. */}
             globalDict={globalDict} 
             saveGlobalDict={saveGlobalDict} 
           />
