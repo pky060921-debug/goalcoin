@@ -880,7 +880,6 @@ function MainApp() {
             setUseAiRecommend={setUseAiRecommend} 
             studyMode={studyMode} 
             setStudyMode={setStudyMode} 
-            handleDeleteAll={handleDeleteAll} 
             globalDict={globalDict} 
             saveGlobalDict={saveGlobalDict} 
           />
