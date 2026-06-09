@@ -54,85 +54,6 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
       onSubmit(val);
     }
   };
-// 💡 [단어장 UI 분리] PC 사이드바와 모바일 모달에서 똑같은 코드를 재사용하기 위한 함수입니다.
-  const renderDictionaryUI = (isMobile: boolean) => (
-    <div className={`flex flex-col w-full h-full ${isMobile ? 'bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 rounded-sm' : 'bg-[#08080a]/80 border border-white/10 p-5 rounded-sm shadow-xl backdrop-blur-sm'}`}>
-      <div className="flex justify-between items-start mb-6">
-        <div className="flex gap-4 border-b border-white/10 w-full pt-1">
-          <button onClick={() => setDictTab('abbr')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'abbr' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-white/40 hover:text-white/70'}`}>⚡ 스마트 약어</button>
-          <button onClick={() => setDictTab('include')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'include' ? 'text-teal-400 border-b-2 border-teal-400' : 'text-white/40 hover:text-white/70'}`}>✅ 필수 포함</button>
-          <button onClick={() => setDictTab('stop')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'stop' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-white/40 hover:text-white/70'}`}>❌ 제외 단어</button>
-        </div>
-        {/* 모바일에서만 닫기 버튼 표시 */}
-        {isMobile && <button onClick={() => setIsDictModalOpen(false)} className="text-white/40 hover:text-white ml-6 text-lg font-bold">✕</button>}
-      </div>
-      
-      <div className="flex gap-2 mb-5 shrink-0">
-        <input type="text" value={tempKey} 
-          onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-             if (dictTab === 'abbr' && tempKey && tempValue) {
-               saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [tempKey.trim()]: tempValue.trim() } });
-               setTempKey(""); setTempValue("");
-             } else if (dictTab !== 'abbr' && tempKey) {
-               const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
-               const targetArray = dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions;
-               saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words])) });
-               setTempKey("");
-             }
-          }
-        }} placeholder={dictTab === 'abbr' ? "약어 (예: 복정고)" : "단어 입력 (쉼표 구분)"} className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-white/30 transition-colors w-full min-w-0" />
-        
-        {dictTab === 'abbr' && (
-          <input type="text" value={tempValue} onChange={(e) => setTempValue(e.target.value)} onKeyDown={(e) => {
-             if (e.key === 'Enter' && tempKey && tempValue) {
-               saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [tempKey.trim()]: tempValue.trim() } });
-               setTempKey(""); setTempValue("");
-             }
-          }} placeholder="원래 정답" className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full min-w-0" />
-        )}
-        
-        <button onClick={() => {
-          if (dictTab === 'abbr' && tempKey && tempValue) {
-            saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [tempKey.trim()]: tempValue.trim() } });
-            setTempKey(""); setTempValue("");
-          } else if (dictTab !== 'abbr' && tempKey) {
-            const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
-            const targetArray = dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions;
-            saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words])) });
-            setTempKey("");
-          }
-        }} className="px-3 sm:px-4 bg-white/5 text-white/80 border border-white/10 text-xs font-bold rounded-sm hover:bg-white/10 transition-colors shrink-0">등록</button>
-      </div>
-      
-      {/* 💡 개별 스크롤 영역 적용 */}
-      <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 min-h-[160px]">
-        {dictTab === 'abbr' && Object.entries(globalDict.abbrs).map(([abbr, full]) => (
-          <div key={abbr} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-indigo-400 font-bold px-2 py-0.5 bg-indigo-900/20 rounded-sm border border-indigo-500/20">{abbr}</span> 
-              <span className="text-white/30 text-[10px]">→</span> 
-              <span className="text-white/70 break-all">{full as string}</span>
-            </div>
-            <button onClick={() => { const nw = {...globalDict.abbrs}; delete nw[abbr]; saveGlobalDict({...globalDict, abbrs: nw}); }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors shrink-0">✕</button>
-          </div>
-        ))}
-        {dictTab !== 'abbr' && (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions).map((word: string) => (
-          <div key={word} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
-            <span className={`px-2 py-0.5 rounded-sm border ${dictTab === 'stop' ? 'text-amber-400 bg-amber-900/10 border-amber-500/20' : 'text-teal-400 bg-teal-900/10 border-teal-500/20'}`}>{word}</span>
-            <button onClick={() => {
-              const targetArray = (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions).filter((w: string) => w !== word);
-              saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: targetArray });
-            }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors">✕</button>
-          </div>
-        ))}
-        
-        {((dictTab === 'abbr' && Object.keys(globalDict.abbrs).length === 0) || (dictTab === 'stop' && globalDict.stopwords.length === 0) || (dictTab === 'include' && globalDict.inclusions.length === 0)) && (
-          <div className="text-center py-8 text-white/20 text-[11px] sm:text-xs">등록된 단어가 없습니다.</div>
-        )}
-      </div>
-    </div>
-  );
   
   return (
     <input
@@ -957,7 +878,86 @@ function MainApp() {
     );
   }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow]); 
   // 💡 [핵심 방어막] 타이머(elapsed)가 감시 대상에서 빠져 있으므로 1초마다 화면이 새로고침되지 않습니다!
-
+// 💡 [단어장 UI 분리] PC 사이드바와 모바일 모달에서 똑같은 코드를 재사용하기 위한 함수입니다.
+  const renderDictionaryUI = (isMobile: boolean) => (
+    <div className={`flex flex-col w-full h-full ${isMobile ? 'bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 rounded-sm' : 'bg-[#08080a]/80 border border-white/10 p-5 rounded-sm shadow-xl backdrop-blur-sm'}`}>
+      <div className="flex justify-between items-start mb-6">
+        <div className="flex gap-4 border-b border-white/10 w-full pt-1">
+          <button onClick={() => setDictTab('abbr')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'abbr' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-white/40 hover:text-white/70'}`}>⚡ 스마트 약어</button>
+          <button onClick={() => setDictTab('include')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'include' ? 'text-teal-400 border-b-2 border-teal-400' : 'text-white/40 hover:text-white/70'}`}>✅ 필수 포함</button>
+          <button onClick={() => setDictTab('stop')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'stop' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-white/40 hover:text-white/70'}`}>❌ 제외 단어</button>
+        </div>
+        {/* 모바일에서만 닫기 버튼 표시 */}
+        {isMobile && <button onClick={() => setIsDictModalOpen(false)} className="text-white/40 hover:text-white ml-6 text-lg font-bold">✕</button>}
+      </div>
+      
+      <div className="flex gap-2 mb-5 shrink-0">
+        <input type="text" value={tempKey} 
+          onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+             if (dictTab === 'abbr' && tempKey && tempValue) {
+               saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [tempKey.trim()]: tempValue.trim() } });
+               setTempKey(""); setTempValue("");
+             } else if (dictTab !== 'abbr' && tempKey) {
+               const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
+               const targetArray = dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions;
+               saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words])) });
+               setTempKey("");
+             }
+          }
+        }} placeholder={dictTab === 'abbr' ? "약어 (예: 복정고)" : "단어 입력 (쉼표 구분)"} className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-white/30 transition-colors w-full min-w-0" />
+        
+        {dictTab === 'abbr' && (
+          <input type="text" value={tempValue} onChange={(e) => setTempValue(e.target.value)} onKeyDown={(e) => {
+             if (e.key === 'Enter' && tempKey && tempValue) {
+               saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [tempKey.trim()]: tempValue.trim() } });
+               setTempKey(""); setTempValue("");
+             }
+          }} placeholder="원래 정답" className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full min-w-0" />
+        )}
+        
+        <button onClick={() => {
+          if (dictTab === 'abbr' && tempKey && tempValue) {
+            saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [tempKey.trim()]: tempValue.trim() } });
+            setTempKey(""); setTempValue("");
+          } else if (dictTab !== 'abbr' && tempKey) {
+            const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
+            const targetArray = dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions;
+            saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words])) });
+            setTempKey("");
+          }
+        }} className="px-3 sm:px-4 bg-white/5 text-white/80 border border-white/10 text-xs font-bold rounded-sm hover:bg-white/10 transition-colors shrink-0">등록</button>
+      </div>
+      
+      {/* 💡 개별 스크롤 영역 적용 */}
+      <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 min-h-[160px]">
+        {dictTab === 'abbr' && Object.entries(globalDict.abbrs).map(([abbr, full]) => (
+          <div key={abbr} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-indigo-400 font-bold px-2 py-0.5 bg-indigo-900/20 rounded-sm border border-indigo-500/20">{abbr}</span> 
+              <span className="text-white/30 text-[10px]">→</span> 
+              <span className="text-white/70 break-all">{full as string}</span>
+            </div>
+            <button onClick={() => { const nw = {...globalDict.abbrs}; delete nw[abbr]; saveGlobalDict({...globalDict, abbrs: nw}); }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors shrink-0">✕</button>
+          </div>
+        ))}
+        {dictTab !== 'abbr' && (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions).map((word: string) => (
+          <div key={word} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
+            <span className={`px-2 py-0.5 rounded-sm border ${dictTab === 'stop' ? 'text-amber-400 bg-amber-900/10 border-amber-500/20' : 'text-teal-400 bg-teal-900/10 border-teal-500/20'}`}>{word}</span>
+            <button onClick={() => {
+              const targetArray = (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions).filter((w: string) => w !== word);
+              saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: targetArray });
+            }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors">✕</button>
+          </div>
+        ))}
+        
+        {((dictTab === 'abbr' && Object.keys(globalDict.abbrs).length === 0) || (dictTab === 'stop' && globalDict.stopwords.length === 0) || (dictTab === 'include' && globalDict.inclusions.length === 0)) && (
+          <div className="text-center py-8 text-white/20 text-[11px] sm:text-xs">등록된 단어가 없습니다.</div>
+        )}
+      </div>
+    </div>
+  );
+  
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
 {/* ?? 여기서부터 복사해서 기존 <header>...</header>가 있던 자리에 붙여넣으세요 */}
