@@ -73,7 +73,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           memo: card.memo
         })
       });
-
+      console.log("서버 응답 상태:", res.status); // 💡 이 줄을 추가하세요
       if (!res.ok) throw new Error("서버 통신에 실패했습니다.");
       
       // 💡 [핵심] 서버 저장 성공 후 부모의 데이터를 새로 가져와서 상태를 최신화합니다.
