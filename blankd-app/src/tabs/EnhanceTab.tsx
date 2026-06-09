@@ -11,6 +11,15 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
+export const EnhanceTab = ({ savedCards, ... }: any) => {
+  // 💡 부모의 savedCards가 바뀔 때마다 EnhanceTab도 알아채도록 합니다.
+  useEffect(() => {
+    if (editingId) {
+      const updatedCard = savedCards.find((c: any) => c.id === editingId);
+      if (updatedCard) setEditContent(updatedCard.content);
+    }
+  }, [savedCards]);
+
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId,  }: any) => {
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
@@ -258,7 +267,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                         
                         {activeTool === 'editor' ? (
                       <textarea
-                        Value={editContent} // 💡 처음 열릴 때의 값만 넣어줍니다.
+                        value={editContent} // 💡 처음 열릴 때의 값만 넣어줍니다.
                         onChange={(e) => {
                           // 💡 입력창 바깥이나 다른 버튼을 클릭해 포커스가 빠져나갈 때 딱 한 번만 상태를 저장합니다.
                           setEditContent(e.target.value); 
