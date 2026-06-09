@@ -61,36 +61,36 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     setIsSaving(true);
     setErrorMsg(null);
     try {
-      // 💡 저장 전, 현재 textarea에 입력된 값이 확실히 editContent에 있는지 한 번 더 동기화하거나
-      // 버튼 클릭 시점에 입력값을 직접 가져오는 것이 안전합니다.
       const res = await fetch("https://api.blankd.top/api/save-card", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           wallet_address: card.wallet_address || "ENOKI_USER", 
           card_id: card.id,
-          card_content: editContent, // 💡 최신 상태가 여기서 사용됨
+          card_content: editContent,
           answer_text: card.answer_text || "",
           folder_name: card.folder_name,
-          memo: card.memo 
+          memo: card.memo
         })
       });
 
       if (!res.ok) throw new Error("서버 통신에 실패했습니다.");
       
-      // 💡 핵심: 저장 성공 후 부모의 상태를 갱신해야 탭 전환 시 초기화되지 않습니다.
+      // 💡 [핵심] 서버 저장 성공 후 부모의 데이터를 새로 가져와서 상태를 최신화합니다.
+      // 이렇게 해야 F5를 눌러도 서버에서 수정된 최신 데이터를 가져오게 됩니다.
       if (typeof loadAllData === 'function') {
         await loadAllData(); 
       }
       
       setEditingId(null);
     } catch (error: any) {
+      console.error("수정 저장 실패:", error);
       setErrorMsg(error.message || "서버 통신에 실패했습니다.");
     } finally {
       setIsSaving(false);
     }
   };
-
+  
   const renderInteractiveText = () => {
     const tokens = editContent.split(/(\s+|\n|---|\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g).filter(Boolean);
     
