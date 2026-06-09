@@ -1342,77 +1342,104 @@ import pandas as pd
 import io
 
 # ==========================================
-# 💡 [IndexError 완벽 해결] 내 지갑 주소 기준 데이터 전체 엑셀 다운로드 API
+# 💡 [정밀 진단 유닛] 내 지갑 주소 기준 데이터 전체 엑셀 다운로드 API
 # ==========================================
 @api_bp.route('/export-excel', methods=['GET'])
 def export_excel_final():
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill
+    
+    wallet_address = request.args.get('wallet_address')
+    target = request.args.get('target', 'all')
+    
+    print(f"\n[엑셀 다운로드 진단 수신] 지갑주소: {wallet_address} | 대상: {target}")
+    
+    if not wallet_address:
+        return jsonify({"error": "인증되지 않은 접근입니다. 지갑 주소가 누락되었습니다."}), 400
+
     try:
-        wallet_address = request.args.get('wallet_address')
-        target = request.args.get('target', 'all')
+        # 💡 openpyxl 워크북 객체를 메모리에 다이렉트로 직접 생성 (기본 시트 자동 생성됨)
+        wb = openpyxl.Workbook()
         
-        if not wallet_address:
-            return jsonify({"error": "인증되지 않은 접근입니다. 지갑 주소가 누락되었습니다."}), 400
-
-        conn = get_db_connection()
-        output = io.BytesIO()
+        # openpyxl 기본 생성 시트 가져오기 및 초기화
+        ws_default = wb.active
+        ws_default.title = "안내_및_요약"
+        ws_default.views.sheetView[0].showGridLines = True
         
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # 💡 [물리 방어 장치] openpyxl 가상 통합 문서 개체를 확보하여 
-            # 데이터가 전부 0건이더라도 엔진이 터지지 않도록 기본 시트를 선제 생성해 둡니다.
-            workbook = writer.book
+        ws_default["A1"] = "공급망 계정 식별자:"
+        ws_default["B1"] = wallet_address
+        ws_default["A2"] = "백업 일시:"
+        ws_default["B2"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # 디자인 서식 지정
+        for cell in [ws_default["A1"], ws_default["A2"]]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="4F46E5", end_color="4F46E5", fill_type="solid")
             
-            # 1. 만들기 탭 데이터 처리 (categories)
-            if target in ['all', 'categories']:
-                df_cat = pd.read_sql_query(
-                    "SELECT id, folder_name, title, content, memo FROM categories WHERE wallet_address = ?", 
-                    conn, params=(wallet_address,)
-                )
-                # 데이터가 비어있어도 컬럼 서식 가이드를 명시하여 구조 유지
-                if df_cat.empty:
-                    df_cat = pd.DataFrame(columns=['id', 'folder_name', 'title', 'content', 'memo'])
-                df_cat.to_excel(writer, sheet_name='만들기_카테고리', index=False)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 1. 만들기 탭 데이터 처리 (categories)
+        if target in ['all', 'categories']:
+            cursor.execute(
+                "SELECT id, folder_name, title, content, memo FROM categories WHERE wallet_address = ? ORDER BY id ASC", 
+                (wallet_address,)
+            )
+            rows_cat = cursor.fetchall()
+            print(f"[만들기 진단] 추출된 행 개수: {len(rows_cat)}개")
+            
+            ws_cat = wb.create_sheet(title="만들기_카테고리")
+            ws_cat.views.sheetView[0].showGridLines = True
+            
+            headers = ['id', 'folder_name', 'title', 'content', 'memo']
+            ws_cat.append(headers)
+            
+            for row in rows_cat:
+                ws_cat.append([row[0], row[1], row[2], row[3], row[4]])
                 
-            # 2. 채우기 탭 데이터 처리 (cards)
-            if target in ['all', 'cards']:
-                df_card = pd.read_sql_query(
-                    "SELECT id, folder_name, card_content, answer_text, memo FROM cards WHERE wallet_address = ?", 
-                    conn, params=(wallet_address,)
-                )
-                if df_card.empty:
-                    df_card = pd.DataFrame(columns=['id', 'folder_name', 'content', 'answer_text', 'memo'])
-                else:
-                    df_card.rename(columns={'card_content': 'content'}, inplace=True)
-                df_card.to_excel(writer, sheet_name='채우기_카드', index=False)
-
-            # 💡 [핵심 버그 격파 필터] 판다스가 연산을 마쳤는데도 생성된 시트가 하나도 없거나 
-            # 첫 번째 기본 Sheet가 비활성화되어 뻗는 현상을 완전히 막기 위해 인덱스를 보정합니다.
-            if len(workbook.sheetnames) > 0:
-                workbook.active = 0  # 첫 번째 시트를 강제로 활성화(Visible) 상태로 고정
-            else:
-                # 만약 예기치 않게 시트가 다 비어있다면 안내용 더미 시트를 구워 런타임 오류 방어
-                ws_dummy = workbook.create_sheet(title="안내_데이터없음")
-                ws_dummy["A1"] = "현재 계정에 등록된 만들기/채우기 내역이 없습니다."
-                workbook.active = 0
-
+        # 2. 채우기 탭 데이터 처리 (cards)
+        if target in ['all', 'cards']:
+            cursor.execute(
+                "SELECT id, folder_name, card_content, answer_text, memo FROM cards WHERE wallet_address = ? ORDER BY id ASC", 
+                (wallet_address,)
+            )
+            rows_card = cursor.fetchall()
+            print(f"[채우기 진단] 추출된 행 개수: {len(rows_card)}개")
+            
+            ws_card = wb.create_sheet(title="채우기_카드")
+            ws_card.views.sheetView[0].showGridLines = True
+            
+            headers = ['id', 'folder_name', 'content', 'answer_text', 'memo']
+            ws_card.append(headers)
+            
+            for row in rows_card:
+                ws_card.append([row[0], row[1], row[2], row[3], row[4]])
+                
         conn.close()
+        
+        # 가상 바이너리 파일로 스트리밍 빌드
+        output = io.BytesIO()
+        wb.save(output)
         output.seek(0)
         
+        print("✅ [성공] openpyxl 가상 통합 문서 빌드 및 예외 감지 통과 완료.")
         return send_file(
             output,
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             as_attachment=True,
-            download_name=f"blankd_내자료_백업_{datetime.now().strftime('%Y%m%d')}.xlsx"
+            download_name=f"blankd_백업_{datetime.now().strftime('%Y%m%d')}.xlsx"
         )
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": f"엑셀 추출 중 에러 발생: {str(e)}"}), 500
+        err_msg = traceback.format_exc()
+        print(f"❌ [백엔드 치명적 에러 캐치]\n{err_msg}", file=sys.stderr)
+        return jsonify({"error": f"서버 내부 연산 장애: {str(e)}", "traceback": err_msg}), 500
+
 
 # ==========================================
 # 💡 [중복 에러 완벽 해결] 내 소유의 데이터만 선택적 수정 및 일괄 반영 API
 # ==========================================
 @api_bp.route('/import-excel', methods=['POST'])
-def import_excel_final(): # 💡 함수명 중복 완전 방어
+def import_excel_final():
     try:
         wallet_address = request.form.get('wallet_address')
         if not wallet_address:
@@ -1426,10 +1453,8 @@ def import_excel_final(): # 💡 함수명 중복 완전 방어
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 1. 만들기_카테고리 시트 동기화 검증 순회
         if '만들기_카테고리' in excel_data.sheet_names:
             df_cat = pd.read_excel(file, sheet_name='만들기_카테고리').fillna('')
-            
             for _, row in df_cat.iterrows():
                 cat_id = row.get('id')
                 folder_name = row.get('folder_name', '기본 폴더')
@@ -1451,10 +1476,8 @@ def import_excel_final(): # 💡 함수명 중복 완전 방어
                     (wallet_address, folder_name, title, content, memo)
                 )
 
-        # 2. 채우기_카드 시트 동기화 검증 순회
         if '채우기_카드' in excel_data.sheet_names:
             df_card = pd.read_excel(file, sheet_name='채우기_카드').fillna('')
-            
             for _, row in df_card.iterrows():
                 card_id = row.get('id')
                 folder_name = row.get('folder_name', '기본 폴더')
