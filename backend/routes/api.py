@@ -1342,10 +1342,10 @@ import pandas as pd
 import io
 
 # ==========================================
-# 💡 [중복 에러 완벽 해결] 내 지갑 주소 기준 데이터 전체 엑셀 다운로드 API
+# 💡 [IndexError 완벽 해결] 내 지갑 주소 기준 데이터 전체 엑셀 다운로드 API
 # ==========================================
 @api_bp.route('/export-excel', methods=['GET'])
-def export_excel_final(): # 💡 엔드포인트 이름 중복 충돌을 원천 차단하기 위해 함수명을 고유하게 변경
+def export_excel_final():
     try:
         wallet_address = request.args.get('wallet_address')
         target = request.args.get('target', 'all')
@@ -1357,16 +1357,19 @@ def export_excel_final(): # 💡 엔드포인트 이름 중복 충돌을 원천 
         output = io.BytesIO()
         
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # 💡 [물리 방어 장치] openpyxl 가상 통합 문서 개체를 확보하여 
+            # 데이터가 전부 0건이더라도 엔진이 터지지 않도록 기본 시트를 선제 생성해 둡니다.
+            workbook = writer.book
+            
             # 1. 만들기 탭 데이터 처리 (categories)
             if target in ['all', 'categories']:
                 df_cat = pd.read_sql_query(
                     "SELECT id, folder_name, title, content, memo FROM categories WHERE wallet_address = ?", 
                     conn, params=(wallet_address,)
                 )
-                # 자료가 없더라도 openpyxl 엔진이 다운 시점에 뻗지 않도록 스키마(헤더 구조)를 획득 보존합니다.
+                # 데이터가 비어있어도 컬럼 서식 가이드를 명시하여 구조 유지
                 if df_cat.empty:
                     df_cat = pd.DataFrame(columns=['id', 'folder_name', 'title', 'content', 'memo'])
-                
                 df_cat.to_excel(writer, sheet_name='만들기_카테고리', index=False)
                 
             # 2. 채우기 탭 데이터 처리 (cards)
@@ -1375,13 +1378,21 @@ def export_excel_final(): # 💡 엔드포인트 이름 중복 충돌을 원천 
                     "SELECT id, folder_name, card_content, answer_text, memo FROM cards WHERE wallet_address = ?", 
                     conn, params=(wallet_address,)
                 )
-                
                 if df_card.empty:
                     df_card = pd.DataFrame(columns=['id', 'folder_name', 'content', 'answer_text', 'memo'])
                 else:
                     df_card.rename(columns={'card_content': 'content'}, inplace=True)
-                    
                 df_card.to_excel(writer, sheet_name='채우기_카드', index=False)
+
+            # 💡 [핵심 버그 격파 필터] 판다스가 연산을 마쳤는데도 생성된 시트가 하나도 없거나 
+            # 첫 번째 기본 Sheet가 비활성화되어 뻗는 현상을 완전히 막기 위해 인덱스를 보정합니다.
+            if len(workbook.sheetnames) > 0:
+                workbook.active = 0  # 첫 번째 시트를 강제로 활성화(Visible) 상태로 고정
+            else:
+                # 만약 예기치 않게 시트가 다 비어있다면 안내용 더미 시트를 구워 런타임 오류 방어
+                ws_dummy = workbook.create_sheet(title="안내_데이터없음")
+                ws_dummy["A1"] = "현재 계정에 등록된 만들기/채우기 내역이 없습니다."
+                workbook.active = 0
 
         conn.close()
         output.seek(0)
@@ -1396,7 +1407,6 @@ def export_excel_final(): # 💡 엔드포인트 이름 중복 충돌을 원천 
         import traceback
         traceback.print_exc()
         return jsonify({"error": f"엑셀 추출 중 에러 발생: {str(e)}"}), 500
-
 
 # ==========================================
 # 💡 [중복 에러 완벽 해결] 내 소유의 데이터만 선택적 수정 및 일괄 반영 API
