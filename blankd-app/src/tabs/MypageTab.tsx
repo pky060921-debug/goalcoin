@@ -1,105 +1,114 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { api } from '../services/api';
 
-export const MypageTab = ({ safeAddress, enokiFlow, useAiRecommend, setUseAiRecommend, studyMode, setStudyMode, handleDeleteAll, globalDict, saveGlobalDict }: any) => {
-  
-  // 💡 [초강력 방어벽 추가] 서버에서 전역 사전을 아직 불러오지 못했거나 초기화 중일 때 화면이 깨지는 것을 막아줍니다.
-  if (!globalDict) {
-    return (
-      <div className="max-w-md mx-auto py-16 text-center text-white/40 text-xs">
-        ⚙️ 설정을 불러오는 중입니다... 잠시만 기다려주세요.
-      </div>
-    );
-  }
-  
-  // 💡 DB에서 설정값(ai_rules)을 읽어옵니다. 없으면 빈 객체 반환.
-  const aiRules = globalDict?.ai_rules || {};
+export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setSystemLogs }: any) => {
+  const [showWallet, setShowWallet] = useState(false);
+  const [lawFile, setLawFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
-  // 💡 토글 스위치 상태를 DB에 저장하는 함수 (오류 진단 로직 포함)
-  const handleToggleRule = (ruleKey: string) => {
-    try {
-      console.log(`[진단] '${ruleKey}' 설정 변경 시도 중...`);
-      const nextVal = !aiRules[ruleKey];
-      const nextRules = { ...aiRules, [ruleKey]: nextVal };
-      
-      // 1. 즉시 DB에 저장
-      if (saveGlobalDict) {
-        saveGlobalDict({ ...globalDict, ai_rules: nextRules });
-        console.log(`[진단] DB 저장 신호 전송 완료:`, nextRules);
-      } else {
-        console.error(`[진단 오류] App.tsx로부터 saveGlobalDict 함수를 전달받지 못했습니다!`);
-      }
+  // ZkLogin 이메일 또는 에노키 공급체인 정보에서 이메일 자동 확보
+  const userEmail = zkLogin?.userEmail || enokiFlow?.getUserInfo?.()?.email || "설계자 계정 (이메일 정보 공백)";
 
-      // 2. 화면 즉각 반응을 위해 App state도 함께 업데이트
-      if (ruleKey === 'useAiRecommend' && setUseAiRecommend) {
-        setUseAiRecommend(nextVal);
-      }
-    } catch (error) {
-      console.error(`[진단 오류] 설정 저장 중 치명적 에러 발생:`, error);
+  // 💡 CraftTab에서 완벽 이식된 업로드 코어 전송 엔진
+  const handleFileUploadAndSubmit = async () => {
+    if (!lawFile) {
+      alert("전송할 원본 학습용 데이터 파일(.txt)을 선택해주십시오.");
+      return;
     }
-  };
-
-  // 💡 레이아웃 모드(법령/일반) 상태를 DB에 저장하는 함수
-  const handleStudyMode = (mode: string) => {
+    
     try {
-      const nextRules = { ...aiRules, studyMode: mode };
-      if (saveGlobalDict) saveGlobalDict({ ...globalDict, ai_rules: nextRules });
-      if (setStudyMode) setStudyMode(mode);
-      console.log(`[진단] 레이아웃 모드 '${mode}' DB 저장 완료`);
-    } catch (error) {
-      console.error(`[진단 오류] 레이아웃 저장 중 에러 발생:`, error);
+      setIsUploading(true);
+      console.log("[Mypage 진단] 원본 데이터 인공지능 청크 분해 전송 시작:", lawFile.name);
+      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[Upload] 자료 파일 '${lawFile.name}' 가공 대기열 등록 완료.`]);
+
+      const data = await api.uploadExamCoop(lawFile, safeAddress);
+      console.log("[Mypage 진단] 서버 가공 결과 동기화 응답 수신 성공:", data);
+      
+      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[Success] ${data.count || 0}개의 학습 조항 노드가 데이터베이스에 정착되었습니다.`]);
+      
+      const updatedCats = await api.getCategories(safeAddress);
+      if (setCategories) setCategories(updatedCats);
+      
+      alert(`성공적으로 ${data.count || 0}개의 조항이 마이그레이션 파싱되었습니다.`);
+      setLawFile(null);
+    } catch (err: any) {
+      console.error("[Mypage 진단 오류] 서버 스트리밍 전송 에러 캐치:", err);
+      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[Error] 업로드 실패 파서 로그: ${err.message}`]);
+      alert(`가공 업로드 실패 알림: ${err.message}`);
+    } finally {
+      setIsUploading(false);
     }
   };
 
   return (
-    <div className="max-w-md mx-auto space-y-8 py-16 animate-in fade-in">
-      <div className="border border-white/10 p-6 rounded-sm">
+    <div className="max-w-md mx-auto space-y-8 py-12 px-4 animate-in fade-in duration-300">
+      <div className="border border-white/10 p-6 rounded-sm bg-[#08080a] shadow-xl">
         
-        <div className="text-xs text-white/60 mb-2">계정 및 지갑 정보</div>
-        <div className="text-[11px] font-mono text-teal-400 bg-black/50 p-3 rounded mb-4 break-all">
-          {safeAddress || "연결된 계정 없음"}
-        </div>
-        <button onClick={() => { enokiFlow?.logout(); window.location.reload(); }} className="px-4 py-2 text-xs border border-white/20 text-white/60 hover:text-white hover:bg-white/10 rounded-sm mb-6 transition-all">
-          로그아웃
+        {/* 💡 [설계 요건] 지갑 정보를 계정 이메일 주소로 전면 배치 및 클릭 토글형 출력 변경 */}
+        <div className="text-xs text-white/40 mb-2 font-mono uppercase tracking-wider">Account Identity (Email)</div>
+        <button 
+          onClick={() => {
+            console.log("[Mypage 진단] 계정 이메일 터치 시도 -> 암호화 지갑 토글 전환:", !showWallet);
+            setShowWallet(!showWallet);
+          }}
+          className="w-full text-left p-3 bg-black/50 border border-white/5 rounded-sm mb-4 transition-all hover:bg-white/[0.02] cursor-pointer group"
+        >
+          <div className="text-xs font-bold text-teal-400 group-hover:text-teal-300 transition-colors break-all">
+            {userEmail}
+          </div>
+          <div className="text-[10px] text-white/30 mt-1">💡 터치(클릭)하면 분산 원장용 지갑 노드 주소가 하단에 표시됩니다.</div>
+        </button>
+
+        {showWallet && (
+          <div className="text-[10px] font-mono text-amber-400 bg-amber-950/20 border border-amber-900/30 p-3 rounded-sm mb-4 break-all animate-in fade-in duration-200">
+            <span className="font-bold block mb-0.5 text-white/50">[Secure Sui Network Node Address]</span>
+            {safeAddress || "연결된 노드 지갑 고유 주소 공백 상태"}
+          </div>
+        )}
+
+        <button 
+          onClick={() => { 
+            console.log("[Mypage 진단] 시스템 커넥션 연결 해제");
+            enokiFlow?.logout(); 
+            window.location.reload(); 
+          }} 
+          className="w-full py-2 text-xs border border-white/20 text-white/60 hover:text-white hover:bg-white/10 rounded-sm mb-6 transition-all font-bold cursor-pointer"
+        >
+          시스템 연결 해제 (로그아웃)
         </button>
 
         <div className="border-t border-white/10 my-6"></div>
 
-        {/* 💡 [학습자료 업로드 설정] CraftTab에서 여기로 완벽하게 이사 완료! */}
-        <div className="text-xs text-white/60 mb-4">학습자료 업로드 및 AI 설정 (DB 자동 동기화)</div>
-        <div className="space-y-4 mb-8 bg-[#0a0a0c] border border-white/10 p-5 rounded-sm shadow-inner">
-          <label className="flex items-center justify-between cursor-pointer group">
-            <span className="text-xs sm:text-sm text-white/70 group-hover:text-amber-400 transition-colors">숫자, 영문 빈칸 추천</span>
-            <input type="checkbox" id="useAiRecommend" name="useAiRecommend" checked={aiRules.useAiRecommend || false} onChange={() => handleToggleRule('useAiRecommend')} className="..." />          </label>
-          
-          <label className="flex items-center justify-between cursor-pointer group">
-            <span className="text-xs sm:text-sm text-white/70 group-hover:text-amber-400 transition-colors">AI 추천 빈칸 우선적용</span>
-            <input type="checkbox" id="aiPrior" name="aiPrior" checked={aiRules.aiPrior || false} onChange={() => handleToggleRule('aiPrior')} className="..." />          </label>
+        {/* 💡 [이식 완료] CraftTab에서 완전히 이동해온 학습자료 파일 로드 및 전송 구조체 */}
+        <div className="text-xs text-white/50 font-bold mb-3 tracking-wider font-mono uppercase">📖 RESOURCE SOURCE FILE UPLOAD INTERFACE</div>
+        <div className="space-y-4 bg-[#0a0a0c] border border-white/10 p-5 rounded-sm">
+          <div className="border border-dashed border-white/20 p-6 rounded-sm text-center bg-black/30 hover:border-amber-500/40 transition-colors relative group">
+            <input 
+              type="file" 
+              accept=".txt"
+              onChange={(e) => {
+                const file = e.target.files?.[0] || null;
+                console.log("[Mypage 진단] 원본 자료 파일 타겟팅 캐시:", file?.name);
+                setLawFile(file);
+              }}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            />
+            <div className="text-xs text-white/70 group-hover:text-amber-400 transition-colors">
+              {lawFile ? `📄 ${lawFile.name}` : "클릭하여 원본 (.txt) 파일을 공급해 주십시오"}
+            </div>
+            <div className="text-[10px] text-white/30 mt-1">파일 인코딩 규격 권장: UTF-8 일반 텍스트 문서</div>
+          </div>
 
-          <label className="flex items-center justify-between cursor-pointer group">
-            <span className="text-xs sm:text-sm text-white/70 group-hover:text-amber-400 transition-colors">법조항 (제X조)만 굵게 표시</span>
-            <input type="checkbox" id="boldLaw" name="boldLaw" checked={aiRules.boldLaw || false} onChange={() => handleToggleRule('boldLaw')} className="..." />          </label>
+          <button
+            onClick={handleFileUploadAndSubmit}
+            disabled={isUploading || !lawFile}
+            className={`w-full py-3 text-xs font-bold rounded-sm border transition-all ${isUploading ? 'bg-white/5 border-white/5 text-white/20 cursor-wait' : !lawFile ? 'bg-white/5 border-white/10 text-white/30 cursor-not-allowed' : 'bg-amber-500/20 text-amber-400 border-amber-500/40 hover:bg-amber-500/30 cursor-pointer'}`}
+          >
+            {isUploading ? "⚡ 인공지능 프레임 가공 엔진 분석 중..." : "🚀 서버로 원본 데이터 전송 가동"}
+          </button>
         </div>
 
-        <div className="border-t border-white/10 my-6"></div>
-
-        {/* 💡 [학습 콘텐츠 레이아웃 설정] 로컬저장에서 DB저장으로 업그레이드! */}
-        <div className="text-xs text-white/60 mb-4">학습 콘텐츠 레이아웃 설정 (DB 자동 동기화)</div>
-        <div className="flex gap-2 mb-4">
-          {['법령', '일반'].map(mode => (
-            <button 
-              key={mode} 
-              onClick={() => handleStudyMode(mode)} 
-              className={`px-4 py-2 text-xs font-bold rounded-sm transition-colors ${(aiRules.studyMode || studyMode) === mode ? 'bg-indigo-600 text-white' : 'border border-white/10 text-white/40 hover:bg-white/5'}`}
-            >
-              {mode} 모드
-            </button>
-          ))}
-        </div>
-        <p className="text-[10px] text-white/40 leading-relaxed">
-          * 법령 모드: [법, 령, 규칙] 등 법률 용어에 맞게 카드가 배치됩니다.<br/>
-          * 일반 모드: 일반적인 텍스트 학습에 최적화된 넓은 카드로 표시됩니다.
-        </p>
       </div>
     </div>
   );
-}
+};
