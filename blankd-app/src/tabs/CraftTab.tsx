@@ -145,18 +145,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [newIncludeWord, setNewIncludeWord] = useState("");
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
-                                                                                                                                                                                                                                                                      
-// 💡 [여기에 추가] DB에서 ai_rules(설정값)를 꺼내옵니다. 없으면 빈 객체({})를 사용합니다.
-  const aiRules = globalDict?.ai_rules || {};
 
-  // 💡 [여기에 추가] 스위치를 누를 때마다 실행되어 DB에 저장하는 리모컨 함수입니다.
-  const handleToggleRule = (ruleKey: string) => {
-    // 현재 상태를 반대로 뒤집습니다. (켜져있으면 끄고, 꺼져있으면 켭니다)
-    const nextRules = { ...aiRules, [ruleKey]: !aiRules[ruleKey] };
-    // 바뀐 상태를 DB로 통째로 전송하여 저장합니다.
-    saveGlobalDict({ ...globalDict, ai_rules: nextRules });
-  };
-                                                                                                                                                                                                                                                                      
   // 💡 [수정 3] 고립된 단어장 코드를 지우고, App.tsx의 전역 사전을 직접 업데이트합니다. (덮어쓰기 멸망 버그 완벽 해결)
   const handleAddStopWord = () => {
     if (!newStopWord.trim()) return;
@@ -499,29 +488,14 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           <input type="file" accept=".pdf,.txt,.html" onChange={e => setLawFile(e.target.files?.[0] || null)} className="hidden"/> {lawFile ? `✅ ${lawFile.name}` : '+ 학습자료 업로드'}
         </label>
         <button onClick={uploadLaw} className="px-3 sm:px-4 border border-white/20 text-[10px] sm:text-xs hover:bg-white/10 transition-colors rounded-sm">전송</button>
-       
+        <button onClick={() => setShowStopWordsSettings(!showStopWordsSettings)} className={`px-3 sm:px-4 border rounded-sm text-[10px] sm:text-xs transition-colors ${showStopWordsSettings ? 'bg-amber-600/30 border-amber-500/50 text-amber-300' : 'border-white/20 text-white/50 hover:bg-white/10'}`}>⚙️ 예외 단어 (DB)</button>
+        
         {isSelectMode && (
           <div className="flex gap-1 animate-in fade-in zoom-in-95">
             <button onClick={handleBatchDelete} className="px-3 sm:px-4 bg-red-600/20 border border-red-500 text-red-400 text-[10px] sm:text-xs font-bold rounded-sm hover:bg-red-600/40 transition-colors">🗑️ 일괄삭제 ({checkedIds.size})</button>
             <button onClick={() => { setIsSelectMode(false); setCheckedIds(new Set()); }} className="px-2 border border-white/10 text-white/40 text-[10px] sm:text-xs rounded-sm hover:bg-white/5">취소</button>
           </div>
         )}
-      </div>
-
-      {/* 💡 [추가] AI 및 화면 설정 토글 (DB 연동) */}
-      <div className="flex flex-col sm:flex-row flex-wrap gap-4 mb-4 sm:mb-6 p-4 bg-black/40 border border-white/10 rounded-sm">
-        <label className="flex items-center gap-2 cursor-pointer group">
-          <input type="checkbox" checked={aiRules.useAiRecommend || false} onChange={() => handleToggleRule('useAiRecommend')} className="w-4 h-4 accent-amber-500 rounded bg-black border-white/20 cursor-pointer" />
-          <span className="text-xs sm:text-sm text-white/70 group-hover:text-white transition-colors">숫자, 영문 빈칸 추천</span>
-        </label>
-        <label className="flex items-center gap-2 cursor-pointer group">
-          <input type="checkbox" checked={aiRules.aiPrior || false} onChange={() => handleToggleRule('aiPrior')} className="w-4 h-4 accent-amber-500 rounded bg-black border-white/20 cursor-pointer" />
-          <span className="text-xs sm:text-sm text-white/70 group-hover:text-white transition-colors">AI 추천 빈칸 우선적용</span>
-        </label>
-        <label className="flex items-center gap-2 cursor-pointer group">
-          <input type="checkbox" checked={aiRules.boldLaw || false} onChange={() => handleToggleRule('boldLaw')} className="w-4 h-4 accent-amber-500 rounded bg-black border-white/20 cursor-pointer" />
-          <span className="text-xs sm:text-sm text-white/70 group-hover:text-white transition-colors">법조항 (제X조)만 굵게 표시</span>
-        </label>
       </div>
 
       {showStopWordsSettings && (
@@ -572,8 +546,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           </div>
         ))}
       </div>
-   {/* 💡 [스크롤 추가] 전체 목록을 감싸고 높이 제한(max-h-[60vh]) 및 스크롤을 생성합니다. */}
-    <div className="overflow-y-auto max-h-[60vh] custom-scrollbar pr-2 pb-10">
+      
       {craftFolders.map((folder: string) => {
         const isChapterFolder = /^제\s*\d+\s*장/.test(folder);
         return openFolders[folder] && (
@@ -709,7 +682,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           </div>
         );
       })}
-      </div> {/* 💡 [스크롤 추가] 위에서 연 스크롤 박스를 여기서 닫습니다 */}
     </div>
   );
 };
