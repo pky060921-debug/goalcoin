@@ -19,7 +19,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     try { const saved = localStorage.getItem('blankd_enhance_folders'); return saved ? JSON.parse(saved) : {}; } 
     catch(e) { return {}; }
   });
-
+  
+// EnhanceTab.tsx 내부
+  useEffect(() => {
+  console.log("EnhanceTab이 받은 savedCards:", savedCards);
+  }, [savedCards]);
+  
   useEffect(() => {
     setOpenFolders(prev => {
       const next = { ...prev };
