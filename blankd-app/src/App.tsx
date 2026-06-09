@@ -225,7 +225,7 @@ function MainApp() {
   }, [isLoggedIn, safeAddress, enokiFlow]);
    
     setCategories(catRes.categories || []); 
-    setSavedCards(cardRes.cards || []); 
+    setSavedCards([...(cardRes.cards || [])]); 
     setGoalBalance(balance);
 
    // 기존의 복잡한 구형 복구 코드를 삭제하고 단순화
