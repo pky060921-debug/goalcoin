@@ -1400,87 +1400,59 @@ def export_excel():
 
 
 # ==========================================
-# 💡 [보안 강화] 내 소유의 데이터만 선택적 수정 및 일괄 반영 API
+# 💡 [최종 완벽 조치] 내 지갑 주소 기준 데이터 전체 엑셀 다운로드 API
 # ==========================================
-@api_bp.route('/import-excel', methods=['POST'])
-def import_excel():
+@api_bp.route('/export-excel', methods=['GET'])
+def export_excel():
     try:
-        wallet_address = request.form.get('wallet_address')
-        if not wallet_address:
-            return jsonify({"error": "인증 정보가 올바르지 않습니다."}), 400
-            
-        if 'file' not in request.files:
-            return jsonify({"error": "업로드된 파일이 없습니다."}), 400
-            
-        file = request.files['file']
-        excel_data = pd.ExcelFile(file)
-        conn = get_db_connection()
-        cursor = conn.cursor()
+        wallet_address = request.args.get('wallet_address')
+        target = request.args.get('target', 'all')
         
-        # 1. 만들기_카테고리 시트 동기화 검증 순회
-        if '만들기_카테고리' in excel_data.sheet_names:
-            df_cat = pd.read_excel(file, sheet_name='만들기_카테고리').fillna('')
-            
-            for _, row in df_cat.iterrows():
-                cat_id = row.get('id')
-                folder_name = row.get('folder_name', '기본 폴더')
-                title = row.get('title', '')
-                content = row.get('content', '')
-                memo = row.get('memo', '')
-                
-                # 💡 고유 고리표(ID)가 명시되어 있다면 소유권 정밀 추적 검사 수행
-                if cat_id and str(cat_id).strip() != '':
-                    # 쿼리 조건문에 wallet_address를 동시 결합하여 '진짜 내 데이터'가 맞는지 확인
-                    cursor.execute("SELECT 1 FROM categories WHERE id = ? AND wallet_address = ?", (cat_id, wallet_address))
-                    if cursor.fetchone():
-                        # 내 소유가 확실하므로 안전하게 수정(UPDATE) 집행
-                        cursor.execute(
-                            "UPDATE categories SET folder_name=?, title=?, content=?, memo=? WHERE id=? AND wallet_address=?",
-                            (folder_name, title, content, memo, cat_id, wallet_address)
-                        )
-                        continue
-                    else:
-                        print(f"[소유권 진단 통과] ID {cat_id}번은 다른 회원 자료이거나 매칭되지 않으므로 내 명의로 신규 분리 삽입합니다.")
-                
-                # 소유자가 다르거나 ID가 비어있다면 내 지갑 주소 명의로 안전하게 신규 추가(INSERT)
-                cursor.execute(
-                    "INSERT INTO categories (wallet_address, folder_name, title, content, memo) VALUES (?, ?, ?, ?, ?)",
-                    (wallet_address, folder_name, title, content, memo)
-                )
+        if not wallet_address:
+            return jsonify({"error": "인증되지 않은 접근입니다. 지갑 주소가 누락되었습니다."}), 400
 
-        # 2. 채우기_카드 시트 동기화 검증 순회
-        if '채우기_카드' in excel_data.sheet_names:
-            df_card = pd.read_excel(file, sheet_name='채우기_카드').fillna('')
-            
-            for _, row in df_card.iterrows():
-                card_id = row.get('id')
-                folder_name = row.get('folder_name', '기본 폴더')
-                content = row.get('content', row.get('card_content', ''))
-                answer_text = row.get('answer_text', '')
-                memo = row.get('memo', '')
-                
-                if card_id and str(card_id).strip() != '':
-                    # 타인의 카드를 악의적으로 덮어쓰거나 탈취하는 행위를 방지하기 위해 소유권 대조 검증
-                    cursor.execute("SELECT 1 FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
-                    if cursor.fetchone():
-                        # 내 카드이므로 마음대로 일괄 수정 허용
-                        cursor.execute(
-                            "UPDATE cards SET folder_name=?, card_content=?, answer_text=?, memo=? WHERE id=? AND wallet_address=?",
-                            (folder_name, content, answer_text, memo, card_id, wallet_address)
-                        )
-                        continue
-                
-                # 내 카드가 아니거나 새로 적은 행이라면 내 명의로 안전하게 신규 추가 생성
-                cursor.execute(
-                    "INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, folder_name, memo) "
-                    "VALUES (?, 0, ?, ?, '[]', 0, ?, 'OWNED', ?, ?)",
-                    (wallet_address, content, answer_text, get_next_review_time(0), folder_name, memo)
+        conn = get_db_connection()
+        output = io.BytesIO()
+        
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # 1. 만들기 탭 데이터 처리 (categories)
+            if target in ['all', 'categories']:
+                df_cat = pd.read_sql_query(
+                    "SELECT id, folder_name, title, content, memo FROM categories WHERE wallet_address = ?", 
+                    conn, params=(wallet_address,)
                 )
+                # 💡 [핵심 보완] 데이터가 없더라도 빈 행을 임의로 가공하지 않고, 
+                # 가이드라인 형태의 순수 빈 열(Column Header) 구조만 선언하여 엑셀 시트를 정상 생성합니다.
+                if df_cat.empty:
+                    df_cat = pd.DataFrame(columns=['id', 'folder_name', 'title', 'content', 'memo'])
+                
+                df_cat.to_excel(writer, sheet_name='만들기_카테고리', index=False)
+                
+            # 2. 채우기 탭 데이터 처리 (cards)
+            if target in ['all', 'cards']:
+                df_card = pd.read_sql_query(
+                    "SELECT id, folder_name, card_content, answer_text, memo FROM cards WHERE wallet_address = ?", 
+                    conn, params=(wallet_address,)
+                )
+                
+                if df_card.empty:
+                    df_card = pd.DataFrame(columns=['id', 'folder_name', 'content', 'answer_text', 'memo'])
+                else:
+                    # card_content 컬럼명을 사용자가 직관적으로 인지 가능한 content 명칭으로 리네임
+                    df_card.rename(columns={'card_content': 'content'}, inplace=True)
+                    
+                df_card.to_excel(writer, sheet_name='채우기_카드', index=False)
 
-        conn.commit()
         conn.close()
-        return jsonify({"message": "내 계정 소유의 데이터베이스 정보가 안전하게 일괄 업데이트 및 동기화되었습니다."}), 200
+        output.seek(0)
+        
+        return send_file(
+            output,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True,
+            download_name=f"blankd_내자료_백업_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        )
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({"error": f"엑셀 업로드 처리 중 오류 발생: {str(e)}"}), 500
+        return jsonify({"error": f"엑셀 추출 중 에러 발생: {str(e)}"}), 500
