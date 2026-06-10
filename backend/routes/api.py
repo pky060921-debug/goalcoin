@@ -1471,3 +1471,52 @@ def update_order():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+
+# ==========================================
+# 💡 [신규 추가] 앱 전체 사용자 빈칸 채우기 랭킹 API
+# ==========================================
+@api_bp.route('/ranking', methods=['GET'])
+def get_ranking():
+    import json
+    import re
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        # 모든 카드의 소유자(wallet_address)와 memo(학습 통계)를 가져옵니다.
+        cursor.execute("SELECT wallet_address, memo FROM cards WHERE wallet_address IS NOT NULL AND wallet_address != ''")
+        rows = cursor.fetchall()
+        conn.close()
+
+        user_scores = {}
+        for row in rows:
+            wallet = row[0]
+            memo = row[1] or ""
+            filled = 0
+            
+            # 카드별 학습 횟수 추출 (안전한 다중 파싱 지원)
+            try:
+                parsed = json.loads(memo)
+                if isinstance(parsed, dict):
+                    filled = int(parsed.get('filled', 0))
+            except:
+                match = re.search(r'"filled"\s*:\s*(\d+)', memo)
+                if match:
+                    filled = int(match.group(1))
+                else:
+                    parts = memo.split('||')
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        filled = int(parts[1])
+
+            if wallet not in user_scores:
+                user_scores[wallet] = 0
+            user_scores[wallet] += filled
+
+        # 랭킹 정렬 및 0회 유저 제외 (상위 50명까지만 반환)
+        sorted_ranking = sorted(user_scores.items(), key=lambda x: x[1], reverse=True)
+        top_ranking = [{"wallet_address": k, "total_filled": v} for k, v in sorted_ranking if v > 0][:50]
+
+        return jsonify({"ranking": top_ranking}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "랭킹 조회 실패", "details": str(e)}), 500
