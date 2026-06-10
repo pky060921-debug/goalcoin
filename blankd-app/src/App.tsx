@@ -10,7 +10,7 @@ import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
-// ── 인라인 빈칸 입력 컴포넌트 (부모 리렌더링 완전 격리) ─────────────────
+// ── 인라인 빈칸 입력 컴포넌트 (부모 리렌더링 완전 격리 및 정밀 채점 연동) ─────────────────
 const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
@@ -34,16 +34,14 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
     const cleanExpected = expected.replace(/\s+/g, '').toLowerCase();
     let isMatch = (cleanInput === cleanExpected);
 
-    // 💡 [정밀 채점 엔진] 사용자가 입력한 값과 예상 정답을 길이 기반으로 정밀 매칭합니다.
+    // 💡 [정밀 채점 엔진] 약어 사전 기반 길이 자동 판독 최적화
     if (!isMatch && abbrDict) {
       Object.entries(abbrDict).forEach(([k, v]) => {
         const strK = k.replace(/\s+/g, '').toLowerCase();
         const strV = v.replace(/\s+/g, '').toLowerCase();
-        // 긴 쪽이 원래 정답(orig), 짧은 쪽이 약어(short)
         const orig = strK.length >= strV.length ? strK : strV;
         const short = strK.length < strV.length ? strK : strV;
         
-        // 빈칸의 내용이 '원래 정답'이고, 사용자가 친 글자가 '약어'일 때 정답 처리
         if (cleanExpected === orig && cleanInput === short) {
           isMatch = true;
         }
@@ -80,21 +78,22 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
   return prevProps.inputStatus === nextProps.inputStatus && prevProps.expected === nextProps.expected && prevProps.abbrDict === nextProps.abbrDict;
 });
 
+// ── 시스템 런타임 오류 복구 바운더리 ─────────────────
 class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
   constructor(props: any) { 
-    super(props);
+    super(props); 
     this.state = { hasError: false, errorMessage: "" }; 
   }
   static getDerivedStateFromError(error: any) { 
-    return { hasError: true, errorMessage: error.message };
+    return { hasError: true, errorMessage: error.message }; 
   }
   componentDidCatch(error: any, errorInfo: any) { 
-    this.props.fallbackLog(`🚨 런타임 에러: ${error.message}`);
+    this.props.fallbackLog(`🚨 코어 엔진 가동 예외 핸들링: ${error.message}`); 
   }
   render() {
     if (this.state.hasError) return (
       <div className="p-6 text-red-400 font-mono border border-red-500/30 bg-red-900/10 rounded-sm shadow-xl">
-        <h3 className="text-lg font-bold mb-2">🔥 시스템 치명적 오류</h3>
+        <h3 className="text-lg font-bold mb-2">🔥 시스템 코어 가동 오류 (자가 복구 활성화)</h3>
         <p className="text-sm opacity-80">{this.state.errorMessage}</p>
       </div>
     );
@@ -102,6 +101,7 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
   }
 }
 
+// ── 로컬 스토리지 분산 동기화 비동기 대기열 큐 ─────────────────
 const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
   try {
     const qStr = localStorage.getItem('blankd_sync_queue');
@@ -114,7 +114,7 @@ const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
     }
     localStorage.setItem('blankd_sync_queue', JSON.stringify(q));
   } catch (e) { 
-    console.error("큐 저장 실패", e); 
+    console.error("동기화 가상 큐 적재 실패:", e); 
   }
 };
 
@@ -167,13 +167,14 @@ function MainApp() {
   const [tempValue, setTempValue] = useState("");
 
   const loadAllData = async () => {
+    if (!safeAddress) return;
     try {
       const [catRes, cardRes, balance, dictRes] = await Promise.all([
         fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
         api.getGoalCoinBalance(safeAddress).catch(() => 0),
         api.getGlobalDict(safeAddress).catch((e) => {
-          console.error("글로벌 단어장 로드 실패:", e);
+          console.error("전역 단어장 로드 실패:", e);
           return { stopwords: [], inclusions: [], abbrs: {} };
         })
       ]);
@@ -206,8 +207,7 @@ function MainApp() {
     }
   };
 
-  // 💡 [핵심 연동] 길이 기반 자가 교정 및 복구 엔진 (앱 시작 시 작동)
-  // 잘못 들어간 약어는 지우고, 진짜 원래 정답을 필수 포함 단어에 복구합니다.
+  // 💡 [코어 자가 치유 연동 엔진] 약어 등록 시 원래 정답이 누락되지 않도록 강제 동기화 처리
   useEffect(() => {
     if (!globalDict || !globalDict.abbrs) return;
     
@@ -217,16 +217,13 @@ function MainApp() {
     Object.entries(globalDict.abbrs).forEach(([k, v]) => {
       const strK = k as string;
       const strV = v as string;
-      // 길이를 비교하여 긴 것을 원래 정답, 짧은 것을 약어로 완벽 분류합니다.
       const orig = strK.length >= strV.length ? strK : strV;
       const short = strK.length < strV.length ? strK : strV;
 
-      // 1. 필수 포함 단어에 약어가 잘못 들어가 있다면 삭제 (오류 치유)
       if (currentInclusions.includes(short)) {
         currentInclusions = currentInclusions.filter(w => w !== short);
         changed = true;
       }
-      // 2. 필수 포함 단어에 원래 정답이 없다면 추가 (연동 복구)
       if (!currentInclusions.includes(orig)) {
         currentInclusions.push(orig);
         changed = true;
@@ -355,7 +352,11 @@ function MainApp() {
     );
     const targetCardId = existingCard ? existingCard.id : null; 
 
-    const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n[[ORIG_ID:${cat.id}]]`;
+    // 조항명은 첫 줄 보존, 빈칸은 본문 레이어만 감싸서 빌드
+    const rawContent = cat.content || cat.title || "";
+    const firstLine = rawContent.split('\n')[0] || "";
+    const finalCardContent = `${firstLine}\n${bodyContent.trim()}\n\n[[ORIG_ID:${cat.id}]]`;
+    
     const initialMemo = stringifyCardStats(memo, 0, []);
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
@@ -386,9 +387,13 @@ function MainApp() {
     if (activeCard) {
       isClosingRef.current = false;
       const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-      const { body } = formatCardText(cleanContent);
+      
+      // 💡 [조항명 보호 격리] 첫 줄(조항명)을 떼어내고 오직 본문 영역에서만 빈칸 추출
+      const lines = cleanContent.split('\n');
+      const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
+
       const foundBlanks: {answer: string, correct: boolean}[] = [];
-      const parts = body.split(/(\[.*?\])/g);
+      const parts = restContent.split(/(\[.*?\])/g);
       parts.forEach(part => {
         if (part.startsWith('[') && part.endsWith(']')) {
           foundBlanks.push({ answer: part.replace(/\[|\]/g, '').trim(), correct: false });
@@ -397,11 +402,7 @@ function MainApp() {
       
       const savedProgress = localStorage.getItem(`blankd_progress_${activeCard.id}`);
       const lastIdx = savedProgress ? parseInt(savedProgress, 10) : 0;
-      
-      const restoredBlanks = foundBlanks.map((b, i) => ({
-          ...b,
-          correct: i < lastIdx 
-      }));
+      const restoredBlanks = foundBlanks.map((b, i) => ({ ...b, correct: i < lastIdx }));
 
       setBlanks(restoredBlanks); 
       setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); 
@@ -534,14 +535,12 @@ function MainApp() {
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
     let isCorrect = (expected === actual);
 
-    // 💡 [정밀 채점 엔진] 사용자가 타자/음성으로 입력한 값 처리 시에도 길이 기반 판독 적용
     if (!isCorrect && globalDict.abbrs) {
       Object.entries(globalDict.abbrs).forEach(([k, v]) => {
         const strK = k.replace(/\s+/g, '').toLowerCase();
         const strV = v.replace(/\s+/g, '').toLowerCase();
         const orig = strK.length >= strV.length ? strK : strV;
         const short = strK.length < strV.length ? strK : strV;
-        
         if (expected === orig && actual === short) {
           isCorrect = true;
         }
@@ -621,8 +620,7 @@ function MainApp() {
     }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다.");
-      return; }
+    if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다."); return; }
     
     const recognition = new SpeechRecognition();
     recognition.lang = 'ko-KR'; 
@@ -642,20 +640,9 @@ function MainApp() {
       addLog(`💬 인식: "${transcript}"`);
       setTimeout(() => handleSequentialInput(cleanText), 300);
     };
-    recognition.onerror = (err: any) => { 
-      if (err.error !== 'no-speech') {
-        setIsListening(false);
-        recognitionRef.current = null;
-      }
-    };
-    
+    recognition.onerror = (err: any) => { if (err.error !== 'no-speech') { setIsListening(false); recognitionRef.current = null; } };
     recognition.onend = () => { 
-      if (recognitionRef.current) {
-         try { recognitionRef.current.start();
-         } catch(e) {}
-      } else {
-         setIsListening(false);
-      }
+      if (recognitionRef.current) { try { recognitionRef.current.start(); } catch(e) {} } else { setIsListening(false); }
     };
 
     recognitionRef.current = recognition;
@@ -663,18 +650,13 @@ function MainApp() {
   };
 
   const minFilledCount = savedCards.length > 0 
-    ? Math.min(...savedCards.map((card: any) => {
-        const stats = parseCardStats(card.memo || "");
-        return stats.filled || 0;
-      }))
+    ? Math.min(...savedCards.map((card: any) => parseCardStats(card.memo || "").filled || 0))
     : 0;
-
   const passProbability = Math.min(minFilledCount * 2, 100);
 
   const { nextCatToCraft, nextStudyCard } = useMemo(() => {
     let craftTarget = null;
     let studyTarget = null;
-
     if (!isLoggedIn) return { nextCatToCraft: null, nextStudyCard: null };
 
     if (categories && categories.length > 0) {
@@ -703,39 +685,32 @@ function MainApp() {
       const minReps = Math.min(...cardsWithStatus.map(c => c.repetitions));
       studyTarget = cardsWithStatus.find(c => c.repetitions === minReps) || cardsWithStatus[0];
     }
-
     return { nextCatToCraft: craftTarget, nextStudyCard: studyTarget };
   }, [isLoggedIn, categories, savedCards]);
 
   const renderContent = React.useCallback(() => {
     if (!activeCard) return null;
     const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-    let displayTitle = (cleanContent.split('\n')[0] || "")
-        .replace(/\[.*?\]/g, '')
-        .replace(/\(\s*내용\s*\)/g, '')
-        .replace(/내용/g, '')
-        .trim();
+    
+    // 💡 [조항명 분리 격리] 모의고사 뷰 렌더링 시 첫 줄을 제외하고 오직 본문만 화면에 렌더링하여 보호합니다.
+    const lines = cleanContent.split('\n');
+    const titleLine = lines[0] || '';
+    const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
+
+    let displayTitle = titleLine.replace(/\[.*?\]/g, '').replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
     if (!displayTitle) displayTitle = "제목 없음";
 
-    const { body } = formatCardText(cleanContent);
-    const parts = body.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== '');
-    let displayPage = 0; 
-    let tempGlobalBlank = 0; 
-    let tempPage = 0;
+    const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== '');
+    let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
     for (let part of parts) {
         if (part === '##PAGE_BREAK##') tempPage++;
         else if (part.startsWith('[') && part.endsWith(']')) {
-            if (tempGlobalBlank === currentBlankIdx) { 
-              displayPage = tempPage;
-              break; 
-            }
+            if (tempGlobalBlank === currentBlankIdx) { displayPage = tempPage; break; }
             tempGlobalBlank++;
         }
     }
 
-    let renderPage = 0;
-    let bIdx = 0;
-    const contentToRender: any[] = [];
+    let renderPage = 0; let bIdx = 0; const contentToRender: any[] = [];
     parts.forEach((part: string, i: number) => {
       if (part === '##PAGE_BREAK##') { renderPage++; return; }
       if (renderPage === displayPage) {
@@ -745,38 +720,24 @@ function MainApp() {
             const isWrong = statsRef.current.wrongIndices.has(bIdx); 
             if (isCorrect) {
               contentToRender.push(
-                <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>
-                  {part.replace(/\[|\]/g, '')}
-                </span>
+                <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
               );
             } else if (isCurrent) {
               contentToRender.push(
-                <InlineBlankInput                  
-                  key={`blank-${currentBlankIdx}`}
-                  inputStatus={inputStatus}
-                  expected={blanks[currentBlankIdx]?.answer || ""} 
-                  abbrDict={globalDict.abbrs} 
-                  onSubmit={handleSequentialInput}
-                />
+                <InlineBlankInput key={`blank-${currentBlankIdx}`} inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} onSubmit={handleSequentialInput}/>
               );
             } else {
-              contentToRender.push(
-                <span key={i} className="inline-block min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>
-              );
+              contentToRender.push(<span key={i} className="inline-block min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
             }
             bIdx++;
-          } else {
-            contentToRender.push(<span key={i}>{part}</span>);
-          }
-      } else if (part.startsWith('[') && part.endsWith(']')) {
-        bIdx++;
-      }
+          } else { contentToRender.push(<span key={i}>{part}</span>); }
+      } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
     });
     
     return (
       <div className="flex flex-col gap-6 w-full">
         <div className="flex justify-between items-center border-b border-white/10 pb-2">
-            <span className="text-amber-400 font-bold text-[14px] leading-tight">{cleanContent.split('\n')[0]}</span>
+            <span className="text-amber-400 font-bold text-[14px] leading-tight">{displayTitle}</span>
             <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
         </div>
         <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
@@ -784,68 +745,35 @@ function MainApp() {
           <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
             {isMemoOpen ? '닫기 ✕' : '메모 열기'}
           </button>
-          <button 
-            onClick={toggleVoiceRecognition} 
-            className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${
-              isListening ? 'bg-red-600/50 text-white border-red-500 animate-pulse' : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'
-            }`}
-          >
+          <button onClick={toggleVoiceRecognition} className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${isListening ? 'bg-red-600/50 text-white border-red-500 animate-pulse' : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'}`}>
             {isListening ? '음성 인식 끄기 (활성화됨)' : '음성으로 입력 (계속 켜두기)'}
           </button>
-          
-            <button 
-              id="show-answer-btn" 
-              onClick={handleShowAnswer} 
-              className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md"
-            >
+            <button id="show-answer-btn" onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
               정답 보기 (오답 처리)
             </button>
         </div>
         {isMemoOpen && (
           <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
-             <input 
-              defaultValue={statsRef.current.text || ""} 
-              placeholder="학습 인사이트 기록..." 
-              onBlur={(e) => { 
-                statsRef.current.text = e.target.value; 
-                handleUpdateMemoBackground(activeCard.id, stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices))); 
-              }} 
-              className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all" 
-              autoFocus
-            />
+             <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { statsRef.current.text = e.target.value; handleUpdateMemoBackground(activeCard.id, stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices))); }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all" autoFocus/>
           </div>
         )}
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs]);
 
-  // 💡 [핵심 연동] 등록된 단어를 앱 전체에 동기화시키는 중앙 컨트롤러
   const handleAddDictItem = () => {
     if (dictTab === 'abbr' && tempKey && tempValue) {
-      const k = tempKey.trim();
-      const v = tempValue.trim();
-      // 길이 기반 완벽 분류 (긴 것이 원래 정답, 짧은 것이 약어)
-      const orig = k.length >= v.length ? k : v;
-      const short = k.length < v.length ? k : v;
-
+      const k = tempKey.trim(); const v = tempValue.trim();
+      const orig = k.length >= v.length ? k : v; const short = k.length < v.length ? k : v;
       const currentInclusions = globalDict.inclusions || [];
       const nextInclusions = Array.from(new Set([...currentInclusions, orig]));
-      // 만약 약어가 예전에 필수 포함에 들어갔다면 청소
       const cleanedInclusions = nextInclusions.filter(w => w !== short);
-
-      saveGlobalDict({
-        ...globalDict,
-        abbrs: { ...globalDict.abbrs, [short]: orig },
-        inclusions: cleanedInclusions
-      });
+      saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [short]: orig }, inclusions: cleanedInclusions });
       setTempKey(""); setTempValue("");
     } else if (dictTab !== 'abbr' && tempKey) {
       const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
       const targetArray = dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions;
-      saveGlobalDict({
-        ...globalDict,
-        [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words]))
-      });
+      saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words])) });
       setTempKey("");
     }
   };
@@ -853,68 +781,21 @@ function MainApp() {
   const memoizedTabs = useMemo(() => {
     return (
       <>
-        <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
-          <DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} />
-        </div>
-        
+        <div className={activeTab === 'progress' ? 'block' : 'hidden'}><DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} /></div>
         <div className={activeTab === 'create' ? 'block' : 'hidden'}>
-          <CraftTab 
-            categories={categories} 
-            savedCards={savedCards} 
-            colCount={colCount} 
-            viewMode={viewMode} 
-            useAiRecommend={useAiRecommend} 
-            safeAddress={safeAddress} 
-            lawFile={lawFile} 
-            setLawFile={setLawFile} 
-            uploadLaw={uploadLaw} 
-            handleMakeBlankCard={handleMakeBlankCard} 
-            handleSplitCategory={handleSplitCategory} 
-            addLog={addLog} 
-            expandedId={expandedId} 
-            setExpandedId={setExpandedId} 
-            handleDeleteCategory={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} 
-            globalDict={globalDict}
-            saveGlobalDict={saveGlobalDict}
-          />
+          <CraftTab categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} expandedId={expandedId} setExpandedId={setExpandedId} handleDeleteCategory={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} globalDict={globalDict} saveGlobalDict={saveGlobalDict} />
         </div>
-        
         <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
-          <EnhanceTab 
-            safeAddress={safeAddress} 
-            loadAllData={loadAllData} 
-            categories={categories} 
-            savedCards={savedCards} 
-            colCount={colCount} 
-            viewMode={viewMode} 
-            setActiveCard={setActiveCard} 
-            setActiveTab={setActiveTab} 
-            setExpandedId={setExpandedId} 
-            globalDict={globalDict}
-            handleDeleteCard={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); setActiveCard(null); loadAllData(); } }} 
-          />
+          <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
         </div>
-        
-        <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
-          <ExamTab walletAddress={safeAddress} address={safeAddress} />
-        </div>
-        
+        <div className={activeTab === 'exam' ? 'block' : 'hidden'}><ExamTab walletAddress={safeAddress} address={safeAddress} /></div>
         <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
-          <MypageTab 
-            safeAddress={safeAddress} 
-            enokiFlow={enokiFlow} 
-            useAiRecommend={useAiRecommend} 
-            setUseAiRecommend={setUseAiRecommend} 
-            studyMode={studyMode} 
-            setStudyMode={setStudyMode} 
-            globalDict={globalDict} 
-            saveGlobalDict={saveGlobalDict} 
-            loadAllData={loadAllData}
-          />
+          {/* 💡 [기능 유실 복구 완료] MypageTab 호출부에 zkLogin={zkLogin} 복구 */}
+          <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} zkLogin={zkLogin} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} globalDict={globalDict} saveGlobalDict={saveGlobalDict} loadAllData={loadAllData}/>
         </div>
       </>
     );
-  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, studyMode, setStudyMode, globalDict]);
+  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, zkLogin, studyMode, setStudyMode, globalDict]);
 
   const renderDictionaryUI = (isMobile: boolean) => (
     <div className={`flex flex-col w-full h-full ${isMobile ? 'bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 rounded-sm' : 'bg-[#08080a]/80 border border-white/10 p-5 rounded-sm shadow-xl backdrop-blur-sm'}`}>
@@ -928,58 +809,41 @@ function MainApp() {
       </div>
       
       <div className="flex gap-2 mb-5 shrink-0">
-        <input type="text" value={tempKey} 
-          onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => {
-            if (e.key === 'Enter') handleAddDictItem();
-          }} 
-          placeholder={dictTab === 'abbr' ? "원래 정답 (예: 행정안전부장관)" : "단어 입력 (쉼표 구분)"} 
-          className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-white/30 transition-colors w-full min-w-0" 
-        />
-        
+        <input type="text" value={tempKey} onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder={dictTab === 'abbr' ? "원래 정답 (예: 행정안전부장관)" : "단어 입력 (쉼표 구분)"} className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-white/30 transition-colors w-full min-w-0" />
         {dictTab === 'abbr' && (
-          <input type="text" value={tempValue} onChange={(e) => setTempValue(e.target.value)} onKeyDown={(e) => {
-             if (e.key === 'Enter') handleAddDictItem();
-          }} 
-          placeholder="약어 (예: 행안부장관)" 
-          className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full min-w-0" 
-          />
+          <input type="text" value={tempValue} onChange={(e) => setTempValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder="약어 (예: 행안부장관)" className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full min-w-0" />
         )}
-        
         <button onClick={handleAddDictItem} className="px-3 sm:px-4 bg-white/5 text-white/80 border border-white/10 text-xs font-bold rounded-sm hover:bg-white/10 transition-colors shrink-0">등록</button>
       </div>
       
       <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 min-h-[160px]">
-        {/* 💡 시각적 정렬: 원래 정답(긴 단어) -> 약어(짧은 단어) 형태로 보기 좋게 고정합니다. */}
-        {dictTab === 'abbr' && Object.entries(globalDict.abbrs).map(([k, v]) => {
-          const strK = k as string;
-          const strV = v as string;
-          const orig = strK.length >= strV.length ? strK : strV;
-          const short = strK.length < strV.length ? strK : strV;
-
-          return (
-            <div key={k} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="opacity-60">{orig}</span> 
-                <span className="text-white/30 text-[10px]">→</span> 
-                <span className="text-indigo-400 font-bold px-2 py-0.5 bg-indigo-900/20 rounded-sm border border-indigo-500/20">{short}</span> 
+        {/* 💡 [기능 유실 복구 완료] 가나다순 정렬 .sort 완벽 적용 */}
+        {dictTab === 'abbr' && Object.entries(globalDict.abbrs)
+          .sort((a, b) => a[1].localeCompare(b[1], 'ko'))
+          .map(([k, v]) => {
+            const strK = k as string; const strV = v as string;
+            const orig = strK.length >= strV.length ? strK : strV; const short = strK.length < strV.length ? strK : strV;
+            return (
+              <div key={k} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="opacity-60">{orig}</span> <span className="text-white/30 text-[10px]">→</span> <span className="text-indigo-400 font-bold px-2 py-0.5 bg-indigo-900/20 rounded-sm border border-indigo-500/20">{short}</span> 
+                </div>
+                <button onClick={() => { const nw = {...globalDict.abbrs}; delete nw[k]; saveGlobalDict({...globalDict, abbrs: nw}); }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors shrink-0">✕</button>
               </div>
-              <button onClick={() => { const nw = {...globalDict.abbrs}; delete nw[k]; saveGlobalDict({...globalDict, abbrs: nw});
-              }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors shrink-0">✕</button>
-            </div>
-          )
+            )
         })}
-        {dictTab !== 'abbr' && (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions).map((word: string) => (
-          <div key={word} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
-            <span className={`px-2 py-0.5 rounded-sm border ${dictTab === 'stop' ? 'text-amber-400 bg-amber-900/10 border-amber-500/20' : 'text-teal-400 bg-teal-900/10 border-teal-500/20'}`}>{word}</span>
-            <button onClick={() => {
-              const targetArray = (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions).filter((w: string) => w !== word);
-              saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: targetArray });
-            }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors">✕</button>
-          </div>
+        {dictTab !== 'abbr' && (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions)
+          .sort((a, b) => a.localeCompare(b, 'ko'))
+          .map((word: string) => (
+            <div key={word} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
+              <span className={`px-2 py-0.5 rounded-sm border ${dictTab === 'stop' ? 'text-amber-400 bg-amber-900/10 border-amber-500/20' : 'text-teal-400 bg-teal-900/10 border-teal-500/20'}`}>{word}</span>
+              <button onClick={() => {
+                const targetArray = (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions).filter((w: string) => w !== word);
+                saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: targetArray });
+              }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors">✕</button>
+            </div>
         ))}
-       
-        {((dictTab === 'abbr' && Object.keys(globalDict.abbrs).length === 0) ||
-          (dictTab === 'stop' && globalDict.stopwords.length === 0) || (dictTab === 'include' && globalDict.inclusions.length === 0)) && (
+        {((dictTab === 'abbr' && Object.keys(globalDict.abbrs).length === 0) || (dictTab === 'stop' && globalDict.stopwords.length === 0) || (dictTab === 'include' && globalDict.inclusions.length === 0)) && (
           <div className="text-center py-8 text-white/20 text-[11px] sm:text-xs">등록된 단어가 없습니다.</div>
         )}
       </div>
@@ -991,13 +855,7 @@ function MainApp() {
       <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex items-center justify-between w-full md:w-auto">
-            <button 
-              onClick={() => {
-                const lastTab = localStorage.getItem('blankd_active_tab') || 'progress';
-                setActiveTab(lastTab);
-              }} 
-              className="text-xl sm:text-2xl font-bold tracking-widest text-white shrink-0 hover:text-teal-400 transition-colors"
-            >
+            <button onClick={() => { const lastTab = localStorage.getItem('blankd_active_tab') || 'progress'; setActiveTab(lastTab); }} className="text-xl sm:text-2xl font-bold tracking-widest text-white shrink-0 hover:text-teal-400 transition-colors">
               BlankD
             </button>
           </div>
@@ -1005,34 +863,17 @@ function MainApp() {
           <div className="flex items-center justify-start md:justify-end gap-3 sm:gap-4 shrink-0 overflow-x-auto custom-scrollbar pb-1 md:pb-0 w-full md:w-auto">
             <div className="flex items-center gap-2 shrink-0">
               <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 uppercase hidden sm:inline">이어하기:</span>
-              
               {nextCatToCraft ? (
-                <button 
-                  onClick={() => { setActiveTab('create'); setExpandedId(nextCatToCraft.id); }}
-                  className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
-                >
-                  <span className="text-[9px] sm:text-[10px] text-amber-400 font-bold whitespace-nowrap">▶ 만들기</span>
-                  <span className="text-[10px] sm:text-[11px] font-medium text-amber-100 truncate">
-                    {getStrictTitleOnly(nextCatToCraft.title) || "다음 조항"}
-                  </span>
+                <button onClick={() => { setActiveTab('create'); setExpandedId(nextCatToCraft.id); }} className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]">
+                  <span className="text-[9px] sm:text-[10px] text-amber-400 font-bold whitespace-nowrap">▶ 만들기</span><span className="text-[10px] sm:text-[11px] font-medium text-amber-100 truncate">{getStrictTitleOnly(nextCatToCraft.title) || "다음 조항"}</span>
                 </button>
-              ) : (
-                <div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">만들기 완료</div>
-              )}
+              ) : (<div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">만들기 완료</div>)}
 
               {nextStudyCard ? (
-                <button 
-                  onClick={() => { setActiveCard(nextStudyCard); }}
-                  className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]"
-                >
-                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span>
-                  <span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">
-                    {nextStudyCard.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim()}
-                  </span>
+                <button onClick={() => { setActiveCard(nextStudyCard); }} className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]">
+                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span><span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{nextStudyCard.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim()}</span>
                 </button>
-              ) : (
-                <div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 완료</div>
-              )}
+              ) : (<div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 완료</div>)}
             </div>
 
             <div className="flex items-center gap-2 shrink-0 ml-1 sm:ml-2 border-l border-white/10 pl-2 sm:pl-3">
@@ -1045,15 +886,9 @@ function MainApp() {
 
             {isLoggedIn && (
               <div className="flex items-center gap-3 sm:gap-4 shrink-0 font-mono">
-                <div className="text-right">
-                  <span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">누적 회독수</span>
-                  <span className="text-[10px] sm:text-xs font-bold text-amber-400">{minFilledCount} 회독</span>
-                </div>
+                <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">누적 회독수</span><span className="text-[10px] sm:text-xs font-bold text-amber-400">{minFilledCount} 회독</span></div>
                 <div className="h-5 sm:h-6 w-px bg-white/10"></div>
-                <div className="text-right">
-                  <span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">예상 합격률</span>
-                  <span className="text-[10px] sm:text-xs font-bold text-indigo-400">{passProbability}%</span>
-                </div>
+                <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">예상 합격률</span><span className="text-[10px] sm:text-xs font-bold text-indigo-400">{passProbability}%</span></div>
                 <div className="h-5 sm:h-6 w-px bg-white/10 hidden sm:block"></div>
                 <button onClick={async () => { await enokiFlow.logout(); localStorage.clear(); window.location.reload(); }} className="border border-white/20 px-2 py-1 text-[9px] sm:text-[10px] hover:bg-white/10 tracking-wider font-mono rounded-sm text-white/70 whitespace-nowrap shrink-0">로그아웃</button>
               </div>
@@ -1066,13 +901,7 @@ function MainApp() {
         <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="max-w-6xl mx-auto flex items-center justify-start gap-1 sm:gap-2">
             {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
-              <button 
-                key={tab.id} 
-                onClick={() => setActiveTab(tab.id)} 
-                className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/70'}`}
-              >
-                {tab.label}
-              </button>
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
             ))}
           </div>
         </nav>
@@ -1106,9 +935,7 @@ function MainApp() {
             </div>
             <div className="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
               {systemLogs.map((l, i) => (
-                <div key={i} className={`leading-snug break-all ${l.includes('?') ? 'text-red-400 font-bold' : l.includes('▶?') ? 'text-amber-300' : ''}`}>
-                  {l}
-                </div>
+                <div key={i} className={`leading-snug break-all ${l.includes('?') ? 'text-red-400 font-bold' : l.includes('▶?') ? 'text-amber-300' : ''}`}>{l}</div>
               ))}
             </div>
           </div>
@@ -1127,16 +954,7 @@ function MainApp() {
       )}
 
       {activeCard && (
-        <CardModal
-          activeCard={activeCard} 
-          totalTimeLimit={totalTimeLimit} 
-          elapsed={elapsed} 
-          inputStatus={inputStatus}
-          handleSequentialInput={handleSequentialInput}
-          handleReviewSelect={handleReviewSelect}
-          renderContent={renderContent}
-          onClose={handleCloseModal} 
-        />
+        <CardModal activeCard={activeCard} totalTimeLimit={totalTimeLimit} elapsed={elapsed} inputStatus={inputStatus} handleSequentialInput={handleSequentialInput} handleReviewSelect={handleReviewSelect} renderContent={renderContent} onClose={handleCloseModal} />
       )}
     </div>
   );
