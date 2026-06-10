@@ -61,7 +61,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
   };
 
-  // 💡 [신규 추가] 채우기 카드 순서 변경 핸들러
   const handleMoveCard = async (folder: string, index: number, direction: 'up' | 'down') => {
     const folderCards = safeCards.filter((c:any) => c && c.content && c.folder_name === folder);
     if (direction === 'up' && index === 0) return;
@@ -231,18 +230,33 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
-            {/* 💡 [수정] 프론트 자체 정렬(sort)을 지워서 서버의 순서를 유지합니다 */}
             {safeCards
               .filter((c:any) => c && c.content && c.folder_name === folder)
               .map((card: any, idx: number, folderCards: any[]) => {
                 try {
                   const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-                  let displayTitle = (cleanContent.split('\n')[0] || "")
-                      .replace(/\[.*?\]/g, '')
-                      .replace(/\(\s*내용\s*\)/g, '')
-                      .replace(/내용/g, '')
-                      .trim();
+                  
+                  // 💡 1줄과 2줄 정밀 분리 추출
+                  const titleMatch = cleanContent.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
+                  let displayTitle = "";
+                  let titleRawString = "";
+                  
+                  if (titleMatch && titleMatch[2].trim() !== "내용") {
+                    displayTitle = `${titleMatch[1].replace(/\s+/g, '')} ${titleMatch[2].trim()}`;
+                    titleRawString = titleMatch[0];
+                  } else {
+                    titleRawString = cleanContent.split('\n')[0] || "";
+                    displayTitle = titleRawString
+                        .replace(/\[.*?\]/g, '')
+                        .replace(/\(\s*내용\s*\)/g, '')
+                        .replace(/내용/g, '')
+                        .trim();
+                  }
                   if (!displayTitle) displayTitle = "제목 없음";
+
+                  // 💡 나머지 본문 텍스트 (피로도 방지를 위해 대괄호 시각적 제거)
+                  let remainingText = cleanContent.replace(titleRawString, '').trim();
+                  remainingText = remainingText.replace(/\[|\]/g, '');
 
                   const { body } = formatCardText(cleanContent);
                   const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
@@ -328,32 +342,46 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           </div>
                         </div>
                       ) : (
-                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
-                          <div className="flex flex-row justify-between items-center w-full gap-2">
-                            <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{displayTitle}</div>
-                            <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
-                              <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
-                              <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">반복:{stats.filled}</span>
-                              <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
-                              
-                              {/* 💡 [신규 추가] 순서 변경 ↕️ 화살표 버튼 */}
-                              <div className="flex items-center bg-black/40 border border-white/10 rounded-sm overflow-hidden shrink-0 ml-1">
-                                <button onClick={(e) => { e.stopPropagation(); handleMoveCard(folder, idx, 'up'); }} className="px-1.5 py-0.5 text-[8px] text-white/40 hover:text-teal-400 hover:bg-white/10 transition-colors" disabled={idx === 0}>▲</button>
-                                <button onClick={(e) => { e.stopPropagation(); handleMoveCard(folder, idx, 'down'); }} className="px-1.5 py-0.5 text-[8px] text-white/40 hover:text-teal-400 hover:bg-white/10 transition-colors" disabled={idx === folderCards.length - 1}>▼</button>
+                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center gap-2 ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
+                          <div className="flex flex-row justify-between items-start w-full gap-3">
+                            
+                            {/* 💡 1줄: 조항명, 2줄: 나머지 내용 미리보기 구조 */}
+                            <div className="flex flex-col text-left flex-1 min-w-0">
+                              <div className={`${titleColor} font-bold text-[12px] sm:text-[14px] leading-snug break-keep mb-1`}>
+                                {displayTitle}
                               </div>
-
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingId(card.id);
-                                  setEditContent(card.content);
-                                  setActiveTool('editor');
-                                }}
-                                className="ml-1 px-1.5 py-0.5 bg-amber-900/40 text-amber-400 border border-amber-500/50 rounded font-mono text-[9px] hover:bg-amber-900/60 transition-colors cursor-pointer"
-                              >
-                                ✏️수정
-                              </button>
+                              <div className="text-[10px] sm:text-[11px] text-white/50 line-clamp-2 break-keep pr-2">
+                                {remainingText || "추가 본문 내용이 없습니다."}
+                              </div>
                             </div>
+                            
+                            {/* 우측 영역: 버튼 및 통계 정렬 */}
+                            <div className="flex flex-col gap-2 shrink-0 items-end">
+                              <div className="flex flex-nowrap gap-1">
+                                <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
+                                <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">반복:{stats.filled}</span>
+                                <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
+                              </div>
+                              
+                              <div className="flex items-center gap-1">
+                                <div className="flex items-center bg-black/40 border border-white/10 rounded-sm overflow-hidden shrink-0">
+                                  <button onClick={(e) => { e.stopPropagation(); handleMoveCard(folder, idx, 'up'); }} className="px-1.5 py-0.5 text-[8px] text-white/40 hover:text-teal-400 hover:bg-white/10 transition-colors" disabled={idx === 0}>▲</button>
+                                  <button onClick={(e) => { e.stopPropagation(); handleMoveCard(folder, idx, 'down'); }} className="px-1.5 py-0.5 text-[8px] text-white/40 hover:text-teal-400 hover:bg-white/10 transition-colors" disabled={idx === folderCards.length - 1}>▼</button>
+                                </div>
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingId(card.id);
+                                    setEditContent(card.content);
+                                    setActiveTool('editor');
+                                  }}
+                                  className="px-1.5 py-0.5 bg-amber-900/40 text-amber-400 border border-amber-500/50 rounded font-mono text-[9px] hover:bg-amber-900/60 transition-colors cursor-pointer"
+                                >
+                                  ✏️수정
+                                </button>
+                              </div>
+                            </div>
+
                           </div>
                         </button>
                       )}
