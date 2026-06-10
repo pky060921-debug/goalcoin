@@ -48,7 +48,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       const fallbackTitle = raw.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').replace(/내용/g, '').trim();
       return fallbackTitle || "제목 없음";
     } catch (error) {
-      console.error("[진단 오류] CraftTab 제목 추출 실패:", error, "데이터 원본:", cat);
       return "제목 추출 에러";
     }
   };
@@ -67,7 +66,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
         const cleanCatTitle = onlyChars(removeBrackets(cat.title));
         
         if (cleanCardTitle && cleanCatTitle) {
-          // 💡 오타 수정 완료: cleanCardTitle === cleanCatTitle 로 정상화
+          // 💡 [버그 교정] 오타로 인한 무조건 True 현상 해결 완료
           if (cleanCardTitle === cleanCatTitle || cleanCardTitle.endsWith(cleanCatTitle)) {
              return true;
           }
@@ -97,21 +96,39 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [editingCatId, setEditingCatId] = useState<number | null>(null);
   const [editArticleText, setEditArticleText] = useState('');
 
+  // 💡 [신규 추가] 순서 변경 (이동) 핸들러
+  const handleMoveCategory = async (folder: string, index: number, direction: 'up' | 'down') => {
+    const folderCats = safeCategories.filter((c:any) => c.folder_name === folder);
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === folderCats.length - 1) return;
+
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    
+    // 배열 맞교환
+    const newFolderCats = [...folderCats];
+    [newFolderCats[index], newFolderCats[targetIndex]] = [newFolderCats[targetIndex], newFolderCats[index]];
+    const orderedIds = newFolderCats.map(c => c.id);
+
+    try {
+      await fetch("https://api.blankd.top/api/update-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, table: 'categories', ordered_ids: orderedIds })
+      });
+      if (loadAllData) await loadAllData(); // 서버 순서 동기화
+    } catch (err) {
+      console.error("순서 변경 실패:", err);
+    }
+  };
+
   const handleSaveEditedText = async (catId: number) => {
     try {
-      print("[Craft 진단] 원본 직접 타이핑 변경사항 디스크 동기화 유닛 진입. ID:", catId);
-      
-      // 💡 [버그 원인 교정 1] 무조건 괄호를 다 지우면 안 되고, 중복 겹침인 [[ ]] 만 단일 [ ] 로 실시간 완화 변환 처리합니다.
       const sanitizedSubmitText = editArticleText.replace(/\[+/g, '[').replace(/\]+/g, ']');
 
       const res = await fetch(`https://api.blankd.top/api/update-category-text`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          wallet_address: safeAddress, 
-          id: catId, 
-          content: sanitizedSubmitText 
-        })
+        body: JSON.stringify({ wallet_address: safeAddress, id: catId, content: sanitizedSubmitText })
       });
       if (!res.ok) throw new Error("원본 수정 반영 실패");
       
@@ -121,7 +138,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       setEditingCatId(null);
       applyTextToState(sanitizedSubmitText);
     } catch (err) {
-      console.error("[Craft 진단 오류] 저장 실패:", err);
       alert("서버 연결 불안정으로 원본 텍스트 수정에 실패했습니다.");
     }
   };
@@ -274,7 +290,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     const currentCustomStopWords = globalDict?.stopwords || globalDict?.custom_stopwords || [];
     const currentCustomIncludeWords = globalDict?.inclusions || globalDict?.custom_inclusions || [];
     
-    // 💡 [버그 원인 교정 2] 기존 괄호 소거 로직을 비활성화하고 본문을 토큰 단위 분해 배열 구조로 안전하게 이관합니다.
     let processedText = textBody;
     
     if (currentCustomStopWords.length > 0) {
@@ -288,7 +303,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
        }
     }
 
-    // 💡 토큰 배열 분리 시 본문에 기지정된 대괄호 속 내용물 구조도 무너지지 않도록 동기화합니다.
     const initialWords = processedText.split(SPLIT_REGEX).filter(w => w !== "");
     let currentWordArray = initialWords.map(w => ({ text: w, subWords: [w] }));
     
@@ -326,13 +340,11 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     const initialSelected = new Set<number>();
     const protectedIndices = new Set<number>();
     
-    // 💡 사용자가 텍스트 수정을 통해 직접 [ ]로 감싸 놓은 토큰 영역을 감지하여 실시간 인터랙션 선택 상태(주황색 채우기)로 보존 복구합니다.
     currentWordArray.forEach((wordObj, idx) => {
         const trimmed = wordObj.text.trim();
         const isUserPreBracketed = trimmed.startsWith('[') && trimmed.endsWith(']');
         
         if (isUserPreBracketed) {
-          // 상태 구조물 동기화를 위해 단어 내부 알맹이 텍스트 형태로 수복하고 선택 인덱스로 밀어 넣습니다.
           wordObj.text = trimmed.slice(1, -1);
           initialSelected.add(idx);
           protectedIndices.add(idx);
@@ -551,7 +563,8 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
               </div>
 
               <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
-                {safeCategories.filter((c:any) => c.folder_name === folder).sort((a:any, b:any) => a.id - b.id).map((cat: any) => {
+                {/* 💡 [수정] 프론트엔드 자체 정렬(sort) 제거: 서버 정렬 순서 보존 */}
+                {safeCategories.filter((c:any) => c.folder_name === folder).map((cat: any, idx: number, folderCats: any[]) => {
                     const isExpanded = expandedId === cat.id;
                     const isChecked = checkedIds.has(cat.id);
                     const isCreated = checkIsCreated(cat);
@@ -588,7 +601,18 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                             >
                               <div className="flex justify-between items-center w-full">
                                 <span className={`${isCreated ? 'text-white/30 font-medium' : `${titleColor} font-bold`} text-[11px] sm:text-[13px] leading-snug break-keep`}>{displayTitle}</span>
-                                {isCreated && <span className="text-[9px] bg-white/5 text-white/30 px-1.5 py-0.5 rounded ml-2 whitespace-nowrap border border-white/10">제작됨</span>}
+                                
+                                <div className="flex items-center gap-2">
+                                  {isCreated && <span className="text-[9px] bg-white/5 text-white/30 px-1.5 py-0.5 rounded whitespace-nowrap border border-white/10">제작됨</span>}
+                                  
+                                  {/* 💡 [신규 추가] 순서 변경 ↕️ 화살표 버튼 */}
+                                  {!isSelectMode && (
+                                    <div className="flex items-center bg-black/40 border border-white/10 rounded-sm overflow-hidden shrink-0">
+                                      <button onClick={(e) => { e.stopPropagation(); handleMoveCategory(folder, idx, 'up'); }} className="px-1.5 py-0.5 text-[8px] text-white/40 hover:text-amber-400 hover:bg-white/10 transition-colors" disabled={idx === 0}>▲</button>
+                                      <button onClick={(e) => { e.stopPropagation(); handleMoveCategory(folder, idx, 'down'); }} className="px-1.5 py-0.5 text-[8px] text-white/40 hover:text-amber-400 hover:bg-white/10 transition-colors" disabled={idx === folderCats.length - 1}>▼</button>
+                                    </div>
+                                  )}
+                                </div>
                               </div>
                               {cat.memo && <div className="text-[9px] sm:text-[11px] text-teal-300 bg-teal-900/20 p-1.5 sm:p-2 rounded border border-teal-500/20 w-full truncate">{cat.memo}</div>}
                               
@@ -610,7 +634,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                                   <button 
                                     onClick={() => { 
                                       setEditingCatId(cat.id); 
-                                      // 💡 직접 편집 시 기존의 대괄호 배치 형태를 훼손 없이 유지 공급하여 타이핑 수정을 시작하게 합니다.
                                       const editableRawText = cat.content || cat.title || "";
                                       setEditArticleText(editableRawText); 
                                     }} 
@@ -660,9 +683,9 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                             <button 
                               disabled={editingCatId === cat.id}
                               onClick={() => {
-                                const folderCats = safeCategories.filter((c:any) => c.folder_name === cat.folder_name).sort((a:any, b:any) => a.id - b.id);
-                                const currentIdx = folderCats.findIndex(c => c.id === cat.id);
-                                const nextCat = folderCats[currentIdx + 1];
+                                const folderCatsOnly = safeCategories.filter((c:any) => c.folder_name === cat.folder_name);
+                                const currentIdx = folderCatsOnly.findIndex(c => c.id === cat.id);
+                                const nextCat = folderCatsOnly[currentIdx + 1];
                                 
                                 handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, cat.id, () => {
                                     if (nextCat) {
