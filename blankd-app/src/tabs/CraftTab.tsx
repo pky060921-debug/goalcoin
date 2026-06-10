@@ -65,8 +65,10 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
         const onlyChars = (text: string) => text.replace(/[^가-힣a-zA-Z0-9一-龥]/g, '');
         const cleanCardTitle = onlyChars(removeBrackets(cardFirstLine));
         const cleanCatTitle = onlyChars(removeBrackets(cat.title));
+        
         if (cleanCardTitle && cleanCatTitle) {
-          if (cleanCardTitle === cleanCardTitle || cleanCardTitle.endsWith(cleanCatTitle)) {
+          // 💡 오타 수정 완료: cleanCardTitle === cleanCatTitle 로 정상화
+          if (cleanCardTitle === cleanCatTitle || cleanCardTitle.endsWith(cleanCatTitle)) {
              return true;
           }
         }
