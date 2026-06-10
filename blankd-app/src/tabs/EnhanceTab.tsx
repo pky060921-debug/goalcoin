@@ -11,17 +11,14 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-// 💡 단 하나의 완전한 컴포넌트로 병합! (인자에 loadAllData 포함)
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, loadAllData, safeAddress }: any) => {
   
-  // 1. 컴포넌트 내부에서 사용할 상태(State)들을 최상단에 먼저 선언해야 에러가 나지 않습니다.
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editContent, setEditContent] = useState<string>("");
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<'editor' | 'include' | 'exclude' | null>('include');
 
-  // 2. 부모로부터 받은 데이터 가공
   const safeCards = Array.isArray(savedCards) ? savedCards : [];
   const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
@@ -29,21 +26,14 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     try { const saved = localStorage.getItem('blankd_enhance_folders'); return saved ? JSON.parse(saved) : {}; } 
     catch(e) { return {}; }
   });
-
-  // 3. 💡 부모의 savedCards가 바뀔 때 현재 수정 중인 창(editor)의 내용도 실시간으로 동기화합니다.
+  
   useEffect(() => {
     if (editingId) {
       const updatedCard = safeCards.find((c: any) => c.id === editingId);
       if (updatedCard) setEditContent(updatedCard.content);
     }
   }, [savedCards, editingId]);
-  
-  // 4. 데이터 로드 확인용 디버깅 로그
-  useEffect(() => {
-    console.log("EnhanceTab이 받은 savedCards:", savedCards);
-  }, [savedCards]);
-  
-  // 5. 폴더 열림/닫힘 상태 동기화
+
   useEffect(() => {
     setOpenFolders(prev => {
       const next = { ...prev };
@@ -54,9 +44,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
       if (changed) localStorage.setItem('blankd_enhance_folders', JSON.stringify(next));
       return next;
     });
-  }, [savedCards]);
-
-  // ... (이 아래로는 const handleToggleFolder = ... 등 기존 코드가 쭉 이어지면 됩니다!)
+  }, [savedCards, enhanceFolders]);
 
   const handleToggleFolder = (f: string) => {
     setOpenFolders(prev => {
@@ -72,62 +60,90 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     const clear = () => { clearTimeout(timer); };
     return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
   };
-  // --- 💡 여기서부터 덮어쓰기 ---
+
+  // 💡 [신규 추가] 채우기 카드 순서 변경 핸들러
+  const handleMoveCard = async (folder: string, index: number, direction: 'up' | 'down') => {
+    const folderCards = safeCards.filter((c:any) => c && c.content && c.folder_name === folder);
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === folderCards.length - 1) return;
+
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    const newFolderCards = [...folderCards];
+    [newFolderCards[index], newFolderCards[targetIndex]] = [newFolderCards[targetIndex], newFolderCards[index]];
+    
+    const orderedIds = newFolderCards.map(c => c.id);
+
+    try {
+      await fetch("https://api.blankd.top/api/update-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, table: 'cards', ordered_ids: orderedIds })
+      });
+      if (loadAllData) await loadAllData();
+    } catch (err) {
+      console.error("순서 변경 실패:", err);
+    }
+  };
+
   const handleSaveEdit = async (card: any) => {
     setIsSaving(true);
     setErrorMsg(null);
     try {
-      // 💡 1. 사용자가 직접 타이핑한 내용에서 [ ] 안의 새로운 빈칸 정답들을 자동으로 추출합니다.
-      const newAnswers = (editContent.match(/\[\s*(.*?)\s*\]/g) || [])
+      let sanitizedContent = editContent;
+      const origIdMatch = editContent.match(/\[\[ORIG_ID:\d+\]\]/);
+      
+      if (origIdMatch) {
+        const systemTag = origIdMatch[0];
+        const bodyText = editContent.replace(systemTag, '');
+        const cleanBody = bodyText.replace(/\[+/g, '[').replace(/\]+/g, ']');
+        sanitizedContent = cleanBody.trim() + '\n\n' + systemTag;
+      } else {
+        sanitizedContent = editContent.replace(/\[+/g, '[').replace(/\]+/g, ']');
+      }
+
+      const newAnswers = (sanitizedContent.match(/\[\s*(.*?)\s*\]/g) || [])
         .map(b => b.replace(/\[|\]/g, '').trim())
         .filter(Boolean)
         .join(", ");
 
       const payload = {
-        wallet_address: safeAddress, // App.tsx에서 넘겨준 지갑 주소 강제 적용
+        wallet_address: safeAddress || "ENOKI_USER", 
         card_id: parseInt(card.id, 10),
-        card_content: editContent,
-        answer_text: newAnswers, // 💡 새롭게 갱신된 정답 전송
+        card_content: sanitizedContent,
+        answer_text: newAnswers,
         folder_name: card.folder_name,
         memo: card.memo
       };
-
-      console.log("🚀 [서버로 전송하는 수정 데이터]:", payload);
 
       const res = await fetch("https://api.blankd.top/api/save-card", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-
+      
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "서버 저장 실패");
+        throw new Error(err.error || "서버에서 수정 요청을 거부했습니다.");
       }
 
-      // 💡 2. 화면 렉(지연) 방지: 서버 데이터를 기다리기 전에 내 화면의 카드를 먼저 바꿔치기 합니다.
-      card.content = editContent;
+      card.content = sanitizedContent;
       card.answer_text = newAnswers;
 
-      // 💡 3. 서버 백그라운드 동기화
       if (typeof loadAllData === 'function') {
          await loadAllData();
       }
-      
       setEditingId(null);
-      alert("✅ 카드 내용이 성공적으로 수정되었습니다!"); // 정상 작동 확인용 알림
-
+      alert("✅ 카드 내용이 성공적으로 수정되었습니다!");
     } catch (error: any) {
-      console.error("❌ 수정 저장 실패:", error);
+      console.error("수정 저장 실패:", error);
       setErrorMsg(error.message || "서버 통신에 실패했습니다.");
     } finally {
       setIsSaving(false);
     }
   };
-  
+
   const renderInteractiveText = () => {
     const tokens = editContent.split(/(\s+|\n|---|\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g).filter(Boolean);
-    
     return (
       <div className={`w-full bg-black/40 p-4 rounded border border-white/10 leading-loose font-sans ${activeTool ? 'select-none' : ''} min-h-[160px] max-h-[400px] overflow-y-auto custom-scrollbar`}>
         {tokens.map((token, idx) => {
@@ -153,10 +169,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           if (isWhitespace) return <span key={idx}>{token}</span>;
 
           let btnClass = "inline-block rounded px-1.5 py-0.5 mx-0.5 transition-all ";
-          
           if (activeTool === 'include') {
             if (isBracketed) {
-              btnClass += "bg-teal-900/20 text-teal-500/50 border border-teal-500/10 cursor-not-allowed"; 
+              btnClass += "bg-teal-900/20 text-teal-500/50 border border-teal-500/10 cursor-not-allowed";
             } else {
               btnClass += "text-white/80 cursor-pointer bg-white/5 hover:bg-teal-500/40 hover:text-white hover:scale-105 active:scale-95 border border-transparent hover:border-teal-400/50 shadow-sm";
             }
@@ -170,7 +185,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
             if (isBracketed) {
               btnClass += "bg-teal-900/30 text-teal-400 border border-teal-500/30 cursor-default";
             } else {
-              btnClass += "text-white/70 cursor-default";
+              btnClass += "text-white/77 cursor-default";
             }
           }
 
@@ -216,137 +231,142 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
+            {/* 💡 [수정] 프론트 자체 정렬(sort)을 지워서 서버의 순서를 유지합니다 */}
             {safeCards
               .filter((c:any) => c && c.content && c.folder_name === folder)
-              .sort((a:any, b:any) => a.id - b.id)
-              .map((card: any) => {
-                
-                const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-                
-                let displayTitle = (cleanContent.split('\n')[0] || "")
-                    .replace(/\[.*?\]/g, '')
-                    .replace(/\(\s*내용\s*\)/g, '')
-                    .replace(/내용/g, '')
-                    .trim();
-                
-                if (!displayTitle) displayTitle = "제목 없음";
+              .map((card: any, idx: number, folderCards: any[]) => {
+                try {
+                  const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+                  let displayTitle = (cleanContent.split('\n')[0] || "")
+                      .replace(/\[.*?\]/g, '')
+                      .replace(/\(\s*내용\s*\)/g, '')
+                      .replace(/내용/g, '')
+                      .trim();
+                  if (!displayTitle) displayTitle = "제목 없음";
 
-                const { body } = formatCardText(cleanContent);
-                const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
-                const stats = parseCardStats(card.memo);
-                const hasWrong = stats.wrongIndices.length > 0;
-                
-                let colClass = "";
-                let titleColor = "text-teal-400";
-                
-                if (viewMode === 'all' && colCount >= 3) {
-                  if (cleanContent.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
-                  else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
-                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
-                } else {
-                  if (cleanContent.includes('[법]')) titleColor = "text-red-500";
-                  else if (cleanContent.includes('[령]')) titleColor = "text-blue-400";
-                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
-                }
+                  const { body } = formatCardText(cleanContent);
+                  const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
+                  const stats = parseCardStats(card.memo);
+                  const hasWrong = stats.wrongIndices.length > 0;
+                  
+                  let colClass = "";
+                  let titleColor = "text-teal-400";
+                  if (viewMode === 'all' && colCount >= 3) {
+                    if (cleanContent.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
+                    else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
+                    else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
+                  } else {
+                    if (cleanContent.includes('[법]')) titleColor = "text-red-500";
+                    else if (cleanContent.includes('[령]')) titleColor = "text-blue-400";
+                    else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
+                  }
 
-                if (editingId === card.id) {
-                  colClass = "col-span-full";
-                }
+                  if (editingId === card.id) {
+                    colClass = "col-span-full";
+                  }
 
-                return (
-                  <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
-                    {editingId === card.id ? (
-                      <div className="relative flex flex-col p-4 rounded-sm border border-amber-500/50 bg-[#0a0a0c] transition-all duration-300 w-full shadow-[0_0_15px_rgba(245,158,11,0.15)]">
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
-                          <span className="text-[12px] text-amber-400 font-bold flex items-center gap-2">
-                            <span className="animate-pulse">🛠️</span> 빈칸 직접 수정 모드
-                          </span>
+                  return (
+                    <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
+                      {editingId === card.id ? (
+                        <div className="relative flex flex-col p-4 rounded-sm border border-amber-500/50 bg-[#0a0a0c] transition-all duration-300 w-full shadow-[0_0_15px_rgba(245,158,11,0.15)]">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
+                            <span className="text-[12px] text-amber-400 font-bold flex items-center gap-2">
+                              <span className="animate-pulse">🛠️</span> 빈칸 직접 수정 모드
+                            </span>
+                            
+                            <div className="flex items-center gap-1.5 bg-black/50 p-1 rounded-md border border-white/10">
+                              <button 
+                                onClick={() => setActiveTool(activeTool === 'editor' ? null : 'editor')}
+                                className={`px-2.5 py-1.5 rounded text-[10px] font-bold transition-all flex items-center gap-1.5 ${activeTool === 'editor' ? 'bg-amber-600/90 text-white shadow-md' : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/80'}`}
+                              >
+                                📝 직접 타이핑
+                              </button>
+                              <div className="w-px h-4 bg-white/10 mx-0.5"></div>
+                              <button 
+                                onClick={() => setActiveTool(activeTool === 'include' ? null : 'include')}
+                                className={`px-2.5 py-1.5 rounded text-[10px] font-bold transition-all flex items-center gap-1.5 ${activeTool === 'include' ? 'bg-teal-600/90 text-white shadow-md' : 'bg-white/5 text-white/50 hover:bg-teal-500/20 hover:text-teal-200'}`}
+                              >
+                                ➕ 클릭 포함
+                              </button>
+                              <button 
+                                onClick={() => setActiveTool(activeTool === 'exclude' ? null : 'exclude')}
+                                className={`px-2.5 py-1.5 rounded text-[10px] font-bold transition-all flex items-center gap-1.5 ${activeTool === 'exclude' ? 'bg-red-600/90 text-white shadow-md' : 'bg-white/5 text-white/50 hover:bg-red-500/20 hover:text-red-200'}`}
+                              >
+                                ➖ 클릭 제외
+                              </button>
+                            </div>
+                          </div>
                           
-                          <div className="flex items-center gap-1.5 bg-black/50 p-1 rounded-md border border-white/10">
+                          {activeTool === 'editor' ? (
+                            <textarea
+                              value={editContent}
+                              onChange={(e) => { setEditContent(e.target.value); }}
+                              className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] sm:text-[13px] p-4 rounded border border-white/10 focus:border-amber-500/70 outline-none resize-none custom-scrollbar leading-relaxed font-sans"
+                              placeholder="여기에 텍스트를 직접 입력하거나 [ ] 기호로 감싸세요."
+                            />
+                          ) : (
+                            renderInteractiveText()
+                          )}
+                          
+                          {errorMsg && <div className="text-red-400 text-[10px] mt-3 font-bold">{errorMsg}</div>}
+                          
+                          <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-white/10">
                             <button 
-                              onClick={() => setActiveTool(activeTool === 'editor' ? null : 'editor')}
-                              className={`px-2.5 py-1.5 rounded text-[10px] font-bold transition-all flex items-center gap-1.5 ${activeTool === 'editor' ? 'bg-amber-600/90 text-white shadow-md' : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/80'}`}
+                              onClick={(e) => { e.stopPropagation(); setEditingId(null); }}
+                              className="px-4 py-2 bg-white/5 text-white/60 hover:text-white hover:bg-white/10 rounded-sm text-[11px] font-bold transition-all"
+                              disabled={isSaving}
                             >
-                              📝 직접 타이핑
+                              취소
                             </button>
-                            <div className="w-px h-4 bg-white/10 mx-0.5"></div>
                             <button 
-                              onClick={() => setActiveTool(activeTool === 'include' ? null : 'include')}
-                              className={`px-2.5 py-1.5 rounded text-[10px] font-bold transition-all flex items-center gap-1.5 ${activeTool === 'include' ? 'bg-teal-600/90 text-white shadow-md' : 'bg-white/5 text-white/50 hover:bg-teal-500/20 hover:text-teal-200'}`}
+                              onClick={(e) => { e.stopPropagation(); handleSaveEdit(card); }}
+                              className="px-5 py-2 bg-amber-600 border border-amber-500/50 text-white hover:bg-amber-500 rounded-sm text-[11px] font-bold transition-all flex items-center gap-1.5 shadow-lg shadow-amber-900/20"
+                              disabled={isSaving}
                             >
-                              ➕ 클릭 포함
-                            </button>
-                            <button 
-                              onClick={() => setActiveTool(activeTool === 'exclude' ? null : 'exclude')}
-                              className={`px-2.5 py-1.5 rounded text-[10px] font-bold transition-all flex items-center gap-1.5 ${activeTool === 'exclude' ? 'bg-red-600/90 text-white shadow-md' : 'bg-white/5 text-white/50 hover:bg-red-500/20 hover:text-red-200'}`}
-                            >
-                              ➖ 클릭 제외
-                            </button>
-                          </div>
-                        </div>
-                        
-                        {activeTool === 'editor' ? (
-                      <textarea
-                        value={editContent} // 💡 처음 열릴 때의 값만 넣어줍니다.
-                        onChange={(e) => {
-                          // 💡 입력창 바깥이나 다른 버튼을 클릭해 포커스가 빠져나갈 때 딱 한 번만 상태를 저장합니다.
-                          setEditContent(e.target.value); 
-                        }}
-                        className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] sm:text-[13px] p-4 rounded border border-white/10 focus:border-amber-500/70 outline-none resize-none custom-scrollbar leading-relaxed font-sans"
-                        placeholder="여기에 텍스트를 직접 입력하거나 [ ] 기호로 감싸세요."
-                      />
-                    ) : (
-                      renderInteractiveText()
-                    )}
-                        
-                        {errorMsg && <div className="text-red-400 text-[10px] mt-3 font-bold">{errorMsg}</div>}
-                        
-                        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-white/10">
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); setEditingId(null); }}
-                            className="px-4 py-2 bg-white/5 text-white/60 hover:text-white hover:bg-white/10 rounded-sm text-[11px] font-bold transition-all"
-                            disabled={isSaving}
-                          >
-                            취소
-                          </button>
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); handleSaveEdit(card); }}
-                            className="px-5 py-2 bg-amber-600 border border-amber-500/50 text-white hover:bg-amber-500 rounded-sm text-[11px] font-bold transition-all flex items-center gap-1.5 shadow-lg shadow-amber-900/20"
-                            disabled={isSaving}
-                          >
-                            {isSaving ? '저장 중...' : '💾 내용 저장'}
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
-                        <div className="flex flex-row justify-between items-center w-full gap-2">
-                          <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{displayTitle}</div>
-                          <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
-                            <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
-                            <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">반복:{stats.filled}</span>
-                            <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingId(card.id);
-                                setEditContent(card.content);
-                                setActiveTool('editor');
-                              }}
-                              className="ml-1 px-1.5 py-0.5 bg-amber-900/40 text-amber-400 border border-amber-500/50 rounded font-mono text-[9px] hover:bg-amber-900/60 transition-colors cursor-pointer"
-                            >
-                              ✏️수정
+                              {isSaving ? '저장 중...' : '💾 내용 저장'}
                             </button>
                           </div>
                         </div>
-                      </button>
-                    )}
-                  </div>
-                );
+                      ) : (
+                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
+                          <div className="flex flex-row justify-between items-center w-full gap-2">
+                            <div className={`${titleColor} font-bold text-[11px] sm:text-[13px] text-left leading-snug truncate flex-1`}>{displayTitle}</div>
+                            <div className="flex flex-nowrap gap-1 justify-end shrink-0 items-center overflow-visible">
+                              <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
+                              <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">반복:{stats.filled}</span>
+                              <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
+                              
+                              {/* 💡 [신규 추가] 순서 변경 ↕️ 화살표 버튼 */}
+                              <div className="flex items-center bg-black/40 border border-white/10 rounded-sm overflow-hidden shrink-0 ml-1">
+                                <button onClick={(e) => { e.stopPropagation(); handleMoveCard(folder, idx, 'up'); }} className="px-1.5 py-0.5 text-[8px] text-white/40 hover:text-teal-400 hover:bg-white/10 transition-colors" disabled={idx === 0}>▲</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleMoveCard(folder, idx, 'down'); }} className="px-1.5 py-0.5 text-[8px] text-white/40 hover:text-teal-400 hover:bg-white/10 transition-colors" disabled={idx === folderCards.length - 1}>▼</button>
+                              </div>
+
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingId(card.id);
+                                  setEditContent(card.content);
+                                  setActiveTool('editor');
+                                }}
+                                className="ml-1 px-1.5 py-0.5 bg-amber-900/40 text-amber-400 border border-amber-500/50 rounded font-mono text-[9px] hover:bg-amber-900/60 transition-colors cursor-pointer"
+                              >
+                                ✏️수정
+                              </button>
+                            </div>
+                          </div>
+                        </button>
+                      )}
+                    </div>
+                  );
+                } catch (renderError: any) {
+                   console.error("EnhanceTab 카드 렌더링 오류:", renderError);
+                   return <div key={card.id || Math.random()} className="text-red-500 text-xs p-2 border border-red-500/50 bg-red-900/20">카드 렌더링 오류 진단: {renderError.message}</div>;
+                }
             })}
-            </div>
           </div>
-        ))}
+        </div>
+      ))}
     </div>
   );
 };
