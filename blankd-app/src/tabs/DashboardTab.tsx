@@ -16,22 +16,16 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
       const folder = card.folder_name || '기본 폴더';
       if (!folderStats[folder]) folderStats[folder] = { total: 0, filled: 0, wrong: 0 };
 
-      const { body } = formatCardText(card.content);
-      const blanks = body.match(/\[\s*(.*?)\s*\]/g) || [];
+      const blanks = card.content.match(/\[\s*(.*?)\s*\]/g) || [];
       const blankCount = blanks.length;
       
       const stats = parseCardStats(card.memo);
-      
-      // 💡 [핵심 버그 수정] stats.filled는 조항을 학습한 '회독수'입니다. 
-      // 따라서 빈칸을 채운 개수는 '학습한 적이 있다면(stats.filled > 0) 해당 조항의 빈칸 개수 전체'로 계산합니다.
-      const memorizedBlanks = stats.filled > 0 ? blankCount : 0;
-
       totalBlanks += blankCount;
-      totalFilled += memorizedBlanks; // 💡 회독수가 아닌 실제 빈칸 개수를 더합니다.
+      totalFilled += stats.filled;
       totalWrong += stats.wrongIndices.length;
 
       folderStats[folder].total += blankCount;
-      folderStats[folder].filled += memorizedBlanks; // 💡 폴더별 통계도 수정
+      folderStats[folder].filled += stats.filled;
       folderStats[folder].wrong += stats.wrongIndices.length;
     } catch (err) {
       console.error("[Dashboard 진단 오류] 카드 데이터 파싱 실패:", err, card);
@@ -67,12 +61,14 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
   return (
     <div className="max-w-6xl mx-auto space-y-8 py-6 px-4 animate-in fade-in duration-300">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {/* 만들기 진척도 */}
+        {/* 만들기 진척도 (제작 수 / 전체 조항 수) */}
         <div className="bg-[#0a0a0c] border border-white/10 p-5 rounded-sm flex flex-col justify-between">
           <div>
             <div className="text-xs text-white/40 font-mono tracking-wider">제작 진척도</div>
-            <div className="text-2xl font-serif text-amber-400 mt-2 font-bold">{craftProgress}%</div>
-            <div className="text-[11px] text-white/50 mt-1">원본 대비 빈칸카드 제작률</div>
+            <div className="text-2xl font-serif text-amber-400 mt-2 font-bold">
+              {safeCards.length} <span className="text-lg text-amber-400/60">/ {safeCategories.length}</span>
+            </div>
+            <div className="text-[11px] text-white/50 mt-1">전체 조항 중 제작 완료된 카드 수 ({craftProgress}%)</div>
           </div>
           <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden mt-4">
             <div className="bg-amber-500 h-full transition-all duration-500" style={{ width: `${craftProgress}%` }}></div>
@@ -87,19 +83,21 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
             <div className="text-[11px] text-white/50 mt-1">전체 빈칸 개수 기준 암기 진척도 ({totalFilled} / {totalBlanks})</div>
           </div>
           <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden mt-4">
-            <div className="bg-indigo-500 h-full transition-all duration-500" style={{ width: `${fillProgress}%` }}></div>
+            <div className="bg-indigo-500 h-full transition-all duration-500" style={{ width: `${fillProgress > 100 ? 100 : fillProgress}%` }}></div>
           </div>
         </div>
 
-        {/* 실시간 오답 현황 */}
+        {/* 오답 빈칸 수 (오답 수 / 전체 빈칸 수) */}
         <div className="bg-[#0a0a0c] border border-white/10 p-5 rounded-sm flex flex-col justify-between">
           <div>
             <div className="text-xs text-white/40 font-mono tracking-wider">오답 빈칸 수</div>
-            <div className="text-2xl font-serif text-red-400 mt-2 font-bold">{totalWrong}개</div>
-            <div className="text-[11px] text-white/50 mt-1">현재 집중 반복이 필요한 빈칸 개수</div>
+            <div className="text-2xl font-serif text-red-400 mt-2 font-bold">
+              {totalWrong} <span className="text-lg text-red-400/60">/ {totalBlanks}</span>
+            </div>
+            <div className="text-[11px] text-white/50 mt-1">전체 빈칸 중 오답이 발생한 빈칸 수</div>
           </div>
           <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden mt-4">
-            <div className="bg-red-500 h-full transition-all duration-300" style={{ width: `${totalWrong > 0 ? Math.min(100, totalWrong * 5) : 0}%` }}></div>
+            <div className="bg-red-500 h-full transition-all duration-300" style={{ width: `${totalBlanks > 0 ? (totalWrong / totalBlanks) * 100 : 0}%` }}></div>
           </div>
         </div>
       </div>
@@ -114,7 +112,6 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
                   <button
                     key={card.id}
                     onClick={() => {
-                      console.log("[Dashboard 진단] 오답 카드 선택:", card.id);
                       setActiveCard(card);
                     }}
                     className="w-full text-left p-2.5 bg-red-950/20 border border-red-900/30 rounded-sm hover:bg-red-950/40 transition-all flex justify-between items-center group"
@@ -130,7 +127,6 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
           {recentEnhanceCard && (
             <button
               onClick={() => {
-                console.log("[Dashboard 진단] 이어하기 클릭:", recentEnhanceCard.id);
                 setActiveTab('enhance');
               }}
               className="border border-white/10 p-5 rounded-sm bg-[#08080a] flex flex-col justify-center items-center hover:border-teal-500/40 transition-all text-center group cursor-pointer"
