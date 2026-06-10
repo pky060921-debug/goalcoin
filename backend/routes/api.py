@@ -964,7 +964,8 @@ def get_categories():
         wallet_address = request.args.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ? ORDER BY id ASC", (wallet_address,))
+        # 💡 [정렬 기준 수정] sort_order를 최우선 기준으로 정렬합니다.
+        cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ? ORDER BY sort_order ASC, id ASC", (wallet_address,))
         cats = [{"id": r[0], "title": r[1], "content": r[2], "folder_name": r[3]} for r in cursor.fetchall()]
         conn.close()
         return jsonify({"categories": cats})
@@ -1038,13 +1039,14 @@ def get_my_cards():
         wallet_address = request.args.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo FROM cards WHERE wallet_address = ? ORDER BY id ASC", (wallet_address,))
+        # 💡 [정렬 기준 수정] sort_order를 최우선 기준으로 정렬합니다.
+        cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo FROM cards WHERE wallet_address = ? ORDER BY sort_order ASC, id ASC", (wallet_address,))
         cards = [{"id": r[0], "content": r[1], "answer": r[2], "options": json.loads(r[3]), "level": r[4], "next_review_time": r[5], "status": r[6], "best_time": r[7], "folder_name": r[8], "memo": r[9] or ""} for r in cursor.fetchall()]
         conn.close()
         return jsonify({"cards": cards})
     except Exception as e:
         return jsonify({"error": "조회 실패"}), 500
-
+        
 @api_bp.route('/delete-category', methods=['POST'])
 def delete_category():
     try:
@@ -1440,3 +1442,32 @@ def export_excel_final():
         err_msg = traceback.format_exc()
         print(f"❌ [백엔드 치명적 에러 캐치]\n{err_msg}", file=sys.stderr)
         return jsonify({"error": f"서버 내부 연산 장애: {str(e)}", "traceback": err_msg}), 500
+
+# ==========================================
+# 💡 [신규 추가] 드래그/버튼 기반 순서 변경 업데이트 API
+# ==========================================
+@api_bp.route('/update-order', methods=['POST'])
+def update_order():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        table = data.get('table') 
+        ordered_ids = data.get('ordered_ids', [])
+        
+        if not wallet_address or table not in ['categories', 'cards'] or not ordered_ids:
+            return jsonify({"error": "잘못된 요청입니다."}), 400
+            
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 전달받은 ID 배열의 인덱스(0, 1, 2...)를 그대로 sort_order에 덮어씌웁니다.
+        for index, item_id in enumerate(ordered_ids):
+            cursor.execute(f"UPDATE {table} SET sort_order = ? WHERE id = ? AND wallet_address = ?", (index, item_id, wallet_address))
+            
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "순서 변경 완료"}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
