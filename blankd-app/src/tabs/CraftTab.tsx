@@ -130,6 +130,25 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
+  // 💡 [자가 치유 동기화 엔진] 과거에 등록했던 기존 스마트 약어들을 추적하여 필수 포함 단어로 일괄 승격시킵니다.
+  useEffect(() => {
+    if (!globalDict) return;
+    const abbrevKeys = Object.keys(globalDict.abbreviations || {});
+    const currentInclusions = globalDict.custom_inclusions || globalDict.inclusions || [];
+    
+    // 포함 단어 리스트에 아직 들어가지 않은 기존 약어 원본 추출
+    const missingKeys = abbrevKeys.filter(key => !currentInclusions.includes(key));
+    
+    if (missingKeys.length > 0) {
+      const nextInclusions = Array.from(new Set([...currentInclusions, ...missingKeys]));
+      saveGlobalDict({
+        ...globalDict,
+        custom_inclusions: nextInclusions,
+        inclusions: nextInclusions
+      });
+    }
+  }, [globalDict, saveGlobalDict]);
+
   // 사전 제어 핸들러
   const handleAddStopWord = () => {
     if (!newStopWord.trim()) return;
@@ -161,7 +180,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     saveGlobalDict({ ...globalDict, custom_inclusions: nextList, inclusions: nextList });
   };
 
-  // 💡 [핵심 구현] 약어 등록 시 원래 정답을 필수 포함 단어(Inclusions) 사전에 즉시 자동 주입합니다.
   const handleAddAbbrev = () => {
     if (!newAbbrevOrig.trim() || !newAbbrevShort.trim()) return;
     
