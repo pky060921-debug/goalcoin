@@ -34,10 +34,20 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
     const cleanExpected = expected.replace(/\s+/g, '').toLowerCase();
     let isMatch = (cleanInput === cleanExpected);
 
-    if (!isMatch && abbrDict && abbrDict[cleanInput]) {
-      if (abbrDict[cleanInput].replace(/\s+/g, '').toLowerCase() === cleanExpected) {
-        isMatch = true;
-      }
+    // 💡 [정밀 채점 엔진] 사용자가 입력한 값과 예상 정답을 길이 기반으로 정밀 매칭합니다.
+    if (!isMatch && abbrDict) {
+      Object.entries(abbrDict).forEach(([k, v]) => {
+        const strK = k.replace(/\s+/g, '').toLowerCase();
+        const strV = v.replace(/\s+/g, '').toLowerCase();
+        // 긴 쪽이 원래 정답(orig), 짧은 쪽이 약어(short)
+        const orig = strK.length >= strV.length ? strK : strV;
+        const short = strK.length < strV.length ? strK : strV;
+        
+        // 빈칸의 내용이 '원래 정답'이고, 사용자가 친 글자가 '약어'일 때 정답 처리
+        if (cleanExpected === orig && cleanInput === short) {
+          isMatch = true;
+        }
+      });
     }
 
     if (isMatch) {
@@ -181,7 +191,6 @@ function MainApp() {
         inclusions: serverInclusions,
         abbrs: finalAbbrs
       });
-      console.log("새로 불러온 카드 데이터:", cardRes.cards);
     } catch (e: any) {
       console.error("데이터 동기화 실패:", e);
       addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
@@ -197,18 +206,37 @@ function MainApp() {
     }
   };
 
-  // 💡 [핵심 연동] 앱 로딩 시, 과거에 등록했던 '스마트 약어'들을 스캔하여 '필수 포함 단어' 리스트에 0.1초 만에 자가 치유(추가)합니다.
+  // 💡 [핵심 연동] 길이 기반 자가 교정 및 복구 엔진 (앱 시작 시 작동)
+  // 잘못 들어간 약어는 지우고, 진짜 원래 정답을 필수 포함 단어에 복구합니다.
   useEffect(() => {
     if (!globalDict || !globalDict.abbrs) return;
-    const abbrevKeys = Object.keys(globalDict.abbrs);
-    const currentInclusions = globalDict.inclusions || [];
     
-    const missingKeys = abbrevKeys.filter(key => !currentInclusions.includes(key));
-    if (missingKeys.length > 0) {
-      const nextInclusions = Array.from(new Set([...currentInclusions, ...missingKeys]));
+    let currentInclusions = globalDict.inclusions || [];
+    let changed = false;
+
+    Object.entries(globalDict.abbrs).forEach(([k, v]) => {
+      const strK = k as string;
+      const strV = v as string;
+      // 길이를 비교하여 긴 것을 원래 정답, 짧은 것을 약어로 완벽 분류합니다.
+      const orig = strK.length >= strV.length ? strK : strV;
+      const short = strK.length < strV.length ? strK : strV;
+
+      // 1. 필수 포함 단어에 약어가 잘못 들어가 있다면 삭제 (오류 치유)
+      if (currentInclusions.includes(short)) {
+        currentInclusions = currentInclusions.filter(w => w !== short);
+        changed = true;
+      }
+      // 2. 필수 포함 단어에 원래 정답이 없다면 추가 (연동 복구)
+      if (!currentInclusions.includes(orig)) {
+        currentInclusions.push(orig);
+        changed = true;
+      }
+    });
+
+    if (changed) {
       saveGlobalDict({
         ...globalDict,
-        inclusions: nextInclusions
+        inclusions: Array.from(new Set(currentInclusions))
       });
     }
   }, [globalDict.abbrs]);
@@ -506,11 +534,18 @@ function MainApp() {
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
     let isCorrect = (expected === actual);
 
-    if (!isCorrect && globalDict.abbrs && globalDict.abbrs[actual]) {
-      const mappedValue = globalDict.abbrs[actual].replace(/\s+/g, '').toLowerCase();
-      if (mappedValue === expected) {
-        isCorrect = true;
-      }
+    // 💡 [정밀 채점 엔진] 사용자가 타자/음성으로 입력한 값 처리 시에도 길이 기반 판독 적용
+    if (!isCorrect && globalDict.abbrs) {
+      Object.entries(globalDict.abbrs).forEach(([k, v]) => {
+        const strK = k.replace(/\s+/g, '').toLowerCase();
+        const strV = v.replace(/\s+/g, '').toLowerCase();
+        const orig = strK.length >= strV.length ? strK : strV;
+        const short = strK.length < strV.length ? strK : strV;
+        
+        if (expected === orig && actual === short) {
+          isCorrect = true;
+        }
+      });
     }
 
     if (isCorrect) {
@@ -784,18 +819,24 @@ function MainApp() {
     );
   }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening]);
 
-  // 💡 [전역 엔진 적용] 앱 어디서든 사전에 단어를 등록/삭제할 수 있는 코어 모듈
+  // 💡 [핵심 연동] 등록된 단어를 앱 전체에 동기화시키는 중앙 컨트롤러
   const handleAddDictItem = () => {
     if (dictTab === 'abbr' && tempKey && tempValue) {
-      const orig = tempKey.trim();
-      const short = tempValue.trim();
+      const k = tempKey.trim();
+      const v = tempValue.trim();
+      // 길이 기반 완벽 분류 (긴 것이 원래 정답, 짧은 것이 약어)
+      const orig = k.length >= v.length ? k : v;
+      const short = k.length < v.length ? k : v;
+
       const currentInclusions = globalDict.inclusions || [];
       const nextInclusions = Array.from(new Set([...currentInclusions, orig]));
+      // 만약 약어가 예전에 필수 포함에 들어갔다면 청소
+      const cleanedInclusions = nextInclusions.filter(w => w !== short);
 
       saveGlobalDict({
         ...globalDict,
-        abbrs: { ...globalDict.abbrs, [orig]: short },
-        inclusions: nextInclusions
+        abbrs: { ...globalDict.abbrs, [short]: orig },
+        inclusions: cleanedInclusions
       });
       setTempKey(""); setTempValue("");
     } else if (dictTab !== 'abbr' && tempKey) {
@@ -908,17 +949,25 @@ function MainApp() {
       </div>
       
       <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 min-h-[160px]">
-        {dictTab === 'abbr' && Object.entries(globalDict.abbrs).map(([abbr, full]) => (
-          <div key={abbr} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-indigo-400 font-bold px-2 py-0.5 bg-indigo-900/20 rounded-sm border border-indigo-500/20">{abbr}</span> 
-              <span className="text-white/30 text-[10px]">→</span> 
-              <span className="text-white/70 break-all">{full as string}</span>
+        {/* 💡 시각적 정렬: 원래 정답(긴 단어) -> 약어(짧은 단어) 형태로 보기 좋게 고정합니다. */}
+        {dictTab === 'abbr' && Object.entries(globalDict.abbrs).map(([k, v]) => {
+          const strK = k as string;
+          const strV = v as string;
+          const orig = strK.length >= strV.length ? strK : strV;
+          const short = strK.length < strV.length ? strK : strV;
+
+          return (
+            <div key={k} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="opacity-60">{orig}</span> 
+                <span className="text-white/30 text-[10px]">→</span> 
+                <span className="text-indigo-400 font-bold px-2 py-0.5 bg-indigo-900/20 rounded-sm border border-indigo-500/20">{short}</span> 
+              </div>
+              <button onClick={() => { const nw = {...globalDict.abbrs}; delete nw[k]; saveGlobalDict({...globalDict, abbrs: nw});
+              }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors shrink-0">✕</button>
             </div>
-            <button onClick={() => { const nw = {...globalDict.abbrs}; delete nw[abbr]; saveGlobalDict({...globalDict, abbrs: nw});
-            }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors shrink-0">✕</button>
-          </div>
-        ))}
+          )
+        })}
         {dictTab !== 'abbr' && (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions).map((word: string) => (
           <div key={word} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
             <span className={`px-2 py-0.5 rounded-sm border ${dictTab === 'stop' ? 'text-amber-400 bg-amber-900/10 border-amber-500/20' : 'text-teal-400 bg-teal-900/10 border-teal-500/20'}`}>{word}</span>
