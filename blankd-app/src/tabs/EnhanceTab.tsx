@@ -236,7 +236,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                 try {
                   const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
                   
-                  // 💡 1줄 조항명 추출
+                  // 조항명만 깔끔하게 추출
                   const titleMatch = cleanContent.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
                   let displayTitle = "";
                   
@@ -250,8 +250,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                         .trim();
                   }
                   if (!displayTitle) displayTitle = "제목 없음";
-
-                  // 본문 텍스트 추출 로직은 완전히 제거됨 (렌더링하지 않으므로 불필요)
 
                   const { body } = formatCardText(cleanContent);
                   const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
@@ -339,14 +337,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                       ) : (
                         <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center gap-2 ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
                           
-                          {/* 💡 1줄: 조항명 영역 (좌측 정렬) */}
                           <div className="flex w-full">
                             <div className={`${titleColor} font-bold text-[12px] sm:text-[14px] leading-snug break-keep text-left flex-1`}>
                               {displayTitle}
                             </div>
                           </div>
                           
-                          {/* 💡 2줄: 통계(빈칸/반복/틀림) 및 순서변경, 수정 버튼 */}
                           <div className="flex flex-row justify-between items-center w-full mt-1 border-t border-white/5 pt-2">
                             
                             <div className="flex flex-nowrap gap-1">
@@ -370,6 +366,28 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                 className="px-1.5 py-0.5 bg-amber-900/40 text-amber-400 border border-amber-500/50 rounded font-mono text-[9px] hover:bg-amber-900/60 transition-colors cursor-pointer"
                               >
                                 ✏️수정
+                              </button>
+                              {/* 💡 [신규 추가] 삭제 버튼 복구 완료 */}
+                              <button
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) {
+                                    try {
+                                      const res = await fetch("https://api.blankd.top/api/delete-card", {
+                                        method: "POST",
+                                        headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id })
+                                      });
+                                      if (!res.ok) throw new Error();
+                                      if (loadAllData) await loadAllData();
+                                    } catch (err) {
+                                      alert("카드 삭제에 실패했습니다.");
+                                    }
+                                  }
+                                }}
+                                className="ml-1 px-1.5 py-0.5 bg-red-900/40 text-red-400 border border-red-500/50 rounded font-mono text-[9px] hover:bg-red-900/60 transition-colors cursor-pointer"
+                              >
+                                🗑️삭제
                               </button>
                             </div>
                             
