@@ -121,7 +121,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     }
   }, [expandedId, safeCategories]);
 
-  // 💡 설정 및 사전(단어장) 상태
+  // 사전 상태
   const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
   const [newStopWord, setNewStopWord] = useState("");
   const [newIncludeWord, setNewIncludeWord] = useState("");
@@ -130,7 +130,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
-  // === 사전 기능 제어 핸들러 ===
+  // 사전 제어 핸들러
   const handleAddStopWord = () => {
     if (!newStopWord.trim()) return;
     const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
@@ -161,13 +161,26 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     saveGlobalDict({ ...globalDict, custom_inclusions: nextList, inclusions: nextList });
   };
 
+  // 💡 [핵심 구현] 약어 등록 시 원래 정답을 필수 포함 단어(Inclusions) 사전에 즉시 자동 주입합니다.
   const handleAddAbbrev = () => {
     if (!newAbbrevOrig.trim() || !newAbbrevShort.trim()) return;
+    
+    const orig = newAbbrevOrig.trim();
+    const short = newAbbrevShort.trim();
+    
     const currentAbbrevs = globalDict?.abbreviations || {};
+    const currentInclusions = globalDict?.custom_inclusions || globalDict?.inclusions || [];
+    
+    // 포함 사전에 원래 정답을 안전하게 중복 제거하여 합침
+    const nextInclusions = Array.from(new Set([...currentInclusions, orig]));
+
     saveGlobalDict({
       ...globalDict,
-      abbreviations: { ...currentAbbrevs, [newAbbrevOrig.trim()]: newAbbrevShort.trim() }
+      abbreviations: { ...currentAbbrevs, [orig]: short },
+      custom_inclusions: nextInclusions,
+      inclusions: nextInclusions
     });
+    
     setNewAbbrevOrig("");
     setNewAbbrevShort("");
   };
@@ -259,15 +272,13 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
 
   const applyTextToState = (textBody: string) => {
     const currentCustomStopWords = globalDict?.stopwords || globalDict?.custom_stopwords || [];
-    
-    // 💡 [개선 포인트] 스마트 약어의 원본(Key)을 필수 포함 단어(Inclusions)에 자동 결합시킵니다.
     const abbrevKeys = Object.keys(globalDict?.abbreviations || {});
     const currentCustomIncludeWords = Array.from(new Set([
       ...(globalDict?.inclusions || globalDict?.custom_inclusions || []),
       ...abbrevKeys
     ]));
     
-    // 💡 [버그 원천 차단] 텍스트에 포함된 모든 대괄호를 시작 시점에 무조건 제거합니다. (터치로만 생성 유도)
+    // 💡 모든 대괄호를 시작 시점에 무조건 제거하여 중복 괄호 생성 원천 차단
     let processedText = textBody.replace(/\[|\]/g, '');
     
     if (currentCustomStopWords.length > 0) {
@@ -320,7 +331,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     
     currentWordArray.forEach((wordObj, idx) => {
         const trimmed = wordObj.text.trim();
-        // 💡 포함 단어 & 스마트 약어가 감지되면 무조건 빈칸으로 선택되도록 보호(Protect)합니다.
+        // 포함 단어 및 스마트 약어는 무조건 보호되며 빈칸(initialSelected)으로 강제 채택됩니다.
         if (currentCustomIncludeWords.some((cw: string) => trimmed.replace(/\s+/g, '') === cw.replace(/\s+/g, ''))) {
             protectedIndices.add(idx);
             initialSelected.add(idx);
@@ -481,12 +492,10 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
         )}
       </div>
 
-      {/* 💡 [UI 개편] 사전 관리 패널: 가로 정렬(flex-wrap) + 가나다순 + 자체 스크롤 적용 */}
       {showStopWordsSettings && (
         <div className="p-4 sm:p-5 bg-[#0a0a0c] border border-white/20 rounded-sm mb-6 flex flex-col gap-6 animate-in slide-in-from-top-2">
           
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            {/* 제외 단어 */}
             <div className="flex-1 bg-black/30 p-3 border border-white/5 rounded-sm">
               <div className="text-xs sm:text-sm text-amber-400 font-bold mb-3">❌ 제외 단어 (빈칸 X)</div>
               <div className="flex gap-2 mb-3">
@@ -504,7 +513,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
               </div>
             </div>
 
-            {/* 포함 단어 */}
             <div className="flex-1 bg-black/30 p-3 border border-white/5 rounded-sm">
               <div className="text-xs sm:text-sm text-teal-400 font-bold mb-3">✅ 필수 포함 단어 (무조건 빈칸 O)</div>
               <div className="flex gap-2 mb-3">
@@ -523,9 +531,8 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
             </div>
           </div>
 
-          {/* 스마트 약어 */}
           <div className="bg-black/30 p-3 border border-white/5 rounded-sm">
-             <div className="text-xs sm:text-sm text-indigo-400 font-bold mb-3">💡 스마트 약어 (자동 포함 적용됨)</div>
+             <div className="text-xs sm:text-sm text-indigo-400 font-bold mb-3">💡 스마트 약어 (등록 시 원본 정답은 필수 포함 단어에 자동 등록됨)</div>
              <div className="flex flex-wrap sm:flex-nowrap gap-2 mb-3">
                 <input type="text" value={newAbbrevOrig} onChange={(e) => setNewAbbrevOrig(e.target.value)} placeholder="원래 정답 (예: 행정안전부장관)" className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-indigo-400/50" />
                 <input type="text" value={newAbbrevShort} onChange={(e) => setNewAbbrevShort(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddAbbrev(); }} placeholder="약어 (예: 행안부장관)" className="w-1/3 sm:w-32 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-indigo-400/50" />
