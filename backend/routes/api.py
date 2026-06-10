@@ -221,6 +221,11 @@ def init_golden_db():
             custom_stopwords TEXT
         )''')
         
+        try: conn.execute('ALTER TABLE categories ADD COLUMN sort_order INTEGER DEFAULT 999999')
+        except: pass
+        try: conn.execute('ALTER TABLE cards ADD COLUMN sort_order INTEGER DEFAULT 999999')
+        except: pass
+            
         try: conn.execute('ALTER TABLE golden_exams ADD COLUMN search_process TEXT DEFAULT ""')
         except: pass
         try: conn.execute('ALTER TABLE golden_exams ADD COLUMN referenced_laws TEXT DEFAULT ""')
