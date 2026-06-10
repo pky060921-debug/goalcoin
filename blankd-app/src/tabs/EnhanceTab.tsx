@@ -19,7 +19,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<'editor' | 'include' | 'exclude' | null>('include');
 
-  // 💡 [초고속 이동 & 즉시 추가]를 위한 로컬 상태 관리 배열
   const [localCards, setLocalCards] = useState<any[]>([]);
   const [movingId, setMovingId] = useState<number | null>(null);
 
@@ -30,7 +29,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     catch(e) { return {}; }
   });
   
-  // 서버에서 받은 데이터를 로컬에 동기화 (단, 이동 모드 중에는 리렌더링 방해를 막기 위해 중지)
   useEffect(() => {
     if (!movingId && !editingId) {
       setLocalCards(Array.isArray(savedCards) ? savedCards : []);
@@ -56,7 +54,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
   };
 
-  // 백그라운드 서버 순서 저장 통신 (화면 렉 방지)
   const triggerMoveApi = async (folder: string, index: number, direction: 'up' | 'down', folderCards: any[]) => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     const newFolderCards = [...folderCards];
@@ -75,7 +72,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     if (direction === 'up' && index === 0) return;
     if (direction === 'down' && index === folderCards.length - 1) return;
     
-    // UI 즉각 스왑 (Optimistic Update)
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     const card = folderCards[index];
     const targetCard = folderCards[targetIndex];
@@ -92,7 +88,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     if (loadAllData) loadAllData();
   };
 
-  // 💡 [방향키 이동 컨트롤러] 마우스 없이 키보드 화살표로 카드를 슉슉 옮깁니다.
   useEffect(() => {
     if (!movingId) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -139,12 +134,16 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [movingId, safeAddress, loadAllData]);
 
-  // 💡 [조항명 보호] 사전 연동 시 첫 줄(조항명)은 보호하고 본문에만 빈칸 적용
+  // 💡 [치명적 버그 수정 완료] 시스템 태그 훼손 방지 및 자가 치유 엔진 적용
   const autoApplyDict = (content: string) => {
     if (!globalDict) return content;
-    const lines = content.split('\n');
+    
+    // 1. 이미 훼손된 태그 [ORIG_ID:xxx] 가 있다면 0.1초 만에 정상 태그로 자가 치유 복구합니다.
+    let fixedContent = content.replace(/\[ORIG_ID:(\d+)\]/g, '[[ORIG_ID:$1]]');
+    
+    const lines = fixedContent.split('\n');
     const titleLine = lines[0] || '';
-    const restContent = lines.slice(1).join('\n');
+    const restContent = lines.length > 1 ? lines.slice(1).join('\n') : '';
 
     const stopWords = globalDict.custom_stopwords || globalDict.stopwords || [];
     const abbrevKeys = Object.keys(globalDict.abbreviations || {});
@@ -153,7 +152,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     let tokens = restContent.split(/(\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g);
     for (let i = 0; i < tokens.length; i++) {
       if (!tokens[i]) continue;
+      // 2. ORIG_ID 태그는 어떠한 사전 규칙도 건드리지 못하게 절대 보호합니다.
       if (tokens[i].startsWith('[[ORIG_ID:')) continue;
+      
       if (tokens[i].startsWith('[') && tokens[i].endsWith(']')) {
         let innerText = tokens[i].slice(1, -1);
         if (stopWords.includes(innerText.trim())) { tokens[i] = innerText; }
@@ -171,10 +172,17 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         tokens[i] = text;
       }
     }
-    return titleLine + (lines.length > 1 ? '\n' : '') + tokens.join('').replace(/\[+/g, '[').replace(/\]+/g, ']');
+    
+    // 3. 괄호 중복 제거 로직에서 시스템 태그는 100% 면제(열외)시킵니다.
+    for (let i = 0; i < tokens.length; i++) {
+      if (!tokens[i].startsWith('[[ORIG_ID:')) {
+         tokens[i] = tokens[i].replace(/\[+/g, '[').replace(/\]+/g, ']');
+      }
+    }
+
+    return titleLine + (lines.length > 1 ? '\n' : '') + tokens.join('');
   };
 
-  // 💡 [즉시 추가 기능] 령, 칙을 누르면 현재 조항 오른쪽 자리에 새 카드를 밀어 넣습니다.
   const handleAddAdjacent = (folder: string, index: number, type: '령' | '칙') => {
     const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
     const origCard = folderCards[index];
@@ -193,7 +201,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
     const nextCards = [...localCards];
     const globalIdx = nextCards.findIndex(c => c.id === origCard.id);
-    nextCards.splice(globalIdx + 1, 0, newCard); // 바로 오른쪽에 위치하도록 원본 바로 뒤에 삽입
+    nextCards.splice(globalIdx + 1, 0, newCard); 
     setLocalCards(nextCards);
 
     setEditingId(tempId);
@@ -201,20 +209,32 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     setActiveTool('editor');
   };
 
-  // 카드 저장 & (새로 만들어진 령/칙 자동 정렬 처리)
   const handleSaveEdit = async (card: any) => {
     setIsSaving(true); setErrorMsg(null);
     try {
       let sanitizedContent = editContent;
-      const origIdMatch = editContent.match(/\[\[ORIG_ID:\d+\]\]/);
+      
+      // 💡 [안전 보장] 훼손된 태그까지 정밀 탐지하여 100% 정상 태그로 재결합합니다.
+      const origIdMatch = editContent.match(/\[\[?ORIG_ID:(\d+)\]?\]?/);
       if (origIdMatch) {
         const systemTag = origIdMatch[0];
+        const origIdNum = origIdMatch[1]; // 번호만 순수하게 추출
+        const correctSystemTag = `[[ORIG_ID:${origIdNum}]]`;
+        
         const bodyText = editContent.replace(systemTag, '');
         const cleanBody = bodyText.replace(/\[+/g, '[').replace(/\]+/g, ']');
-        sanitizedContent = cleanBody.trim() + '\n\n' + systemTag;
-      } else { sanitizedContent = editContent.replace(/\[+/g, '[').replace(/\]+/g, ']'); }
+        sanitizedContent = cleanBody.trim() + '\n\n' + correctSystemTag;
+      } else { 
+        sanitizedContent = editContent.replace(/\[+/g, '[').replace(/\]+/g, ']'); 
+      }
 
-      const newAnswers = (sanitizedContent.match(/\[\s*(.*?)\s*\]/g) || []).map(b => b.replace(/\[|\]/g, '').trim()).filter(Boolean).join(", ");
+      // 💡 빈칸 정답을 파싱할 때 ORIG_ID 라는 글자 자체가 절대 정답으로 지정되지 못하게 원천 차단 필터 삽입
+      const newAnswers = (sanitizedContent.match(/\[\s*(.*?)\s*\]/g) || [])
+        .map(b => b.replace(/\[|\]/g, '').trim())
+        .filter(a => !a.startsWith('ORIG_ID:')) // 철통 방어벽
+        .filter(Boolean)
+        .join(", ");
+        
       const isTemp = card.isTemp || typeof card.id === 'string';
       
       const payload = { 
@@ -229,7 +249,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
       const res = await fetch("https://api.blankd.top/api/save-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!res.ok) throw new Error("서버에서 수정 요청 거부됨");
 
-      // 💡 임시로 만들어진 카드(령/칙)였다면, 생성 후 정확한 위치로 정렬 API 호출
       if (isTemp && card.insertAfterId) {
         const resData = await res.json().catch(()=>({}));
         const newCardId = resData.card_id || resData.id;
@@ -262,11 +281,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
   };
 
   const renderInteractiveText = () => {
-    // 💡 [조항명 보호] 클릭 에디터 상에서도 첫 줄을 분리하여 빈칸 처리를 불가능하게 막습니다.
     const lines = editContent.split('\n');
     const titleLine = lines[0] || '';
     const restLines = lines.slice(1).join('\n');
-    const tokens = restLines.split(/(\s+|\n|---|\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g).filter(Boolean);
+    
+    // 💡 [에디터 화면 치유] 훼손된 태그와 정상 태그 모두 분리해내어 에디터에 깔끔하게 띄워줍니다.
+    const tokens = restLines.split(/(\s+|\n|---|\[\[?ORIG_ID:\d+\]?\]?|\[[^\]]+\])/g).filter(Boolean);
 
     return (
       <div className={`w-full bg-black/40 p-4 rounded border border-white/10 leading-loose font-sans ${activeTool ? 'select-none' : ''} min-h-[160px] max-h-[400px] overflow-y-auto custom-scrollbar`}>
@@ -274,13 +294,13 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           {titleLine}
         </div>
         {tokens.map((token, idx) => {
-          const isOrigId = token.startsWith('[[ORIG_ID:');
+          const isOrigId = token.startsWith('[[ORIG_ID:') || token.startsWith('[ORIG_ID:');
           const isBracketed = token.startsWith('[') && token.endsWith(']') && !isOrigId;
           const isPageBreak = token === '---';
           const isNewline = token === '\n';
           const isWhitespace = /^\s+$/.test(token);
           
-          if (isOrigId) return <div key={idx} className="inline-block text-[10px] text-white/20 font-mono bg-white/5 px-2 py-0.5 rounded mr-2 mb-2 select-none cursor-default">🔗 시스템 태그: {token}</div>;
+          if (isOrigId) return <div key={idx} className="inline-block text-[10px] text-white/20 font-mono bg-white/5 px-2 py-0.5 rounded mr-2 mb-2 select-none cursor-default">🔗 시스템 태그 보호중</div>;
           if (isPageBreak) return <div key={idx} className="my-6 border-b-2 border-dashed border-white/20 relative flex justify-center cursor-default"><span className="absolute -top-3 bg-[#0a0a0c] px-3 py-0.5 rounded-full text-[10px] text-white/40 font-bold border border-white/10">✂️ PAGE BREAK (---)</span></div>;
           if (isNewline) return <br key={idx} />;
           if (isWhitespace) return <span key={idx}>{token}</span>;
@@ -328,7 +348,8 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             {localCards.filter((c:any) => c && c.content && c.folder_name === folder).map((card: any, idx: number, folderCards: any[]) => {
                 try {
-                  const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+                  // 💡 화면 렌더링 시에도 훼손된 태그까지 완벽하게 걸러내어 표시합니다.
+                  const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
                   let displayTitle = (cleanContent.split('\n')[0] || "").replace(/\[.*?\]/g, '').replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
                   if (!displayTitle) displayTitle = "제목 없음";
 
@@ -384,7 +405,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                             <div className={`${titleColor} font-bold text-[12px] sm:text-[14px] leading-snug break-keep text-left flex-1`}>{displayTitle}</div>
                           </div>
                           
-                          {/* 💡 [순서 이동 모드 활성화 시] 화살표 UI 출력 */}
                           {movingId === card.id ? (
                             <div className="flex items-center justify-between w-full mt-2 pt-2 border-t border-blue-500/30 animate-in fade-in">
                               <span className="text-blue-300 text-[11px] font-bold flex items-center gap-1.5">
@@ -405,7 +425,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                 <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                               </div>
                               <div className="flex items-center gap-1">
-                                {/* 💡 [새 기능] 즉시 오른쪽 열 추가 및 초고속 이동 버튼 */}
                                 <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 bg-blue-900/40 text-blue-400 border border-blue-500/50 rounded font-mono text-[9px] hover:bg-blue-900/60 transition-colors cursor-pointer flex items-center gap-1">↕️ 이동</button>
                                 <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx, '령'); }} className="px-1.5 py-0.5 bg-teal-900/40 text-teal-400 border border-teal-500/50 rounded font-mono text-[9px] hover:bg-teal-900/60 transition-colors cursor-pointer">+령</button>
                                 <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx, '칙'); }} className="px-1.5 py-0.5 bg-green-900/40 text-green-400 border border-green-500/50 rounded font-mono text-[9px] hover:bg-green-900/60 transition-colors cursor-pointer">+칙</button>
