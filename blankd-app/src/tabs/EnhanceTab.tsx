@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { formatCardText, parseCardStats, SPLIT_REGEX } from '../utils/constants';
 import { api } from '../services/api';
 
@@ -13,13 +13,13 @@ const getGridClass = (cols: number) => {
 
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, loadAllData, safeAddress, globalDict }: any) => {
   
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | string | null>(null);
   const [editContent, setEditContent] = useState<string>("");
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<'editor' | 'include' | 'exclude' | null>('include');
 
-  // 💡 [순서 이동 모드] 로컬 상태 관리 (빠른 키보드 이동을 위해 로컬 배열 사용)
+  // 💡 [초고속 이동 & 즉시 추가]를 위한 로컬 상태 관리 배열
   const [localCards, setLocalCards] = useState<any[]>([]);
   const [movingId, setMovingId] = useState<number | null>(null);
 
@@ -30,19 +30,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     catch(e) { return {}; }
   });
   
-  // 서버에서 받은 데이터를 로컬에 동기화 (단, 이동 모드 중에는 리렌더링 방해를 막기 위해 일시 중지)
+  // 서버에서 받은 데이터를 로컬에 동기화 (단, 이동 모드 중에는 리렌더링 방해를 막기 위해 중지)
   useEffect(() => {
-    if (!movingId) {
+    if (!movingId && !editingId) {
       setLocalCards(Array.isArray(savedCards) ? savedCards : []);
     }
-  }, [savedCards, movingId]);
-
-  useEffect(() => {
-    if (editingId) {
-      const updatedCard = localCards.find((c: any) => c.id === editingId);
-      if (updatedCard) setEditContent(updatedCard.content);
-    }
-  }, [localCards, editingId]);
+  }, [savedCards, movingId, editingId]);
 
   useEffect(() => {
     setOpenFolders(prev => {
@@ -63,7 +56,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
   };
 
-  // 백그라운드에서 순서를 저장하는 API (화면 렉 방지)
+  // 백그라운드 서버 순서 저장 통신 (화면 렉 방지)
   const triggerMoveApi = async (folder: string, index: number, direction: 'up' | 'down', folderCards: any[]) => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     const newFolderCards = [...folderCards];
@@ -77,53 +70,64 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     } catch (err) { console.error("순서 변경 실패:", err); }
   };
 
-  // 💡 [방향키 이동 이벤트 리스너]
+  const handleMoveCard = async (folder: string, index: number, direction: 'up' | 'down') => {
+    const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === folderCards.length - 1) return;
+    
+    // UI 즉각 스왑 (Optimistic Update)
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    const card = folderCards[index];
+    const targetCard = folderCards[targetIndex];
+    
+    setLocalCards(prevCards => {
+      const next = [...prevCards];
+      const g1 = next.findIndex(c => c.id === card.id);
+      const g2 = next.findIndex(c => c.id === targetCard.id);
+      [next[g1], next[g2]] = [next[g2], next[g1]];
+      return next;
+    });
+
+    await triggerMoveApi(folder, index, direction, folderCards);
+    if (loadAllData) loadAllData();
+  };
+
+  // 💡 [방향키 이동 컨트롤러] 마우스 없이 키보드 화살표로 카드를 슉슉 옮깁니다.
   useEffect(() => {
     if (!movingId) return;
-
     const handleKeyDown = (e: KeyboardEvent) => {
-      // 완료 처리
       if (e.key === 'Escape' || e.key === 'Enter') {
         e.preventDefault();
         setMovingId(null);
-        if (loadAllData) loadAllData(); // 최종 동기화
+        if (loadAllData) loadAllData(); 
         return;
       }
-
-      // 위/아래 이동 처리
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         e.preventDefault();
-        
         setLocalCards(prevCards => {
           const card = prevCards.find(c => c.id === movingId);
           if (!card) return prevCards;
-          
           const folder = card.folder_name;
           const folderCards = prevCards.filter(c => c && c.content && c.folder_name === folder);
           const idx = folderCards.findIndex(c => c.id === movingId);
           
           if (e.key === 'ArrowUp' && idx > 0) {
             const targetCard = folderCards[idx - 1];
-            triggerMoveApi(folder, idx, 'up', folderCards); // 백그라운드 서버 통신
-            
-            // 프론트엔드 즉각 스왑 (Optimistic Update)
+            triggerMoveApi(folder, idx, 'up', folderCards);
             const next = [...prevCards];
             const g1 = next.findIndex(c => c.id === card.id);
             const g2 = next.findIndex(c => c.id === targetCard.id);
             [next[g1], next[g2]] = [next[g2], next[g1]];
-            
             setTimeout(() => document.getElementById(`enhance-card-${movingId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
             return next;
           } 
           else if (e.key === 'ArrowDown' && idx < folderCards.length - 1) {
             const targetCard = folderCards[idx + 1];
             triggerMoveApi(folder, idx, 'down', folderCards);
-            
             const next = [...prevCards];
             const g1 = next.findIndex(c => c.id === card.id);
             const g2 = next.findIndex(c => c.id === targetCard.id);
             [next[g1], next[g2]] = [next[g2], next[g1]];
-            
             setTimeout(() => document.getElementById(`enhance-card-${movingId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
             return next;
           }
@@ -131,11 +135,11 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         });
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [movingId, safeAddress, loadAllData]);
 
+  // 💡 [조항명 보호] 사전 연동 시 첫 줄(조항명)은 보호하고 본문에만 빈칸 적용
   const autoApplyDict = (content: string) => {
     if (!globalDict) return content;
     const lines = content.split('\n');
@@ -170,6 +174,34 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return titleLine + (lines.length > 1 ? '\n' : '') + tokens.join('').replace(/\[+/g, '[').replace(/\]+/g, ']');
   };
 
+  // 💡 [즉시 추가 기능] 령, 칙을 누르면 현재 조항 오른쪽 자리에 새 카드를 밀어 넣습니다.
+  const handleAddAdjacent = (folder: string, index: number, type: '령' | '칙') => {
+    const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
+    const origCard = folderCards[index];
+    const tempId = `temp_${Date.now()}`;
+    const newTitle = type === '령' ? '[령] 새 시행령' : '[칙] 새 시행규칙';
+    
+    const newCard = {
+        id: tempId,
+        folder_name: folder,
+        content: `${newTitle}\n\n내용을 입력하세요.`,
+        memo: JSON.stringify({ text: "", filled: 0, wrongIndices: [] }),
+        answer_text: "",
+        isTemp: true,
+        insertAfterId: origCard.id
+    };
+
+    const nextCards = [...localCards];
+    const globalIdx = nextCards.findIndex(c => c.id === origCard.id);
+    nextCards.splice(globalIdx + 1, 0, newCard); // 바로 오른쪽에 위치하도록 원본 바로 뒤에 삽입
+    setLocalCards(nextCards);
+
+    setEditingId(tempId);
+    setEditContent(newCard.content);
+    setActiveTool('editor');
+  };
+
+  // 카드 저장 & (새로 만들어진 령/칙 자동 정렬 처리)
   const handleSaveEdit = async (card: any) => {
     setIsSaving(true); setErrorMsg(null);
     try {
@@ -183,18 +215,54 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
       } else { sanitizedContent = editContent.replace(/\[+/g, '[').replace(/\]+/g, ']'); }
 
       const newAnswers = (sanitizedContent.match(/\[\s*(.*?)\s*\]/g) || []).map(b => b.replace(/\[|\]/g, '').trim()).filter(Boolean).join(", ");
-      const payload = { wallet_address: safeAddress || "ENOKI_USER", card_id: parseInt(card.id, 10), card_content: sanitizedContent, answer_text: newAnswers, folder_name: card.folder_name, memo: card.memo };
+      const isTemp = card.isTemp || typeof card.id === 'string';
+      
+      const payload = { 
+        wallet_address: safeAddress || "ENOKI_USER", 
+        card_id: isTemp ? null : parseInt(card.id, 10), 
+        card_content: sanitizedContent, 
+        answer_text: newAnswers, 
+        folder_name: card.folder_name, 
+        memo: card.memo 
+      };
 
       const res = await fetch("https://api.blankd.top/api/save-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!res.ok) throw new Error("서버에서 수정 요청 거부됨");
 
-      card.content = sanitizedContent; card.answer_text = newAnswers;
+      // 💡 임시로 만들어진 카드(령/칙)였다면, 생성 후 정확한 위치로 정렬 API 호출
+      if (isTemp && card.insertAfterId) {
+        const resData = await res.json().catch(()=>({}));
+        const newCardId = resData.card_id || resData.id;
+        
+        const listRes = await fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`);
+        const listData = await listRes.json();
+        const allCards = listData.cards || [];
+        const folderCards = allCards.filter((c:any) => c.folder_name === card.folder_name);
+        
+        let createdCard = newCardId ? folderCards.find((c:any) => c.id === newCardId) : folderCards.filter((c:any) => c.content === sanitizedContent).pop();
+        
+        if (createdCard) {
+            const otherFolderCards = folderCards.filter((c:any) => c.id !== createdCard.id);
+            const targetIdx = otherFolderCards.findIndex((c:any) => c.id === card.insertAfterId);
+            if (targetIdx !== -1) {
+                otherFolderCards.splice(targetIdx + 1, 0, createdCard);
+                const orderedIds = otherFolderCards.map((c:any) => c.id);
+                await fetch("https://api.blankd.top/api/update-order", {
+                    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, table: 'cards', ordered_ids: orderedIds })
+                });
+            }
+        }
+      } else {
+        card.content = sanitizedContent; card.answer_text = newAnswers;
+      }
+      
       if (typeof loadAllData === 'function') await loadAllData();
-      setEditingId(null); alert("✅ 카드 내용 수정 성공!");
+      setEditingId(null); 
     } catch (error: any) { setErrorMsg(error.message || "서버 통신 실패"); } finally { setIsSaving(false); }
   };
 
   const renderInteractiveText = () => {
+    // 💡 [조항명 보호] 클릭 에디터 상에서도 첫 줄을 분리하여 빈칸 처리를 불가능하게 막습니다.
     const lines = editContent.split('\n');
     const titleLine = lines[0] || '';
     const restLines = lines.slice(1).join('\n');
@@ -305,7 +373,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           {errorMsg && <div className="text-red-400 text-[10px] mt-3 font-bold">{errorMsg}</div>}
                           
                           <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-white/10">
-                            <button onClick={(e) => { e.stopPropagation(); setEditingId(null); }} className="px-4 py-2 bg-white/5 text-white/60 hover:text-white hover:bg-white/10 rounded-sm text-[11px] font-bold">취소</button>
+                            <button onClick={(e) => { e.stopPropagation(); setEditingId(null); if(card.isTemp) { setLocalCards(prev=>prev.filter(c=>c.id!==card.id)); } }} className="px-4 py-2 bg-white/5 text-white/60 hover:text-white hover:bg-white/10 rounded-sm text-[11px] font-bold">취소</button>
                             <button onClick={(e) => { e.stopPropagation(); handleSaveEdit(card); }} className="px-5 py-2 bg-amber-600 text-white hover:bg-amber-500 rounded-sm text-[11px] font-bold">{isSaving ? '저장 중...' : '💾 내용 저장'}</button>
                           </div>
                         </div>
@@ -316,7 +384,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                             <div className={`${titleColor} font-bold text-[12px] sm:text-[14px] leading-snug break-keep text-left flex-1`}>{displayTitle}</div>
                           </div>
                           
-                          {/* 💡 [신규] 순서 이동 모드 활성화 시 표시되는 덮개 UI */}
+                          {/* 💡 [순서 이동 모드 활성화 시] 화살표 UI 출력 */}
                           {movingId === card.id ? (
                             <div className="flex items-center justify-between w-full mt-2 pt-2 border-t border-blue-500/30 animate-in fade-in">
                               <span className="text-blue-300 text-[11px] font-bold flex items-center gap-1.5">
@@ -337,13 +405,11 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                 <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                               </div>
                               <div className="flex items-center gap-1">
-                                {/* 💡 [버튼 교체] 화살표 버튼들을 하나의 ↕️ 이동 버튼으로 통합 */}
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} 
-                                  className="px-1.5 py-0.5 bg-blue-900/40 text-blue-400 border border-blue-500/50 rounded font-mono text-[9px] hover:bg-blue-900/60 transition-colors cursor-pointer flex items-center gap-1"
-                                >
-                                  ↕️ 이동
-                                </button>
+                                {/* 💡 [새 기능] 즉시 오른쪽 열 추가 및 초고속 이동 버튼 */}
+                                <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 bg-blue-900/40 text-blue-400 border border-blue-500/50 rounded font-mono text-[9px] hover:bg-blue-900/60 transition-colors cursor-pointer flex items-center gap-1">↕️ 이동</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx, '령'); }} className="px-1.5 py-0.5 bg-teal-900/40 text-teal-400 border border-teal-500/50 rounded font-mono text-[9px] hover:bg-teal-900/60 transition-colors cursor-pointer">+령</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx, '칙'); }} className="px-1.5 py-0.5 bg-green-900/40 text-green-400 border border-green-500/50 rounded font-mono text-[9px] hover:bg-green-900/60 transition-colors cursor-pointer">+칙</button>
+                                
                                 <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('editor'); }} className="px-1.5 py-0.5 bg-amber-900/40 text-amber-400 border border-amber-500/50 rounded font-mono text-[9px] hover:bg-amber-900/60 transition-colors">✏️수정</button>
                                 <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-1 px-1.5 py-0.5 bg-red-900/40 text-red-400 border border-red-500/50 rounded font-mono text-[9px] hover:bg-red-900/60 transition-colors">🗑️삭제</button>
                               </div>
