@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { formatCardText, parseCardStats, SPLIT_REGEX } from '../utils/constants';
 import { api } from '../services/api';
 
@@ -11,7 +11,6 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-// 💡 Props에 globalDict가 추가되었습니다. (앱 전체의 약어/사전 데이터를 수신)
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, loadAllData, safeAddress, globalDict }: any) => {
   
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -20,32 +19,41 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<'editor' | 'include' | 'exclude' | null>('include');
 
-  const safeCards = Array.isArray(savedCards) ? savedCards : [];
-  const enhanceFolders = Array.from(new Set(safeCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
+  // 💡 [순서 이동 모드] 로컬 상태 관리 (빠른 키보드 이동을 위해 로컬 배열 사용)
+  const [localCards, setLocalCards] = useState<any[]>([]);
+  const [movingId, setMovingId] = useState<number | null>(null);
+
+  const enhanceFolders = Array.from(new Set(localCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
   
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>(() => {
     try { const saved = localStorage.getItem('blankd_enhance_folders'); return saved ? JSON.parse(saved) : {}; } 
     catch(e) { return {}; }
   });
   
+  // 서버에서 받은 데이터를 로컬에 동기화 (단, 이동 모드 중에는 리렌더링 방해를 막기 위해 일시 중지)
+  useEffect(() => {
+    if (!movingId) {
+      setLocalCards(Array.isArray(savedCards) ? savedCards : []);
+    }
+  }, [savedCards, movingId]);
+
+  useEffect(() => {
+    if (editingId) {
+      const updatedCard = localCards.find((c: any) => c.id === editingId);
+      if (updatedCard) setEditContent(updatedCard.content);
+    }
+  }, [localCards, editingId]);
+
   useEffect(() => {
     setOpenFolders(prev => {
-      const next = { ...prev };
-      let changed = false;
-      enhanceFolders.forEach(f => {
-        if (next[f] === undefined) { next[f] = true; changed = true; }
-      });
-      if (changed) localStorage.setItem('blankd_enhance_folders', JSON.stringify(next));
-      return next;
+      const next = { ...prev }; let changed = false;
+      enhanceFolders.forEach(f => { if (next[f] === undefined) { next[f] = true; changed = true; } });
+      if (changed) localStorage.setItem('blankd_enhance_folders', JSON.stringify(next)); return next;
     });
-  }, [savedCards, enhanceFolders]);
+  }, [localCards, enhanceFolders]);
 
   const handleToggleFolder = (f: string) => {
-    setOpenFolders(prev => {
-      const next = { ...prev, [f]: !prev[f] };
-      localStorage.setItem('blankd_enhance_folders', JSON.stringify(next));
-      return next;
-    });
+    setOpenFolders(prev => { const next = { ...prev, [f]: !prev[f] }; localStorage.setItem('blankd_enhance_folders', JSON.stringify(next)); return next; });
   };
 
   const createLongPressHandlers = (callback: () => void, ms = 800) => {
@@ -55,139 +63,148 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e:any) => { e.preventDefault(); callback(); } };
   };
 
-  const handleMoveCard = async (folder: string, index: number, direction: 'up' | 'down') => {
-    const folderCards = safeCards.filter((c:any) => c && c.content && c.folder_name === folder);
-    if (direction === 'up' && index === 0) return;
-    if (direction === 'down' && index === folderCards.length - 1) return;
-
+  // 백그라운드에서 순서를 저장하는 API (화면 렉 방지)
+  const triggerMoveApi = async (folder: string, index: number, direction: 'up' | 'down', folderCards: any[]) => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     const newFolderCards = [...folderCards];
     [newFolderCards[index], newFolderCards[targetIndex]] = [newFolderCards[targetIndex], newFolderCards[index]];
-    
     const orderedIds = newFolderCards.map(c => c.id);
 
     try {
       await fetch("https://api.blankd.top/api/update-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: safeAddress, table: 'cards', ordered_ids: orderedIds })
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, table: 'cards', ordered_ids: orderedIds })
       });
-      if (loadAllData) await loadAllData();
-    } catch (err) {
-      console.error("순서 변경 실패:", err);
-    }
+    } catch (err) { console.error("순서 변경 실패:", err); }
   };
 
-  // 💡 [핵심 연동] 수정창을 열 때, 사전(스마트 약어+포함+제외 단어)을 스캔하여 자동으로 빈칸 규칙을 강제 적용합니다.
+  // 💡 [방향키 이동 이벤트 리스너]
+  useEffect(() => {
+    if (!movingId) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 완료 처리
+      if (e.key === 'Escape' || e.key === 'Enter') {
+        e.preventDefault();
+        setMovingId(null);
+        if (loadAllData) loadAllData(); // 최종 동기화
+        return;
+      }
+
+      // 위/아래 이동 처리
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        
+        setLocalCards(prevCards => {
+          const card = prevCards.find(c => c.id === movingId);
+          if (!card) return prevCards;
+          
+          const folder = card.folder_name;
+          const folderCards = prevCards.filter(c => c && c.content && c.folder_name === folder);
+          const idx = folderCards.findIndex(c => c.id === movingId);
+          
+          if (e.key === 'ArrowUp' && idx > 0) {
+            const targetCard = folderCards[idx - 1];
+            triggerMoveApi(folder, idx, 'up', folderCards); // 백그라운드 서버 통신
+            
+            // 프론트엔드 즉각 스왑 (Optimistic Update)
+            const next = [...prevCards];
+            const g1 = next.findIndex(c => c.id === card.id);
+            const g2 = next.findIndex(c => c.id === targetCard.id);
+            [next[g1], next[g2]] = [next[g2], next[g1]];
+            
+            setTimeout(() => document.getElementById(`enhance-card-${movingId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+            return next;
+          } 
+          else if (e.key === 'ArrowDown' && idx < folderCards.length - 1) {
+            const targetCard = folderCards[idx + 1];
+            triggerMoveApi(folder, idx, 'down', folderCards);
+            
+            const next = [...prevCards];
+            const g1 = next.findIndex(c => c.id === card.id);
+            const g2 = next.findIndex(c => c.id === targetCard.id);
+            [next[g1], next[g2]] = [next[g2], next[g1]];
+            
+            setTimeout(() => document.getElementById(`enhance-card-${movingId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+            return next;
+          }
+          return prevCards;
+        });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [movingId, safeAddress, loadAllData]);
+
   const autoApplyDict = (content: string) => {
     if (!globalDict) return content;
-    
+    const lines = content.split('\n');
+    const titleLine = lines[0] || '';
+    const restContent = lines.slice(1).join('\n');
+
     const stopWords = globalDict.custom_stopwords || globalDict.stopwords || [];
     const abbrevKeys = Object.keys(globalDict.abbreviations || {});
-    // 스마트 약어 원본과 사용자가 추가한 포함 단어를 합치고, 길이가 긴 단어부터 교체되도록 정렬하여 중복 오류를 막습니다.
-    const includeWords = Array.from(new Set([
-      ...(globalDict.custom_inclusions || globalDict.inclusions || []),
-      ...abbrevKeys
-    ])).filter(w => w.trim() !== '').sort((a, b) => b.length - a.length);
+    const includeWords = Array.from(new Set([...(globalDict.custom_inclusions || globalDict.inclusions || []), ...abbrevKeys])).filter(w => w.trim() !== '').sort((a, b) => b.length - a.length);
 
-    // 텍스트를 시스템 태그와 이미 존재하는 괄호 단위로 안전하게 분해합니다.
-    let tokens = content.split(/(\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g);
-    
+    let tokens = restContent.split(/(\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g);
     for (let i = 0; i < tokens.length; i++) {
       if (!tokens[i]) continue;
       if (tokens[i].startsWith('[[ORIG_ID:')) continue;
-      
       if (tokens[i].startsWith('[') && tokens[i].endsWith(']')) {
-        // 이미 괄호가 쳐진 단어 중에 '제외 단어'가 있다면 괄호를 벗겨냅니다.
         let innerText = tokens[i].slice(1, -1);
-        if (stopWords.includes(innerText.trim())) {
-          tokens[i] = innerText;
-        }
+        if (stopWords.includes(innerText.trim())) { tokens[i] = innerText; }
       } else {
-        // 괄호가 없는 일반 텍스트에서 '포함 단어'와 '스마트 약어'를 찾아 자동으로 괄호를 씌웁니다.
         let text = tokens[i];
         includeWords.forEach((iw: string) => {
           const escaped = iw.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           const regex = new RegExp(`(${escaped})`, 'g');
-          
-          // 이미 씌워진 괄호 안에 중복으로 씌워지는 것을 방지하는 정밀 토큰화
           let parts = text.split(/(\[[^\]]+\])/g);
           for(let j=0; j<parts.length; j++){
-            if(!parts[j].startsWith('[')){
-              parts[j] = parts[j].replace(regex, '[$1]');
-            }
+            if(!parts[j].startsWith('[')){ parts[j] = parts[j].replace(regex, '[$1]'); }
           }
           text = parts.join('');
         });
         tokens[i] = text;
       }
     }
-    
-    let result = tokens.join('');
-    return result.replace(/\[+/g, '[').replace(/\]+/g, ']');
+    return titleLine + (lines.length > 1 ? '\n' : '') + tokens.join('').replace(/\[+/g, '[').replace(/\]+/g, ']');
   };
 
   const handleSaveEdit = async (card: any) => {
-    setIsSaving(true);
-    setErrorMsg(null);
+    setIsSaving(true); setErrorMsg(null);
     try {
       let sanitizedContent = editContent;
       const origIdMatch = editContent.match(/\[\[ORIG_ID:\d+\]\]/);
-      
       if (origIdMatch) {
         const systemTag = origIdMatch[0];
         const bodyText = editContent.replace(systemTag, '');
         const cleanBody = bodyText.replace(/\[+/g, '[').replace(/\]+/g, ']');
         sanitizedContent = cleanBody.trim() + '\n\n' + systemTag;
-      } else {
-        sanitizedContent = editContent.replace(/\[+/g, '[').replace(/\]+/g, ']');
-      }
+      } else { sanitizedContent = editContent.replace(/\[+/g, '[').replace(/\]+/g, ']'); }
 
-      const newAnswers = (sanitizedContent.match(/\[\s*(.*?)\s*\]/g) || [])
-        .map(b => b.replace(/\[|\]/g, '').trim())
-        .filter(Boolean)
-        .join(", ");
+      const newAnswers = (sanitizedContent.match(/\[\s*(.*?)\s*\]/g) || []).map(b => b.replace(/\[|\]/g, '').trim()).filter(Boolean).join(", ");
+      const payload = { wallet_address: safeAddress || "ENOKI_USER", card_id: parseInt(card.id, 10), card_content: sanitizedContent, answer_text: newAnswers, folder_name: card.folder_name, memo: card.memo };
 
-      const payload = {
-        wallet_address: safeAddress || "ENOKI_USER", 
-        card_id: parseInt(card.id, 10),
-        card_content: sanitizedContent,
-        answer_text: newAnswers,
-        folder_name: card.folder_name,
-        memo: card.memo
-      };
+      const res = await fetch("https://api.blankd.top/api/save-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      if (!res.ok) throw new Error("서버에서 수정 요청 거부됨");
 
-      const res = await fetch("https://api.blankd.top/api/save-card", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "서버에서 수정 요청을 거부했습니다.");
-      }
-
-      card.content = sanitizedContent;
-      card.answer_text = newAnswers;
-
-      if (typeof loadAllData === 'function') {
-         await loadAllData();
-      }
-      setEditingId(null);
-      alert("✅ 카드 내용이 성공적으로 수정되었습니다!");
-    } catch (error: any) {
-      console.error("수정 저장 실패:", error);
-      setErrorMsg(error.message || "서버 통신에 실패했습니다.");
-    } finally {
-      setIsSaving(false);
-    }
+      card.content = sanitizedContent; card.answer_text = newAnswers;
+      if (typeof loadAllData === 'function') await loadAllData();
+      setEditingId(null); alert("✅ 카드 내용 수정 성공!");
+    } catch (error: any) { setErrorMsg(error.message || "서버 통신 실패"); } finally { setIsSaving(false); }
   };
 
   const renderInteractiveText = () => {
-    const tokens = editContent.split(/(\s+|\n|---|\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g).filter(Boolean);
+    const lines = editContent.split('\n');
+    const titleLine = lines[0] || '';
+    const restLines = lines.slice(1).join('\n');
+    const tokens = restLines.split(/(\s+|\n|---|\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g).filter(Boolean);
+
     return (
       <div className={`w-full bg-black/40 p-4 rounded border border-white/10 leading-loose font-sans ${activeTool ? 'select-none' : ''} min-h-[160px] max-h-[400px] overflow-y-auto custom-scrollbar`}>
+        <div className="text-amber-400 font-bold mb-2 pb-2 border-b border-white/10 select-none opacity-70 cursor-not-allowed">
+          {titleLine}
+        </div>
         {tokens.map((token, idx) => {
           const isOrigId = token.startsWith('[[ORIG_ID:');
           const isBracketed = token.startsWith('[') && token.endsWith(']') && !isOrigId;
@@ -195,60 +212,32 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           const isNewline = token === '\n';
           const isWhitespace = /^\s+$/.test(token);
           
-          if (isOrigId) {
-            return <div key={idx} className="inline-block text-[10px] text-white/20 font-mono bg-white/5 px-2 py-0.5 rounded mr-2 mb-2 select-none cursor-default">🔗 시스템 태그: {token}</div>;
-          }
-          if (isPageBreak) {
-            return (
-              <div key={idx} className="my-6 border-b-2 border-dashed border-white/20 relative flex justify-center cursor-default">
-                <span className="absolute -top-3 bg-[#0a0a0c] px-3 py-0.5 rounded-full text-[10px] text-white/40 font-bold tracking-widest border border-white/10">
-                  ✂️ PAGE BREAK (---)
-                </span>
-              </div>
-            );
-          }
+          if (isOrigId) return <div key={idx} className="inline-block text-[10px] text-white/20 font-mono bg-white/5 px-2 py-0.5 rounded mr-2 mb-2 select-none cursor-default">🔗 시스템 태그: {token}</div>;
+          if (isPageBreak) return <div key={idx} className="my-6 border-b-2 border-dashed border-white/20 relative flex justify-center cursor-default"><span className="absolute -top-3 bg-[#0a0a0c] px-3 py-0.5 rounded-full text-[10px] text-white/40 font-bold border border-white/10">✂️ PAGE BREAK (---)</span></div>;
           if (isNewline) return <br key={idx} />;
           if (isWhitespace) return <span key={idx}>{token}</span>;
 
           let btnClass = "inline-block rounded px-1.5 py-0.5 mx-0.5 transition-all ";
           if (activeTool === 'include') {
-            if (isBracketed) {
-              btnClass += "bg-teal-900/20 text-teal-500/50 border border-teal-500/10 cursor-not-allowed";
-            } else {
-              btnClass += "text-white/80 cursor-pointer bg-white/5 hover:bg-teal-500/40 hover:text-white hover:scale-105 active:scale-95 border border-transparent hover:border-teal-400/50 shadow-sm";
-            }
+            if (isBracketed) btnClass += "bg-teal-900/20 text-teal-500/50 border border-teal-500/10 cursor-not-allowed";
+            else btnClass += "text-white/80 cursor-pointer bg-white/5 hover:bg-teal-500/40 hover:text-white hover:scale-105 active:scale-95 border border-transparent hover:border-teal-400/50 shadow-sm";
           } else if (activeTool === 'exclude') {
-            if (isBracketed) {
-              btnClass += "bg-teal-900/60 text-teal-200 border border-teal-500/60 cursor-pointer hover:bg-red-600/80 hover:text-white hover:border-red-400 hover:scale-105 active:scale-95 hover:line-through shadow-md";
-            } else {
-              btnClass += "text-white/30 cursor-default";
-            }
+            if (isBracketed) btnClass += "bg-teal-900/60 text-teal-200 border border-teal-500/60 cursor-pointer hover:bg-red-600/80 hover:text-white hover:border-red-400 hover:scale-105 active:scale-95 hover:line-through shadow-md";
+            else btnClass += "text-white/30 cursor-default";
           } else {
-            if (isBracketed) {
-              btnClass += "bg-teal-900/30 text-teal-400 border border-teal-500/30 cursor-default";
-            } else {
-              btnClass += "text-white/77 cursor-default";
-            }
+            if (isBracketed) btnClass += "bg-teal-900/30 text-teal-400 border border-teal-500/30 cursor-default";
+            else btnClass += "text-white/77 cursor-default";
           }
 
           return (
-            <span 
-              key={idx} 
-              onClick={() => {
+            <span key={idx} onClick={() => {
                 if (activeTool === 'include' && !isBracketed) {
-                  const newTokens = [...tokens];
-                  newTokens[idx] = `[${token}]`;
-                  setEditContent(newTokens.join(''));
+                  const newTokens = [...tokens]; newTokens[idx] = `[${token}]`; setEditContent(titleLine + '\n' + newTokens.join(''));
                 } else if (activeTool === 'exclude' && isBracketed) {
-                  const newTokens = [...tokens];
-                  newTokens[idx] = token.slice(1, -1);
-                  setEditContent(newTokens.join(''));
+                  const newTokens = [...tokens]; newTokens[idx] = token.slice(1, -1); setEditContent(titleLine + '\n' + newTokens.join(''));
                 }
-              }}
-              className={btnClass}
-            >
-              {isBracketed ? token.slice(1, -1) : token}
-            </span>
+              }} className={btnClass}
+            >{isBracketed ? token.slice(1, -1) : token}</span>
           );
         })}
       </div>
@@ -259,11 +248,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     <div className="space-y-6 sm:space-y-8 animate-in fade-in w-full">
       <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-4 sm:mb-6">
         {enhanceFolders.map((f: string) => (
-          <button 
-            key={f}
-            onClick={() => handleToggleFolder(f)} 
-            className={`px-3 py-1.5 sm:py-2 text-[10px] sm:text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-teal-600 border-teal-500 text-white shadow-sm' : 'bg-teal-900/40 text-teal-300 border-teal-500/30'}`}
-          >
+          <button key={f} onClick={() => handleToggleFolder(f)} className={`px-3 py-1.5 sm:py-2 text-[10px] sm:text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-teal-600 border-teal-500 text-white shadow-sm' : 'bg-teal-900/40 text-teal-300 border-teal-500/30'}`}>
             📁 {f}
           </button>
         ))}
@@ -273,33 +258,20 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
-            {safeCards
-              .filter((c:any) => c && c.content && c.folder_name === folder)
-              .map((card: any, idx: number, folderCards: any[]) => {
+            {localCards.filter((c:any) => c && c.content && c.folder_name === folder).map((card: any, idx: number, folderCards: any[]) => {
                 try {
                   const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-                  
-                  const titleMatch = cleanContent.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
-                  let displayTitle = "";
-                  
-                  if (titleMatch && titleMatch[2].trim() !== "내용") {
-                    displayTitle = `${titleMatch[1].replace(/\s+/g, '')} ${titleMatch[2].trim()}`;
-                  } else {
-                    displayTitle = (cleanContent.split('\n')[0] || "")
-                        .replace(/\[.*?\]/g, '')
-                        .replace(/\(\s*내용\s*\)/g, '')
-                        .replace(/내용/g, '')
-                        .trim();
-                  }
+                  let displayTitle = (cleanContent.split('\n')[0] || "").replace(/\[.*?\]/g, '').replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
                   if (!displayTitle) displayTitle = "제목 없음";
 
-                  const { body } = formatCardText(cleanContent);
-                  const totalBlanks = (body.match(/\[\s*(.*?)\s*\]/g) || []).length;
+                  const lines = cleanContent.split('\n');
+                  const bodyOnlyForStats = lines.slice(1).join('\n');
+                  const totalBlanks = (bodyOnlyForStats.match(/\[\s*(.*?)\s*\]/g) || []).length;
+                  
                   const stats = parseCardStats(card.memo);
                   const hasWrong = stats.wrongIndices.length > 0;
                   
-                  let colClass = "";
-                  let titleColor = "text-teal-400";
+                  let colClass = ""; let titleColor = "text-teal-400";
                   if (viewMode === 'all' && colCount >= 3) {
                     if (cleanContent.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
                     else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
@@ -310,140 +282,79 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                     else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
                   }
 
-                  if (editingId === card.id) {
-                    colClass = "col-span-full";
-                  }
+                  if (editingId === card.id) colClass = "col-span-full";
 
                   return (
-                    <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
+                    <div key={card.id} id={`enhance-card-${card.id}`} className={`relative transition-all w-full ${colClass}`}>
                       {editingId === card.id ? (
                         <div className="relative flex flex-col p-4 rounded-sm border border-amber-500/50 bg-[#0a0a0c] transition-all duration-300 w-full shadow-[0_0_15px_rgba(245,158,11,0.15)]">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
-                            <span className="text-[12px] text-amber-400 font-bold flex items-center gap-2">
-                              <span className="animate-pulse">🛠️</span> 빈칸 직접 수정 모드
-                            </span>
-                            
+                            <span className="text-[12px] text-amber-400 font-bold flex items-center gap-2">🛠️ 빈칸 직접 수정 모드</span>
                             <div className="flex items-center gap-1.5 bg-black/50 p-1 rounded-md border border-white/10">
-                              <button 
-                                onClick={() => setActiveTool(activeTool === 'editor' ? null : 'editor')}
-                                className={`px-2.5 py-1.5 rounded text-[10px] font-bold transition-all flex items-center gap-1.5 ${activeTool === 'editor' ? 'bg-amber-600/90 text-white shadow-md' : 'bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/80'}`}
-                              >
-                                📝 직접 타이핑
-                              </button>
+                              <button onClick={() => setActiveTool(activeTool === 'editor' ? null : 'editor')} className={`px-2.5 py-1.5 rounded text-[10px] font-bold ${activeTool === 'editor' ? 'bg-amber-600/90 text-white' : 'bg-white/5 text-white/50'}`}>📝 직접 타이핑</button>
                               <div className="w-px h-4 bg-white/10 mx-0.5"></div>
-                              <button 
-                                onClick={() => setActiveTool(activeTool === 'include' ? null : 'include')}
-                                className={`px-2.5 py-1.5 rounded text-[10px] font-bold transition-all flex items-center gap-1.5 ${activeTool === 'include' ? 'bg-teal-600/90 text-white shadow-md' : 'bg-white/5 text-white/50 hover:bg-teal-500/20 hover:text-teal-200'}`}
-                              >
-                                ➕ 클릭 포함
-                              </button>
-                              <button 
-                                onClick={() => setActiveTool(activeTool === 'exclude' ? null : 'exclude')}
-                                className={`px-2.5 py-1.5 rounded text-[10px] font-bold transition-all flex items-center gap-1.5 ${activeTool === 'exclude' ? 'bg-red-600/90 text-white shadow-md' : 'bg-white/5 text-white/50 hover:bg-red-500/20 hover:text-red-200'}`}
-                              >
-                                ➖ 클릭 제외
-                              </button>
+                              <button onClick={() => setActiveTool(activeTool === 'include' ? null : 'include')} className={`px-2.5 py-1.5 rounded text-[10px] font-bold ${activeTool === 'include' ? 'bg-teal-600/90 text-white' : 'bg-white/5 text-white/50'}`}>➕ 클릭 포함</button>
+                              <button onClick={() => setActiveTool(activeTool === 'exclude' ? null : 'exclude')} className={`px-2.5 py-1.5 rounded text-[10px] font-bold ${activeTool === 'exclude' ? 'bg-red-600/90 text-white' : 'bg-white/5 text-white/50'}`}>➖ 클릭 제외</button>
                             </div>
                           </div>
                           
                           {activeTool === 'editor' ? (
-                            <textarea
-                              value={editContent}
-                              onChange={(e) => { setEditContent(e.target.value); }}
-                              className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] sm:text-[13px] p-4 rounded border border-white/10 focus:border-amber-500/70 outline-none resize-none custom-scrollbar leading-relaxed font-sans"
-                              placeholder="여기에 텍스트를 직접 입력하거나 [ ] 기호로 감싸세요."
-                            />
-                          ) : (
-                            renderInteractiveText()
-                          )}
+                            <textarea value={editContent} onChange={(e) => { setEditContent(e.target.value); }} className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] p-4 rounded border border-white/10 outline-none resize-none custom-scrollbar" placeholder="직접 입력하거나 [ ] 기호로 감싸세요." />
+                          ) : renderInteractiveText()}
                           
                           {errorMsg && <div className="text-red-400 text-[10px] mt-3 font-bold">{errorMsg}</div>}
                           
                           <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-white/10">
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setEditingId(null); }}
-                              className="px-4 py-2 bg-white/5 text-white/60 hover:text-white hover:bg-white/10 rounded-sm text-[11px] font-bold transition-all"
-                              disabled={isSaving}
-                            >
-                              취소
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); handleSaveEdit(card); }}
-                              className="px-5 py-2 bg-amber-600 border border-amber-500/50 text-white hover:bg-amber-500 rounded-sm text-[11px] font-bold transition-all flex items-center gap-1.5 shadow-lg shadow-amber-900/20"
-                              disabled={isSaving}
-                            >
-                              {isSaving ? '저장 중...' : '💾 내용 저장'}
-                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); setEditingId(null); }} className="px-4 py-2 bg-white/5 text-white/60 hover:text-white hover:bg-white/10 rounded-sm text-[11px] font-bold">취소</button>
+                            <button onClick={(e) => { e.stopPropagation(); handleSaveEdit(card); }} className="px-5 py-2 bg-amber-600 text-white hover:bg-amber-500 rounded-sm text-[11px] font-bold">{isSaving ? '저장 중...' : '💾 내용 저장'}</button>
                           </div>
                         </div>
                       ) : (
-                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-3 sm:p-4 rounded-sm border transition-all flex flex-col justify-center gap-2 ${hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} cursor-pointer shadow-sm hover:shadow-md`}>
+                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-3 sm:p-4 rounded-sm border flex flex-col justify-center gap-2 ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
                           
                           <div className="flex w-full">
-                            <div className={`${titleColor} font-bold text-[12px] sm:text-[14px] leading-snug break-keep text-left flex-1`}>
-                              {displayTitle}
-                            </div>
+                            <div className={`${titleColor} font-bold text-[12px] sm:text-[14px] leading-snug break-keep text-left flex-1`}>{displayTitle}</div>
                           </div>
                           
-                          <div className="flex flex-row justify-between items-center w-full mt-1 border-t border-white/5 pt-2">
-                            
-                            <div className="flex flex-nowrap gap-1">
-                              <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
-                              <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">반복:{stats.filled}</span>
-                              <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
-                            </div>
-                            
-                            <div className="flex items-center gap-1">
-                              <div className="flex items-center bg-black/40 border border-white/10 rounded-sm overflow-hidden shrink-0">
-                                <button onClick={(e) => { e.stopPropagation(); handleMoveCard(folder, idx, 'up'); }} className="px-1.5 py-0.5 text-[8px] text-white/40 hover:text-teal-400 hover:bg-white/10 transition-colors" disabled={idx === 0}>▲</button>
-                                <button onClick={(e) => { e.stopPropagation(); handleMoveCard(folder, idx, 'down'); }} className="px-1.5 py-0.5 text-[8px] text-white/40 hover:text-teal-400 hover:bg-white/10 transition-colors" disabled={idx === folderCards.length - 1}>▼</button>
-                              </div>
+                          {/* 💡 [신규] 순서 이동 모드 활성화 시 표시되는 덮개 UI */}
+                          {movingId === card.id ? (
+                            <div className="flex items-center justify-between w-full mt-2 pt-2 border-t border-blue-500/30 animate-in fade-in">
+                              <span className="text-blue-300 text-[11px] font-bold flex items-center gap-1.5">
+                                <span className="animate-bounce">↕️</span> 방향키(↑, ↓)로 이동 후 Enter 입력
+                              </span>
                               <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setEditingId(card.id);
-                                  // 💡 [핵심 연동] 수정 버튼을 누르는 순간 사전 규칙이 자동 적용된 텍스트가 공급됩니다.
-                                  const preProcessedContent = autoApplyDict(card.content);
-                                  setEditContent(preProcessedContent);
-                                  setActiveTool('editor');
-                                }}
-                                className="px-1.5 py-0.5 bg-amber-900/40 text-amber-400 border border-amber-500/50 rounded font-mono text-[9px] hover:bg-amber-900/60 transition-colors cursor-pointer"
+                                onClick={(e) => { e.stopPropagation(); setMovingId(null); if(loadAllData) loadAllData(); }} 
+                                className="px-3 py-1 bg-blue-600 text-white text-[10px] font-bold rounded-sm shadow-md hover:bg-blue-500 transition-colors"
                               >
-                                ✏️수정
-                              </button>
-                              <button
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) {
-                                    try {
-                                      const res = await fetch("https://api.blankd.top/api/delete-card", {
-                                        method: "POST",
-                                        headers: { "Content-Type": "application/json" },
-                                        body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id })
-                                      });
-                                      if (!res.ok) throw new Error();
-                                      if (loadAllData) await loadAllData();
-                                    } catch (err) {
-                                      alert("카드 삭제에 실패했습니다.");
-                                    }
-                                  }
-                                }}
-                                className="ml-1 px-1.5 py-0.5 bg-red-900/40 text-red-400 border border-red-500/50 rounded font-mono text-[9px] hover:bg-red-900/60 transition-colors cursor-pointer"
-                              >
-                                🗑️삭제
+                                ✅ 완료
                               </button>
                             </div>
-                            
-                          </div>
+                          ) : (
+                            <div className="flex flex-row justify-between items-center w-full mt-1 border-t border-white/5 pt-2">
+                              <div className="flex flex-nowrap gap-1">
+                                <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
+                                <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">반복:{stats.filled}</span>
+                                <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                {/* 💡 [버튼 교체] 화살표 버튼들을 하나의 ↕️ 이동 버튼으로 통합 */}
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} 
+                                  className="px-1.5 py-0.5 bg-blue-900/40 text-blue-400 border border-blue-500/50 rounded font-mono text-[9px] hover:bg-blue-900/60 transition-colors cursor-pointer flex items-center gap-1"
+                                >
+                                  ↕️ 이동
+                                </button>
+                                <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('editor'); }} className="px-1.5 py-0.5 bg-amber-900/40 text-amber-400 border border-amber-500/50 rounded font-mono text-[9px] hover:bg-amber-900/60 transition-colors">✏️수정</button>
+                                <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-1 px-1.5 py-0.5 bg-red-900/40 text-red-400 border border-red-500/50 rounded font-mono text-[9px] hover:bg-red-900/60 transition-colors">🗑️삭제</button>
+                              </div>
+                            </div>
+                          )}
 
                         </button>
                       )}
                     </div>
                   );
-                } catch (renderError: any) {
-                   console.error("EnhanceTab 카드 렌더링 오류:", renderError);
-                   return <div key={card.id || Math.random()} className="text-red-500 text-xs p-2 border border-red-500/50 bg-red-900/20">카드 렌더링 오류 진단: {renderError.message}</div>;
-                }
+                } catch (renderError: any) { return <div key={card.id || Math.random()} className="text-red-500 text-xs p-2 border border-red-500/50 bg-red-900/20">카드 렌더링 오류 진단: {renderError.message}</div>; }
             })}
           </div>
         </div>
