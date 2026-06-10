@@ -804,7 +804,7 @@ function MainApp() {
         
         <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
           <EnhanceTab 
-            safeAddress={safeAddress} // 💡 핵심 해결책: EnhanceTab에 지갑 주소를 전달합니다!
+            safeAddress={safeAddress} 
             loadAllData={loadAllData} 
             categories={categories} 
             savedCards={savedCards} 
@@ -813,6 +813,7 @@ function MainApp() {
             setActiveCard={setActiveCard} 
             setActiveTab={setActiveTab} 
             setExpandedId={setExpandedId} 
+            globalDict={globalDict} // 💡 핵심 추가: 스마트 약어와 사전 데이터를 EnhanceTab으로 넘겨줍니다!
             handleDeleteCard={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); setActiveCard(null); loadAllData(); } }} 
           />
         </div>
