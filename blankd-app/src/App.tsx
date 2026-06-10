@@ -34,7 +34,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
     const cleanExpected = expected.replace(/\s+/g, '').toLowerCase();
     let isMatch = (cleanInput === cleanExpected);
 
-    // 💡 [정밀 채점 엔진] 약어 사전 기반 길이 자동 판독 최적화
+    // 약어 사전 기반 정밀 채점 엔진 연동 (길이 기반 판독 자동 최적화)
     if (!isMatch && abbrDict) {
       Object.entries(abbrDict).forEach(([k, v]) => {
         const strK = k.replace(/\s+/g, '').toLowerCase();
@@ -78,7 +78,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
   return prevProps.inputStatus === nextProps.inputStatus && prevProps.expected === nextProps.expected && prevProps.abbrDict === nextProps.abbrDict;
 });
 
-// ── 시스템 런타임 오류 복구 바운더리 ─────────────────
+// ── 시스템 런타임 에러 진단 바운더리 ─────────────────
 class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
   constructor(props: any) { 
     super(props); 
@@ -207,7 +207,7 @@ function MainApp() {
     }
   };
 
-  // 💡 [코어 자가 치유 연동 엔진] 약어 등록 시 원래 정답이 누락되지 않도록 강제 동기화 처리
+  // 스마트 약어 길이 기반 자가 교정 및 복구 엔진
   useEffect(() => {
     if (!globalDict || !globalDict.abbrs) return;
     
@@ -386,9 +386,10 @@ function MainApp() {
   useEffect(() => {
     if (activeCard) {
       isClosingRef.current = false;
-      const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+      // 💡 [버그 조치 완료] 공백 유연성 및 줄바꿈 차이를 방어하도록 전방 정규식 교정 수행
+      const cleanContent = activeCard.content.replace(/\s*\[\[ORIG_ID:\d+\]\]/g, '');
       
-      // 💡 [조항명 보호 격리] 첫 줄(조항명)을 떼어내고 오직 본문 영역에서만 빈칸 추출
+      // 조항명 보호 격리: 첫 줄(조항명)을 분리하여 본문 영역에서만 빈칸을 추출
       const lines = cleanContent.split('\n');
       const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
@@ -496,7 +497,7 @@ function MainApp() {
     setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
-    pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
+    pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, remove_time: finalTime, next_review: nextReviewDate.toISOString() });
     addLog(`✅ 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
     flushQueue();
   };
@@ -690,9 +691,9 @@ function MainApp() {
 
   const renderContent = React.useCallback(() => {
     if (!activeCard) return null;
-    const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
+    // 💡 [버그 조치 완료] 모의고사 본문 렌더링 시에도 전방 공백을 유연하게 매칭하도록 정규식 교정 적용
+    const cleanContent = activeCard.content.replace(/\s*\[\[ORIG_ID:\d+\]\]/g, '');
     
-    // 💡 [조항명 분리 격리] 모의고사 뷰 렌더링 시 첫 줄을 제외하고 오직 본문만 화면에 렌더링하여 보호합니다.
     const lines = cleanContent.split('\n');
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
@@ -790,7 +791,6 @@ function MainApp() {
         </div>
         <div className={activeTab === 'exam' ? 'block' : 'hidden'}><ExamTab walletAddress={safeAddress} address={safeAddress} /></div>
         <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
-          {/* 💡 [기능 유실 복구 완료] MypageTab 호출부에 zkLogin={zkLogin} 복구 */}
           <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} zkLogin={zkLogin} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} globalDict={globalDict} saveGlobalDict={saveGlobalDict} loadAllData={loadAllData}/>
         </div>
       </>
@@ -809,7 +809,7 @@ function MainApp() {
       </div>
       
       <div className="flex gap-2 mb-5 shrink-0">
-        <input type="text" value={tempKey} onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder={dictTab === 'abbr' ? "원래 정답 (예: 행정안전부장관)" : "단어 입력 (쉼표 구분)"} className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-white/30 transition-colors w-full min-w-0" />
+        <input type="text" value={tempKey} onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder={dictTab === 'abbr' ? "원래 정답 (예: 행정안전부장관)" : "단어 입력 (쉼표 구분)"} className="flex-1 bg-black/50 border border-white/30 transition-colors w-full min-w-0" />
         {dictTab === 'abbr' && (
           <input type="text" value={tempValue} onChange={(e) => setTempValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder="약어 (예: 행안부장관)" className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full min-w-0" />
         )}
@@ -817,7 +817,6 @@ function MainApp() {
       </div>
       
       <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 min-h-[160px]">
-        {/* 💡 [기능 유실 복구 완료] 가나다순 정렬 .sort 완벽 적용 */}
         {dictTab === 'abbr' && Object.entries(globalDict.abbrs)
           .sort((a, b) => a[1].localeCompare(b[1], 'ko'))
           .map(([k, v]) => {
