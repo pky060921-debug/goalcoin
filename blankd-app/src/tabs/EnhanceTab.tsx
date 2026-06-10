@@ -11,7 +11,8 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, loadAllData, safeAddress }: any) => {
+// 💡 Props에 globalDict가 추가되었습니다. (앱 전체의 약어/사전 데이터를 수신)
+export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, loadAllData, safeAddress, globalDict }: any) => {
   
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editContent, setEditContent] = useState<string>("");
@@ -27,13 +28,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     catch(e) { return {}; }
   });
   
-  useEffect(() => {
-    if (editingId) {
-      const updatedCard = safeCards.find((c: any) => c.id === editingId);
-      if (updatedCard) setEditContent(updatedCard.content);
-    }
-  }, [savedCards, editingId]);
-
   useEffect(() => {
     setOpenFolders(prev => {
       const next = { ...prev };
@@ -82,6 +76,55 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     } catch (err) {
       console.error("순서 변경 실패:", err);
     }
+  };
+
+  // 💡 [핵심 연동] 수정창을 열 때, 사전(스마트 약어+포함+제외 단어)을 스캔하여 자동으로 빈칸 규칙을 강제 적용합니다.
+  const autoApplyDict = (content: string) => {
+    if (!globalDict) return content;
+    
+    const stopWords = globalDict.custom_stopwords || globalDict.stopwords || [];
+    const abbrevKeys = Object.keys(globalDict.abbreviations || {});
+    // 스마트 약어 원본과 사용자가 추가한 포함 단어를 합치고, 길이가 긴 단어부터 교체되도록 정렬하여 중복 오류를 막습니다.
+    const includeWords = Array.from(new Set([
+      ...(globalDict.custom_inclusions || globalDict.inclusions || []),
+      ...abbrevKeys
+    ])).filter(w => w.trim() !== '').sort((a, b) => b.length - a.length);
+
+    // 텍스트를 시스템 태그와 이미 존재하는 괄호 단위로 안전하게 분해합니다.
+    let tokens = content.split(/(\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g);
+    
+    for (let i = 0; i < tokens.length; i++) {
+      if (!tokens[i]) continue;
+      if (tokens[i].startsWith('[[ORIG_ID:')) continue;
+      
+      if (tokens[i].startsWith('[') && tokens[i].endsWith(']')) {
+        // 이미 괄호가 쳐진 단어 중에 '제외 단어'가 있다면 괄호를 벗겨냅니다.
+        let innerText = tokens[i].slice(1, -1);
+        if (stopWords.includes(innerText.trim())) {
+          tokens[i] = innerText;
+        }
+      } else {
+        // 괄호가 없는 일반 텍스트에서 '포함 단어'와 '스마트 약어'를 찾아 자동으로 괄호를 씌웁니다.
+        let text = tokens[i];
+        includeWords.forEach((iw: string) => {
+          const escaped = iw.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(`(${escaped})`, 'g');
+          
+          // 이미 씌워진 괄호 안에 중복으로 씌워지는 것을 방지하는 정밀 토큰화
+          let parts = text.split(/(\[[^\]]+\])/g);
+          for(let j=0; j<parts.length; j++){
+            if(!parts[j].startsWith('[')){
+              parts[j] = parts[j].replace(regex, '[$1]');
+            }
+          }
+          text = parts.join('');
+        });
+        tokens[i] = text;
+      }
+    }
+    
+    let result = tokens.join('');
+    return result.replace(/\[+/g, '[').replace(/\]+/g, ']');
   };
 
   const handleSaveEdit = async (card: any) => {
@@ -236,7 +279,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                 try {
                   const cleanContent = card.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
                   
-                  // 조항명만 깔끔하게 추출
                   const titleMatch = cleanContent.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
                   let displayTitle = "";
                   
@@ -360,14 +402,15 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setEditingId(card.id);
-                                  setEditContent(card.content);
+                                  // 💡 [핵심 연동] 수정 버튼을 누르는 순간 사전 규칙이 자동 적용된 텍스트가 공급됩니다.
+                                  const preProcessedContent = autoApplyDict(card.content);
+                                  setEditContent(preProcessedContent);
                                   setActiveTool('editor');
                                 }}
                                 className="px-1.5 py-0.5 bg-amber-900/40 text-amber-400 border border-amber-500/50 rounded font-mono text-[9px] hover:bg-amber-900/60 transition-colors cursor-pointer"
                               >
                                 ✏️수정
                               </button>
-                              {/* 💡 [신규 추가] 삭제 버튼 복구 완료 */}
                               <button
                                 onClick={async (e) => {
                                   e.stopPropagation();
