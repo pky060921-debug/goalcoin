@@ -15,10 +15,7 @@ const sortChapters = (folders: string[]): string[] => {
   return folders.sort((a, b) => {
     const matchA = a.match(/^제\s*(\d+)\s*장/);
     const matchB = b.match(/^제\s*(\d+)\s*장/);
-    
-    if (matchA && matchB) {
-      return parseInt(matchA[1]) - parseInt(matchB[1]);
-    }
+    if (matchA && matchB) return parseInt(matchA[1]) - parseInt(matchB[1]);
     if (matchA) return -1;
     if (matchB) return 1;
     return a.localeCompare(b, 'ko');
@@ -34,22 +31,14 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     try {
       const raw = cat.title || cat.content || "";
       const match = raw.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
-      if (match && match[2].trim() !== "내용") {
-        return `${match[1].replace(/\s+/g, '')} ${match[2].trim()}`;
-      }
-      
+      if (match && match[2].trim() !== "내용") return `${match[1].replace(/\s+/g, '')} ${match[2].trim()}`;
       if (cat.content) {
         const bodyMatch = cat.content.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
-        if (bodyMatch && bodyMatch[2].trim() !== "내용") {
-          return `${bodyMatch[1].replace(/\s+/g, '')} ${bodyMatch[2].trim()}`;
-        }
+        if (bodyMatch && bodyMatch[2].trim() !== "내용") return `${bodyMatch[1].replace(/\s+/g, '')} ${bodyMatch[2].trim()}`;
       }
-
       const fallbackTitle = raw.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').replace(/내용/g, '').trim();
       return fallbackTitle || "제목 없음";
-    } catch (error) {
-      return "제목 추출 에러";
-    }
+    } catch (error) { return "제목 추출 에러"; }
   };
 
   const checkIsCreated = (cat: any) => {
@@ -57,34 +46,24 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     return savedCards.some((c: any) => {
       if (!c || !c.content) return false;
       if (c.content.includes(`[[ORIG_ID:${cat.id}]]`)) return true;
-      
       if (cat.title) {
         const cardFirstLine = c.content.split('\n')[0];
         const removeBrackets = (text: string) => text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '');
         const onlyChars = (text: string) => text.replace(/[^가-힣a-zA-Z0-9一-龥]/g, '');
         const cleanCardTitle = onlyChars(removeBrackets(cardFirstLine));
         const cleanCatTitle = onlyChars(removeBrackets(cat.title));
-        
         if (cleanCardTitle && cleanCatTitle) {
-          if (cleanCardTitle === cleanCatTitle || cleanCardTitle.endsWith(cleanCatTitle)) {
-             return true;
-          }
+          if (cleanCardTitle === cleanCatTitle || cleanCardTitle.endsWith(cleanCatTitle)) return true;
         }
       }
       return false;
     });
   };
   
-  const craftFolders = sortChapters(
-    Array.from(new Set(safeCategories.map((c: any) => c.folder_name)))
-      .filter(f => f && f !== '기본 폴더') as string[]
-  );
+  const craftFolders = sortChapters(Array.from(new Set(safeCategories.map((c: any) => c.folder_name))).filter(f => f && f !== '기본 폴더') as string[]);
 
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>(() => {
-    try { 
-      const saved = localStorage.getItem('blankd_craft_folders'); 
-      return saved ? JSON.parse(saved) : {}; 
-    } catch(e) { return {}; }
+    try { const saved = localStorage.getItem('blankd_craft_folders'); return saved ? JSON.parse(saved) : {}; } catch(e) { return {}; }
   });
 
   const [wordArray, setWordArray] = useState<WordItem[]>([]);
@@ -108,20 +87,14 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   useEffect(() => {
     if (expandedId) {
       const targetCat = safeCategories.find((c: any) => c.id === expandedId);
-      if (targetCat && targetCat.folder_name) {
-        setOpenFolders((prev: any) => ({ ...prev, [targetCat.folder_name]: true }));
-      }
+      if (targetCat && targetCat.folder_name) setOpenFolders((prev: any) => ({ ...prev, [targetCat.folder_name]: true }));
       setTimeout(() => {
-        const targetId = `category-${expandedId}`;
-        const targetElement = document.getElementById(targetId);
-        if (targetElement) {
-          targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
+        const targetElement = document.getElementById(`category-${expandedId}`);
+        if (targetElement) targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 500); 
     }
   }, [expandedId, safeCategories]);
 
-  // 사전 상태
   const [showStopWordsSettings, setShowStopWordsSettings] = useState(false);
   const [newStopWord, setNewStopWord] = useState("");
   const [newIncludeWord, setNewIncludeWord] = useState("");
@@ -130,26 +103,18 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
-  // 💡 [자가 치유 동기화 엔진] 과거에 등록했던 기존 스마트 약어들을 추적하여 필수 포함 단어로 일괄 승격시킵니다.
+  // 💡 [자가 치유 동기화 엔진] 약어 사전에 있지만 포함 단어에는 없는 항목 자동 복구
   useEffect(() => {
     if (!globalDict) return;
     const abbrevKeys = Object.keys(globalDict.abbreviations || {});
     const currentInclusions = globalDict.custom_inclusions || globalDict.inclusions || [];
-    
-    // 포함 단어 리스트에 아직 들어가지 않은 기존 약어 원본 추출
     const missingKeys = abbrevKeys.filter(key => !currentInclusions.includes(key));
-    
     if (missingKeys.length > 0) {
       const nextInclusions = Array.from(new Set([...currentInclusions, ...missingKeys]));
-      saveGlobalDict({
-        ...globalDict,
-        custom_inclusions: nextInclusions,
-        inclusions: nextInclusions
-      });
+      saveGlobalDict({ ...globalDict, custom_inclusions: nextInclusions, inclusions: nextInclusions });
     }
   }, [globalDict, saveGlobalDict]);
 
-  // 사전 제어 핸들러
   const handleAddStopWord = () => {
     if (!newStopWord.trim()) return;
     const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
@@ -182,77 +147,44 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
 
   const handleAddAbbrev = () => {
     if (!newAbbrevOrig.trim() || !newAbbrevShort.trim()) return;
-    
-    const orig = newAbbrevOrig.trim();
-    const short = newAbbrevShort.trim();
-    
+    const orig = newAbbrevOrig.trim(); const short = newAbbrevShort.trim();
     const currentAbbrevs = globalDict?.abbreviations || {};
     const currentInclusions = globalDict?.custom_inclusions || globalDict?.inclusions || [];
     
-    // 포함 사전에 원래 정답을 안전하게 중복 제거하여 합침
+    // 원래 정답을 필수 포함 리스트에 즉시 안전 추가
     const nextInclusions = Array.from(new Set([...currentInclusions, orig]));
 
-    saveGlobalDict({
-      ...globalDict,
-      abbreviations: { ...currentAbbrevs, [orig]: short },
-      custom_inclusions: nextInclusions,
-      inclusions: nextInclusions
-    });
-    
-    setNewAbbrevOrig("");
-    setNewAbbrevShort("");
+    saveGlobalDict({ ...globalDict, abbreviations: { ...currentAbbrevs, [orig]: short }, custom_inclusions: nextInclusions, inclusions: nextInclusions });
+    setNewAbbrevOrig(""); setNewAbbrevShort("");
   };
 
   const handleRemoveAbbrev = (keyToRemove: string) => {
-    const currentAbbrevs = { ...(globalDict?.abbreviations || {}) };
-    delete currentAbbrevs[keyToRemove];
+    const currentAbbrevs = { ...(globalDict?.abbreviations || {}) }; delete currentAbbrevs[keyToRemove];
     saveGlobalDict({ ...globalDict, abbreviations: currentAbbrevs });
   };
 
   useEffect(() => {
     setOpenFolders(prev => {
-      const next = { ...prev };
-      let changed = false;
-      craftFolders.forEach(f => {
-        if (next[f] === undefined) { next[f] = true; changed = true; }
-      });
-      if (changed) localStorage.setItem('blankd_craft_folders', JSON.stringify(next));
-      return next;
+      const next = { ...prev }; let changed = false;
+      craftFolders.forEach(f => { if (next[f] === undefined) { next[f] = true; changed = true; } });
+      if (changed) localStorage.setItem('blankd_craft_folders', JSON.stringify(next)); return next;
     });
   }, [categories]);
 
   const handleToggleFolder = (f: string) => {
-    setOpenFolders(prev => {
-      const next = { ...prev, [f]: !prev[f] };
-      localStorage.setItem('blankd_craft_folders', JSON.stringify(next));
-      return next;
-    });
+    setOpenFolders(prev => { const next = { ...prev, [f]: !prev[f] }; localStorage.setItem('blankd_craft_folders', JSON.stringify(next)); return next; });
   };
 
   const createLongPressHandlers = (catId: number) => {
     let timer: any;
-    const start = () => {
-      timer = setTimeout(() => {
-        if (!isSelectMode) {
-          setIsSelectMode(true);
-          setCheckedIds(new Set([catId]));
-          addLog("📦 일괄 선택 모드가 활성화되었습니다.");
-        }
-      }, 700);
-    };
+    const start = () => { timer = setTimeout(() => { if (!isSelectMode) { setIsSelectMode(true); setCheckedIds(new Set([catId])); addLog("📦 일괄 선택 모드가 활성화되었습니다."); } }, 700); };
     const clear = () => { clearTimeout(timer); };
-    return {
-      onTouchStart: start, onTouchEnd: clear,
-      onMouseDown: start, onMouseUp: clear, onMouseLeave: clear,
-      onContextMenu: (e: any) => { e.preventDefault(); }
-    };
+    return { onTouchStart: start, onTouchEnd: clear, onMouseDown: start, onMouseUp: clear, onMouseLeave: clear, onContextMenu: (e: any) => { e.preventDefault(); } };
   };
 
   const handleToggleCheck = (catId: number) => {
-    const next = new Set(checkedIds);
-    if (next.has(catId)) next.delete(catId); else next.add(catId);
-    setCheckedIds(next);
-    if (next.size === 0) setIsSelectMode(false);
+    const next = new Set(checkedIds); if (next.has(catId)) next.delete(catId); else next.add(catId);
+    setCheckedIds(next); if (next.size === 0) setIsSelectMode(false);
   };
 
   const handleBatchDelete = async () => {
@@ -260,18 +192,10 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     if (window.confirm(`선택한 ${checkedIds.size}개의 조항을 일괄 삭제하시겠습니까?`)) {
       addLog(`🗑️ ${checkedIds.size}개 조항 일괄 삭제 시작...`);
       try {
-        const deletePromises = Array.from(checkedIds).map(id =>
-          fetch("https://api.blankd.top/api/delete-category", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ wallet_address: safeAddress, id })
-          })
-        );
+        const deletePromises = Array.from(checkedIds).map(id => fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }));
         await Promise.all(deletePromises);
-        addLog("✅ 일괄 삭제 완료 패킷 전송 성공.");
-        setIsSelectMode(false);
-        setCheckedIds(new Set());
-        if (loadAllData) await loadAllData();
-        else window.location.reload();
+        addLog("✅ 일괄 삭제 완료 패킷 전송 성공."); setIsSelectMode(false); setCheckedIds(new Set());
+        if (loadAllData) await loadAllData(); else window.location.reload();
       } catch (e) { alert("일괄 삭제 중 오류가 발생했습니다."); }
     }
   };
@@ -281,32 +205,27 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       localStorage.setItem('blankd_craft_expanded', expandedId.toString());
       const targetCat = safeCategories.find((c: any) => c.id === expandedId);
       if (targetCat) {
-        openCategory(targetCat, true); 
+        // 💡 [조항명 빈칸 원천 분리] 원본 텍스트에서 첫 줄(조항명)을 제거하고 본문만 추출하여 넘깁니다.
+        const rawContent = targetCat.content || targetCat.title || "";
+        const lines = rawContent.split('\n');
+        const bodyOnly = lines.length > 1 ? lines.slice(1).join('\n').trim() : rawContent;
+        applyTextToState(bodyOnly); 
       }
-    } else {
-      localStorage.removeItem('blankd_craft_expanded');
-    }
+    } else { localStorage.removeItem('blankd_craft_expanded'); }
   }, [expandedId, categories]);
 
   const applyTextToState = (textBody: string) => {
     const currentCustomStopWords = globalDict?.stopwords || globalDict?.custom_stopwords || [];
     const abbrevKeys = Object.keys(globalDict?.abbreviations || {});
-    const currentCustomIncludeWords = Array.from(new Set([
-      ...(globalDict?.inclusions || globalDict?.custom_inclusions || []),
-      ...abbrevKeys
-    ]));
+    const currentCustomIncludeWords = Array.from(new Set([...(globalDict?.inclusions || globalDict?.custom_inclusions || []), ...abbrevKeys]));
     
-    // 💡 모든 대괄호를 시작 시점에 무조건 제거하여 중복 괄호 생성 원천 차단
+    // 기존에 있던 대괄호 무조건 삭제하여 중복 괄호 방지
     let processedText = textBody.replace(/\[|\]/g, '');
-    
     if (currentCustomStopWords.length > 0) {
-       const safeStops = currentCustomStopWords
-          .map((w: string) => w.trim().replace(/[.*+?^${}()|[\]\\ packs]/g, '\\$&'))
-          .filter((w: string) => w !== "");
+       const safeStops = currentCustomStopWords.map((w: string) => w.trim().replace(/[.*+?^${}()|[\]\\ packs]/g, '\\$&')).filter((w: string) => w !== "");
        if (safeStops.length > 0) {
           const dynamicRegex = new RegExp(`([가-힣]+)(${safeStops.join('|')})([\\s,.)\\]]|$)`, 'g');
-          processedText = processedText.replace(dynamicRegex, '$1 $2$3');
-          processedText = processedText.replace(dynamicRegex, '$1 $2$3');
+          processedText = processedText.replace(dynamicRegex, '$1 $2$3').replace(dynamicRegex, '$1 $2$3');
        }
     }
 
@@ -314,81 +233,51 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     let currentWordArray = initialWords.map(w => ({ text: w, subWords: [w] }));
     
     currentCustomIncludeWords.forEach((cw: string) => {
-       const trimmedCw = cw.trim();
-       if (!trimmedCw) return;
+       const trimmedCw = cw.trim(); if (!trimmedCw) return;
        const cwNoSpace = trimmedCw.replace(/\s+/g, ''); 
-
        let i = 0;
        while (i < currentWordArray.length) {
-          let tempStr = "";
-          let matchCount = 0;
- 
+          let tempStr = ""; let matchCount = 0;
           for (let j = i; j < currentWordArray.length; j++) {
-             tempStr += currentWordArray[j].text.replace(/\s+/g, '');
-             matchCount++;
-             
+             tempStr += currentWordArray[j].text.replace(/\s+/g, ''); matchCount++;
              if (tempStr === cwNoSpace) {
                 if (matchCount > 1) {
                    const mergedText = currentWordArray.slice(i, j + 1).map(w => w.text).join("");
                    const mergedSubWords = currentWordArray.slice(i, j + 1).flatMap(w => w.subWords);
                    currentWordArray.splice(i, matchCount, { text: mergedText, subWords: mergedSubWords });
-                }
-                break;
-             } else if (tempStr.length > cwNoSpace.length) {
-                break;
-             }
-          }
-          i++;
+                } break;
+             } else if (tempStr.length > cwNoSpace.length) { break; }
+          } i++;
        }
     });
 
     setWordArray(currentWordArray);
-
-    const initialSelected = new Set<number>();
-    const protectedIndices = new Set<number>();
+    const initialSelected = new Set<number>(); const protectedIndices = new Set<number>();
     
     currentWordArray.forEach((wordObj, idx) => {
         const trimmed = wordObj.text.trim();
-        // 포함 단어 및 스마트 약어는 무조건 보호되며 빈칸(initialSelected)으로 강제 채택됩니다.
-        if (currentCustomIncludeWords.some((cw: string) => trimmed.replace(/\s+/g, '') === cw.replace(/\s+/g, ''))) {
-            protectedIndices.add(idx);
-            initialSelected.add(idx);
-        }
+        // 포함 단어 & 약어 보호 처리
+        if (currentCustomIncludeWords.some((cw: string) => trimmed.replace(/\s+/g, '') === cw.replace(/\s+/g, ''))) { protectedIndices.add(idx); initialSelected.add(idx); }
     });
     
     currentWordArray.forEach((wordObj, idx) => {
       if (protectedIndices.has(idx)) return;
-
       const trimmed = wordObj.text.trim();
       const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(trimmed) && trimmed !== "";
-      const isArticleOrNum = /^(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조)(?:의\s*\d+)?/.test(trimmed) || 
-                             /^\(?\d+(?:항|호|목)?\)?$/.test(trimmed) || 
-                             /^\(?(?:①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)\)?$/.test(trimmed);
-                             
+      const isArticleOrNum = /^(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조)(?:의\s*\d+)?/.test(trimmed) || /^\(?\d+(?:항|호|목)?\)?$/.test(trimmed) || /^\(?(?:①|②|③|④|⑤|⑥|⑦|⑧|⑨|⑩|⑪|⑫|⑬|⑭|⑮)\)?$/.test(trimmed);
       const isStopWord = /^(은|는|이|가|을|를|의|에|에게|에서|로|으로|과|와|도|만|부터|까지|조차|마저|치고|및|등|또는|수|할|이하|이상|초과|미만|관한|대한|관하여|대하여|한다|된다|있다|없다|아니한다|하여야|그|이|저|법|영|규칙|따라|따른|의해|의하여|바|것|자|경우|때|중)$/.test(trimmed);
       const isCustomSingleStopWord = currentCustomStopWords.some((cw: string) => trimmed === cw || trimmed === cw + "." || trimmed === cw + ",");
-      
-      if (!isSymbolOnly && !isArticleOrNum && !isStopWord && !isCustomSingleStopWord && trimmed.length > 0) {
-        initialSelected.add(idx);
-      }
+      if (!isSymbolOnly && !isArticleOrNum && !isStopWord && !isCustomSingleStopWord && trimmed.length > 0) initialSelected.add(idx);
     });
 
     const fullText = currentWordArray.map(w => w.text).join("");
     const wordRanges: {start: number, end: number, wordIdx: number}[] = [];
     let currentPos = 0;
+    currentWordArray.forEach((w, idx) => { wordRanges.push({ start: currentPos, end: currentPos + w.text.length, wordIdx: idx }); currentPos += w.text.length; });
     
-    currentWordArray.forEach((w, idx) => {
-       wordRanges.push({ start: currentPos, end: currentPos + w.text.length, wordIdx: idx });
-       currentPos += w.text.length;
-    });
-    
-    const patternsToExclude: RegExp[] = [
-      /(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)( Lifespan)?(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g
-    ];
-    
+    const patternsToExclude: RegExp[] = [/(?:법\s*)?제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?)( Lifespan)?(?:\s*제\s*\d+\s*(?:편|장|절|관|조|항|호|목)(?:\s*(?:의\s*\d+)?))+/g];
     currentCustomStopWords.forEach((cw: string) => {
-       const trimmedCw = cw.trim();
-       if (!trimmedCw) return;
+       const trimmedCw = cw.trim(); if (!trimmedCw) return;
        const regexStr = trimmedCw.split(/\s+/).map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
        patternsToExclude.push(new RegExp(regexStr, 'g'));
     });
@@ -396,104 +285,52 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     patternsToExclude.forEach(regex => {
        let match;
        while ((match = regex.exec(fullText)) !== null) {
-          const matchStart = match.index;
-          const matchEnd = matchStart + match[0].length;
-          wordRanges.forEach(wr => {
-             if (wr.start < matchEnd && wr.end > matchStart) {
-                if (!protectedIndices.has(wr.wordIdx)) {
-                    initialSelected.delete(wr.wordIdx);
-                }
-             }
-          });
+          const matchStart = match.index; const matchEnd = matchStart + match[0].length;
+          wordRanges.forEach(wr => { if (wr.start < matchEnd && wr.end > matchStart) { if (!protectedIndices.has(wr.wordIdx)) initialSelected.delete(wr.wordIdx); } });
        }
     });
-    
     setSelectedWords(initialSelected);
   };
 
-  useEffect(() => {
-    if (expandedId !== null) {
-      const targetCat = safeCategories.find((c: any) => c.id === expandedId);
-      if (targetCat) {
-        const { body } = formatCardText(targetCat.content || targetCat.title || "");
-        applyTextToState(body);
-      }
-    }
-  }, [globalDict, expandedId, safeCategories]);
-
   const openCategory = (targetCat: any, bypassToggle = false) => {
-    if (isSelectMode) { 
-        handleToggleCheck(targetCat.id);
-        return; 
-    }
+    if (isSelectMode) { handleToggleCheck(targetCat.id); return; }
     if (!bypassToggle) setExpandedId(targetCat.id);
-    
     const existingCard = savedCards.find((c: any) => c.content.includes(`[[ORIG_ID:${targetCat.id}]]`));
-    
     setPageBreaks(new Set());
     if (existingCard) {
-      const parsed = parseCardStats(existingCard.memo);
-      setMemoInput(parsed.text);
-    } else {
-      setMemoInput(targetCat.memo || "");
-    }
+      const parsed = parseCardStats(existingCard.memo); setMemoInput(parsed.text);
+    } else { setMemoInput(targetCat.memo || ""); }
     
-    const { body } = formatCardText(targetCat.content || targetCat.title || "");
-    applyTextToState(body);
+    // 💡 [조항명 분리 격리] 클릭하여 열 때도 첫 줄 제거 후 적용
+    const rawContent = targetCat.content || targetCat.title || "";
+    const lines = rawContent.split('\n');
+    const bodyOnly = lines.length > 1 ? lines.slice(1).join('\n').trim() : rawContent;
+    applyTextToState(bodyOnly);
   };
 
-  const handleWordClick = (idx: number) => {
-    const s = new Set(selectedWords);
-    if(s.has(idx)) s.delete(idx); else s.add(idx);
-    setSelectedWords(s);
-  };
+  const handleWordClick = (idx: number) => { const s = new Set(selectedWords); if(s.has(idx)) s.delete(idx); else s.add(idx); setSelectedWords(s); };
 
-  const handleWordSplit = (idx: number, e: any) => {
-    e.preventDefault();
-    const p = new Set(pageBreaks);
-    if (p.has(idx)) p.delete(idx); else if (window.confirm("이 위치에서 페이지를 나누시겠습니까?")) p.add(idx);
-    setPageBreaks(p);
-  };
+  const handleWordSplit = (idx: number, e: any) => { e.preventDefault(); const p = new Set(pageBreaks); if (p.has(idx)) p.delete(idx); else if (window.confirm("이 위치에서 페이지를 나누시겠습니까?")) p.add(idx); setPageBreaks(p); };
 
   const handleWordMerge = (idx: number) => {
     const current = wordArray[idx];
     if (current.subWords.length > 1) {
-      const newArray = [...wordArray];
-      const splitItems = current.subWords.map(w => ({ text: w, subWords: [w] }));
-      newArray.splice(idx, 1, ...splitItems);
-      setWordArray(newArray);
-      
-      const shiftAmount = splitItems.length - 1;
-      const newSelected = new Set<number>();
+      const newArray = [...wordArray]; const splitItems = current.subWords.map(w => ({ text: w, subWords: [w] })); newArray.splice(idx, 1, ...splitItems); setWordArray(newArray);
+      const shiftAmount = splitItems.length - 1; const newSelected = new Set<number>();
       selectedWords.forEach(i => { if (i < idx) newSelected.add(i); else if (i > idx) newSelected.add(i + shiftAmount); });
-      if (selectedWords.has(idx)) { for(let k = 0; k <= shiftAmount; k++) newSelected.add(idx + k); }
-      setSelectedWords(newSelected);
-
-      const newPageBreaks = new Set<number>();
-      pageBreaks.forEach(i => { if (i < idx) newPageBreaks.add(i); else if (i > idx) newPageBreaks.add(i + shiftAmount); });
-      setPageBreaks(newPageBreaks);
+      if (selectedWords.has(idx)) { for(let k = 0; k <= shiftAmount; k++) newSelected.add(idx + k); } setSelectedWords(newSelected);
+      const newPageBreaks = new Set<number>(); pageBreaks.forEach(i => { if (i < idx) newPageBreaks.add(i); else if (i > idx) newPageBreaks.add(i + shiftAmount); }); setPageBreaks(newPageBreaks);
       return;
     }
 
     if (idx >= wordArray.length - 1) return;
     const next = wordArray[idx + 1];
-    const isSymbol1 = !/[a-zA-Z0-9가-힣]/.test(current.text) && current.text.trim() !== "";
-    const isSymbol2 = !/[a-zA-Z0-9가-힣]/.test(next.text) && next.text.trim() !== "";
+    const isSymbol1 = !/[a-zA-Z0-9가-힣]/.test(current.text) && current.text.trim() !== ""; const isSymbol2 = !/[a-zA-Z0-9가-힣]/.test(next.text) && next.text.trim() !== "";
     if (isSymbol1 || isSymbol2) return; 
-
-    const newArray = [...wordArray];
-    newArray[idx] = { text: current.text + next.text, subWords: [...current.subWords, ...next.subWords] };
-    newArray.splice(idx + 1, 1);
-    setWordArray(newArray);
-
-    const newSelected = new Set<number>();
-    selectedWords.forEach(i => { if (i < idx) newSelected.add(i); else if (i > idx) newSelected.add(i - 1); });
-    if (selectedWords.has(idx) || selectedWords.has(idx + 1)) newSelected.add(idx);
-    setSelectedWords(newSelected);
-
-    const newPageBreaks = new Set<number>();
-    pageBreaks.forEach(i => { if (i < idx) newPageBreaks.add(i); else if (i > idx) newPageBreaks.add(i - 1); });
-    setPageBreaks(newPageBreaks);
+    const newArray = [...wordArray]; newArray[idx] = { text: current.text + next.text, subWords: [...current.subWords, ...next.subWords] }; newArray.splice(idx + 1, 1); setWordArray(newArray);
+    const newSelected = new Set<number>(); selectedWords.forEach(i => { if (i < idx) newSelected.add(i); else if (i > idx) newSelected.add(i - 1); });
+    if (selectedWords.has(idx) || selectedWords.has(idx + 1)) newSelected.add(idx); setSelectedWords(newSelected);
+    const newPageBreaks = new Set<number>(); pageBreaks.forEach(i => { if (i < idx) newPageBreaks.add(i); else if (i > idx) newPageBreaks.add(i - 1); }); setPageBreaks(newPageBreaks);
   };
 
   return (
@@ -512,7 +349,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
 
       {showStopWordsSettings && (
         <div className="p-4 sm:p-5 bg-[#0a0a0c] border border-white/20 rounded-sm mb-6 flex flex-col gap-6 animate-in slide-in-from-top-2">
-          
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div className="flex-1 bg-black/30 p-3 border border-white/5 rounded-sm">
               <div className="text-xs sm:text-sm text-amber-400 font-bold mb-3">❌ 제외 단어 (빈칸 X)</div>
@@ -521,9 +357,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                 <button onClick={handleAddStopWord} className="px-4 bg-amber-600/20 text-amber-400 border border-amber-500/30 text-xs font-bold rounded-sm hover:bg-amber-600/40 transition-colors">추가</button>
               </div>
               <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto custom-scrollbar content-start p-1">
-                  {[...(globalDict?.custom_stopwords || globalDict?.stopwords || [])]
-                    .sort((a, b) => a.localeCompare(b, 'ko'))
-                    .map((word: string) => (
+                  {[...(globalDict?.custom_stopwords || globalDict?.stopwords || [])].sort((a, b) => a.localeCompare(b, 'ko')).map((word: string) => (
                     <span key={word} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] sm:text-[11px] text-white/70 flex items-center gap-1.5 whitespace-nowrap">
                       {word} <button onClick={() => handleRemoveStopWord(word)} className="text-white/30 hover:text-red-400">✕</button>
                     </span>
@@ -538,9 +372,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                 <button onClick={handleAddIncludeWord} className="px-4 bg-teal-600/20 text-teal-400 border border-teal-500/30 text-xs font-bold rounded-sm hover:bg-teal-600/40 transition-colors">추가</button>
               </div>
               <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto custom-scrollbar content-start p-1">
-                  {[...(globalDict?.custom_inclusions || globalDict?.inclusions || [])]
-                    .sort((a, b) => a.localeCompare(b, 'ko'))
-                    .map((word: string) => (
+                  {[...(globalDict?.custom_inclusions || globalDict?.inclusions || [])].sort((a, b) => a.localeCompare(b, 'ko')).map((word: string) => (
                     <span key={word} className="px-2 py-1 bg-teal-900/30 border border-teal-500/30 rounded text-[10px] sm:text-[11px] text-teal-300 flex items-center gap-1.5 whitespace-nowrap">
                       {word} <button onClick={() => handleRemoveIncludeWord(word)} className="text-teal-500/50 hover:text-teal-300">✕</button>
                     </span>
@@ -557,9 +389,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                 <button onClick={handleAddAbbrev} className="px-4 bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 text-xs font-bold rounded-sm hover:bg-indigo-600/40 transition-colors">등록</button>
              </div>
              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto custom-scrollbar content-start p-1">
-                 {Object.entries(globalDict?.abbreviations || {})
-                   .sort((a, b) => a[0].localeCompare(b[0], 'ko'))
-                   .map(([orig, short]: any) => (
+                 {Object.entries(globalDict?.abbreviations || {}).sort((a, b) => a[0].localeCompare(b[0], 'ko')).map(([orig, short]: any) => (
                    <span key={orig} className="px-2 py-1 bg-indigo-900/30 border border-indigo-500/30 rounded text-[10px] sm:text-[11px] text-indigo-300 flex items-center gap-1.5 whitespace-nowrap">
                      <span className="opacity-60">{orig}</span> → <strong>{short}</strong>
                      <button onClick={() => handleRemoveAbbrev(orig)} className="text-indigo-500/50 hover:text-indigo-300 ml-1">✕</button>
@@ -608,11 +438,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                     if (isExpanded) colClass = "col-span-full";
                     
                     return (
-                      <div 
-                        key={cat.id} 
-                        id={`category-${cat.id}`}
-                        className={`relative transition-all w-full ${colClass}`}
-                      >
+                      <div key={cat.id} id={`category-${cat.id}`} className={`relative transition-all w-full ${colClass}`}>
                         {!isExpanded ? (
                           <div className="relative group/card w-full flex items-center gap-2">
                              {isSelectMode && (
@@ -621,11 +447,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                             <button 
                               {...createLongPressHandlers(cat.id)}
                               onClick={() => openCategory(cat)} 
-                              className={`flex-1 min-h-[60px] p-3 sm:p-4 border rounded-sm transition-colors flex flex-col gap-1.5 sm:gap-2 text-left relative pr-10 ${
-                                isChecked ? 'border-amber-500/50 bg-amber-950/10' : 
-                                isCreated ? 'border-white/5 bg-black/40 hover:bg-white/5' : 
-                                'border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40'
-                              }`}
+                              className={`flex-1 min-h-[60px] p-3 sm:p-4 border rounded-sm transition-colors flex flex-col gap-1.5 sm:gap-2 text-left relative pr-10 ${isChecked ? 'border-amber-500/50 bg-amber-950/10' : isCreated ? 'border-white/5 bg-black/40 hover:bg-white/5' : 'border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40'}`}
                             >
                               <div className="flex justify-between items-center w-full">
                                 <span className={`${isCreated ? 'text-white/30 font-medium' : `${titleColor} font-bold`} text-[11px] sm:text-[13px] leading-snug break-keep`}>{displayTitle}</span>
@@ -645,14 +467,18 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                                    <span className={`${titleColor} font-bold text-[12px] sm:text-[14px] cursor-pointer`} onClick={() => setExpandedId(null)}>{displayTitle}</span>
                                    {isCreated && <span className="text-[10px] text-amber-500 font-bold ml-2">⚠️ 이미 제작된 카드입니다</span>}
                                 </div>
-                                <button onClick={() => setExpandedId(null)} className="px-3 py-1 text-[11px] font-bold rounded-sm border bg-white/5 border-white/10 text-white/40 hover:bg-white/10">
-                                  닫기
-                                </button>
+                                <button onClick={() => setExpandedId(null)} className="px-3 py-1 text-[11px] font-bold rounded-sm border bg-white/5 border-white/10 text-white/40 hover:bg-white/10">닫기</button>
                               </div>
 
                             <input type="text" value={memoInput} onChange={(e) => setMemoInput(e.target.value)} placeholder="암기 메모 입력..." className="w-full bg-black/50 border border-teal-500/30 p-2 text-xs text-teal-200 outline-none rounded-sm" />
                             
                             <div className="font-serif mt-2 text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border border-white/10 max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative transition-all">
+                              
+                              {/* 💡 [조항명 보호 격리 적용] 렌더링 시 제목 영역이 터치되지 않도록 고정합니다. */}
+                              <div className="text-amber-400 font-bold mb-2 pb-2 border-b border-white/10 select-none opacity-70 cursor-not-allowed">
+                                {displayTitle}
+                              </div>
+
                               {wordArray.map((wordObj, idx) => {
                                 const word = wordObj.text;
                                 const isSymbolOnly = !/[a-zA-Z0-9가-힣]/.test(word) && word.trim() !== "";
@@ -677,11 +503,8 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                                 const nextCat = folderCatsOnly[currentIdx + 1];
                                 
                                 handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, cat.id, () => {
-                                    if (nextCat) {
-                                        setExpandedId(nextCat.id);
-                                    } else {
-                                        setExpandedId(null);
-                                    }
+                                    if (nextCat) { setExpandedId(nextCat.id); } 
+                                    else { setExpandedId(null); }
                                 });
                               }} 
                               className="w-full py-2.5 text-xs sm:text-sm font-bold rounded-sm mt-2 transition-all bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30"
