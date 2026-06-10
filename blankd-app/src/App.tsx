@@ -136,7 +136,6 @@ function MainApp() {
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [isMemoOpen, setIsMemoOpen] = useState(false);
-
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
@@ -151,6 +150,7 @@ function MainApp() {
   const [globalDict, setGlobalDict] = useState<{ stopwords: string[], inclusions: string[], abbrs: Record<string, string> }>({
     stopwords: [], inclusions: [], abbrs: {}
   });
+
   const [isDictModalOpen, setIsDictModalOpen] = useState(false);
   const [dictTab, setDictTab] = useState<'stop'|'include'|'abbr'>('abbr');
   const [tempKey, setTempKey] = useState("");
@@ -158,7 +158,6 @@ function MainApp() {
 
   const loadAllData = async () => {
     try {
-      // 💡 [수정 완료] 시간(Date.now) 대신 진짜 지갑 주소를 API에 넘깁니다.
       const [catRes, cardRes, balance, dictRes] = await Promise.all([
         fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
@@ -182,10 +181,7 @@ function MainApp() {
         inclusions: serverInclusions,
         abbrs: finalAbbrs
       });
-
-      // 💡 [수정 완료] try 구문 안에 존재하므로 에러가 발생하지 않습니다.
       console.log("새로 불러온 카드 데이터:", cardRes.cards);
-
     } catch (e: any) {
       console.error("데이터 동기화 실패:", e);
       addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
@@ -200,6 +196,22 @@ function MainApp() {
       console.error("단어장 DB 동기화 실패:", err);
     }
   };
+
+  // 💡 [핵심 연동] 앱 로딩 시, 과거에 등록했던 '스마트 약어'들을 스캔하여 '필수 포함 단어' 리스트에 0.1초 만에 자가 치유(추가)합니다.
+  useEffect(() => {
+    if (!globalDict || !globalDict.abbrs) return;
+    const abbrevKeys = Object.keys(globalDict.abbrs);
+    const currentInclusions = globalDict.inclusions || [];
+    
+    const missingKeys = abbrevKeys.filter(key => !currentInclusions.includes(key));
+    if (missingKeys.length > 0) {
+      const nextInclusions = Array.from(new Set([...currentInclusions, ...missingKeys]));
+      saveGlobalDict({
+        ...globalDict,
+        inclusions: nextInclusions
+      });
+    }
+  }, [globalDict.abbrs]);
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
@@ -235,6 +247,7 @@ function MainApp() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ wallet_address: safeAddress, memos: q.memos, answers: q.answers })
       });
+
       if (res.ok) {
         localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
         addLog(`✅ 백그라운드 동기화 완료 (M:${q.memos.length}, A:${q.answers.length})`);
@@ -316,7 +329,6 @@ function MainApp() {
 
     const finalCardContent = `${cat.title}\n\n${bodyContent}\n\n[[ORIG_ID:${cat.id}]]`;
     const initialMemo = stringifyCardStats(memo, 0, []);
-    
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
       body: JSON.stringify({ 
@@ -574,7 +586,8 @@ function MainApp() {
     }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다."); return; }
+    if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다.");
+      return; }
     
     const recognition = new SpeechRecognition();
     recognition.lang = 'ko-KR'; 
@@ -594,7 +607,6 @@ function MainApp() {
       addLog(`💬 인식: "${transcript}"`);
       setTimeout(() => handleSequentialInput(cleanText), 300);
     };
-    
     recognition.onerror = (err: any) => { 
       if (err.error !== 'no-speech') {
         setIsListening(false);
@@ -604,7 +616,8 @@ function MainApp() {
     
     recognition.onend = () => { 
       if (recognitionRef.current) {
-         try { recognitionRef.current.start(); } catch(e) {}
+         try { recognitionRef.current.start();
+         } catch(e) {}
       } else {
          setIsListening(false);
       }
@@ -620,7 +633,7 @@ function MainApp() {
         return stats.filled || 0;
       }))
     : 0;
-    
+
   const passProbability = Math.min(minFilledCount * 2, 100);
 
   const { nextCatToCraft, nextStudyCard } = useMemo(() => {
@@ -739,9 +752,7 @@ function MainApp() {
           <button 
             onClick={toggleVoiceRecognition} 
             className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${
-              isListening 
-                ? 'bg-red-600/50 text-white border-red-500 animate-pulse' 
-                : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'
+              isListening ? 'bg-red-600/50 text-white border-red-500 animate-pulse' : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'
             }`}
           >
             {isListening ? '음성 인식 끄기 (활성화됨)' : '음성으로 입력 (계속 켜두기)'}
@@ -772,6 +783,31 @@ function MainApp() {
       </div>
     );
   }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening]);
+
+  // 💡 [전역 엔진 적용] 앱 어디서든 사전에 단어를 등록/삭제할 수 있는 코어 모듈
+  const handleAddDictItem = () => {
+    if (dictTab === 'abbr' && tempKey && tempValue) {
+      const orig = tempKey.trim();
+      const short = tempValue.trim();
+      const currentInclusions = globalDict.inclusions || [];
+      const nextInclusions = Array.from(new Set([...currentInclusions, orig]));
+
+      saveGlobalDict({
+        ...globalDict,
+        abbrs: { ...globalDict.abbrs, [orig]: short },
+        inclusions: nextInclusions
+      });
+      setTempKey(""); setTempValue("");
+    } else if (dictTab !== 'abbr' && tempKey) {
+      const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
+      const targetArray = dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions;
+      saveGlobalDict({
+        ...globalDict,
+        [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words]))
+      });
+      setTempKey("");
+    }
+  };
 
   const memoizedTabs = useMemo(() => {
     return (
@@ -813,7 +849,7 @@ function MainApp() {
             setActiveCard={setActiveCard} 
             setActiveTab={setActiveTab} 
             setExpandedId={setExpandedId} 
-            globalDict={globalDict} // 💡 핵심 추가: 스마트 약어와 사전 데이터를 EnhanceTab으로 넘겨줍니다!
+            globalDict={globalDict}
             handleDeleteCard={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); setActiveCard(null); loadAllData(); } }} 
           />
         </div>
@@ -832,11 +868,12 @@ function MainApp() {
             setStudyMode={setStudyMode} 
             globalDict={globalDict} 
             saveGlobalDict={saveGlobalDict} 
+            loadAllData={loadAllData}
           />
         </div>
       </>
     );
-  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, studyMode, setStudyMode]);
+  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, studyMode, setStudyMode, globalDict]);
 
   const renderDictionaryUI = (isMobile: boolean) => (
     <div className={`flex flex-col w-full h-full ${isMobile ? 'bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 rounded-sm' : 'bg-[#08080a]/80 border border-white/10 p-5 rounded-sm shadow-xl backdrop-blur-sm'}`}>
@@ -852,39 +889,22 @@ function MainApp() {
       <div className="flex gap-2 mb-5 shrink-0">
         <input type="text" value={tempKey} 
           onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-             if (dictTab === 'abbr' && tempKey && tempValue) {
-               saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [tempKey.trim()]: tempValue.trim() } });
-               setTempKey(""); setTempValue("");
-             } else if (dictTab !== 'abbr' && tempKey) {
-               const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
-               const targetArray = dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions;
-               saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words])) });
-               setTempKey("");
-             }
-          }
-        }} placeholder={dictTab === 'abbr' ? "약어 (예: 복정고)" : "단어 입력 (쉼표 구분)"} className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-white/30 transition-colors w-full min-w-0" />
+            if (e.key === 'Enter') handleAddDictItem();
+          }} 
+          placeholder={dictTab === 'abbr' ? "원래 정답 (예: 행정안전부장관)" : "단어 입력 (쉼표 구분)"} 
+          className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-white/30 transition-colors w-full min-w-0" 
+        />
         
         {dictTab === 'abbr' && (
           <input type="text" value={tempValue} onChange={(e) => setTempValue(e.target.value)} onKeyDown={(e) => {
-             if (e.key === 'Enter' && tempKey && tempValue) {
-               saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [tempKey.trim()]: tempValue.trim() } });
-               setTempKey(""); setTempValue("");
-             }
-          }} placeholder="원래 정답" className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full min-w-0" />
+             if (e.key === 'Enter') handleAddDictItem();
+          }} 
+          placeholder="약어 (예: 행안부장관)" 
+          className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full min-w-0" 
+          />
         )}
         
-        <button onClick={() => {
-          if (dictTab === 'abbr' && tempKey && tempValue) {
-            saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [tempKey.trim()]: tempValue.trim() } });
-            setTempKey(""); setTempValue("");
-          } else if (dictTab !== 'abbr' && tempKey) {
-            const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
-            const targetArray = dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions;
-            saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words])) });
-            setTempKey("");
-          }
-        }} className="px-3 sm:px-4 bg-white/5 text-white/80 border border-white/10 text-xs font-bold rounded-sm hover:bg-white/10 transition-colors shrink-0">등록</button>
+        <button onClick={handleAddDictItem} className="px-3 sm:px-4 bg-white/5 text-white/80 border border-white/10 text-xs font-bold rounded-sm hover:bg-white/10 transition-colors shrink-0">등록</button>
       </div>
       
       <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 min-h-[160px]">
@@ -895,7 +915,8 @@ function MainApp() {
               <span className="text-white/30 text-[10px]">→</span> 
               <span className="text-white/70 break-all">{full as string}</span>
             </div>
-            <button onClick={() => { const nw = {...globalDict.abbrs}; delete nw[abbr]; saveGlobalDict({...globalDict, abbrs: nw}); }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors shrink-0">✕</button>
+            <button onClick={() => { const nw = {...globalDict.abbrs}; delete nw[abbr]; saveGlobalDict({...globalDict, abbrs: nw});
+            }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors shrink-0">✕</button>
           </div>
         ))}
         {dictTab !== 'abbr' && (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions).map((word: string) => (
@@ -907,9 +928,9 @@ function MainApp() {
             }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors">✕</button>
           </div>
         ))}
-         
+       
         {((dictTab === 'abbr' && Object.keys(globalDict.abbrs).length === 0) ||
-         (dictTab === 'stop' && globalDict.stopwords.length === 0) || (dictTab === 'include' && globalDict.inclusions.length === 0)) && (
+          (dictTab === 'stop' && globalDict.stopwords.length === 0) || (dictTab === 'include' && globalDict.inclusions.length === 0)) && (
           <div className="text-center py-8 text-white/20 text-[11px] sm:text-xs">등록된 단어가 없습니다.</div>
         )}
       </div>
@@ -973,7 +994,6 @@ function MainApp() {
 
             <div className="h-5 sm:h-6 w-px bg-white/10 shrink-0 hidden sm:block ml-1 sm:ml-2"></div>
 
-                        {/* 통계 지표 및 로그아웃 */}
             {isLoggedIn && (
               <div className="flex items-center gap-3 sm:gap-4 shrink-0 font-mono">
                 <div className="text-right">
@@ -1032,8 +1052,8 @@ function MainApp() {
         {isTerminalOpen && (
           <div className="w-[85vw] max-w-lg h-64 bg-black/95 border border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto rounded shadow-2xl flex flex-col custom-scrollbar animate-in slide-in-from-bottom-5 fade-in">
             <div className="flex justify-between items-center mb-2 border-b border-teal-500/10 pb-2 sticky top-0 bg-black/95">
-              <span className="uppercase tracking-widest text-teal-500/50 font-bold">Diagnostic Terminal</span>
-              <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2 py-0.5 bg-white/5 rounded transition-colors">Clear</button>
+              <span className="uppercase tracking-widest text-teal-500/50 font-bold">시스템 진단 터미널</span>
+              <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2 py-0.5 bg-white/5 rounded transition-colors">기록 지우기</button>
             </div>
             <div className="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
               {systemLogs.map((l, i) => (
@@ -1045,7 +1065,7 @@ function MainApp() {
           </div>
         )}
         <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>
-          {isTerminalOpen ? 'Close Terminal' : 'Open Terminal'}
+          {isTerminalOpen ? '터미널 닫기' : '터미널 열기'}
         </button>
       </div>
 
