@@ -453,7 +453,8 @@ function MainApp() {
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
-    addLog(`✅ 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`); flushQueue();
+    addLog(`✅ 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
+    flushQueue();
   };
 
   const handleReviewSelect = (days: number) => { if (!activeCard) return; statsRef.current.filled += 1; finishCard(days); };
@@ -461,11 +462,13 @@ function MainApp() {
   const handleCloseModal = () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
-    const currentId = activeCard.id; const wrongArr = Array.from(statsRef.current.wrongIndices);
+    const currentId = activeCard.id;
+    const wrongArr = Array.from(statsRef.current.wrongIndices);
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     setActiveCard(null);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
-    pushToQueue('MEMO', { id: currentId, memo: newMemo }); flushQueue();
+    pushToQueue('MEMO', { id: currentId, memo: newMemo });
+    flushQueue();
   };
 
   useEffect(() => {
@@ -486,8 +489,10 @@ function MainApp() {
 
     if (!isCorrect && globalDict.abbrs) {
       Object.entries(globalDict.abbrs).forEach(([k, v]) => {
-        const strK = k.replace(/\s+/g, '').toLowerCase(); const strV = v.replace(/\s+/g, '').toLowerCase();
-        const orig = strK.length >= strV.length ? strK : strV; const short = strK.length < strV.length ? strK : strV;
+        const strK = k.replace(/\s+/g, '').toLowerCase();
+        const strV = v.replace(/\s+/g, '').toLowerCase();
+        const orig = strK.length >= strV.length ? strK : strV;
+        const short = strK.length < strV.length ? strK : strV;
         if (expected === orig && actual === short) { isCorrect = true; }
       });
     }
@@ -500,9 +505,11 @@ function MainApp() {
         setInputStatus('idle'); 
         setBlanks(currentBlanks => {
           if (currentBlankIdx + 1 < currentBlanks.length) {
-            setCurrentBlankIdx(prevIdx => { const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx; });
-          } else { 
-            localStorage.removeItem(`blankd_progress_${activeCard.id}`); statsRef.current.filled += 1; finishCard(); 
+            setCurrentBlankIdx(prevIdx => {
+              const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx;
+            });
+          } else {
+            localStorage.removeItem(`blankd_progress_${activeCard.id}`); statsRef.current.filled += 1; finishCard();
           }
           return currentBlanks;
         });
@@ -535,7 +542,6 @@ function MainApp() {
       if (recognitionRef.current) { recognitionRef.current.onend = null; recognitionRef.current.stop(); recognitionRef.current = null; }
       addLog("🎤 음성 인식 종료됨"); return;
     }
-
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다."); return; }
     
@@ -595,7 +601,8 @@ function MainApp() {
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
-    let displayTitle = titleLine.replace(/\[.*?\]/g, '').replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
+    // 💡 [수정 완료] 대괄호 삭제 로직 제거
+    let displayTitle = titleLine.replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
     if (!displayTitle) displayTitle = "제목 없음";
 
     const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== '');
@@ -746,7 +753,6 @@ function MainApp() {
     </div>
   );
 
-  // 💡 [CSS Injector] 전역 테마 적용 시스템 (화이트 테마 시 모든 컴포넌트의 가독성을 극대화하는 강제 컬러 맵핑)
   const getThemeCSS = () => {
     if (theme === 'white') {
       return `
@@ -855,7 +861,7 @@ function MainApp() {
 
               {nextStudyCard ? (
                 <button onClick={() => { setActiveCard(nextStudyCard); }} className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]">
-                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span><span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{nextStudyCard.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim()}</span>
+                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span><span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{nextStudyCard.content.split('\n')[0].replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim()}</span>
                 </button>
               ) : (<div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 완료</div>)}
             </div>
