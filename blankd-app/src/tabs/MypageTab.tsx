@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 
-export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setSystemLogs, useAiRecommend, setUseAiRecommend, studyMode, setStudyMode, globalDict, saveGlobalDict, loadAllData }: any) => {
+export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setSystemLogs, useAiRecommend, setUseAiRecommend, studyMode, setStudyMode, globalDict, saveGlobalDict, loadAllData, theme, setTheme }: any) => {
   const [showWallet, setShowWallet] = useState(false);
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -11,8 +11,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
   const [uploadLog, setUploadLog] = useState<string | null>(null);
 
   const [userEmail, setUserEmail] = useState("설계자 계정 (이메일 정보 불러오는 중...)");
-
-  // 💡 [신규 상태] 랭킹 데이터
   const [rankingData, setRankingData] = useState<any[]>([]);
   const [isLoadingRanking, setIsLoadingRanking] = useState(false);
 
@@ -31,7 +29,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
     fetchUserEmail();
   }, [enokiFlow, zkLogin]);
 
-  // 💡 랭킹 통신 로직
   useEffect(() => {
     const fetchRanking = async () => {
       setIsLoadingRanking(true);
@@ -123,7 +120,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
     } finally { setIsImporting(false); e.target.value = ""; }
   };
 
-  // 아이디(주소) 보호 처리 함수
   const formatAddress = (addr: string) => {
     if (!addr) return "Unknown User";
     if (addr.includes('@')) {
@@ -161,7 +157,21 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
         <div className="border-t border-white/10"></div>
 
-        {/* 🏆 명예의 전당 (랭킹 보드) 신규 추가 */}
+        {/* 🎨 화면 테마 설정 (신규 기능) */}
+        <div className="space-y-3">
+          <div className="text-xs text-white/50 font-bold tracking-wider font-mono uppercase flex items-center gap-2">
+            <span>🎨</span> 화면 테마 설정
+          </div>
+          <div className="grid grid-cols-3 gap-2 bg-black/40 border border-white/5 p-4 rounded-sm">
+            <button onClick={() => setTheme('black')} className={`py-2.5 rounded-sm text-xs font-bold transition-all shadow-sm ${theme === 'black' ? 'bg-gray-800 text-white border border-gray-500' : 'bg-white/5 text-white/40 border border-transparent hover:bg-white/10'}`}>다크 (블랙)</button>
+            <button onClick={() => setTheme('white')} className={`py-2.5 rounded-sm text-xs font-bold transition-all shadow-sm ${theme === 'white' ? 'bg-gray-200 text-gray-900 border border-gray-400' : 'bg-white/5 text-white/40 border border-transparent hover:bg-white/10'}`}>라이트 (화이트)</button>
+            <button onClick={() => setTheme('green')} className={`py-2.5 rounded-sm text-xs font-bold transition-all shadow-sm ${theme === 'green' ? 'bg-green-800 text-green-50 border border-green-500' : 'bg-white/5 text-white/40 border border-transparent hover:bg-white/10'}`}>칠판 (그린)</button>
+          </div>
+        </div>
+
+        <div className="border-t border-white/10"></div>
+
+        {/* 🏆 명예의 전당 (랭킹 보드) */}
         <div className="space-y-3">
           <div className="text-xs text-amber-400/80 font-bold tracking-wider font-mono uppercase flex items-center gap-2">
             <span>🏆</span> 명예의 전당 (학습 랭킹)
