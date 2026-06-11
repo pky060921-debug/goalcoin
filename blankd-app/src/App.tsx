@@ -10,7 +10,6 @@ import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
-// ── 인라인 빈칸 입력 컴포넌트 ─────────────────
 const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
@@ -40,7 +39,6 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
         const strV = v.replace(/\s+/g, '').toLowerCase();
         const orig = strK.length >= strV.length ? strK : strV;
         const short = strK.length < strV.length ? strK : strV;
-        
         if (cleanExpected === orig && cleanInput === short) {
           isMatch = true;
         }
@@ -339,16 +337,23 @@ function MainApp() {
     const targetCardId = existingCard ? existingCard.id : null; 
 
     const rawContent = cat.content || cat.title || "";
-    const firstLine = rawContent.split('\n')[0] || "";
-    const finalCardContent = `${firstLine}\n${bodyContent.trim()}\n\n[[ORIG_ID:${cat.id}]]`;
+    let firstLine = rawContent.split('\n')[0] || "";
     
+    // 💡 [핵심 교정] DB 저장 직전, 제목에 [법][령][칙][규] 중 하나도 없다면 강제로 [법]을 주입합니다.
+    if (!/^\[(법|령|칙|규)\]/.test(firstLine)) {
+        firstLine = `[법] ${firstLine.trim()}`;
+    }
+    
+    const finalCardContent = `${firstLine}\n${bodyContent.trim()}\n\n[[ORIG_ID:${cat.id}]]`;
     const initialMemo = stringifyCardStats(memo, 0, []);
+    
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
       body: JSON.stringify({ 
           wallet_address: safeAddress, card_id: targetCardId, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo 
       }) 
     });
+    
     if (res.ok) {
       localStorage.setItem('blankd_last_crafted_id', cat.id.toString());
       localStorage.setItem('blankd_last_crafted_title', cat.title);
@@ -601,8 +606,11 @@ function MainApp() {
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
-    // 💡 [수정 완료] 대괄호 삭제 로직 제거
-    let displayTitle = titleLine.replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
+    let displayTitle = titleLine
+      .replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '')
+      .replace(/\(\s*내용\s*\)/g, '')
+      .replace(/내용/g, '')
+      .trim();
     if (!displayTitle) displayTitle = "제목 없음";
 
     const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== '');
@@ -713,7 +721,7 @@ function MainApp() {
       </div>
       
       <div className="flex gap-2 mb-5 shrink-0">
-        <input type="text" value={tempKey} onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder={dictTab === 'abbr' ? "원래 정답 (예: 행정안전부장관)" : "단어 입력 (쉼표 구분)"} className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-white/30 transition-colors w-full min-w-0" />
+        <input type="text" value={tempKey} onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder={dictTab === 'abbr' ? "원래 정답 (예: 행정안전부장관)" : "단어 입력 (쉼표 구분)"} className="flex-1 bg-black/50 border border-white/30 transition-colors w-full min-w-0" />
         {dictTab === 'abbr' && (
           <input type="text" value={tempValue} onChange={(e) => setTempValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder="약어 (예: 행안부장관)" className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full min-w-0" />
         )}
@@ -785,42 +793,36 @@ function MainApp() {
         }
 
         /* 🎨 5. 브랜드 컬러 강제 교정 (라이트 모드 맞춤형) 🎨 */
-        /* TEAL (청록색) - 채우기 탭 버튼, 필수 포함 단어 등 */
         .text-teal-300, .text-teal-400, .text-teal-500 { color: #0f766e !important; font-weight: 800 !important; }
         .bg-teal-900\\/20, .bg-teal-900\\/30, .bg-teal-900\\/40, .bg-teal-950\\/20, .bg-teal-500\\/10, .bg-teal-500\\/20 { 
           background-color: #ccfbf1 !important; border-color: #5eead4 !important; 
         }
         .border-teal-500\\/30, .border-teal-500\\/40, .border-teal-500\\/50 { border-color: #5eead4 !important; }
 
-        /* AMBER (호박색/주황색) - 만들기 탭 버튼, 제외 단어, 랭킹 1위 등 */
         .text-amber-300, .text-amber-400, .text-amber-500 { color: #b45309 !important; font-weight: 800 !important; }
         .bg-amber-900\\/20, .bg-amber-900\\/30, .bg-amber-900\\/40, .bg-amber-950\\/20, .bg-amber-500\\/10, .bg-amber-500\\/20 { 
           background-color: #fef3c7 !important; border-color: #fcd34d !important; 
         }
         .border-amber-500\\/30, .border-amber-500\\/40, .border-amber-500\\/50, .border-amber-900\\/30 { border-color: #fcd34d !important; }
 
-        /* INDIGO (남색/보라색) - 스마트 약어, 폴더 버튼 등 */
         .text-indigo-300, .text-indigo-400, .text-indigo-500 { color: #4338ca !important; font-weight: 800 !important; }
         .bg-indigo-900\\/20, .bg-indigo-900\\/30, .bg-indigo-900\\/40 { 
           background-color: #e0e7ff !important; border-color: #c7d2fe !important; 
         }
         .border-indigo-500\\/30, .border-indigo-500\\/40, .border-indigo-500\\/50 { border-color: #c7d2fe !important; }
 
-        /* BLUE (파란색) - 이동 버튼 등 */
         .text-blue-300, .text-blue-400, .text-blue-500 { color: #1d4ed8 !important; font-weight: 800 !important; }
         .bg-blue-900\\/20, .bg-blue-900\\/30, .bg-blue-900\\/40, .bg-blue-500\\/10, .bg-blue-500\\/20 { 
           background-color: #dbeafe !important; border-color: #bfdbfe !important; 
         }
         .border-blue-500\\/30, .border-blue-500\\/40, .border-blue-500\\/50 { border-color: #bfdbfe !important; }
 
-        /* RED (빨간색) - 오답, 삭제 버튼, 오류 메시지 등 */
         .text-red-300, .text-red-400, .text-red-500 { color: #b91c1c !important; font-weight: 800 !important; }
         .bg-red-900\\/20, .bg-red-900\\/30, .bg-red-900\\/40, .bg-red-950\\/20, .bg-red-500\\/10, .bg-red-500\\/20 { 
           background-color: #fee2e2 !important; border-color: #fecaca !important; 
         }
         .border-red-500\\/30, .border-red-500\\/40, .border-red-500\\/50, .border-red-900\\/30 { border-color: #fecaca !important; }
 
-        /* GREEN (녹색) */
         .text-green-300, .text-green-400, .text-green-500 { color: #15803d !important; font-weight: 800 !important; }
         .bg-green-900\\/20, .bg-green-900\\/30, .bg-green-900\\/40, .bg-green-500\\/10, .bg-green-500\\/20 { 
           background-color: #dcfce7 !important; border-color: #a7f3d0 !important; 
@@ -861,7 +863,7 @@ function MainApp() {
 
               {nextStudyCard ? (
                 <button onClick={() => { setActiveCard(nextStudyCard); }} className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]">
-                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span><span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{nextStudyCard.content.split('\n')[0].replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim()}</span>
+                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span><span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{nextStudyCard.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim()}</span>
                 </button>
               ) : (<div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 완료</div>)}
             </div>
