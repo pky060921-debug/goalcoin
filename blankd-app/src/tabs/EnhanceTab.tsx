@@ -179,17 +179,17 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return titleLine + (lines.length > 1 ? '\n' : '') + tokens.join('');
   };
 
-  // 💡 [개선 완료] +령, +칙 버튼 클릭 시 더미 텍스트 없이 글자만 띄워놓고 즉시 에디터 모드로 진입합니다.
-  const handleAddAdjacent = (folder: string, index: number, type: '령' | '칙') => {
+  // 💡 [버튼 단일화] "+" 버튼 하나로 동작하며, 누르면 [령/칙] 이 포함된 템플릿 로드
+  const handleAddAdjacent = (folder: string, index: number) => {
     const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
     const origCard = folderCards[index];
     const tempId = `temp_${Date.now()}`;
-    const newTitle = type === '령' ? '[령] ' : '[칙] ';
+    const newTitle = '[령/칙] 조항명 입력';
     
     const newCard = {
         id: tempId,
         folder_name: folder,
-        content: newTitle, 
+        content: `${newTitle}\n\n내용을 입력하세요.`, 
         memo: JSON.stringify({ text: "", filled: 0, wrongIndices: [] }),
         answer_text: "",
         isTemp: true,
@@ -343,7 +343,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
             {localCards.filter((c:any) => c && c.content && c.folder_name === folder).map((card: any, idx: number, folderCards: any[]) => {
                 try {
                   const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
-                  let displayTitle = (cleanContent.split('\n')[0] || "").replace(/\[.*?\]/g, '').replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
+                  
+                  // 💡 [수정 완료] [법], [령], [칙]을 삭제하던 원인 제거
+                  let displayTitle = (cleanContent.split('\n')[0] || "").replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
                   if (!displayTitle) displayTitle = "제목 없음";
 
                   const lines = cleanContent.split('\n');
@@ -353,16 +355,13 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                   const stats = parseCardStats(card.memo);
                   const hasWrong = stats.wrongIndices.length > 0;
                   
-                  let colClass = ""; let titleColor = "text-teal-400";
-                  if (viewMode === 'all' && colCount >= 3) {
-                    if (cleanContent.includes('[법]')) { colClass = "md:col-start-1"; titleColor = "text-red-500"; }
-                    else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2"; titleColor = "text-blue-400"; }
-                    else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { colClass = "md:col-start-3"; titleColor = "text-green-500"; }
-                  } else {
-                    if (cleanContent.includes('[법]')) titleColor = "text-red-500";
-                    else if (cleanContent.includes('[령]')) titleColor = "text-blue-400";
-                    else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) titleColor = "text-green-500";
-                  }
+                  let colClass = "md:col-span-1"; 
+                  let titleColor = "text-teal-400";
+                  
+                  // 💡 [수정 완료] 법, 령, 칙에 따른 완벽한 열(Column) 배치 및 색상 정렬 시스템
+                  if (cleanContent.includes('[법]')) { colClass = "md:col-start-1 md:col-span-1"; titleColor = "text-red-500"; }
+                  else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2 md:col-span-1"; titleColor = "text-blue-400"; }
+                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { colClass = "md:col-start-3 md:col-span-1"; titleColor = "text-green-500"; }
 
                   if (editingId === card.id) colClass = "col-span-full";
 
@@ -417,14 +416,14 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                 <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">반복:{stats.filled}</span>
                                 <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                               </div>
-                              <div className="flex items-center gap-1">
-                                {/* 💡 [디자인 완전 정리] 버튼에서 이모티콘 제거 및 깔끔한 CSS 스타일 적용 */}
-                                <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-2 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/30 rounded-sm font-mono text-[10px] hover:bg-blue-500/20 transition-colors cursor-pointer">이동</button>
-                                <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx, '령'); }} className="px-2 py-1 bg-teal-500/10 text-teal-400 border border-teal-500/30 rounded-sm font-mono text-[10px] hover:bg-teal-500/20 transition-colors cursor-pointer">+령</button>
-                                <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx, '칙'); }} className="px-2 py-1 bg-green-500/10 text-green-400 border border-green-500/30 rounded-sm font-mono text-[10px] hover:bg-green-500/20 transition-colors cursor-pointer">+칙</button>
+                              <div className="flex items-center gap-1 opacity-80 hover:opacity-100 transition-opacity">
+                                {/* 💡 [디자인 수정] 화이트 테마에서도 눈이 편안한 깔끔한 무채색 기반 버튼으로 일괄 교체 및 [+] 버튼 병합 */}
+                                <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-blue-500/10 hover:text-blue-500 hover:border-blue-500/30 transition-all cursor-pointer">이동</button>
                                 
-                                <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('editor'); }} className="px-2 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/30 rounded-sm font-mono text-[10px] hover:bg-amber-500/20 transition-colors">수정</button>
-                                <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-1 px-2 py-1 bg-red-500/10 text-red-400 border border-red-500/30 rounded-sm font-mono text-[10px] hover:bg-red-500/20 transition-colors">✕</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-green-500/10 hover:text-green-600 hover:border-green-500/30 transition-all cursor-pointer">+</button>
+                                
+                                <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('editor'); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/30 transition-all">수정</button>
+                                <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-1 px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-red-500/10 hover:text-red-500 hover:border-red-500/30 transition-all">✕</button>
                               </div>
                             </div>
                           )}
