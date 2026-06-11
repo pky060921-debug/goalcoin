@@ -139,7 +139,6 @@ function MainApp() {
   const [useAiRecommend, setUseAiRecommend] = useState(true);
   const [studyMode, setStudyMode] = useState('일반');
   
-  // 💡 [신규 추가] 화면 테마 전역 상태 관리 (black, white, green)
   const [theme, setTheme] = useState(() => localStorage.getItem('blankd_theme') || 'black');
   useEffect(() => { localStorage.setItem('blankd_theme', theme); }, [theme]);
   
@@ -210,7 +209,6 @@ function MainApp() {
 
   useEffect(() => {
     if (!globalDict || !globalDict.abbrs) return;
-    
     let currentInclusions = globalDict.inclusions || [];
     let changed = false;
 
@@ -320,18 +318,9 @@ function MainApp() {
   };
 
   const handleMakeBlankCard = async (
-    cat: any, 
-    wordsArray: string[], 
-    selectedIndices: Set<number>, 
-    pageBreaks: Set<number>, 
-    memo: string, 
-    cardId: any, 
-    onComplete: () => void
+    cat: any, wordsArray: string[], selectedIndices: Set<number>, pageBreaks: Set<number>, memo: string, cardId: any, onComplete: () => void
   ) => {
-    let bodyContent = "";
-    let answerText = ""; 
-    let isBlanking = false;
-    
+    let bodyContent = ""; let answerText = ""; let isBlanking = false;
     wordsArray.forEach((word, index) => {
       if (pageBreaks.has(index)) { bodyContent += " ##PAGE_BREAK## "; }
       if (selectedIndices.has(index)) {
@@ -345,10 +334,7 @@ function MainApp() {
     if (isBlanking) bodyContent += " ]";
     
     const existingCard = savedCards.find((c: any) => 
-      c && c.content && (
-        c.content.includes(`[[ORIG_ID:${cat.id}]]`) || 
-        c.content.trim().startsWith(cat.title.trim())
-      )
+      c && c.content && (c.content.includes(`[[ORIG_ID:${cat.id}]]`) || c.content.trim().startsWith(cat.title.trim()))
     );
     const targetCardId = existingCard ? existingCard.id : null; 
 
@@ -360,20 +346,14 @@ function MainApp() {
     const res = await fetch("https://api.blankd.top/api/save-card", { 
       method: "POST", headers: { "Content-Type": "application/json" }, 
       body: JSON.stringify({ 
-          wallet_address: safeAddress, 
-          card_id: targetCardId, 
-          card_content: finalCardContent, 
-          answer_text: answerText, 
-          folder_name: cat.folder_name, 
-          memo: initialMemo 
+          wallet_address: safeAddress, card_id: targetCardId, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo 
       }) 
     });
     if (res.ok) {
       localStorage.setItem('blankd_last_crafted_id', cat.id.toString());
       localStorage.setItem('blankd_last_crafted_title', cat.title);
       addLog(targetCardId ? "✅ 덮어쓰기 완료" : "✅ 신규 생성 완료");
-      await loadAllData(); 
-      onComplete(); 
+      await loadAllData(); onComplete(); 
     }
   };
 
@@ -386,7 +366,6 @@ function MainApp() {
     if (activeCard) {
       isClosingRef.current = false;
       const cleanContent = activeCard.content.replace(/\s*\[\[ORIG_ID:\d+\]\]/g, '');
-      
       const lines = cleanContent.split('\n');
       const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
@@ -402,32 +381,22 @@ function MainApp() {
       const lastIdx = savedProgress ? parseInt(savedProgress, 10) : 0;
       const restoredBlanks = foundBlanks.map((b, i) => ({ ...b, correct: i < lastIdx }));
 
-      setBlanks(restoredBlanks); 
-      setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); 
-      setInputStatus('idle');
+      setBlanks(restoredBlanks); setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); setInputStatus('idle');
 
       const stats = parseCardStats(activeCard.memo);
       const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
-      
-      setStartTime(Date.now()); 
-      setElapsed(0);
-      setIsMemoOpen(false);
+      setStartTime(Date.now()); setElapsed(0); setIsMemoOpen(false);
 
       let cleanText = stats.text;
-      if (cleanText) {
-         cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim();
-      }
+      if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
       statsRef.current = { text: cleanText, filled: stats.filled, wrongIndices: new Set(stats.wrongIndices) };
       const cleanTitle = getStrictTitleOnly(cleanContent);
       localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
       localStorage.setItem('blankd_last_enhanced_title', cleanTitle || "이름 없는 카드");
     } else {
       if (recognitionRef.current) {
-        recognitionRef.current.onend = null;
-        recognitionRef.current.stop();
-        recognitionRef.current = null;
-        setIsListening(false);
+        recognitionRef.current.onend = null; recognitionRef.current.stop(); recognitionRef.current = null; setIsListening(false);
       }
     }
   }, [activeCard]);
@@ -435,23 +404,18 @@ function MainApp() {
   const finishCard = (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
-    const currentId = activeCard.id;
-    const currentFolder = activeCard.folder_name;
-    const finalTime = elapsed;
+    const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = elapsed;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     const isCorrect = wrongArr.length === 0;
 
     let daysInterval = customDays;
     if (daysInterval === undefined) {
-      const wrongCount = wrongArr.length;
-      const totalBlanks = blanks.length;
+      const wrongCount = wrongArr.length; const totalBlanks = blanks.length;
       let quality = 5;
       if (totalBlanks > 0 && wrongCount > 0) {
         const wrongRatio = wrongCount / totalBlanks;
-        if (wrongRatio > 0.5) quality = 1;
-        else if (wrongRatio > 0.2) quality = 2;
-        else quality = 3;
+        if (wrongRatio > 0.5) quality = 1; else if (wrongRatio > 0.2) quality = 2; else quality = 3;
       }
       let easiness = parseFloat(localStorage.getItem(`blankd_factor_${currentId}`) || "2.5");
       easiness = easiness + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
@@ -459,27 +423,22 @@ function MainApp() {
       localStorage.setItem(`blankd_factor_${currentId}`, easiness.toString());
 
       const currentRepetitions = statsRef.current.filled || 1;
-      if (quality < 3) {
-        daysInterval = 1;
-      } else {
+      if (quality < 3) { daysInterval = 1; } 
+      else {
         if (currentRepetitions === 1) daysInterval = 1;
         else if (currentRepetitions === 2) daysInterval = 4;
         else daysInterval = Math.ceil((currentRepetitions - 1) * easiness);
       }
     } else {
       let quality = 3;
-      if (daysInterval === 1) quality = 1;
-      else if (daysInterval === 4) quality = 2;
-      else if (daysInterval >= 14) quality = 5;
-      
+      if (daysInterval === 1) quality = 1; else if (daysInterval === 4) quality = 2; else if (daysInterval >= 14) quality = 5;
       let easiness = parseFloat(localStorage.getItem(`blankd_factor_${currentId}`) || "2.5");
       easiness = easiness + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
       if (easiness < 1.3) easiness = 1.3;
       localStorage.setItem(`blankd_factor_${currentId}`, easiness.toString());
     }
 
-    const nextReviewDate = new Date();
-    nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
+    const nextReviewDate = new Date(); nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
 
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
         const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
@@ -490,31 +449,23 @@ function MainApp() {
     const nextCard = folderCards[currentIdx + 1] || null;
 
     localStorage.removeItem(`blankd_progress_${currentId}`);
-
     setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
-    addLog(`✅ 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
-    flushQueue();
+    addLog(`✅ 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`); flushQueue();
   };
 
-  const handleReviewSelect = (days: number) => {
-    if (!activeCard) return;
-    statsRef.current.filled += 1;
-    finishCard(days);
-  };
+  const handleReviewSelect = (days: number) => { if (!activeCard) return; statsRef.current.filled += 1; finishCard(days); };
 
   const handleCloseModal = () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
-    const currentId = activeCard.id;
-    const wrongArr = Array.from(statsRef.current.wrongIndices);
+    const currentId = activeCard.id; const wrongArr = Array.from(statsRef.current.wrongIndices);
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     setActiveCard(null);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
-    pushToQueue('MEMO', { id: currentId, memo: newMemo });
-    flushQueue();
+    pushToQueue('MEMO', { id: currentId, memo: newMemo }); flushQueue();
   };
 
   useEffect(() => {
@@ -535,70 +486,43 @@ function MainApp() {
 
     if (!isCorrect && globalDict.abbrs) {
       Object.entries(globalDict.abbrs).forEach(([k, v]) => {
-        const strK = k.replace(/\s+/g, '').toLowerCase();
-        const strV = v.replace(/\s+/g, '').toLowerCase();
-        const orig = strK.length >= strV.length ? strK : strV;
-        const short = strK.length < strV.length ? strK : strV;
-        if (expected === orig && actual === short) {
-          isCorrect = true;
-        }
+        const strK = k.replace(/\s+/g, '').toLowerCase(); const strV = v.replace(/\s+/g, '').toLowerCase();
+        const orig = strK.length >= strV.length ? strK : strV; const short = strK.length < strV.length ? strK : strV;
+        if (expected === orig && actual === short) { isCorrect = true; }
       });
     }
 
     if (isCorrect) {
       setInputStatus('correct');
-      setBlanks(prev => {
-        const nb = [...prev]; 
-        if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; 
-        return nb;
-      });
+      setBlanks(prev => { const nb = [...prev]; if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; return nb; });
       statsRef.current.wrongIndices.delete(currentBlankIdx);
       setTimeout(() => {
         setInputStatus('idle'); 
         setBlanks(currentBlanks => {
           if (currentBlankIdx + 1 < currentBlanks.length) {
-            setCurrentBlankIdx(prevIdx => {
-              const nextIdx = prevIdx + 1;
-              localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
-              return nextIdx;
-            });
+            setCurrentBlankIdx(prevIdx => { const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx; });
           } else { 
-            localStorage.removeItem(`blankd_progress_${activeCard.id}`);
-            statsRef.current.filled += 1; 
-            finishCard(); 
+            localStorage.removeItem(`blankd_progress_${activeCard.id}`); statsRef.current.filled += 1; finishCard(); 
           }
           return currentBlanks;
         });
       }, 150);
     } else { 
-      setInputStatus('wrong'); 
-      statsRef.current.wrongIndices.add(currentBlankIdx); 
-      setTimeout(() => setInputStatus('idle'), 500);
+      setInputStatus('wrong'); statsRef.current.wrongIndices.add(currentBlankIdx); setTimeout(() => setInputStatus('idle'), 500);
     }
   };
   
   const handleShowAnswer = () => {
     if (!blanks[currentBlankIdx]) return;
-    setInputStatus('wrong'); 
-    statsRef.current.wrongIndices.add(currentBlankIdx);
-    setBlanks(prev => {
-      const nb = [...prev];
-      if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; 
-      return nb;
-    });
+    setInputStatus('wrong'); statsRef.current.wrongIndices.add(currentBlankIdx);
+    setBlanks(prev => { const nb = [...prev]; if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; return nb; });
     setTimeout(() => {
       setInputStatus('idle');
       setBlanks(currentBlanks => {
         if (currentBlankIdx + 1 < currentBlanks.length) {
-          setCurrentBlankIdx(prevIdx => {
-            const nextIdx = prevIdx + 1;
-            localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
-            return nextIdx;
-          });
+          setCurrentBlankIdx(prevIdx => { const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx; });
         } else {
-          localStorage.removeItem(`blankd_progress_${activeCard.id}`);
-          statsRef.current.filled += 1;
-          finishCard();
+          localStorage.removeItem(`blankd_progress_${activeCard.id}`); statsRef.current.filled += 1; finishCard();
         }
         return currentBlanks;
       });
@@ -608,58 +532,36 @@ function MainApp() {
   const toggleVoiceRecognition = () => {
     if (isListening) {
       setIsListening(false);
-      if (recognitionRef.current) {
-        recognitionRef.current.onend = null; 
-        recognitionRef.current.stop();
-        recognitionRef.current = null;
-      }
-      addLog("🎤 음성 인식 종료됨");
-      return;
+      if (recognitionRef.current) { recognitionRef.current.onend = null; recognitionRef.current.stop(); recognitionRef.current = null; }
+      addLog("🎤 음성 인식 종료됨"); return;
     }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다."); return; }
     
     const recognition = new SpeechRecognition();
-    recognition.lang = 'ko-KR'; 
-    recognition.interimResults = false;
-    recognition.continuous = true; 
-    recognition.maxAlternatives = 1;
-
-    recognition.onstart = () => { 
-      setIsListening(true);
-      addLog("🎙️ 음성 인식 활성화됨 (계속 듣는 중...)");
-    };
-    
+    recognition.lang = 'ko-KR'; recognition.interimResults = false; recognition.continuous = true; recognition.maxAlternatives = 1;
+    recognition.onstart = () => { setIsListening(true); addLog("🎙️ 음성 인식 활성화됨 (계속 듣는 중...)"); };
     recognition.onresult = (event: any) => {
       const last = event.results.length - 1;
       const transcript = event.results[last][0].transcript;
       const cleanText = transcript.replace(/\s+/g, '').replace(/[.,!?]/g, '');
-      addLog(`💬 인식: "${transcript}"`);
-      setTimeout(() => handleSequentialInput(cleanText), 300);
+      addLog(`💬 인식: "${transcript}"`); setTimeout(() => handleSequentialInput(cleanText), 300);
     };
     recognition.onerror = (err: any) => { if (err.error !== 'no-speech') { setIsListening(false); recognitionRef.current = null; } };
-    recognition.onend = () => { 
-      if (recognitionRef.current) { try { recognitionRef.current.start(); } catch(e) {} } else { setIsListening(false); }
-    };
-
-    recognitionRef.current = recognition;
-    recognition.start();
+    recognition.onend = () => { if (recognitionRef.current) { try { recognitionRef.current.start(); } catch(e) {} } else { setIsListening(false); } };
+    recognitionRef.current = recognition; recognition.start();
   };
 
-  const minFilledCount = savedCards.length > 0 
-    ? Math.min(...savedCards.map((card: any) => parseCardStats(card.memo || "").filled || 0))
-    : 0;
+  const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => parseCardStats(card.memo || "").filled || 0)) : 0;
   const passProbability = Math.min(minFilledCount * 2, 100);
 
   const { nextCatToCraft, nextStudyCard } = useMemo(() => {
-    let craftTarget = null;
-    let studyTarget = null;
+    let craftTarget = null; let studyTarget = null;
     if (!isLoggedIn) return { nextCatToCraft: null, nextStudyCard: null };
 
     if (categories && categories.length > 0) {
-      const craftedOrigIds = new Set();
-      const craftedTitles: string[] = [];
+      const craftedOrigIds = new Set(); const craftedTitles: string[] = [];
       const cleanText = (text: string) => text ? text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '').replace(/[^가-힣a-zA-Z0-9一-龥]/g, '') : "";
       savedCards.forEach((c: any) => {
         const match = c.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
@@ -688,8 +590,7 @@ function MainApp() {
 
   const renderContent = React.useCallback(() => {
     if (!activeCard) return null;
-    const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
-    
+    const cleanContent = activeCard.content.replace(/\s*\[\[ORIG_ID:\d+\]\]/g, '');
     const lines = cleanContent.split('\n');
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
@@ -845,38 +746,45 @@ function MainApp() {
     </div>
   );
 
-  // 💡 [CSS Injector] 전역 테마 적용 시스템
+  // 💡 [CSS Injector] 전역 테마 적용 시스템 (화이트 테마 시 글씨, 배경, 사전 목록 강제 오버라이딩 최적화)
   const getThemeCSS = () => {
     if (theme === 'white') {
       return `
-        body { background-color: #f0f2f5; color: #111827; }
+        body { background-color: #f3f4f6; color: #111827; }
         .text-white { color: #111827 !important; }
         .text-white\\/20, .text-white\\/30 { color: rgba(17,24,39,0.4) !important; }
         .text-white\\/40, .text-white\\/50 { color: rgba(17,24,39,0.6) !important; }
         .text-white\\/60, .text-white\\/70 { color: rgba(17,24,39,0.8) !important; }
-        .text-white\\/80 { color: #111827 !important; }
+        .text-white\\/80 { color: #374151 !important; }
         .text-\\[\\#d1d1d1\\] { color: #374151 !important; }
+        
+        .bg-\\[\\#08080a\\] { background-color: #ffffff !important; }
+        .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(255, 255, 255, 0.9) !important; backdrop-filter: blur(8px); }
+        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .bg-\\[\\#0d0d0f\\] { background-color: #f3f4f6 !important; }
+        
+        .bg-black\\/30 { background-color: #f9fafb !important; }
+        .bg-black\\/40 { background-color: #ffffff !important; box-shadow: 0 1px 2px rgba(0,0,0,0.05); border-color: #e5e7eb !important; }
+        .bg-black\\/50 { background-color: #f3f4f6 !important; color: #111827 !important; } 
+        .bg-black\\/60 { background-color: #ffffff !important; color: #111827 !important; border-color: #d1d5db !important; } 
+        .bg-white\\/5 { background-color: rgba(0,0,0,0.03) !important; }
+        .bg-white\\/10 { background-color: rgba(0,0,0,0.06) !important; }
+        
         .border-white\\/5 { border-color: rgba(0,0,0,0.05) !important; }
         .border-white\\/10 { border-color: rgba(0,0,0,0.1) !important; }
         .border-white\\/20 { border-color: rgba(0,0,0,0.2) !important; }
-        .bg-black\\/30 { background-color: rgba(255,255,255,0.5) !important; }
-        .bg-black\\/40 { background-color: rgba(255,255,255,0.6) !important; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-        .bg-black\\/50 { background-color: rgba(255,255,255,0.8) !important; }
-        .bg-white\\/5 { background-color: rgba(0,0,0,0.03) !important; }
-        .bg-white\\/10 { background-color: rgba(0,0,0,0.06) !important; }
-        .bg-\\[\\#08080a\\] { background-color: #f8f9fa !important; }
-        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; }
-        .bg-\\[\\#0d0d0f\\] { background-color: #f0f2f5 !important; }
+        .text-amber-50 { color: #111827 !important; }
       `;
     } else if (theme === 'green') {
       return `
         body { background-color: #163322; }
         .bg-\\[\\#08080a\\] { background-color: #0f2418 !important; }
+        .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(15, 36, 24, 0.9) !important; }
         .bg-\\[\\#0a0a0c\\] { background-color: #122b1c !important; }
         .bg-\\[\\#0d0d0f\\] { background-color: #163322 !important; }
       `;
     }
-    return `body { background-color: #0d0d0f; }`; // Black
+    return `body { background-color: #0d0d0f; }`; // Black Default
   };
 
   return (
