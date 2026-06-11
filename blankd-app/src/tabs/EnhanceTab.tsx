@@ -134,11 +134,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [movingId, safeAddress, loadAllData]);
 
-  // 💡 [치명적 버그 수정 완료] 시스템 태그 훼손 방지 및 자가 치유 엔진 적용
   const autoApplyDict = (content: string) => {
     if (!globalDict) return content;
     
-    // 1. 이미 훼손된 태그 [ORIG_ID:xxx] 가 있다면 0.1초 만에 정상 태그로 자가 치유 복구합니다.
     let fixedContent = content.replace(/\[ORIG_ID:(\d+)\]/g, '[[ORIG_ID:$1]]');
     
     const lines = fixedContent.split('\n');
@@ -152,7 +150,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     let tokens = restContent.split(/(\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g);
     for (let i = 0; i < tokens.length; i++) {
       if (!tokens[i]) continue;
-      // 2. ORIG_ID 태그는 어떠한 사전 규칙도 건드리지 못하게 절대 보호합니다.
       if (tokens[i].startsWith('[[ORIG_ID:')) continue;
       
       if (tokens[i].startsWith('[') && tokens[i].endsWith(']')) {
@@ -173,7 +170,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
       }
     }
     
-    // 3. 괄호 중복 제거 로직에서 시스템 태그는 100% 면제(열외)시킵니다.
     for (let i = 0; i < tokens.length; i++) {
       if (!tokens[i].startsWith('[[ORIG_ID:')) {
          tokens[i] = tokens[i].replace(/\[+/g, '[').replace(/\]+/g, ']');
@@ -183,16 +179,17 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return titleLine + (lines.length > 1 ? '\n' : '') + tokens.join('');
   };
 
+  // 💡 [개선 완료] +령, +칙 버튼 클릭 시 더미 텍스트 없이 글자만 띄워놓고 즉시 에디터 모드로 진입합니다.
   const handleAddAdjacent = (folder: string, index: number, type: '령' | '칙') => {
     const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
     const origCard = folderCards[index];
     const tempId = `temp_${Date.now()}`;
-    const newTitle = type === '령' ? '[령] 새 시행령' : '[칙] 새 시행규칙';
+    const newTitle = type === '령' ? '[령] ' : '[칙] ';
     
     const newCard = {
         id: tempId,
         folder_name: folder,
-        content: `${newTitle}\n\n내용을 입력하세요.`,
+        content: newTitle, 
         memo: JSON.stringify({ text: "", filled: 0, wrongIndices: [] }),
         answer_text: "",
         isTemp: true,
@@ -214,11 +211,10 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     try {
       let sanitizedContent = editContent;
       
-      // 💡 [안전 보장] 훼손된 태그까지 정밀 탐지하여 100% 정상 태그로 재결합합니다.
       const origIdMatch = editContent.match(/\[\[?ORIG_ID:(\d+)\]?\]?/);
       if (origIdMatch) {
         const systemTag = origIdMatch[0];
-        const origIdNum = origIdMatch[1]; // 번호만 순수하게 추출
+        const origIdNum = origIdMatch[1];
         const correctSystemTag = `[[ORIG_ID:${origIdNum}]]`;
         
         const bodyText = editContent.replace(systemTag, '');
@@ -228,10 +224,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         sanitizedContent = editContent.replace(/\[+/g, '[').replace(/\]+/g, ']'); 
       }
 
-      // 💡 빈칸 정답을 파싱할 때 ORIG_ID 라는 글자 자체가 절대 정답으로 지정되지 못하게 원천 차단 필터 삽입
       const newAnswers = (sanitizedContent.match(/\[\s*(.*?)\s*\]/g) || [])
         .map(b => b.replace(/\[|\]/g, '').trim())
-        .filter(a => !a.startsWith('ORIG_ID:')) // 철통 방어벽
+        .filter(a => !a.startsWith('ORIG_ID:'))
         .filter(Boolean)
         .join(", ");
         
@@ -285,7 +280,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     const titleLine = lines[0] || '';
     const restLines = lines.slice(1).join('\n');
     
-    // 💡 [에디터 화면 치유] 훼손된 태그와 정상 태그 모두 분리해내어 에디터에 깔끔하게 띄워줍니다.
     const tokens = restLines.split(/(\s+|\n|---|\[\[?ORIG_ID:\d+\]?\]?|\[[^\]]+\])/g).filter(Boolean);
 
     return (
@@ -348,7 +342,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
             {localCards.filter((c:any) => c && c.content && c.folder_name === folder).map((card: any, idx: number, folderCards: any[]) => {
                 try {
-                  // 💡 화면 렌더링 시에도 훼손된 태그까지 완벽하게 걸러내어 표시합니다.
                   const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
                   let displayTitle = (cleanContent.split('\n')[0] || "").replace(/\[.*?\]/g, '').replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
                   if (!displayTitle) displayTitle = "제목 없음";
@@ -378,12 +371,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                       {editingId === card.id ? (
                         <div className="relative flex flex-col p-4 rounded-sm border border-amber-500/50 bg-[#0a0a0c] transition-all duration-300 w-full shadow-[0_0_15px_rgba(245,158,11,0.15)]">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
-                            <span className="text-[12px] text-amber-400 font-bold flex items-center gap-2">🛠️ 빈칸 직접 수정 모드</span>
-                            <div className="flex items-center gap-1.5 bg-black/50 p-1 rounded-md border border-white/10">
-                              <button onClick={() => setActiveTool(activeTool === 'editor' ? null : 'editor')} className={`px-2.5 py-1.5 rounded text-[10px] font-bold ${activeTool === 'editor' ? 'bg-amber-600/90 text-white' : 'bg-white/5 text-white/50'}`}>📝 직접 타이핑</button>
-                              <div className="w-px h-4 bg-white/10 mx-0.5"></div>
-                              <button onClick={() => setActiveTool(activeTool === 'include' ? null : 'include')} className={`px-2.5 py-1.5 rounded text-[10px] font-bold ${activeTool === 'include' ? 'bg-teal-600/90 text-white' : 'bg-white/5 text-white/50'}`}>➕ 클릭 포함</button>
-                              <button onClick={() => setActiveTool(activeTool === 'exclude' ? null : 'exclude')} className={`px-2.5 py-1.5 rounded text-[10px] font-bold ${activeTool === 'exclude' ? 'bg-red-600/90 text-white' : 'bg-white/5 text-white/50'}`}>➖ 클릭 제외</button>
+                            <span className="text-[12px] text-amber-500 font-bold flex items-center gap-2">빈칸 직접 수정 모드</span>
+                            <div className="flex items-center gap-1.5 bg-black/50 p-1 rounded-sm border border-white/10">
+                              <button onClick={() => setActiveTool(activeTool === 'editor' ? null : 'editor')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'editor' ? 'bg-amber-500/80 text-white' : 'bg-white/5 text-white/50'}`}>직접 타이핑</button>
+                              <div className="w-px h-3 bg-white/10 mx-0.5"></div>
+                              <button onClick={() => setActiveTool(activeTool === 'include' ? null : 'include')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'include' ? 'bg-teal-500/80 text-white' : 'bg-white/5 text-white/50'}`}>클릭 포함</button>
+                              <button onClick={() => setActiveTool(activeTool === 'exclude' ? null : 'exclude')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'exclude' ? 'bg-red-500/80 text-white' : 'bg-white/5 text-white/50'}`}>클릭 제외</button>
                             </div>
                           </div>
                           
@@ -394,8 +387,8 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           {errorMsg && <div className="text-red-400 text-[10px] mt-3 font-bold">{errorMsg}</div>}
                           
                           <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-white/10">
-                            <button onClick={(e) => { e.stopPropagation(); setEditingId(null); if(card.isTemp) { setLocalCards(prev=>prev.filter(c=>c.id!==card.id)); } }} className="px-4 py-2 bg-white/5 text-white/60 hover:text-white hover:bg-white/10 rounded-sm text-[11px] font-bold">취소</button>
-                            <button onClick={(e) => { e.stopPropagation(); handleSaveEdit(card); }} className="px-5 py-2 bg-amber-600 text-white hover:bg-amber-500 rounded-sm text-[11px] font-bold">{isSaving ? '저장 중...' : '💾 내용 저장'}</button>
+                            <button onClick={(e) => { e.stopPropagation(); setEditingId(null); if(card.isTemp) { setLocalCards(prev=>prev.filter(c=>c.id!==card.id)); } }} className="px-4 py-1.5 bg-white/5 text-white/60 hover:text-white hover:bg-white/10 rounded-sm text-[11px] font-bold transition-all">취소</button>
+                            <button onClick={(e) => { e.stopPropagation(); handleSaveEdit(card); }} className="px-5 py-1.5 bg-amber-600 text-white hover:bg-amber-500 rounded-sm text-[11px] font-bold transition-all">{isSaving ? '저장 중...' : '내용 저장'}</button>
                           </div>
                         </div>
                       ) : (
@@ -408,13 +401,13 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           {movingId === card.id ? (
                             <div className="flex items-center justify-between w-full mt-2 pt-2 border-t border-blue-500/30 animate-in fade-in">
                               <span className="text-blue-300 text-[11px] font-bold flex items-center gap-1.5">
-                                <span className="animate-bounce">↕️</span> 방향키(↑, ↓)로 이동 후 Enter 입력
+                                방향키(↑, ↓)로 이동 후 Enter 입력
                               </span>
                               <button 
                                 onClick={(e) => { e.stopPropagation(); setMovingId(null); if(loadAllData) loadAllData(); }} 
-                                className="px-3 py-1 bg-blue-600 text-white text-[10px] font-bold rounded-sm shadow-md hover:bg-blue-500 transition-colors"
+                                className="px-3 py-1 bg-blue-500 text-white text-[10px] font-bold rounded-sm shadow-md hover:bg-blue-400 transition-colors"
                               >
-                                ✅ 완료
+                                완료
                               </button>
                             </div>
                           ) : (
@@ -425,12 +418,13 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                 <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                               </div>
                               <div className="flex items-center gap-1">
-                                <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 bg-blue-900/40 text-blue-400 border border-blue-500/50 rounded font-mono text-[9px] hover:bg-blue-900/60 transition-colors cursor-pointer flex items-center gap-1">↕️ 이동</button>
-                                <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx, '령'); }} className="px-1.5 py-0.5 bg-teal-900/40 text-teal-400 border border-teal-500/50 rounded font-mono text-[9px] hover:bg-teal-900/60 transition-colors cursor-pointer">+령</button>
-                                <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx, '칙'); }} className="px-1.5 py-0.5 bg-green-900/40 text-green-400 border border-green-500/50 rounded font-mono text-[9px] hover:bg-green-900/60 transition-colors cursor-pointer">+칙</button>
+                                {/* 💡 [디자인 완전 정리] 버튼에서 이모티콘 제거 및 깔끔한 CSS 스타일 적용 */}
+                                <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-2 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/30 rounded-sm font-mono text-[10px] hover:bg-blue-500/20 transition-colors cursor-pointer">이동</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx, '령'); }} className="px-2 py-1 bg-teal-500/10 text-teal-400 border border-teal-500/30 rounded-sm font-mono text-[10px] hover:bg-teal-500/20 transition-colors cursor-pointer">+령</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx, '칙'); }} className="px-2 py-1 bg-green-500/10 text-green-400 border border-green-500/30 rounded-sm font-mono text-[10px] hover:bg-green-500/20 transition-colors cursor-pointer">+칙</button>
                                 
-                                <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('editor'); }} className="px-1.5 py-0.5 bg-amber-900/40 text-amber-400 border border-amber-500/50 rounded font-mono text-[9px] hover:bg-amber-900/60 transition-colors">✏️수정</button>
-                                <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-1 px-1.5 py-0.5 bg-red-900/40 text-red-400 border border-red-500/50 rounded font-mono text-[9px] hover:bg-red-900/60 transition-colors">🗑️삭제</button>
+                                <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('editor'); }} className="px-2 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/30 rounded-sm font-mono text-[10px] hover:bg-amber-500/20 transition-colors">수정</button>
+                                <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-1 px-2 py-1 bg-red-500/10 text-red-400 border border-red-500/30 rounded-sm font-mono text-[10px] hover:bg-red-500/20 transition-colors">✕</button>
                               </div>
                             </div>
                           )}
