@@ -746,40 +746,80 @@ function MainApp() {
     </div>
   );
 
-  // 💡 [CSS Injector] 전역 테마 적용 시스템 (화이트 테마 시 글씨, 배경, 선 가독성 대폭 강화)
+  // 💡 [CSS Injector] 전역 테마 적용 시스템 (화이트 테마 시 모든 컴포넌트의 가독성을 극대화하는 강제 컬러 맵핑)
   const getThemeCSS = () => {
     if (theme === 'white') {
       return `
+        /* 1. 기본 배경 및 텍스트 베이스 */
         body { background-color: #f3f4f6; color: #111827; }
         .text-white { color: #111827 !important; }
+        .text-white\\/20, .text-white\\/30 { color: #6b7280 !important; font-weight: 600; }
+        .text-white\\/40, .text-white\\/50 { color: #4b5563 !important; font-weight: 600; }
+        .text-white\\/60, .text-white\\/70 { color: #374151 !important; font-weight: 700; }
+        .text-white\\/80 { color: #1f2937 !important; font-weight: 700; }
+        .text-\\[\\#d1d1d1\\] { color: #111827 !important; font-weight: 700; }
         
-        /* 💡 글씨 색상: 흐릿한 회색을 모두 진한 회색~검은색으로 변경 */
-        .text-white\\/20, .text-white\\/30 { color: #4b5563 !important; font-weight: 600; }
-        .text-white\\/40, .text-white\\/50 { color: #374151 !important; font-weight: 600; }
-        .text-white\\/60, .text-white\\/70 { color: #1f2937 !important; font-weight: 600; }
-        .text-white\\/80 { color: #111827 !important; font-weight: 600; }
-        .text-\\[\\#d1d1d1\\] { color: #111827 !important; font-weight: 600; }
-        
-        /* 💡 배경 색상 최적화 */
-        .bg-\\[\\#08080a\\] { background-color: #ffffff !important; }
+        /* 2. 레이아웃 구조 박스 (모달, 카드 등) */
+        .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #d1d5db !important; }
         .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(255, 255, 255, 0.95) !important; backdrop-filter: blur(8px); }
-        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border-color: #e5e7eb !important; }
         .bg-\\[\\#0d0d0f\\] { background-color: #f3f4f6 !important; }
         
-        .bg-black\\/30 { background-color: #f9fafb !important; }
-        .bg-black\\/40 { background-color: #ffffff !important; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-color: #9ca3af !important; }
-        .bg-black\\/50 { background-color: #e5e7eb !important; color: #111827 !important; } 
-        .bg-black\\/60 { background-color: #ffffff !important; color: #111827 !important; border-color: #6b7280 !important; } 
-        .bg-white\\/5 { background-color: #f3f4f6 !important; }
-        .bg-white\\/10 { background-color: #e5e7eb !important; }
+        /* 3. 인풋 및 범용 반투명 배경 */
+        .bg-black\\/30, .bg-black\\/40, .bg-black\\/50, .bg-black\\/60 { 
+          background-color: #f9fafb !important; color: #111827 !important; border-color: #d1d5db !important; 
+        }
+        .bg-white\\/5, .bg-white\\/10 { 
+          background-color: #f3f4f6 !important; border-color: #d1d5db !important; color: #111827 !important; 
+        }
         
-        /* 💡 테두리(선) 색상: 흐릿한 선을 진한 선으로 변경하여 구역을 뚜렷하게 분리 */
-        .border-white\\/5 { border-color: #d1d5db !important; }
-        .border-white\\/10 { border-color: #9ca3af !important; }
-        .border-white\\/20 { border-color: #6b7280 !important; }
-        .border-white\\/30 { border-color: #4b5563 !important; }
-        
-        .text-amber-50 { color: #111827 !important; }
+        /* 4. 범용 테두리 선명화 */
+        .border-white\\/5, .border-white\\/10, .border-white\\/20, .border-white\\/30 { 
+          border-color: #d1d5db !important; 
+        }
+
+        /* 🎨 5. 브랜드 컬러 강제 교정 (라이트 모드 맞춤형) 🎨 */
+        /* TEAL (청록색) - 채우기 탭 버튼, 필수 포함 단어 등 */
+        .text-teal-300, .text-teal-400, .text-teal-500 { color: #0f766e !important; font-weight: 800 !important; }
+        .bg-teal-900\\/20, .bg-teal-900\\/30, .bg-teal-900\\/40, .bg-teal-950\\/20, .bg-teal-500\\/10, .bg-teal-500\\/20 { 
+          background-color: #ccfbf1 !important; border-color: #5eead4 !important; 
+        }
+        .border-teal-500\\/30, .border-teal-500\\/40, .border-teal-500\\/50 { border-color: #5eead4 !important; }
+
+        /* AMBER (호박색/주황색) - 만들기 탭 버튼, 제외 단어, 랭킹 1위 등 */
+        .text-amber-300, .text-amber-400, .text-amber-500 { color: #b45309 !important; font-weight: 800 !important; }
+        .bg-amber-900\\/20, .bg-amber-900\\/30, .bg-amber-900\\/40, .bg-amber-950\\/20, .bg-amber-500\\/10, .bg-amber-500\\/20 { 
+          background-color: #fef3c7 !important; border-color: #fcd34d !important; 
+        }
+        .border-amber-500\\/30, .border-amber-500\\/40, .border-amber-500\\/50, .border-amber-900\\/30 { border-color: #fcd34d !important; }
+
+        /* INDIGO (남색/보라색) - 스마트 약어, 폴더 버튼 등 */
+        .text-indigo-300, .text-indigo-400, .text-indigo-500 { color: #4338ca !important; font-weight: 800 !important; }
+        .bg-indigo-900\\/20, .bg-indigo-900\\/30, .bg-indigo-900\\/40 { 
+          background-color: #e0e7ff !important; border-color: #c7d2fe !important; 
+        }
+        .border-indigo-500\\/30, .border-indigo-500\\/40, .border-indigo-500\\/50 { border-color: #c7d2fe !important; }
+
+        /* BLUE (파란색) - 이동 버튼 등 */
+        .text-blue-300, .text-blue-400, .text-blue-500 { color: #1d4ed8 !important; font-weight: 800 !important; }
+        .bg-blue-900\\/20, .bg-blue-900\\/30, .bg-blue-900\\/40, .bg-blue-500\\/10, .bg-blue-500\\/20 { 
+          background-color: #dbeafe !important; border-color: #bfdbfe !important; 
+        }
+        .border-blue-500\\/30, .border-blue-500\\/40, .border-blue-500\\/50 { border-color: #bfdbfe !important; }
+
+        /* RED (빨간색) - 오답, 삭제 버튼, 오류 메시지 등 */
+        .text-red-300, .text-red-400, .text-red-500 { color: #b91c1c !important; font-weight: 800 !important; }
+        .bg-red-900\\/20, .bg-red-900\\/30, .bg-red-900\\/40, .bg-red-950\\/20, .bg-red-500\\/10, .bg-red-500\\/20 { 
+          background-color: #fee2e2 !important; border-color: #fecaca !important; 
+        }
+        .border-red-500\\/30, .border-red-500\\/40, .border-red-500\\/50, .border-red-900\\/30 { border-color: #fecaca !important; }
+
+        /* GREEN (녹색) */
+        .text-green-300, .text-green-400, .text-green-500 { color: #15803d !important; font-weight: 800 !important; }
+        .bg-green-900\\/20, .bg-green-900\\/30, .bg-green-900\\/40, .bg-green-500\\/10, .bg-green-500\\/20 { 
+          background-color: #dcfce7 !important; border-color: #a7f3d0 !important; 
+        }
+        .border-green-500\\/30, .border-green-500\\/40, .border-green-500\\/50 { border-color: #a7f3d0 !important; }
       `;
     } else if (theme === 'green') {
       return `
