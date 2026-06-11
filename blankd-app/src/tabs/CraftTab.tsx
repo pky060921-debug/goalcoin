@@ -30,7 +30,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const getDisplayTitle = (cat: any) => {
     try {
       const raw = cat.title || cat.content || "";
-      // 💡 [자동 태그 주입] 령/칙이 없으면 무조건 [법]을 붙여줌
+      
       let prefix = "";
       if (raw.includes('[령]')) prefix = "[령] ";
       else if (raw.includes('[칙]') || raw.includes('[규]')) prefix = "[칙] ";
@@ -503,41 +503,9 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                                 const currentIdx = folderCatsOnly.findIndex(c => c.id === cat.id);
                                 const nextCat = folderCatsOnly[currentIdx + 1];
                                 
-                                // 💡 [수정 완료] DB 저장 시에는 첫 줄에 강제로 [법]을 부착하여 보냅니다.
-                                const rawContent = cat.content || cat.title || "";
-                                let firstLine = rawContent.split('\n')[0] || "";
-                                if (!/^\[(법|령|칙|규)\]/.test(firstLine)) {
-                                    firstLine = `[법] ${firstLine.trim()}`;
-                                }
-                                
-                                let bodyContent = ""; let answerText = ""; let isBlanking = false;
-                                wordArray.forEach((wObj, index) => {
-                                  if (pageBreaks.has(index)) { bodyContent += " ##PAGE_BREAK## "; }
-                                  if (selectedWords.has(index)) {
-                                    if (!isBlanking) { bodyContent += "[ "; isBlanking = true; }
-                                    bodyContent += wObj.text; answerText += (answerText ? ", " : "") + wObj.text;
-                                  } else { 
-                                    if (isBlanking) { bodyContent += " ]"; isBlanking = false; } 
-                                    bodyContent += wObj.text; 
-                                  }
-                                });
-                                if (isBlanking) bodyContent += " ]";
-                                
-                                const finalCardContent = `${firstLine}\n${bodyContent.trim()}\n\n[[ORIG_ID:${cat.id}]]`;
-                                const initialMemo = stringifyCardStats(memoInput, 0, []);
-                                
-                                fetch("https://api.blankd.top/api/save-card", { 
-                                  method: "POST", headers: { "Content-Type": "application/json" }, 
-                                  body: JSON.stringify({ 
-                                      wallet_address: safeAddress, card_id: null, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo 
-                                  }) 
-                                }).then(res => {
-                                    if(res.ok) {
-                                        addLog("✅ 신규 생성 완료");
-                                        if (loadAllData) loadAllData();
-                                        if (nextCat) setExpandedId(nextCat.id);
-                                        else setExpandedId(null);
-                                    }
+                                handleMakeBlankCard(cat, wordArray.map(w => w.text), selectedWords, pageBreaks, memoInput, cat.id, () => {
+                                    if (nextCat) { setExpandedId(nextCat.id); } 
+                                    else { setExpandedId(null); }
                                 });
                               }} 
                               className="w-full py-2.5 text-xs sm:text-sm font-bold rounded-sm mt-2 transition-all bg-amber-500/20 text-amber-400 border border-amber-500/30 hover:bg-amber-500/30"
