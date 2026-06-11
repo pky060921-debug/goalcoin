@@ -10,7 +10,7 @@ import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
-// ── 인라인 빈칸 입력 컴포넌트 (부모 리렌더링 완전 격리 및 정밀 채점 연동) ─────────────────
+// ── 인라인 빈칸 입력 컴포넌트 ─────────────────
 const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
@@ -34,7 +34,6 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
     const cleanExpected = expected.replace(/\s+/g, '').toLowerCase();
     let isMatch = (cleanInput === cleanExpected);
 
-    // 약어 사전 기반 정밀 채점 엔진 연동 (길이 기반 판독 자동 최적화)
     if (!isMatch && abbrDict) {
       Object.entries(abbrDict).forEach(([k, v]) => {
         const strK = k.replace(/\s+/g, '').toLowerCase();
@@ -78,7 +77,6 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
   return prevProps.inputStatus === nextProps.inputStatus && prevProps.expected === nextProps.expected && prevProps.abbrDict === nextProps.abbrDict;
 });
 
-// ── 시스템 런타임 에러 진단 바운더리 ─────────────────
 class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
   constructor(props: any) { 
     super(props); 
@@ -101,7 +99,6 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
   }
 }
 
-// ── 로컬 스토리지 분산 동기화 비동기 대기열 큐 ─────────────────
 const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
   try {
     const qStr = localStorage.getItem('blankd_sync_queue');
@@ -141,6 +138,10 @@ function MainApp() {
   const [colCount, setColCount] = useState(3);
   const [useAiRecommend, setUseAiRecommend] = useState(true);
   const [studyMode, setStudyMode] = useState('일반');
+  
+  // 💡 [신규 추가] 화면 테마 전역 상태 관리 (black, white, green)
+  const [theme, setTheme] = useState(() => localStorage.getItem('blankd_theme') || 'black');
+  useEffect(() => { localStorage.setItem('blankd_theme', theme); }, [theme]);
   
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
@@ -207,7 +208,6 @@ function MainApp() {
     }
   };
 
-  // 스마트 약어 길이 기반 자가 교정 및 복구 엔진
   useEffect(() => {
     if (!globalDict || !globalDict.abbrs) return;
     
@@ -352,7 +352,6 @@ function MainApp() {
     );
     const targetCardId = existingCard ? existingCard.id : null; 
 
-    // 조항명은 첫 줄 보존, 빈칸은 본문 레이어만 감싸서 빌드
     const rawContent = cat.content || cat.title || "";
     const firstLine = rawContent.split('\n')[0] || "";
     const finalCardContent = `${firstLine}\n${bodyContent.trim()}\n\n[[ORIG_ID:${cat.id}]]`;
@@ -386,10 +385,8 @@ function MainApp() {
   useEffect(() => {
     if (activeCard) {
       isClosingRef.current = false;
-      // 💡 [버그 조치 완료] 공백 유연성 및 줄바꿈 차이를 방어하도록 전방 정규식 교정 수행
       const cleanContent = activeCard.content.replace(/\s*\[\[ORIG_ID:\d+\]\]/g, '');
       
-      // 조항명 보호 격리: 첫 줄(조항명)을 분리하여 본문 영역에서만 빈칸을 추출
       const lines = cleanContent.split('\n');
       const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
@@ -497,7 +494,7 @@ function MainApp() {
     setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
-    pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, remove_time: finalTime, next_review: nextReviewDate.toISOString() });
+    pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
     addLog(`✅ 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
     flushQueue();
   };
@@ -691,8 +688,7 @@ function MainApp() {
 
   const renderContent = React.useCallback(() => {
     if (!activeCard) return null;
-    // 💡 [버그 조치 완료] 모의고사 본문 렌더링 시에도 전방 공백을 유연하게 매칭하도록 정규식 교정 적용
-    const cleanContent = activeCard.content.replace(/\s*\[\[ORIG_ID:\d+\]\]/g, '');
+    const cleanContent = activeCard.content.replace(/\n\n\[\[ORIG_ID:\d+\]\]/g, '');
     
     const lines = cleanContent.split('\n');
     const titleLine = lines[0] || '';
@@ -791,11 +787,11 @@ function MainApp() {
         </div>
         <div className={activeTab === 'exam' ? 'block' : 'hidden'}><ExamTab walletAddress={safeAddress} address={safeAddress} /></div>
         <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
-          <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} zkLogin={zkLogin} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} globalDict={globalDict} saveGlobalDict={saveGlobalDict} loadAllData={loadAllData}/>
+          <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} zkLogin={zkLogin} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} globalDict={globalDict} saveGlobalDict={saveGlobalDict} loadAllData={loadAllData} theme={theme} setTheme={setTheme}/>
         </div>
       </>
     );
-  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, zkLogin, studyMode, setStudyMode, globalDict]);
+  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, zkLogin, studyMode, setStudyMode, globalDict, theme]);
 
   const renderDictionaryUI = (isMobile: boolean) => (
     <div className={`flex flex-col w-full h-full ${isMobile ? 'bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 rounded-sm' : 'bg-[#08080a]/80 border border-white/10 p-5 rounded-sm shadow-xl backdrop-blur-sm'}`}>
@@ -809,7 +805,7 @@ function MainApp() {
       </div>
       
       <div className="flex gap-2 mb-5 shrink-0">
-        <input type="text" value={tempKey} onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder={dictTab === 'abbr' ? "원래 정답 (예: 행정안전부장관)" : "단어 입력 (쉼표 구분)"} className="flex-1 bg-black/50 border border-white/30 transition-colors w-full min-w-0" />
+        <input type="text" value={tempKey} onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder={dictTab === 'abbr' ? "원래 정답 (예: 행정안전부장관)" : "단어 입력 (쉼표 구분)"} className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-white/30 transition-colors w-full min-w-0" />
         {dictTab === 'abbr' && (
           <input type="text" value={tempValue} onChange={(e) => setTempValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder="약어 (예: 행안부장관)" className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full min-w-0" />
         )}
@@ -849,12 +845,47 @@ function MainApp() {
     </div>
   );
 
+  // 💡 [CSS Injector] 전역 테마 적용 시스템
+  const getThemeCSS = () => {
+    if (theme === 'white') {
+      return `
+        body { background-color: #f0f2f5; color: #111827; }
+        .text-white { color: #111827 !important; }
+        .text-white\\/20, .text-white\\/30 { color: rgba(17,24,39,0.4) !important; }
+        .text-white\\/40, .text-white\\/50 { color: rgba(17,24,39,0.6) !important; }
+        .text-white\\/60, .text-white\\/70 { color: rgba(17,24,39,0.8) !important; }
+        .text-white\\/80 { color: #111827 !important; }
+        .text-\\[\\#d1d1d1\\] { color: #374151 !important; }
+        .border-white\\/5 { border-color: rgba(0,0,0,0.05) !important; }
+        .border-white\\/10 { border-color: rgba(0,0,0,0.1) !important; }
+        .border-white\\/20 { border-color: rgba(0,0,0,0.2) !important; }
+        .bg-black\\/30 { background-color: rgba(255,255,255,0.5) !important; }
+        .bg-black\\/40 { background-color: rgba(255,255,255,0.6) !important; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .bg-black\\/50 { background-color: rgba(255,255,255,0.8) !important; }
+        .bg-white\\/5 { background-color: rgba(0,0,0,0.03) !important; }
+        .bg-white\\/10 { background-color: rgba(0,0,0,0.06) !important; }
+        .bg-\\[\\#08080a\\] { background-color: #f8f9fa !important; }
+        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; }
+        .bg-\\[\\#0d0d0f\\] { background-color: #f0f2f5 !important; }
+      `;
+    } else if (theme === 'green') {
+      return `
+        body { background-color: #163322; }
+        .bg-\\[\\#08080a\\] { background-color: #0f2418 !important; }
+        .bg-\\[\\#0a0a0c\\] { background-color: #122b1c !important; }
+        .bg-\\[\\#0d0d0f\\] { background-color: #163322 !important; }
+      `;
+    }
+    return `body { background-color: #0d0d0f; }`; // Black
+  };
+
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
+      <style>{getThemeCSS()}</style>
       <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex items-center justify-between w-full md:w-auto">
-            <button onClick={() => { const lastTab = localStorage.getItem('blankd_active_tab') || 'progress'; setActiveTab(lastTab); }} className="text-xl sm:text-2xl font-bold tracking-widest text-white shrink-0 hover:text-teal-400 transition-colors">
+            <button onClick={() => { const lastTab = localStorage.getItem('blankd_active_tab') || 'progress'; setActiveTab(lastTab); }} className="text-xl sm:text-2xl font-bold tracking-widest text-current shrink-0 hover:text-teal-400 transition-colors">
               BlankD
             </button>
           </div>
@@ -900,7 +931,7 @@ function MainApp() {
         <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="max-w-6xl mx-auto flex items-center justify-start gap-1 sm:gap-2">
             {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-white' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
             ))}
           </div>
         </nav>
@@ -908,9 +939,9 @@ function MainApp() {
 
       {!isLoggedIn ? (
         <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
-          <h2 className="text-xl sm:text-2xl font-serif text-white mb-4 tracking-tight">빈칸개발 (BlankD)</h2>
+          <h2 className="text-xl sm:text-2xl font-serif text-current mb-4 tracking-tight">빈칸개발 (BlankD)</h2>
           <p className="text-xs sm:text-sm text-white/40 mb-10 sm:mb-12 text-center leading-relaxed">인지 부하 이론 기반의 학습 플랫폼<br/>압도적인 영구 기억을 형성합니다.</p>
-          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-white text-black text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
+          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-[#111827] text-white text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
         </main>
       ) : (
         <div className="max-w-[1500px] mx-auto w-full flex gap-4 sm:gap-6 px-4 lg:px-6 items-start pb-10">
