@@ -36,7 +36,8 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
         const bodyMatch = cat.content.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
         if (bodyMatch && bodyMatch[2].trim() !== "내용") return `${bodyMatch[1].replace(/\s+/g, '')} ${bodyMatch[2].trim()}`;
       }
-      const fallbackTitle = raw.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').replace(/내용/g, '').trim();
+      // 💡 [수정 완료] [법], [령], [칙]을 삭제하던 원인 제거
+      const fallbackTitle = raw.split('\n')[0].replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
       return fallbackTitle || "제목 없음";
     } catch (error) { return "제목 추출 에러"; }
   };
@@ -103,7 +104,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
-  // 💡 [자가 치유 동기화 엔진] 약어 사전에 있지만 포함 단어에는 없는 항목 자동 복구
   useEffect(() => {
     if (!globalDict) return;
     const abbrevKeys = Object.keys(globalDict.abbreviations || {});
@@ -150,8 +150,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     const orig = newAbbrevOrig.trim(); const short = newAbbrevShort.trim();
     const currentAbbrevs = globalDict?.abbreviations || {};
     const currentInclusions = globalDict?.custom_inclusions || globalDict?.inclusions || [];
-    
-    // 원래 정답을 필수 포함 리스트에 즉시 안전 추가
     const nextInclusions = Array.from(new Set([...currentInclusions, orig]));
 
     saveGlobalDict({ ...globalDict, abbreviations: { ...currentAbbrevs, [orig]: short }, custom_inclusions: nextInclusions, inclusions: nextInclusions });
@@ -205,7 +203,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       localStorage.setItem('blankd_craft_expanded', expandedId.toString());
       const targetCat = safeCategories.find((c: any) => c.id === expandedId);
       if (targetCat) {
-        // 💡 [조항명 빈칸 원천 분리] 원본 텍스트에서 첫 줄(조항명)을 제거하고 본문만 추출하여 넘깁니다.
         const rawContent = targetCat.content || targetCat.title || "";
         const lines = rawContent.split('\n');
         const bodyOnly = lines.length > 1 ? lines.slice(1).join('\n').trim() : rawContent;
@@ -219,7 +216,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     const abbrevKeys = Object.keys(globalDict?.abbreviations || {});
     const currentCustomIncludeWords = Array.from(new Set([...(globalDict?.inclusions || globalDict?.custom_inclusions || []), ...abbrevKeys]));
     
-    // 기존에 있던 대괄호 무조건 삭제하여 중복 괄호 방지
     let processedText = textBody.replace(/\[|\]/g, '');
     if (currentCustomStopWords.length > 0) {
        const safeStops = currentCustomStopWords.map((w: string) => w.trim().replace(/[.*+?^${}()|[\]\\ packs]/g, '\\$&')).filter((w: string) => w !== "");
@@ -256,7 +252,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     
     currentWordArray.forEach((wordObj, idx) => {
         const trimmed = wordObj.text.trim();
-        // 포함 단어 & 약어 보호 처리
         if (currentCustomIncludeWords.some((cw: string) => trimmed.replace(/\s+/g, '') === cw.replace(/\s+/g, ''))) { protectedIndices.add(idx); initialSelected.add(idx); }
     });
     
@@ -301,7 +296,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       const parsed = parseCardStats(existingCard.memo); setMemoInput(parsed.text);
     } else { setMemoInput(targetCat.memo || ""); }
     
-    // 💡 [조항명 분리 격리] 클릭하여 열 때도 첫 줄 제거 후 적용
     const rawContent = targetCat.content || targetCat.title || "";
     const lines = rawContent.split('\n');
     const bodyOnly = lines.length > 1 ? lines.slice(1).join('\n').trim() : rawContent;
@@ -474,7 +468,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                             
                             <div className="font-serif mt-2 text-[13px] sm:text-[15px] leading-loose text-white/80 p-4 bg-black/40 border border-white/10 max-h-72 overflow-y-auto rounded select-none touch-manipulation whitespace-pre-wrap break-keep custom-scrollbar relative transition-all">
                               
-                              {/* 💡 [조항명 보호 격리 적용] 렌더링 시 제목 영역이 터치되지 않도록 고정합니다. */}
                               <div className="text-amber-400 font-bold mb-2 pb-2 border-b border-white/10 select-none opacity-70 cursor-not-allowed">
                                 {displayTitle}
                               </div>
