@@ -746,33 +746,39 @@ function MainApp() {
     </div>
   );
 
-  // 💡 [CSS Injector] 전역 테마 적용 시스템 (화이트 테마 시 글씨, 배경, 사전 목록 강제 오버라이딩 최적화)
+  // 💡 [CSS Injector] 전역 테마 적용 시스템 (화이트 테마 시 글씨, 배경, 선 가독성 대폭 강화)
   const getThemeCSS = () => {
     if (theme === 'white') {
       return `
         body { background-color: #f3f4f6; color: #111827; }
         .text-white { color: #111827 !important; }
-        .text-white\\/20, .text-white\\/30 { color: rgba(17,24,39,0.4) !important; }
-        .text-white\\/40, .text-white\\/50 { color: rgba(17,24,39,0.6) !important; }
-        .text-white\\/60, .text-white\\/70 { color: rgba(17,24,39,0.8) !important; }
-        .text-white\\/80 { color: #374151 !important; }
-        .text-\\[\\#d1d1d1\\] { color: #374151 !important; }
         
+        /* 💡 글씨 색상: 흐릿한 회색을 모두 진한 회색~검은색으로 변경 */
+        .text-white\\/20, .text-white\\/30 { color: #4b5563 !important; font-weight: 600; }
+        .text-white\\/40, .text-white\\/50 { color: #374151 !important; font-weight: 600; }
+        .text-white\\/60, .text-white\\/70 { color: #1f2937 !important; font-weight: 600; }
+        .text-white\\/80 { color: #111827 !important; font-weight: 600; }
+        .text-\\[\\#d1d1d1\\] { color: #111827 !important; font-weight: 600; }
+        
+        /* 💡 배경 색상 최적화 */
         .bg-\\[\\#08080a\\] { background-color: #ffffff !important; }
-        .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(255, 255, 255, 0.9) !important; backdrop-filter: blur(8px); }
-        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+        .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(255, 255, 255, 0.95) !important; backdrop-filter: blur(8px); }
+        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
         .bg-\\[\\#0d0d0f\\] { background-color: #f3f4f6 !important; }
         
         .bg-black\\/30 { background-color: #f9fafb !important; }
-        .bg-black\\/40 { background-color: #ffffff !important; box-shadow: 0 1px 2px rgba(0,0,0,0.05); border-color: #e5e7eb !important; }
-        .bg-black\\/50 { background-color: #f3f4f6 !important; color: #111827 !important; } 
-        .bg-black\\/60 { background-color: #ffffff !important; color: #111827 !important; border-color: #d1d5db !important; } 
-        .bg-white\\/5 { background-color: rgba(0,0,0,0.03) !important; }
-        .bg-white\\/10 { background-color: rgba(0,0,0,0.06) !important; }
+        .bg-black\\/40 { background-color: #ffffff !important; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-color: #9ca3af !important; }
+        .bg-black\\/50 { background-color: #e5e7eb !important; color: #111827 !important; } 
+        .bg-black\\/60 { background-color: #ffffff !important; color: #111827 !important; border-color: #6b7280 !important; } 
+        .bg-white\\/5 { background-color: #f3f4f6 !important; }
+        .bg-white\\/10 { background-color: #e5e7eb !important; }
         
-        .border-white\\/5 { border-color: rgba(0,0,0,0.05) !important; }
-        .border-white\\/10 { border-color: rgba(0,0,0,0.1) !important; }
-        .border-white\\/20 { border-color: rgba(0,0,0,0.2) !important; }
+        /* 💡 테두리(선) 색상: 흐릿한 선을 진한 선으로 변경하여 구역을 뚜렷하게 분리 */
+        .border-white\\/5 { border-color: #d1d5db !important; }
+        .border-white\\/10 { border-color: #9ca3af !important; }
+        .border-white\\/20 { border-color: #6b7280 !important; }
+        .border-white\\/30 { border-color: #4b5563 !important; }
+        
         .text-amber-50 { color: #111827 !important; }
       `;
     } else if (theme === 'green') {
