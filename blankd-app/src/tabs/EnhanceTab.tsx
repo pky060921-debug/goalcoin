@@ -179,7 +179,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return titleLine + (lines.length > 1 ? '\n' : '') + tokens.join('');
   };
 
-  // 💡 [버튼 단일화] "+" 버튼 하나로 동작하며, 누르면 [령/칙] 이 포함된 템플릿 로드
   const handleAddAdjacent = (folder: string, index: number) => {
     const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
     const origCard = folderCards[index];
@@ -277,7 +276,8 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
   const renderInteractiveText = () => {
     const lines = editContent.split('\n');
-    const titleLine = lines[0] || '';
+    // 💡 [화면 가림 필터링] 수정 창 상단의 제목에서도 법, 령, 칙을 시각적으로 숨깁니다.
+    const titleLine = (lines[0] || '').replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '').trim();
     const restLines = lines.slice(1).join('\n');
     
     const tokens = restLines.split(/(\s+|\n|---|\[\[?ORIG_ID:\d+\]?\]?|\[[^\]]+\])/g).filter(Boolean);
@@ -314,9 +314,11 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           return (
             <span key={idx} onClick={() => {
                 if (activeTool === 'include' && !isBracketed) {
-                  const newTokens = [...tokens]; newTokens[idx] = `[${token}]`; setEditContent(titleLine + '\n' + newTokens.join(''));
+                  const newTokens = [...tokens]; newTokens[idx] = `[${token}]`; 
+                  setEditContent(lines[0] + '\n' + newTokens.join(''));
                 } else if (activeTool === 'exclude' && isBracketed) {
-                  const newTokens = [...tokens]; newTokens[idx] = token.slice(1, -1); setEditContent(titleLine + '\n' + newTokens.join(''));
+                  const newTokens = [...tokens]; newTokens[idx] = token.slice(1, -1); 
+                  setEditContent(lines[0] + '\n' + newTokens.join(''));
                 }
               }} className={btnClass}
             >{isBracketed ? token.slice(1, -1) : token}</span>
@@ -344,24 +346,28 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                 try {
                   const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
                   
-                  // 💡 [수정 완료] [법], [령], [칙]을 삭제하던 원인 제거
-                  let displayTitle = (cleanContent.split('\n')[0] || "").replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
+                  // 💡 [화면 가림 필터링] 화면에 보여질 때만 [법], [령], [칙] 등을 삭제하여 깔끔하게 노출
+                  let displayTitle = (cleanContent.split('\n')[0] || "")
+                    .replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '')
+                    .replace(/\(\s*내용\s*\)/g, '')
+                    .replace(/내용/g, '')
+                    .trim();
                   if (!displayTitle) displayTitle = "제목 없음";
+
+                  // 💡 원본 데이터를 바탕으로 열(Column) 배치 및 색상을 100% 정상 정렬
+                  let colClass = "md:col-start-1 md:col-span-1"; 
+                  let titleColor = "text-red-500";
+                  
+                  const firstLineData = cleanContent.split('\n')[0] || "";
+                  if (firstLineData.includes('[법]')) { colClass = "md:col-start-1 md:col-span-1"; titleColor = "text-red-500"; }
+                  else if (firstLineData.includes('[령]')) { colClass = "md:col-start-2 md:col-span-1"; titleColor = "text-blue-400"; }
+                  else if (firstLineData.includes('[칙]') || firstLineData.includes('[규]')) { colClass = "md:col-start-3 md:col-span-1"; titleColor = "text-green-500"; }
 
                   const lines = cleanContent.split('\n');
                   const bodyOnlyForStats = lines.slice(1).join('\n');
                   const totalBlanks = (bodyOnlyForStats.match(/\[\s*(.*?)\s*\]/g) || []).length;
-                  
                   const stats = parseCardStats(card.memo);
                   const hasWrong = stats.wrongIndices.length > 0;
-                  
-                  let colClass = "md:col-span-1"; 
-                  let titleColor = "text-teal-400";
-                  
-                  // 💡 [수정 완료] 법, 령, 칙에 따른 완벽한 열(Column) 배치 및 색상 정렬 시스템
-                  if (cleanContent.includes('[법]')) { colClass = "md:col-start-1 md:col-span-1"; titleColor = "text-red-500"; }
-                  else if (cleanContent.includes('[령]')) { colClass = "md:col-start-2 md:col-span-1"; titleColor = "text-blue-400"; }
-                  else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { colClass = "md:col-start-3 md:col-span-1"; titleColor = "text-green-500"; }
 
                   if (editingId === card.id) colClass = "col-span-full";
 
@@ -417,10 +423,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                 <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                               </div>
                               <div className="flex items-center gap-1 opacity-80 hover:opacity-100 transition-opacity">
-                                {/* 💡 [디자인 수정] 화이트 테마에서도 눈이 편안한 깔끔한 무채색 기반 버튼으로 일괄 교체 및 [+] 버튼 병합 */}
                                 <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-blue-500/10 hover:text-blue-500 hover:border-blue-500/30 transition-all cursor-pointer">이동</button>
                                 
-                                <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-green-500/10 hover:text-green-600 hover:border-green-500/30 transition-all cursor-pointer">+</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-green-500/10 hover:text-green-600 hover:border-green-500/30 transition-all cursor-pointer">➕ 추가</button>
                                 
                                 <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('editor'); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/30 transition-all">수정</button>
                                 <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-1 px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-red-500/10 hover:text-red-500 hover:border-red-500/30 transition-all">✕</button>
