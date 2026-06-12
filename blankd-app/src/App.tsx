@@ -10,6 +10,62 @@ import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
+// 💡 [혁신 엔진] 사전에 단어가 등록되는 순간, 모든 카드 텍스트를 스캔하여 띄어쓰기 무관하게 빈칸을 뚫는 함수
+const autoApplyDictHelper = (content: string, dict: any) => {
+  if (!dict) return content;
+  let fixedContent = content.replace(/\[ORIG_ID:(\d+)\]/g, '[[ORIG_ID:$1]]');
+  const lines = fixedContent.split('\n');
+  const titleLine = lines[0] || '';
+  const restContent = lines.length > 1 ? lines.slice(1).join('\n') : '';
+
+  const stopWords = dict.stopwords || [];
+  const abbrevKeys = Object.keys(dict.abbrs || {});
+  const abbrevValues = Object.values(dict.abbrs || {});
+  
+  // 필수포함 단어 + 약어(원래 정답) + 약어(짧은 정답) 모두 타겟으로 지정
+  const includeWords = Array.from(new Set([
+      ...(dict.inclusions || []),
+      ...abbrevKeys,
+      ...(abbrevValues as string[])
+  ])).filter((w: any) => typeof w === 'string' && w.trim() !== '').sort((a: any, b: any) => b.length - a.length);
+
+  let tokens = restContent.split(/(\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g);
+  for (let i = 0; i < tokens.length; i++) {
+    if (!tokens[i]) continue;
+    if (tokens[i].startsWith('[[ORIG_ID:')) continue;
+    
+    if (tokens[i].startsWith('[') && tokens[i].endsWith(']')) {
+      let innerText = tokens[i].slice(1, -1);
+      let cleanInner = innerText.replace(/\s+/g, '');
+      if (stopWords.some((sw:string) => sw.replace(/\s+/g,'') === cleanInner)) {
+          tokens[i] = innerText; // 제외 단어면 괄호 박탈
+      }
+    } else {
+      let text = tokens[i];
+      includeWords.forEach((iw: string) => {
+        // 💡 띄어쓰기가 어떻게 되어있든 귀신같이 찾아내는 정규식 마법 (가나다 -> 가\s*나\s*다)
+        const escaped = iw.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const flexibleRegexStr = escaped.split('').join('\\s*');
+        const regex = new RegExp(`(${flexibleRegexStr})`, 'g');
+        
+        let parts = text.split(/(\[[^\]]+\])/g);
+        for(let j=0; j<parts.length; j++){
+          if(!parts[j].startsWith('[')){ parts[j] = parts[j].replace(regex, '[$1]'); }
+        }
+        text = parts.join('');
+      });
+      tokens[i] = text;
+    }
+  }
+  
+  for (let i = 0; i < tokens.length; i++) {
+    if (!tokens[i].startsWith('[[ORIG_ID:')) {
+       tokens[i] = tokens[i].replace(/\[+/g, '[').replace(/\]+/g, ']');
+    }
+  }
+  return titleLine + (lines.length > 1 ? '\n' : '') + tokens.join('');
+};
+
 const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
@@ -177,7 +233,6 @@ function MainApp() {
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
         api.getGoalCoinBalance(safeAddress).catch(() => 0),
         api.getGlobalDict(safeAddress).catch((e) => {
-          console.error("전역 단어장 로드 실패:", e);
           return { stopwords: [], inclusions: [], abbrs: {} };
         })
       ]);
@@ -196,21 +251,55 @@ function MainApp() {
         abbrs: finalAbbrs
       });
     } catch (e: any) {
-      console.error("데이터 동기화 실패:", e);
       addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
     }
   };
 
+  // 💡 [혁신적 자동화] 사전에 새로운 단어가 추가되면 모든 카드에 빈칸을 자동 적용하여 즉시 업데이트!
   const saveGlobalDict = async (newDict: any) => {
-    setGlobalDict(newDict);
+    setGlobalDict(newDict); // 1. 화면 즉시 반영
+    
     try {
-      await api.updateGlobalDict(safeAddress, newDict);
+      await api.updateGlobalDict(safeAddress, newDict); // 2. DB에 사전 저장
     } catch (err) {
       console.error("단어장 DB 동기화 실패:", err);
     }
-  };
 
-  // 💡 [치명적 버그 수정] 기존에 App.tsx에 숨어있던 '약어 등록 시 필수 단어로 강제 복사하는 감시 코드(useEffect)' 완전 삭제 완료!
+    // 3. 백그라운드 카드 스캔 & 자동 빈칸 업데이트 프로세스 가동
+    setSavedCards(prevCards => {
+      let changeCount = 0;
+      const updatedCards = prevCards.map(card => {
+        const newContent = autoApplyDictHelper(card.content, newDict);
+        if (newContent !== card.content) {
+          changeCount++;
+          return { ...card, content: newContent, _isModified: true };
+        }
+        return card;
+      });
+
+      if (changeCount > 0) {
+        addLog(`🔄 스마트 스캔 중: ${changeCount}개 카드에 빈칸 자동 생성 및 동기화 진행...`);
+        updatedCards.filter(c => c._isModified).forEach(card => {
+           // 새롭게 뚫린 빈칸 정답들 추출
+           const newAnswers = (card.content.match(/\[\s*(.*?)\s*\]/g) || [])
+              .map((b: string) => b.replace(/\[|\]/g, '').trim())
+              .filter((a: string) => !a.startsWith('ORIG_ID:'))
+              .filter(Boolean)
+              .join(", ");
+           
+           // 개별 카드의 DB 업데이트 전송
+           fetch("https://api.blankd.top/api/save-card", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                  wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: newAnswers, folder_name: card.folder_name, memo: card.memo
+              })
+           }).catch(()=>{});
+        });
+        setTimeout(() => addLog(`✅ 전역 빈칸 자동 생성 완료!`), 1000);
+      }
+      return updatedCards.map(c => { const { _isModified, ...rest } = c; return rest; });
+    });
+  };
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
@@ -336,12 +425,14 @@ function MainApp() {
         detectedPrefix = "[칙]";
       } else if (fullTextToScan.includes("[령]") || fullTextToScan.includes("시행령")) {
         detectedPrefix = "[령]";
+      } else if (fullTextToScan.includes("[정관]")) {
+        detectedPrefix = "[정관]";
       } else {
         detectedPrefix = "[법]";
       }
 
       let firstLineRaw = rawTitle.length > rawContent.split('\n')[0].length ? rawTitle : rawContent.split('\n')[0];
-      let cleanFirstLine = firstLineRaw.replace(/\[(법|령|칙|규)\]/g, '').trim();
+      let cleanFirstLine = firstLineRaw.replace(/\[(법|령|칙|규|정관)\]/g, '').trim();
       const finalFirstLine = `${detectedPrefix} ${cleanFirstLine}`;
       
       const finalCardContent = `${finalFirstLine}\n${bodyContent.trim()}\n\n[[ORIG_ID:${cat.id}]]`;
@@ -360,9 +451,7 @@ function MainApp() {
         addLog(targetCardId ? "✅ 덮어쓰기 완료" : "✅ 신규 생성 완료");
         await loadAllData(); onComplete(); 
       }
-    } catch (e) {
-      console.error("저장 에러:", e);
-    }
+    } catch (e) {}
   };
 
   const handleUpdateMemoBackground = (id: number, memo: string) => {
@@ -610,7 +699,7 @@ function MainApp() {
     const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
     let displayTitle = titleLine
-      .replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '')
+      .replace(/\[법\]|\[령\]|\[칙\]|\[규\]|\[정관\]/g, '')
       .replace(/\(\s*내용\s*\)/g, '')
       .replace(/내용/g, '')
       .trim();
@@ -677,7 +766,7 @@ function MainApp() {
     );
   }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs]);
 
-  // 💡 [치명적 버그 수정] 여기서도 약어가 필수 포함 단어에 섞이지 않도록 완벽히 분리!
+  // 💡 [개선] 약어(abbrs)는 오직 약어 DB에만 저장하고, 포함단어(inclusions)와 완벽히 분리
   const handleAddDictItem = () => {
     if (dictTab === 'abbr' && tempKey && tempValue) {
       const k = tempKey.trim(); const v = tempValue.trim();
@@ -765,7 +854,6 @@ function MainApp() {
   const getThemeCSS = () => {
     if (theme === 'white') {
       return `
-        /* 1. 기본 배경 및 텍스트 베이스 */
         body { background-color: #f3f4f6; color: #111827; }
         .text-white { color: #111827 !important; }
         .text-white\\/20, .text-white\\/30 { color: #6b7280 !important; font-weight: 600; }
@@ -774,13 +862,11 @@ function MainApp() {
         .text-white\\/80 { color: #1f2937 !important; font-weight: 700; }
         .text-\\[\\#d1d1d1\\] { color: #111827 !important; font-weight: 700; }
         
-        /* 2. 레이아웃 구조 박스 (모달, 카드 등) */
         .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #9ca3af !important; }
         .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(255, 255, 255, 0.95) !important; backdrop-filter: blur(8px); }
         .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border-color: #d1d5db !important; }
         .bg-\\[\\#0d0d0f\\] { background-color: #f3f4f6 !important; }
         
-        /* 3. 인풋 및 범용 반투명 배경 */
         .bg-black\\/30, .bg-black\\/40, .bg-black\\/50, .bg-black\\/60 { 
           background-color: #f9fafb !important; color: #111827 !important; border-color: #9ca3af !important; 
         }
@@ -788,12 +874,10 @@ function MainApp() {
           background-color: #f3f4f6 !important; border-color: #9ca3af !important; color: #111827 !important; 
         }
         
-        /* 4. 범용 테두리 선명화 */
         .border-white\\/5, .border-white\\/10, .border-white\\/20, .border-white\\/30 { 
           border-color: #6b7280 !important; 
         }
 
-        /* 🎨 5. 브랜드 컬러 강제 교정 (라이트 모드 맞춤형) 🎨 */
         .text-teal-300, .text-teal-400, .text-teal-500 { color: #0f766e !important; font-weight: 800 !important; }
         .bg-teal-900\\/20, .bg-teal-900\\/30, .bg-teal-900\\/40, .bg-teal-950\\/20, .bg-teal-500\\/10, .bg-teal-500\\/20 { 
           background-color: #ccfbf1 !important; border-color: #0d9488 !important; 
