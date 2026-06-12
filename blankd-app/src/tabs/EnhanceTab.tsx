@@ -281,7 +281,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
   const renderInteractiveText = () => {
     const lines = editContent.split('\n');
-    const titleLine = (lines[0] || '').replace(/\[(법|령|칙|규)\]/g, '').trim();
+    const titleLine = (lines[0] || '').replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '').trim();
     const restLines = lines.slice(1).join('\n');
     
     const tokens = restLines.split(/(\s+|\n|---|\[\[?ORIG_ID:\d+\]?\]?|\[[^\]]+\])/g).filter(Boolean);
@@ -360,6 +360,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                   let colClass = "md:col-start-1 md:col-span-1"; 
                   let titleColor = "text-red-500";
                   
+                  // 💡 [지능형 정렬 스캔 역전] 첫줄이 아니라 '전체 텍스트'에서 [칙] -> [령] -> [법] 순서로 하위 법령을 무조건 먼저 찾습니다!
                   if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { 
                     colClass = "md:col-start-3 md:col-span-1"; titleColor = "text-green-500";
                   } else if (cleanContent.includes('[령]')) { 
@@ -376,6 +377,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
                   if (editingId === card.id) colClass = "col-span-full";
 
+                  // 💡 [한 줄 고정 강제화] 조항명 길이에 따라 글씨 크기와 자간을 자동 축소하여 무조건 한 줄에 맞춥니다.
                   const titleLen = displayTitle.length;
                   const titleSizing = titleLen > 25 ? 'text-[10px] sm:text-[11px] tracking-[calc(-0.06em)]' : 
                                       titleLen > 15 ? 'text-[11px] sm:text-[12px] tracking-tighter' : 
@@ -407,7 +409,8 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           </div>
                         </div>
                       ) : (
-                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm border flex flex-col justify-center gap-0.5 ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
+                        // 💡 [디자인 수정] 모든 선(Border)을 제거하여 플랫하게 변경.
+                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm flex flex-col justify-center gap-0.5 ${movingId === card.id ? "shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "bg-red-900/20" : "bg-indigo-900/20 hover:bg-indigo-900/40"} transition-all duration-200`}>
                           
                           <div className="flex w-full overflow-hidden mb-1">
                             <div className={`${titleColor} font-bold ${titleSizing} w-full text-left truncate leading-tight`} title={displayTitle}>
@@ -431,15 +434,17 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                             <div className="flex flex-col w-full pt-1">
                               <div className="flex flex-row justify-between items-center w-full">
                                 <div className="flex flex-nowrap gap-0.5">
-                                  <span className="text-[7px] sm:text-[8px] text-indigo-300 px-1 py-[1px] rounded bg-indigo-900/40 font-mono whitespace-nowrap leading-none flex items-center">빈칸:{totalBlanks}</span>
-                                  <span className="text-[7px] sm:text-[8px] text-teal-300 px-1 py-[1px] rounded bg-teal-900/40 font-mono whitespace-nowrap leading-none flex items-center">반복:{stats.filled}</span>
-                                  <span className={`text-[7px] sm:text-[8px] px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center ${hasWrong ? 'text-white bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
+                                  {/* 💡 [디자인 수정] 통계 박스 테두리 모두 제거 */}
+                                  <span className="text-[7px] sm:text-[8px] text-indigo-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">빈칸:{totalBlanks}</span>
+                                  <span className="text-[7px] sm:text-[8px] text-teal-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">반복:{stats.filled}</span>
+                                  <span className={`text-[7px] sm:text-[8px] px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center ${hasWrong ? 'text-white bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30'}`}>틀림:{stats.wrongIndices.length}</span>
                                 </div>
                                 <div className="flex items-center gap-0.5 opacity-80 hover:opacity-100 transition-opacity">
-                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
-                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
-                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('editor'); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
-                                  <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-0.5 px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[8px] hover:bg-red-500/10 hover:text-red-500 transition-all flex items-center justify-center leading-none h-4" title="삭제">✕</button>
+                                  {/* 💡 [극도로 축소된 아이콘 버튼] 테두리 제거, 여백 최소화 */}
+                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
+                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('editor'); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
+                                  <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-0.5 px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[8px] hover:bg-red-500/10 hover:text-red-500 transition-all flex items-center justify-center leading-none h-4" title="삭제">✕</button>
                                 </div>
                               </div>
                             </div>
