@@ -210,35 +210,6 @@ function MainApp() {
     }
   };
 
-  useEffect(() => {
-    if (!globalDict || !globalDict.abbrs) return;
-    let currentInclusions = globalDict.inclusions || [];
-    let changed = false;
-
-    Object.entries(globalDict.abbrs).forEach(([k, v]) => {
-      const strK = k as string;
-      const strV = v as string;
-      const orig = strK.length >= strV.length ? strK : strV;
-      const short = strK.length < strV.length ? strK : strV;
-
-      if (currentInclusions.includes(short)) {
-        currentInclusions = currentInclusions.filter(w => w !== short);
-        changed = true;
-      }
-      if (!currentInclusions.includes(orig)) {
-        currentInclusions.push(orig);
-        changed = true;
-      }
-    });
-
-    if (changed) {
-      saveGlobalDict({
-        ...globalDict,
-        inclusions: Array.from(new Set(currentInclusions))
-      });
-    }
-  }, [globalDict.abbrs]);
-
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
 
@@ -703,14 +674,12 @@ function MainApp() {
     );
   }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs]);
 
+  // 💡 [수정] 약어 등록 시 필수단어 리스트(inclusions)에 무단 침범하지 않도록 변경
   const handleAddDictItem = () => {
     if (dictTab === 'abbr' && tempKey && tempValue) {
       const k = tempKey.trim(); const v = tempValue.trim();
       const orig = k.length >= v.length ? k : v; const short = k.length < v.length ? k : v;
-      const currentInclusions = globalDict.inclusions || [];
-      const nextInclusions = Array.from(new Set([...currentInclusions, orig]));
-      const cleanedInclusions = nextInclusions.filter(w => w !== short);
-      saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [short]: orig }, inclusions: cleanedInclusions });
+      saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [short]: orig } });
       setTempKey(""); setTempValue("");
     } else if (dictTab !== 'abbr' && tempKey) {
       const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
@@ -758,7 +727,7 @@ function MainApp() {
       </div>
       
       <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 min-h-[160px]">
-        {dictTab === 'abbr' && Object.entries(globalDict.abbrs)
+        {dictTab === 'abbr' && Object.entries(globalDict.abbrs || {})
           .sort((a, b) => a[1].localeCompare(b[1], 'ko'))
           .map(([k, v]) => {
             const strK = k as string; const strV = v as string;
@@ -783,17 +752,17 @@ function MainApp() {
               }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors">✕</button>
             </div>
         ))}
-        {((dictTab === 'abbr' && Object.keys(globalDict.abbrs).length === 0) || (dictTab === 'stop' && globalDict.stopwords.length === 0) || (dictTab === 'include' && globalDict.inclusions.length === 0)) && (
+        {((dictTab === 'abbr' && Object.keys(globalDict.abbrs || {}).length === 0) || (dictTab === 'stop' && (globalDict.stopwords || []).length === 0) || (dictTab === 'include' && (globalDict.inclusions || []).length === 0)) && (
           <div className="text-center py-8 text-white/20 text-[11px] sm:text-xs">등록된 단어가 없습니다.</div>
         )}
       </div>
     </div>
   );
 
-  // 💡 [화이트 테마 교정] 선들을 명확한 진한 회색(#6b7280)으로 재정렬하고 외곽선을 살렸습니다.
   const getThemeCSS = () => {
     if (theme === 'white') {
       return `
+        /* 1. 기본 배경 및 텍스트 베이스 */
         body { background-color: #f3f4f6; color: #111827; }
         .text-white { color: #111827 !important; }
         .text-white\\/20, .text-white\\/30 { color: #6b7280 !important; font-weight: 600; }
@@ -802,58 +771,61 @@ function MainApp() {
         .text-white\\/80 { color: #1f2937 !important; font-weight: 700; }
         .text-\\[\\#d1d1d1\\] { color: #111827 !important; font-weight: 700; }
         
-        .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #9ca3af !important; }
+        /* 2. 레이아웃 구조 박스 (모달, 카드 등) */
+        .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #d1d5db !important; }
         .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(255, 255, 255, 0.95) !important; backdrop-filter: blur(8px); }
-        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border-color: #d1d5db !important; }
+        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border-color: #e5e7eb !important; }
         .bg-\\[\\#0d0d0f\\] { background-color: #f3f4f6 !important; }
         
+        /* 3. 인풋 및 범용 반투명 배경 */
         .bg-black\\/30, .bg-black\\/40, .bg-black\\/50, .bg-black\\/60 { 
-          background-color: #f9fafb !important; color: #111827 !important; border-color: #9ca3af !important; 
+          background-color: #f9fafb !important; color: #111827 !important; border-color: #d1d5db !important; 
         }
         .bg-white\\/5, .bg-white\\/10 { 
-          background-color: #f3f4f6 !important; border-color: #9ca3af !important; color: #111827 !important; 
+          background-color: #f3f4f6 !important; border-color: #d1d5db !important; color: #111827 !important; 
         }
         
-        /* 💡 화이트 모드일 때 범용 테두리를 진한 회색으로 교정 */
+        /* 4. 범용 테두리 선명화 */
         .border-white\\/5, .border-white\\/10, .border-white\\/20, .border-white\\/30 { 
-          border-color: #6b7280 !important; 
+          border-color: #d1d5db !important; 
         }
 
+        /* 🎨 5. 브랜드 컬러 강제 교정 (라이트 모드 맞춤형) 🎨 */
         .text-teal-300, .text-teal-400, .text-teal-500 { color: #0f766e !important; font-weight: 800 !important; }
         .bg-teal-900\\/20, .bg-teal-900\\/30, .bg-teal-900\\/40, .bg-teal-950\\/20, .bg-teal-500\\/10, .bg-teal-500\\/20 { 
-          background-color: #ccfbf1 !important; border-color: #0d9488 !important; 
+          background-color: #ccfbf1 !important; border-color: #5eead4 !important; 
         }
-        .border-teal-500\\/30, .border-teal-500\\/40, .border-teal-500\\/50 { border-color: #0d9488 !important; }
+        .border-teal-500\\/30, .border-teal-500\\/40, .border-teal-500\\/50 { border-color: #5eead4 !important; }
 
         .text-amber-300, .text-amber-400, .text-amber-500 { color: #b45309 !important; font-weight: 800 !important; }
         .bg-amber-900\\/20, .bg-amber-900\\/30, .bg-amber-900\\/40, .bg-amber-950\\/20, .bg-amber-500\\/10, .bg-amber-500\\/20 { 
-          background-color: #fef3c7 !important; border-color: #d97706 !important; 
+          background-color: #fef3c7 !important; border-color: #fcd34d !important; 
         }
-        .border-amber-500\\/30, .border-amber-500\\/40, .border-amber-500\\/50, .border-amber-900\\/30 { border-color: #d97706 !important; }
+        .border-amber-500\\/30, .border-amber-500\\/40, .border-amber-500\\/50, .border-amber-900\\/30 { border-color: #fcd34d !important; }
 
         .text-indigo-300, .text-indigo-400, .text-indigo-500 { color: #4338ca !important; font-weight: 800 !important; }
         .bg-indigo-900\\/20, .bg-indigo-900\\/30, .bg-indigo-900\\/40 { 
-          background-color: #e0e7ff !important; border-color: #6366f1 !important; 
+          background-color: #e0e7ff !important; border-color: #c7d2fe !important; 
         }
-        .border-indigo-500\\/30, .border-indigo-500\\/40, .border-indigo-500\\/50 { border-color: #6366f1 !important; }
+        .border-indigo-500\\/30, .border-indigo-500\\/40, .border-indigo-500\\/50 { border-color: #c7d2fe !important; }
 
         .text-blue-300, .text-blue-400, .text-blue-500 { color: #1d4ed8 !important; font-weight: 800 !important; }
         .bg-blue-900\\/20, .bg-blue-900\\/30, .bg-blue-900\\/40, .bg-blue-500\\/10, .bg-blue-500\\/20 { 
-          background-color: #dbeafe !important; border-color: #3b82f6 !important; 
+          background-color: #dbeafe !important; border-color: #bfdbfe !important; 
         }
-        .border-blue-500\\/30, .border-blue-500\\/40, .border-blue-500\\/50, .border-blue-500 { border-color: #3b82f6 !important; }
+        .border-blue-500\\/30, .border-blue-500\\/40, .border-blue-500\\/50 { border-color: #bfdbfe !important; }
 
         .text-red-300, .text-red-400, .text-red-500 { color: #b91c1c !important; font-weight: 800 !important; }
         .bg-red-900\\/20, .bg-red-900\\/30, .bg-red-900\\/40, .bg-red-950\\/20, .bg-red-500\\/10, .bg-red-500\\/20 { 
-          background-color: #fee2e2 !important; border-color: #ef4444 !important; 
+          background-color: #fee2e2 !important; border-color: #fecaca !important; 
         }
-        .border-red-500\\/30, .border-red-500\\/40, .border-red-500\\/50, .border-red-900\\/30 { border-color: #ef4444 !important; }
+        .border-red-500\\/30, .border-red-500\\/40, .border-red-500\\/50, .border-red-900\\/30 { border-color: #fecaca !important; }
 
         .text-green-300, .text-green-400, .text-green-500 { color: #15803d !important; font-weight: 800 !important; }
         .bg-green-900\\/20, .bg-green-900\\/30, .bg-green-900\\/40, .bg-green-500\\/10, .bg-green-500\\/20 { 
-          background-color: #dcfce7 !important; border-color: #10b981 !important; 
+          background-color: #dcfce7 !important; border-color: #a7f3d0 !important; 
         }
-        .border-green-500\\/30, .border-green-500\\/40, .border-green-500\\/50 { border-color: #10b981 !important; }
+        .border-green-500\\/30, .border-green-500\\/40, .border-green-500\\/50 { border-color: #a7f3d0 !important; }
       `;
     } else if (theme === 'green') {
       return `
@@ -889,7 +861,7 @@ function MainApp() {
 
               {nextStudyCard ? (
                 <button onClick={() => { setActiveCard(nextStudyCard); }} className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]">
-                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span><span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{nextStudyCard.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim()}</span>
+                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span><span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{nextStudyCard.content.split('\n')[0].replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim()}</span>
                 </button>
               ) : (<div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 완료</div>)}
             </div>
