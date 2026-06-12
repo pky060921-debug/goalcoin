@@ -111,7 +111,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
-  // 💡 [버그 해결] 글로벌 딕셔너리 연동 속성명(abbrs) 통일
   useEffect(() => {
     if (!globalDict) return;
     const abbrevKeys = Object.keys(globalDict.abbrs || {});
@@ -222,7 +221,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const applyTextToState = (textBody: string) => {
     const currentCustomStopWords = globalDict?.stopwords || [];
     const abbrevKeys = Object.keys(globalDict?.abbrs || {});
-    const abbrevValues = Object.values(globalDict?.abbrs || {}); // 💡 [추가] 약어 자체도 빈칸으로 만들 수 있도록 포함
+    const abbrevValues = Object.values(globalDict?.abbrs || {});
     const currentCustomIncludeWords = Array.from(new Set([
         ...(globalDict?.inclusions || []), 
         ...abbrevKeys, 
