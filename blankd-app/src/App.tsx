@@ -316,57 +316,71 @@ function MainApp() {
     }
   };
 
-  // 💡 [치명적 버그 수정 완료] 시스템에 카드를 저장하는 핵심 엔진
+  // 💡 [핵심 진단 및 교정] DB에 저장되기 전 거치는 최후의 검문소
   const handleMakeBlankCard = async (
     cat: any, wordsArray: string[], selectedIndices: Set<number>, pageBreaks: Set<number>, memo: string, cardId: any, onComplete: () => void
   ) => {
-    let bodyContent = ""; let answerText = ""; let isBlanking = false;
-    wordsArray.forEach((word, index) => {
-      if (pageBreaks.has(index)) { bodyContent += " ##PAGE_BREAK## "; }
-      if (selectedIndices.has(index)) {
-        if (!isBlanking) { bodyContent += "[ "; isBlanking = true; }
-        bodyContent += word; answerText += (answerText ? ", " : "") + word;
-      } else { 
-        if (isBlanking) { bodyContent += " ]"; isBlanking = false; } 
-        bodyContent += word; 
+    try {
+      console.log(`[진단] DB 저장 파이프라인 진입 (Card ID: ${cat.id})`);
+      let bodyContent = ""; let answerText = ""; let isBlanking = false;
+      wordsArray.forEach((word, index) => {
+        if (pageBreaks.has(index)) { bodyContent += " ##PAGE_BREAK## "; }
+        if (selectedIndices.has(index)) {
+          if (!isBlanking) { bodyContent += "[ "; isBlanking = true; }
+          bodyContent += word; answerText += (answerText ? ", " : "") + word;
+        } else { 
+          if (isBlanking) { bodyContent += " ]"; isBlanking = false; } 
+          bodyContent += word; 
+        }
+      });
+      if (isBlanking) bodyContent += " ]";
+      
+      const existingCard = savedCards.find((c: any) => 
+        c && c.content && (c.content.includes(`[[ORIG_ID:${cat.id}]]`) || c.content.trim().startsWith(cat.title.trim()))
+      );
+      const targetCardId = existingCard ? existingCard.id : null; 
+
+      const rawContent = cat.content || cat.title || "";
+      const fullTextToScan = rawContent + " " + bodyContent; // 💡 텍스트 전체를 샅샅이 뒤집니다!
+      
+      // 💡 [오류 원인 제거] [칙] -> [령] -> [법] 순서로 최우선 기호를 검출
+      let detectedPrefix = "[법]"; 
+      if (fullTextToScan.includes("[칙]") || fullTextToScan.includes("[규]")) {
+        detectedPrefix = "[칙]";
+      } else if (fullTextToScan.includes("[령]")) {
+        detectedPrefix = "[령]";
+      } else if (fullTextToScan.includes("[법]")) {
+        detectedPrefix = "[법]";
       }
-    });
-    if (isBlanking) bodyContent += " ]";
-    
-    const existingCard = savedCards.find((c: any) => 
-      c && c.content && (c.content.includes(`[[ORIG_ID:${cat.id}]]`) || c.content.trim().startsWith(cat.title.trim()))
-    );
-    const targetCardId = existingCard ? existingCard.id : null; 
+      console.log(`[진단] 스캔된 최우선 기호: ${detectedPrefix}`);
 
-    // 💡 [핵심 정렬 지능 엔진] 위치와 무관하게 전체 텍스트에서 령/칙을 우선으로 찾아냅니다!
-    const rawContent = cat.content || cat.title || "";
-    let firstLine = rawContent.split('\n')[0] || "";
-    
-    let detectedPrefix = "[법]"; // 기본값
-    if (rawContent.includes("[령]")) detectedPrefix = "[령]";
-    else if (rawContent.includes("[칙]") || rawContent.includes("[규]")) detectedPrefix = "[칙]";
-
-    // 기존 텍스트에 엉켜있을 수 있는 잡다한 [법][령][칙] 기호들을 싹 치워버립니다.
-    let cleanFirstLine = firstLine.replace(/\[(법|령|칙|규)\]/g, '').trim();
-    
-    // 찾아낸 진짜 이름표 1개만 깔끔하게 맨 앞에 고정 부착! (이래야 1, 2, 3열 정렬이 오작동하지 않습니다)
-    const finalFirstLine = `${detectedPrefix} ${cleanFirstLine}`;
-    
-    const finalCardContent = `${finalFirstLine}\n${bodyContent.trim()}\n\n[[ORIG_ID:${cat.id}]]`;
-    const initialMemo = stringifyCardStats(memo, 0, []);
-    
-    const res = await fetch("https://api.blankd.top/api/save-card", { 
-      method: "POST", headers: { "Content-Type": "application/json" }, 
-      body: JSON.stringify({ 
-          wallet_address: safeAddress, card_id: targetCardId, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo 
-      }) 
-    });
-    
-    if (res.ok) {
-      localStorage.setItem('blankd_last_crafted_id', cat.id.toString());
-      localStorage.setItem('blankd_last_crafted_title', cat.title);
-      addLog(targetCardId ? "✅ 덮어쓰기 완료" : "✅ 신규 생성 완료");
-      await loadAllData(); onComplete(); 
+      // 💡 기존 텍스트에 꼬여있던 더러운 [법][령][칙] 기호들을 싹 치워버립니다.
+      let cleanFirstLine = (rawContent.split('\n')[0] || "")
+        .replace(/\[(법|령|칙|규)\]/g, '')
+        .trim();
+      
+      // 💡 판독된 단 1개의 기호만 문장 맨 앞에 안전하게 부착
+      const finalFirstLine = `${detectedPrefix} ${cleanFirstLine}`;
+      console.log(`[진단] 최종 정제된 제목: ${finalFirstLine}`);
+      
+      const finalCardContent = `${finalFirstLine}\n${bodyContent.trim()}\n\n[[ORIG_ID:${cat.id}]]`;
+      const initialMemo = stringifyCardStats(memo, 0, []);
+      
+      const res = await fetch("https://api.blankd.top/api/save-card", { 
+        method: "POST", headers: { "Content-Type": "application/json" }, 
+        body: JSON.stringify({ 
+            wallet_address: safeAddress, card_id: targetCardId, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo 
+        }) 
+      });
+      
+      if (res.ok) {
+        localStorage.setItem('blankd_last_crafted_id', cat.id.toString());
+        localStorage.setItem('blankd_last_crafted_title', cat.title);
+        addLog(targetCardId ? "✅ 덮어쓰기 완료" : "✅ 신규 생성 완료");
+        await loadAllData(); onComplete(); 
+      }
+    } catch (e) {
+      console.error("[진단] 저장 중 치명적 에러:", e);
     }
   };
 
@@ -614,7 +628,7 @@ function MainApp() {
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
-    // 💡 [화면 가림 필터링] 모의고사 뷰에서도 제목에서 [법], [령], [칙] 기호를 화면에서 완전히 가려줍니다.
+    // 💡 모의고사 뷰: [법], [령], [칙]을 화면에서 깔끔하게 제거합니다.
     let displayTitle = titleLine
       .replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '')
       .replace(/\(\s*내용\s*\)/g, '')
@@ -867,7 +881,7 @@ function MainApp() {
 
               {nextStudyCard ? (
                 <button onClick={() => { setActiveCard(nextStudyCard); }} className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]">
-                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span><span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{nextStudyCard.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim()}</span>
+                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span><span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{nextStudyCard.content.split('\n')[0].replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim()}</span>
                 </button>
               ) : (<div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 완료</div>)}
             </div>
