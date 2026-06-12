@@ -276,7 +276,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
   const renderInteractiveText = () => {
     const lines = editContent.split('\n');
-    const titleLine = (lines[0] || '').trim();
+    const titleLine = (lines[0] || '').replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '').trim();
     const restLines = lines.slice(1).join('\n');
     
     const tokens = restLines.split(/(\s+|\n|---|\[\[?ORIG_ID:\d+\]?\]?|\[[^\]]+\])/g).filter(Boolean);
@@ -345,11 +345,19 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                 try {
                   const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
                   
+                  // 💡 [화면 가림 필터링] 화면 노출 시 지저분한 기호들을 숨겨줍니다.
+                  let displayTitle = (cleanContent.split('\n')[0] || "")
+                    .replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '')
+                    .replace(/\(\s*내용\s*\)/g, '')
+                    .replace(/내용/g, '')
+                    .trim();
+                  if (!displayTitle) displayTitle = "제목 없음";
+
                   let colClass = "md:col-start-1 md:col-span-1"; 
                   let titleColor = "text-red-500";
                   let diagnosticInfo = "[법]"; // 진단용 텍스트
                   
-                  // 💡 [지능형 정렬 스캔] 첫줄이 아니라 '전체 텍스트'에서 [칙] -> [령] -> [법] 순서로 최하위 법령을 우선 탐지합니다.
+                  // 💡 [지능형 정렬 스캔 역전] 첫줄이 아니라 '전체 텍스트'에서 [칙] -> [령] -> [법] 순서로 하위 법령을 무조건 먼저 찾습니다!
                   if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { 
                     colClass = "md:col-start-3 md:col-span-1"; titleColor = "text-green-500"; diagnosticInfo = "[칙]";
                   } else if (cleanContent.includes('[령]')) { 
@@ -357,14 +365,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                   } else { 
                     colClass = "md:col-start-1 md:col-span-1"; titleColor = "text-red-500"; diagnosticInfo = "[법]";
                   }
-
-                  // 화면에 노출되는 제목에서만 [법], [령], [칙] 글자를 깔끔하게 지워줍니다.
-                  let displayTitle = (cleanContent.split('\n')[0] || "")
-                    .replace(/\[(법|령|칙|규)\]/g, '')
-                    .replace(/\(\s*내용\s*\)/g, '')
-                    .replace(/내용/g, '')
-                    .trim();
-                  if (!displayTitle) displayTitle = "제목 없음";
 
                   const lines = cleanContent.split('\n');
                   const bodyOnlyForStats = lines.slice(1).join('\n');
