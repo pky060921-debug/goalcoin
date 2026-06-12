@@ -98,8 +98,13 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
   }
 }
 
+// 💡 [에러 해결 1] 임시 카드의 ID(temp_...)가 서버로 넘어가 500 에러를 터뜨리는 것을 원천 차단
 const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
   try {
+    const targetId = payload.id || payload.card_id;
+    if (typeof targetId === 'string' && targetId.startsWith('temp_')) return; 
+    if (!targetId || isNaN(parseInt(targetId as string, 10))) return;
+
     const qStr = localStorage.getItem('blankd_sync_queue');
     const q = qStr ? JSON.parse(qStr) : { memos: [], answers: [] };
     if (type === 'MEMO') {
@@ -257,13 +262,20 @@ function MainApp() {
     if (isLoggedIn) loadAllData();
   }, [isLoggedIn, safeAddress, enokiFlow]);
 
+  // 💡 [에러 해결 2] 서버 통신부 500 에러 자가치유 (잘못된 데이터 필터링 및 큐 강제 초기화)
   const flushQueue = async () => {
     if (!safeAddress) return;
     try {
       const qStr = localStorage.getItem('blankd_sync_queue');
       if (!qStr) return;
-      const q = JSON.parse(qStr);
-      if (q.memos.length === 0 && q.answers.length === 0) return;
+      let q = JSON.parse(qStr);
+      
+      q.memos = q.memos.filter((m:any) => m.id && !String(m.id).startsWith('temp_') && !isNaN(parseInt(m.id)));
+      q.answers = q.answers.filter((a:any) => a.card_id && !String(a.card_id).startsWith('temp_') && !isNaN(parseInt(a.card_id)));
+
+      if (q.memos.length === 0 && q.answers.length === 0) {
+          localStorage.removeItem('blankd_sync_queue'); return;
+      }
 
       const res = await fetch("https://api.blankd.top/api/sync-batch", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -275,6 +287,11 @@ function MainApp() {
         addLog(`✅ 백그라운드 동기화 완료 (M:${q.memos.length}, A:${q.answers.length})`);
         const newBalance = await api.getGoalCoinBalance(safeAddress).catch(()=>goalBalance);
         setGoalBalance(newBalance);
+      } else {
+        if(res.status >= 500) {
+            addLog(`🚨 서버 치명적 오류 감지. 손상된 동기화 큐를 안전하게 비웁니다.`);
+            localStorage.removeItem('blankd_sync_queue');
+        }
       }
     } catch (e) { 
       addLog("⚠️ 오프라인 감지: 데이터는 로컬에 안전하게 보관 중입니다.");
@@ -316,12 +333,11 @@ function MainApp() {
     }
   };
 
-  // 💡 [핵심 진단 및 교정] DB에 저장되기 전 거치는 최후의 검문소
+  // 💡 [버그 완벽 수정] 령이 법으로 저장되던 문제를 고친 스마트 스캔 엔진
   const handleMakeBlankCard = async (
     cat: any, wordsArray: string[], selectedIndices: Set<number>, pageBreaks: Set<number>, memo: string, cardId: any, onComplete: () => void
   ) => {
     try {
-      console.log(`[진단] DB 저장 파이프라인 진입 (Card ID: ${cat.id})`);
       let bodyContent = ""; let answerText = ""; let isBlanking = false;
       wordsArray.forEach((word, index) => {
         if (pageBreaks.has(index)) { bodyContent += " ##PAGE_BREAK## "; }
@@ -340,10 +356,12 @@ function MainApp() {
       );
       const targetCardId = existingCard ? existingCard.id : null; 
 
-      const rawContent = cat.content || cat.title || "";
-      const fullTextToScan = rawContent + " " + bodyContent; // 💡 텍스트 전체를 샅샅이 뒤집니다!
+      // 💡 Title을 우선적으로 가져오도록 수정 (cat.content만 보면 앞부분 기호가 잘렸을 수 있음)
+      const rawTitle = cat.title || "";
+      const rawContent = cat.content || "";
+      const fullTextToScan = rawTitle + " " + rawContent + " " + bodyContent;
       
-      // 💡 [오류 원인 제거] [칙] -> [령] -> [법] 순서로 최우선 기호를 검출
+      // 💡 [칙] -> [령] -> [법] 순서로 하위 법령 기호가 존재하는지 정밀 스캔!
       let detectedPrefix = "[법]"; 
       if (fullTextToScan.includes("[칙]") || fullTextToScan.includes("[규]")) {
         detectedPrefix = "[칙]";
@@ -352,16 +370,13 @@ function MainApp() {
       } else if (fullTextToScan.includes("[법]")) {
         detectedPrefix = "[법]";
       }
-      console.log(`[진단] 스캔된 최우선 기호: ${detectedPrefix}`);
 
-      // 💡 기존 텍스트에 꼬여있던 더러운 [법][령][칙] 기호들을 싹 치워버립니다.
-      let cleanFirstLine = (rawContent.split('\n')[0] || "")
-        .replace(/\[(법|령|칙|규)\]/g, '')
-        .trim();
+      // 첫 번째 줄 텍스트 확보 (불필요한 꼬리표들을 청소하기 위함)
+      let firstLineRaw = (rawTitle || rawContent).split('\n')[0] || "";
+      let cleanFirstLine = firstLineRaw.replace(/\[(법|령|칙|규)\]/g, '').trim();
       
-      // 💡 판독된 단 1개의 기호만 문장 맨 앞에 안전하게 부착
+      // 가장 정확히 판독된 단 1개의 기호만 문장 맨 앞에 안전하게 부착합니다.
       const finalFirstLine = `${detectedPrefix} ${cleanFirstLine}`;
-      console.log(`[진단] 최종 정제된 제목: ${finalFirstLine}`);
       
       const finalCardContent = `${finalFirstLine}\n${bodyContent.trim()}\n\n[[ORIG_ID:${cat.id}]]`;
       const initialMemo = stringifyCardStats(memo, 0, []);
@@ -380,7 +395,7 @@ function MainApp() {
         await loadAllData(); onComplete(); 
       }
     } catch (e) {
-      console.error("[진단] 저장 중 치명적 에러:", e);
+      console.error("[진단] 저장 중 시스템 내부 에러:", e);
     }
   };
 
@@ -628,7 +643,7 @@ function MainApp() {
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
-    // 💡 모의고사 뷰: [법], [령], [칙]을 화면에서 깔끔하게 제거합니다.
+    // 💡 모의고사 뷰에서도 시각적으로 [법][령][칙] 기호를 감쪽같이 지워줌 (데이터상 정렬은 그대로 유지됨)
     let displayTitle = titleLine
       .replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '')
       .replace(/\(\s*내용\s*\)/g, '')
@@ -787,6 +802,7 @@ function MainApp() {
   const getThemeCSS = () => {
     if (theme === 'white') {
       return `
+        /* 1. 기본 배경 및 텍스트 베이스 */
         body { background-color: #f3f4f6; color: #111827; }
         .text-white { color: #111827 !important; }
         .text-white\\/20, .text-white\\/30 { color: #6b7280 !important; font-weight: 600; }
@@ -795,11 +811,13 @@ function MainApp() {
         .text-white\\/80 { color: #1f2937 !important; font-weight: 700; }
         .text-\\[\\#d1d1d1\\] { color: #111827 !important; font-weight: 700; }
         
+        /* 2. 레이아웃 구조 박스 (모달, 카드 등) */
         .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #d1d5db !important; }
         .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(255, 255, 255, 0.95) !important; backdrop-filter: blur(8px); }
         .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border-color: #e5e7eb !important; }
         .bg-\\[\\#0d0d0f\\] { background-color: #f3f4f6 !important; }
         
+        /* 3. 인풋 및 범용 반투명 배경 */
         .bg-black\\/30, .bg-black\\/40, .bg-black\\/50, .bg-black\\/60 { 
           background-color: #f9fafb !important; color: #111827 !important; border-color: #d1d5db !important; 
         }
@@ -807,10 +825,12 @@ function MainApp() {
           background-color: #f3f4f6 !important; border-color: #d1d5db !important; color: #111827 !important; 
         }
         
+        /* 4. 범용 테두리 선명화 */
         .border-white\\/5, .border-white\\/10, .border-white\\/20, .border-white\\/30 { 
           border-color: #d1d5db !important; 
         }
 
+        /* 🎨 5. 브랜드 컬러 강제 교정 (라이트 모드 맞춤형) 🎨 */
         .text-teal-300, .text-teal-400, .text-teal-500 { color: #0f766e !important; font-weight: 800 !important; }
         .bg-teal-900\\/20, .bg-teal-900\\/30, .bg-teal-900\\/40, .bg-teal-950\\/20, .bg-teal-500\\/10, .bg-teal-500\\/20 { 
           background-color: #ccfbf1 !important; border-color: #5eead4 !important; 
@@ -881,7 +901,7 @@ function MainApp() {
 
               {nextStudyCard ? (
                 <button onClick={() => { setActiveCard(nextStudyCard); }} className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]">
-                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span><span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{nextStudyCard.content.split('\n')[0].replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim()}</span>
+                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span><span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{nextStudyCard.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim()}</span>
                 </button>
               ) : (<div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 완료</div>)}
             </div>
