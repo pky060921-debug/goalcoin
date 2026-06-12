@@ -177,6 +177,7 @@ function MainApp() {
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
         api.getGoalCoinBalance(safeAddress).catch(() => 0),
         api.getGlobalDict(safeAddress).catch((e) => {
+          console.error("전역 단어장 로드 실패:", e);
           return { stopwords: [], inclusions: [], abbrs: {} };
         })
       ]);
@@ -195,6 +196,7 @@ function MainApp() {
         abbrs: finalAbbrs
       });
     } catch (e: any) {
+      console.error("데이터 동기화 실패:", e);
       addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
     }
   };
@@ -208,34 +210,7 @@ function MainApp() {
     }
   };
 
-  useEffect(() => {
-    if (!globalDict || !globalDict.abbrs) return;
-    let currentInclusions = globalDict.inclusions || [];
-    let changed = false;
-
-    Object.entries(globalDict.abbrs).forEach(([k, v]) => {
-      const strK = k as string;
-      const strV = v as string;
-      const orig = strK.length >= strV.length ? strK : strV;
-      const short = strK.length < strV.length ? strK : strV;
-
-      if (currentInclusions.includes(short)) {
-        currentInclusions = currentInclusions.filter(w => w !== short);
-        changed = true;
-      }
-      if (!currentInclusions.includes(orig)) {
-        currentInclusions.push(orig);
-        changed = true;
-      }
-    });
-
-    if (changed) {
-      saveGlobalDict({
-        ...globalDict,
-        inclusions: Array.from(new Set(currentInclusions))
-      });
-    }
-  }, [globalDict.abbrs]);
+  // 💡 불필요하게 [스마트 약어]를 [필수포함]으로 자동 복사해서 오염시키던 useEffect 삭제됨
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
@@ -328,7 +303,6 @@ function MainApp() {
     }
   };
 
-  // 💡 [치명적 버그 수정 완벽판] 제목/본문/폴더명을 통째로 스캔하여 [령]을 절대 놓치지 않음
   const handleMakeBlankCard = async (
     cat: any, wordsArray: string[], selectedIndices: Set<number>, pageBreaks: Set<number>, memo: string, cardId: any, onComplete: () => void
   ) => {
@@ -351,14 +325,12 @@ function MainApp() {
       );
       const targetCardId = existingCard ? existingCard.id : null; 
 
-      // 💡 [핵심] 제목이나 본문 중 하나만 읽는게 아니라, 가진 정보를 모조리 합쳐서 판독합니다.
       const rawTitle = cat.title || "";
       const rawContent = cat.content || "";
       const rawFolder = cat.folder_name || "";
       
       const fullTextToScan = `${rawTitle} ${rawContent} ${rawFolder} ${bodyContent}`;
       
-      // 💡 [규/칙] -> [령] -> [법] 순서로 하위 법령 기호가 존재하는지 정밀 스캔!
       let detectedPrefix = "[법]"; 
       if (fullTextToScan.includes("[칙]") || fullTextToScan.includes("[규]") || fullTextToScan.includes("시행규칙")) {
         detectedPrefix = "[칙]";
@@ -368,13 +340,8 @@ function MainApp() {
         detectedPrefix = "[법]";
       }
 
-      // 첫 번째 줄 텍스트 확보 (가장 긴 것을 사용)
       let firstLineRaw = rawTitle.length > rawContent.split('\n')[0].length ? rawTitle : rawContent.split('\n')[0];
-      
-      // 기존 텍스트에 꼬여있던 더러운 [법][령][칙] 기호들을 싹 치워버립니다.
       let cleanFirstLine = firstLineRaw.replace(/\[(법|령|칙|규)\]/g, '').trim();
-      
-      // 가장 정확히 판독된 단 1개의 기호만 문장 맨 앞에 안전하게 부착합니다.
       const finalFirstLine = `${detectedPrefix} ${cleanFirstLine}`;
       
       const finalCardContent = `${finalFirstLine}\n${bodyContent.trim()}\n\n[[ORIG_ID:${cat.id}]]`;
@@ -710,6 +677,7 @@ function MainApp() {
     );
   }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs]);
 
+  // 💡 [버그 해결] 약어가 필수 포함 단어에 섞이지 않고 자기 자리에만 저장되도록 수정
   const handleAddDictItem = () => {
     if (dictTab === 'abbr' && tempKey && tempValue) {
       const k = tempKey.trim(); const v = tempValue.trim();
@@ -807,22 +775,22 @@ function MainApp() {
         .text-\\[\\#d1d1d1\\] { color: #111827 !important; font-weight: 700; }
         
         /* 2. 레이아웃 구조 박스 (모달, 카드 등) */
-        .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #d1d5db !important; }
+        .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #9ca3af !important; }
         .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(255, 255, 255, 0.95) !important; backdrop-filter: blur(8px); }
-        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border-color: #e5e7eb !important; }
+        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border-color: #d1d5db !important; }
         .bg-\\[\\#0d0d0f\\] { background-color: #f3f4f6 !important; }
         
         /* 3. 인풋 및 범용 반투명 배경 */
         .bg-black\\/30, .bg-black\\/40, .bg-black\\/50, .bg-black\\/60 { 
-          background-color: #f9fafb !important; color: #111827 !important; border-color: #d1d5db !important; 
+          background-color: #f9fafb !important; color: #111827 !important; border-color: #9ca3af !important; 
         }
         .bg-white\\/5, .bg-white\\/10 { 
-          background-color: #f3f4f6 !important; border-color: #d1d5db !important; color: #111827 !important; 
+          background-color: #f3f4f6 !important; border-color: #9ca3af !important; color: #111827 !important; 
         }
         
         /* 4. 범용 테두리 선명화 */
         .border-white\\/5, .border-white\\/10, .border-white\\/20, .border-white\\/30 { 
-          border-color: #d1d5db !important; 
+          border-color: #6b7280 !important; 
         }
 
         /* 🎨 5. 브랜드 컬러 강제 교정 (라이트 모드 맞춤형) 🎨 */
