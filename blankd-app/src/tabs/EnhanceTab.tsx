@@ -134,6 +134,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [movingId, safeAddress, loadAllData]);
 
+  // 💡 [버그 해결] EnhanceTab 수정 모드에서도 스마트 약어(원어 + 약어) 전부 빈칸 자동 적용
   const autoApplyDict = (content: string) => {
     if (!globalDict) return content;
     
@@ -143,9 +144,14 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n') : '';
 
-    const stopWords = globalDict.custom_stopwords || globalDict.stopwords || [];
-    const abbrevKeys = Object.keys(globalDict.abbreviations || {});
-    const includeWords = Array.from(new Set([...(globalDict.custom_inclusions || globalDict.inclusions || []), ...abbrevKeys])).filter(w => w.trim() !== '').sort((a, b) => b.length - a.length);
+    const stopWords = globalDict.stopwords || [];
+    const abbrevKeys = Object.keys(globalDict.abbrs || {});
+    const abbrevValues = Object.values(globalDict.abbrs || {});
+    const includeWords = Array.from(new Set([
+        ...(globalDict.inclusions || []), 
+        ...abbrevKeys, 
+        ...(abbrevValues as string[])
+    ])).filter((w: any) => typeof w === 'string' && w.trim() !== '').sort((a: any, b: any) => b.length - a.length);
 
     let tokens = restContent.split(/(\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g);
     for (let i = 0; i < tokens.length; i++) {
@@ -402,7 +408,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           </div>
                         </div>
                       ) : (
-                        // 💡 [바깥 테두리 부활] 클래스에 'border'와 테두리 색상들(border-indigo-500/30 등)을 재삽입
                         <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm border flex flex-col justify-center gap-0.5 ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
                           
                           <div className="flex w-full overflow-hidden mb-1">
@@ -424,7 +429,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                               </button>
                             </div>
                           ) : (
-                            <div className="flex flex-col w-full pt-1">
+                            <div className="flex flex-col w-full pt-1 border-t border-white/5">
                               <div className="flex flex-row justify-between items-center w-full">
                                 <div className="flex flex-nowrap gap-0.5">
                                   <span className="text-[7px] sm:text-[8px] text-indigo-300 px-1 py-[1px] rounded bg-indigo-900/40 font-mono whitespace-nowrap leading-none flex items-center">빈칸:{totalBlanks}</span>
