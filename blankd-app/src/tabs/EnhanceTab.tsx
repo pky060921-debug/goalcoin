@@ -139,6 +139,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [movingId, safeAddress, loadAllData]);
 
+  // 💡 [초강력 수정] 띄어쓰기 무시 + 잘못된 약어 괄호 박탈 기능 추가 완료!
   const autoApplyDict = (content: string) => {
     if (!globalDict) return content;
     
@@ -149,10 +150,13 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     const restContent = lines.length > 1 ? lines.slice(1).join('\n') : '';
 
     const stopWords = globalDict.stopwords || [];
+    const abbrevKeys = Object.keys(globalDict.abbrs || {}); // 짧은 약어 (강제로 벗길 타겟)
+    const abbrevValues = Object.values(globalDict.abbrs || {}); // 긴 원래 정답 (빈칸 타겟)
     
-    // 💡 [핵심 복구] 약어 중에서 "원래 정답(Values)"만 추출해서 자동 빈칸 타겟에 포함시킵니다!
-    const abbrevValues = Object.values(globalDict.abbrs || {});
+    // 잘못 뚫려있으면 강제로 괄호를 부숴버릴 대상 (제외 단어 + 짧은 약어)
+    const wordsToUnbracket = [...stopWords, ...abbrevKeys];
 
+    // 무조건 빈칸으로 만들어버릴 대상
     const includeWords = Array.from(new Set([
         ...(globalDict.inclusions || []),
         ...(abbrevValues as string[])
@@ -165,12 +169,19 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
       
       if (tokens[i].startsWith('[') && tokens[i].endsWith(']')) {
         let innerText = tokens[i].slice(1, -1);
-        if (stopWords.includes(innerText.trim())) { tokens[i] = innerText; }
+        let cleanInner = innerText.replace(/\s+/g, '');
+        // 💡 기존에 잘못 묶여있던 단어가 약어이거나 제외단어라면 괄호를 파괴합니다.
+        if (wordsToUnbracket.some(w => w.replace(/\s+/g, '') === cleanInner)) {
+           tokens[i] = innerText; 
+        }
       } else {
         let text = tokens[i];
         includeWords.forEach((iw: string) => {
+          // 💡 띄어쓰기 무시하고 스캔하는 마법의 정규식
           const escaped = iw.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          const regex = new RegExp(`(${escaped})`, 'g');
+          const flexibleRegexStr = escaped.split('').join('\\s*');
+          const regex = new RegExp(`(${flexibleRegexStr})`, 'g');
+          
           let parts = text.split(/(\[[^\]]+\])/g);
           for(let j=0; j<parts.length; j++){
             if(!parts[j].startsWith('[')){ parts[j] = parts[j].replace(regex, '[$1]'); }
@@ -450,10 +461,19 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                             
                             <div className="flex flex-col sm:flex-row items-center gap-2 bg-black/50 p-1.5 rounded-sm border border-white/10">
                               <div className="flex gap-1 items-center">
+                                {/* 💡 [마법 버튼] 기존에 오염된 빈칸을 폭파시키고 사전 기준으로 싹 재정렬하는 버튼 추가! */}
+                                <button onClick={(e) => {
+                                  e.preventDefault();
+                                  let stripped = editContent.replace(/\[\[ORIG_ID:\d+\]\]/g, (m) => `__ORIG_ID__${m}__ORIG_ID__`);
+                                  stripped = stripped.replace(/\[|\]/g, ''); // 기존 모든 괄호 박탈
+                                  stripped = stripped.replace(/__ORIG_ID__(.*?)__ORIG_ID__/g, '$1'); 
+                                  setEditContent(autoApplyDict(stripped)); // 새로운 룰로 재적용
+                                }} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-blue-900/30 text-blue-400 border border-blue-500/30 hover:bg-blue-500/20 transition-all">
+                                  🪄 사전 기준 전면 재적용
+                                </button>
+                                <div className="w-px h-3 bg-white/10 mx-0.5"></div>
                                 <button onClick={() => setActiveTool(activeTool === 'editor' ? null : 'editor')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'editor' ? 'bg-amber-500/80 text-white' : 'bg-white/5 text-white/50'}`}>직접 타이핑</button>
-                                <div className="w-px h-3 bg-white/10 mx-0.5"></div>
                                 <button onClick={() => setActiveTool(activeTool === 'smart' ? null : 'smart')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'smart' ? 'bg-teal-500/80 text-white' : 'bg-white/5 text-white/50'}`}>스마트 클릭</button>
-                                <div className="w-px h-3 bg-white/10 mx-0.5"></div>
                                 <button onClick={() => setShowJeonggwanSelector(!showJeonggwanSelector)} className={`px-2 py-1 rounded-sm text-[10px] font-bold transition-all ${showJeonggwanSelector ? 'bg-yellow-500 text-black' : 'bg-yellow-900/30 text-yellow-500 border border-yellow-500/30 hover:bg-yellow-500/20'}`}>📜 정관 불러오기</button>
                               </div>
                               {activeTool === 'smart' && (
@@ -502,7 +522,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           </div>
                         </div>
                       ) : (
-                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm border flex flex-col justify-center gap-0.5 ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
+                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm flex flex-col justify-center gap-0.5 ${movingId === card.id ? "shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "bg-red-900/20" : "bg-indigo-900/20 hover:bg-indigo-900/40"} transition-all duration-200`}>
                           
                           <div className="flex w-full overflow-hidden mb-1">
                             <div className={`${titleColor} font-bold ${titleSizing} w-full text-left truncate leading-tight`} title={displayTitle}>
@@ -523,18 +543,18 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                               </button>
                             </div>
                           ) : (
-                            <div className="flex flex-col w-full pt-1 border-t border-white/5">
+                            <div className="flex flex-col w-full pt-1">
                               <div className="flex flex-row justify-between items-center w-full">
                                 <div className="flex flex-nowrap gap-0.5">
                                   <span className="text-[7px] sm:text-[8px] text-indigo-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">빈칸:{totalBlanks}</span>
                                   <span className="text-[7px] sm:text-[8px] text-teal-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">반복:{stats.filled}</span>
-                                  <span className={`text-[7px] sm:text-[8px] px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center ${hasWrong ? 'text-white bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
+                                  <span className={`text-[7px] sm:text-[8px] px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center ${hasWrong ? 'text-white bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30'}`}>틀림:{stats.wrongIndices.length}</span>
                                 </div>
                                 <div className="flex items-center gap-0.5 opacity-80 hover:opacity-100 transition-opacity">
-                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
-                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
-                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool(window.innerWidth < 768 ? 'smart' : 'editor'); setShowJeonggwanSelector(false); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
-                                  <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-0.5 px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[8px] hover:bg-red-500/10 hover:text-red-500 transition-all flex items-center justify-center leading-none h-4" title="삭제">✕</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
+                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool(window.innerWidth < 768 ? 'smart' : 'editor'); setShowJeonggwanSelector(false); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
+                                  <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-0.5 px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[8px] hover:bg-red-500/10 hover:text-red-500 transition-all flex items-center justify-center leading-none h-4" title="삭제">✕</button>
                                 </div>
                               </div>
                             </div>
