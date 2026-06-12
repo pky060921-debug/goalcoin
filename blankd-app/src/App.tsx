@@ -98,7 +98,6 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
   }
 }
 
-// 💡 [에러 해결 1] 임시 카드의 ID(temp_...)가 서버로 넘어가 500 에러를 터뜨리는 것을 원천 차단
 const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
   try {
     const targetId = payload.id || payload.card_id;
@@ -262,7 +261,6 @@ function MainApp() {
     if (isLoggedIn) loadAllData();
   }, [isLoggedIn, safeAddress, enokiFlow]);
 
-  // 💡 [에러 해결 2] 서버 통신부 500 에러 자가치유 (잘못된 데이터 필터링 및 큐 강제 초기화)
   const flushQueue = async () => {
     if (!safeAddress) return;
     try {
@@ -333,7 +331,6 @@ function MainApp() {
     }
   };
 
-  // 💡 [버그 완벽 수정] 령이 법으로 저장되던 문제를 고친 스마트 스캔 엔진
   const handleMakeBlankCard = async (
     cat: any, wordsArray: string[], selectedIndices: Set<number>, pageBreaks: Set<number>, memo: string, cardId: any, onComplete: () => void
   ) => {
@@ -356,12 +353,9 @@ function MainApp() {
       );
       const targetCardId = existingCard ? existingCard.id : null; 
 
-      // 💡 Title을 우선적으로 가져오도록 수정 (cat.content만 보면 앞부분 기호가 잘렸을 수 있음)
-      const rawTitle = cat.title || "";
-      const rawContent = cat.content || "";
-      const fullTextToScan = rawTitle + " " + rawContent + " " + bodyContent;
+      const rawContent = cat.content || cat.title || "";
+      const fullTextToScan = rawContent + " " + bodyContent;
       
-      // 💡 [칙] -> [령] -> [법] 순서로 하위 법령 기호가 존재하는지 정밀 스캔!
       let detectedPrefix = "[법]"; 
       if (fullTextToScan.includes("[칙]") || fullTextToScan.includes("[규]")) {
         detectedPrefix = "[칙]";
@@ -371,11 +365,9 @@ function MainApp() {
         detectedPrefix = "[법]";
       }
 
-      // 첫 번째 줄 텍스트 확보 (불필요한 꼬리표들을 청소하기 위함)
-      let firstLineRaw = (rawTitle || rawContent).split('\n')[0] || "";
+      let firstLineRaw = (rawContent).split('\n')[0] || "";
       let cleanFirstLine = firstLineRaw.replace(/\[(법|령|칙|규)\]/g, '').trim();
       
-      // 가장 정확히 판독된 단 1개의 기호만 문장 맨 앞에 안전하게 부착합니다.
       const finalFirstLine = `${detectedPrefix} ${cleanFirstLine}`;
       
       const finalCardContent = `${finalFirstLine}\n${bodyContent.trim()}\n\n[[ORIG_ID:${cat.id}]]`;
@@ -395,7 +387,7 @@ function MainApp() {
         await loadAllData(); onComplete(); 
       }
     } catch (e) {
-      console.error("[진단] 저장 중 시스템 내부 에러:", e);
+      console.error("[진단] 저장 중 치명적 에러:", e);
     }
   };
 
@@ -643,7 +635,6 @@ function MainApp() {
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
-    // 💡 모의고사 뷰에서도 시각적으로 [법][령][칙] 기호를 감쪽같이 지워줌 (데이터상 정렬은 그대로 유지됨)
     let displayTitle = titleLine
       .replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '')
       .replace(/\(\s*내용\s*\)/g, '')
@@ -799,10 +790,10 @@ function MainApp() {
     </div>
   );
 
+  // 💡 [화이트 테마 교정] 선들을 명확한 진한 회색(#6b7280)으로 재정렬하고 외곽선을 살렸습니다.
   const getThemeCSS = () => {
     if (theme === 'white') {
       return `
-        /* 1. 기본 배경 및 텍스트 베이스 */
         body { background-color: #f3f4f6; color: #111827; }
         .text-white { color: #111827 !important; }
         .text-white\\/20, .text-white\\/30 { color: #6b7280 !important; font-weight: 600; }
@@ -811,61 +802,58 @@ function MainApp() {
         .text-white\\/80 { color: #1f2937 !important; font-weight: 700; }
         .text-\\[\\#d1d1d1\\] { color: #111827 !important; font-weight: 700; }
         
-        /* 2. 레이아웃 구조 박스 (모달, 카드 등) */
-        .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #d1d5db !important; }
+        .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #9ca3af !important; }
         .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(255, 255, 255, 0.95) !important; backdrop-filter: blur(8px); }
-        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border-color: #e5e7eb !important; }
+        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border-color: #d1d5db !important; }
         .bg-\\[\\#0d0d0f\\] { background-color: #f3f4f6 !important; }
         
-        /* 3. 인풋 및 범용 반투명 배경 */
         .bg-black\\/30, .bg-black\\/40, .bg-black\\/50, .bg-black\\/60 { 
-          background-color: #f9fafb !important; color: #111827 !important; border-color: #d1d5db !important; 
+          background-color: #f9fafb !important; color: #111827 !important; border-color: #9ca3af !important; 
         }
         .bg-white\\/5, .bg-white\\/10 { 
-          background-color: #f3f4f6 !important; border-color: #d1d5db !important; color: #111827 !important; 
+          background-color: #f3f4f6 !important; border-color: #9ca3af !important; color: #111827 !important; 
         }
         
-        /* 4. 범용 테두리 선명화 */
+        /* 💡 화이트 모드일 때 범용 테두리를 진한 회색으로 교정 */
         .border-white\\/5, .border-white\\/10, .border-white\\/20, .border-white\\/30 { 
-          border-color: #d1d5db !important; 
+          border-color: #6b7280 !important; 
         }
 
-        /* 🎨 5. 브랜드 컬러 강제 교정 (라이트 모드 맞춤형) 🎨 */
         .text-teal-300, .text-teal-400, .text-teal-500 { color: #0f766e !important; font-weight: 800 !important; }
         .bg-teal-900\\/20, .bg-teal-900\\/30, .bg-teal-900\\/40, .bg-teal-950\\/20, .bg-teal-500\\/10, .bg-teal-500\\/20 { 
-          background-color: #ccfbf1 !important; border-color: #5eead4 !important; 
+          background-color: #ccfbf1 !important; border-color: #0d9488 !important; 
         }
-        .border-teal-500\\/30, .border-teal-500\\/40, .border-teal-500\\/50 { border-color: #5eead4 !important; }
+        .border-teal-500\\/30, .border-teal-500\\/40, .border-teal-500\\/50 { border-color: #0d9488 !important; }
 
         .text-amber-300, .text-amber-400, .text-amber-500 { color: #b45309 !important; font-weight: 800 !important; }
         .bg-amber-900\\/20, .bg-amber-900\\/30, .bg-amber-900\\/40, .bg-amber-950\\/20, .bg-amber-500\\/10, .bg-amber-500\\/20 { 
-          background-color: #fef3c7 !important; border-color: #fcd34d !important; 
+          background-color: #fef3c7 !important; border-color: #d97706 !important; 
         }
-        .border-amber-500\\/30, .border-amber-500\\/40, .border-amber-500\\/50, .border-amber-900\\/30 { border-color: #fcd34d !important; }
+        .border-amber-500\\/30, .border-amber-500\\/40, .border-amber-500\\/50, .border-amber-900\\/30 { border-color: #d97706 !important; }
 
         .text-indigo-300, .text-indigo-400, .text-indigo-500 { color: #4338ca !important; font-weight: 800 !important; }
         .bg-indigo-900\\/20, .bg-indigo-900\\/30, .bg-indigo-900\\/40 { 
-          background-color: #e0e7ff !important; border-color: #c7d2fe !important; 
+          background-color: #e0e7ff !important; border-color: #6366f1 !important; 
         }
-        .border-indigo-500\\/30, .border-indigo-500\\/40, .border-indigo-500\\/50 { border-color: #c7d2fe !important; }
+        .border-indigo-500\\/30, .border-indigo-500\\/40, .border-indigo-500\\/50 { border-color: #6366f1 !important; }
 
         .text-blue-300, .text-blue-400, .text-blue-500 { color: #1d4ed8 !important; font-weight: 800 !important; }
         .bg-blue-900\\/20, .bg-blue-900\\/30, .bg-blue-900\\/40, .bg-blue-500\\/10, .bg-blue-500\\/20 { 
-          background-color: #dbeafe !important; border-color: #bfdbfe !important; 
+          background-color: #dbeafe !important; border-color: #3b82f6 !important; 
         }
-        .border-blue-500\\/30, .border-blue-500\\/40, .border-blue-500\\/50 { border-color: #bfdbfe !important; }
+        .border-blue-500\\/30, .border-blue-500\\/40, .border-blue-500\\/50, .border-blue-500 { border-color: #3b82f6 !important; }
 
         .text-red-300, .text-red-400, .text-red-500 { color: #b91c1c !important; font-weight: 800 !important; }
         .bg-red-900\\/20, .bg-red-900\\/30, .bg-red-900\\/40, .bg-red-950\\/20, .bg-red-500\\/10, .bg-red-500\\/20 { 
-          background-color: #fee2e2 !important; border-color: #fecaca !important; 
+          background-color: #fee2e2 !important; border-color: #ef4444 !important; 
         }
-        .border-red-500\\/30, .border-red-500\\/40, .border-red-500\\/50, .border-red-900\\/30 { border-color: #fecaca !important; }
+        .border-red-500\\/30, .border-red-500\\/40, .border-red-500\\/50, .border-red-900\\/30 { border-color: #ef4444 !important; }
 
         .text-green-300, .text-green-400, .text-green-500 { color: #15803d !important; font-weight: 800 !important; }
         .bg-green-900\\/20, .bg-green-900\\/30, .bg-green-900\\/40, .bg-green-500\\/10, .bg-green-500\\/20 { 
-          background-color: #dcfce7 !important; border-color: #a7f3d0 !important; 
+          background-color: #dcfce7 !important; border-color: #10b981 !important; 
         }
-        .border-green-500\\/30, .border-green-500\\/40, .border-green-500\\/50 { border-color: #a7f3d0 !important; }
+        .border-green-500\\/30, .border-green-500\\/40, .border-green-500\\/50 { border-color: #10b981 !important; }
       `;
     } else if (theme === 'green') {
       return `
