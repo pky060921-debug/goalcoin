@@ -179,7 +179,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return titleLine + (lines.length > 1 ? '\n' : '') + tokens.join('');
   };
 
-  // 💡 [버튼 단일화] "+" 버튼 하나로 통합, 누르면 [령/칙] 템플릿 로드
   const handleAddAdjacent = (folder: string, index: number) => {
     const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
     const origCard = folderCards[index];
@@ -277,6 +276,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
   const renderInteractiveText = () => {
     const lines = editContent.split('\n');
+    // 💡 [화면 가림 필터링 복구] 수정 창 상단의 제목에서 법, 령, 칙을 시각적으로 완전히 숨깁니다.
     const titleLine = (lines[0] || '').replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '').trim();
     const restLines = lines.slice(1).join('\n');
     
@@ -346,6 +346,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                 try {
                   const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
                   
+                  // 💡 [화면 가림 필터링 복구] 화면에 보여질 때만 [법], [령], [칙] 등을 삭제하여 깔끔하게 노출!
                   let displayTitle = (cleanContent.split('\n')[0] || "")
                     .replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '')
                     .replace(/\(\s*내용\s*\)/g, '')
@@ -356,6 +357,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                   let colClass = "md:col-start-1 md:col-span-1"; 
                   let titleColor = "text-red-500";
                   
+                  // 💡 [정렬 엔진 보호] 뒷단 데이터(firstLineData)에는 [법][령][칙]이 그대로 살아있으므로 완벽하게 열에 맞춰 정렬됩니다.
                   const firstLineData = cleanContent.split('\n')[0] || "";
                   if (firstLineData.includes('[법]')) { colClass = "md:col-start-1 md:col-span-1"; titleColor = "text-red-500"; }
                   else if (firstLineData.includes('[령]')) { colClass = "md:col-start-2 md:col-span-1"; titleColor = "text-blue-400"; }
@@ -422,10 +424,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                               </div>
                               <div className="flex items-center gap-1 opacity-80 hover:opacity-100 transition-opacity">
                                 <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-blue-500/10 hover:text-blue-500 hover:border-blue-500/30 transition-all cursor-pointer">이동</button>
-                                
-                                {/* 💡 [단일 추가 버튼] 누르면 [령/칙] 조항명 입력 템플릿이 로드됨 */}
                                 <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-green-500/10 hover:text-green-600 hover:border-green-500/30 transition-all cursor-pointer">➕ 추가</button>
-                                
                                 <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('editor'); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/30 transition-all">수정</button>
                                 <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-1 px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-red-500/10 hover:text-red-500 hover:border-red-500/30 transition-all">✕</button>
                               </div>
