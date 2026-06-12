@@ -338,13 +338,14 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
       </div>
       
       {enhanceFolders.map((folder: string) => openFolders[folder] && (
-        <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-3 sm:pl-4">
+        <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-2 sm:pl-3">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
-          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
+          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-1.5 sm:gap-2 items-start`}>
             {localCards.filter((c:any) => c && c.content && c.folder_name === folder).map((card: any, idx: number, folderCards: any[]) => {
                 try {
                   const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
                   
+                  // 화면상 노출되는 제목에서만 [법], [령], [칙] 제거
                   let displayTitle = (cleanContent.split('\n')[0] || "")
                     .replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '')
                     .replace(/\(\s*내용\s*\)/g, '')
@@ -355,6 +356,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                   let colClass = "md:col-start-1 md:col-span-1"; 
                   let titleColor = "text-red-500";
                   
+                  // 백그라운드 데이터의 [법] [령] [칙] 을 분석하여 열 위치 결정 (정렬 기능 정상화)
                   if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { 
                     colClass = "md:col-start-3 md:col-span-1"; titleColor = "text-green-500";
                   } else if (cleanContent.includes('[령]')) { 
@@ -373,9 +375,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
                   // 💡 [한 줄 고정 강제화] 조항명 길이에 따라 글씨 크기와 자간을 자동 축소하여 무조건 한 줄에 맞춥니다.
                   const titleLen = displayTitle.length;
-                  const titleSizing = titleLen > 25 ? 'text-[10px] sm:text-[11px] tracking-tighter' : 
-                                      titleLen > 15 ? 'text-[11px] sm:text-[12px] tracking-tight' : 
-                                      'text-[12px] sm:text-[14px]';
+                  const titleSizing = titleLen > 25 ? 'text-[10px] sm:text-[11px] tracking-[calc(-0.06em)]' : 
+                                      titleLen > 15 ? 'text-[11px] sm:text-[12px] tracking-tighter' : 
+                                      'text-[12px] sm:text-[13px] tracking-tight';
 
                   return (
                     <div key={card.id} id={`enhance-card-${card.id}`} className={`relative transition-all w-full ${colClass}`}>
@@ -403,45 +405,44 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           </div>
                         </div>
                       ) : (
-                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-3 sm:p-4 rounded-sm border flex flex-col justify-center gap-2 ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
+                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm border flex flex-col justify-center gap-0.5 ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
                           
-                          <div className="flex w-full overflow-hidden">
-                            <div className={`${titleColor} font-bold ${titleSizing} w-full text-left truncate`} title={displayTitle}>
+                          <div className="flex w-full overflow-hidden mb-1">
+                            <div className={`${titleColor} font-bold ${titleSizing} w-full text-left truncate leading-tight`} title={displayTitle}>
                               {displayTitle}
                             </div>
                           </div>
                           
                           {movingId === card.id ? (
-                            <div className="flex items-center justify-between w-full mt-2 pt-2 border-t border-blue-500/30 animate-in fade-in">
-                              <span className="text-blue-300 text-[11px] font-bold flex items-center gap-1.5">
+                            <div className="flex items-center justify-between w-full border-t border-blue-500/30 pt-1 animate-in fade-in">
+                              <span className="text-blue-300 text-[10px] font-bold flex items-center">
                                 방향키(↑, ↓)로 이동 후 Enter 입력
                               </span>
                               <button 
                                 onClick={(e) => { e.stopPropagation(); setMovingId(null); if(loadAllData) loadAllData(); }} 
-                                className="px-3 py-1 bg-blue-500 text-white text-[10px] font-bold rounded-sm shadow-md hover:bg-blue-400 transition-colors"
+                                className="px-2 py-0.5 bg-blue-500 text-white text-[9px] font-bold rounded-sm shadow-md hover:bg-blue-400 transition-colors"
                               >
                                 완료
                               </button>
                             </div>
                           ) : (
-                            <div className="flex flex-col w-full mt-1 border-t border-white/5 pt-1.5">
+                            <div className="flex flex-col w-full border-t border-white/5 pt-1">
                               <div className="flex flex-row justify-between items-center w-full">
-                                <div className="flex flex-nowrap gap-1">
-                                  <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
-                                  <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">반복:{stats.filled}</span>
-                                  <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
+                                <div className="flex flex-nowrap gap-0.5">
+                                  <span className="text-[7px] sm:text-[8px] text-indigo-300 border border-indigo-500/30 px-1 py-[1px] rounded bg-indigo-900/40 font-mono whitespace-nowrap leading-none flex items-center">빈칸:{totalBlanks}</span>
+                                  <span className="text-[7px] sm:text-[8px] text-teal-300 border border-teal-500/30 px-1 py-[1px] rounded bg-teal-900/40 font-mono whitespace-nowrap leading-none flex items-center">반복:{stats.filled}</span>
+                                  <span className={`text-[7px] sm:text-[8px] px-1 py-[1px] rounded font-mono border whitespace-nowrap leading-none flex items-center ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                                 </div>
-                                <div className="flex items-center gap-1 opacity-80 hover:opacity-100 transition-opacity">
-                                  {/* 💡 [버튼 심플 디자인 교체] 텍스트 대신 기호로 대체하고 상하 폭을 극도로 축소 */}
-                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-2 py-0.5 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-blue-500/10 hover:text-blue-500 hover:border-blue-500/30 transition-all cursor-pointer" title="이동">↕️</button>
-                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-2 py-0.5 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[11px] font-bold hover:bg-green-500/10 hover:text-green-600 hover:border-green-500/30 transition-all cursor-pointer" title="추가">+</button>
-                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('editor'); }} className="px-2 py-0.5 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/30 transition-all" title="수정">✏️</button>
-                                  <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-1 px-2 py-0.5 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-red-500/10 hover:text-red-500 hover:border-red-500/30 transition-all" title="삭제">✕</button>
+                                <div className="flex items-center gap-0.5 opacity-80 hover:opacity-100 transition-opacity">
+                                  {/* 💡 [극도로 축소된 아이콘 버튼] 위아래 패딩 최소화 및 텍스트 제거 */}
+                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 hover:border-blue-500/30 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
+                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 hover:border-green-500/30 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('editor'); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/30 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
+                                  <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-0.5 px-1.5 py-0.5 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[8px] hover:bg-red-500/10 hover:text-red-500 hover:border-red-500/30 transition-all flex items-center justify-center leading-none h-4" title="삭제">✕</button>
                                 </div>
                               </div>
                             </div>
                           )}
-
                         </button>
                       )}
                     </div>
