@@ -111,17 +111,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
-  useEffect(() => {
-    if (!globalDict) return;
-    const abbrevKeys = Object.keys(globalDict.abbrs || {});
-    const currentInclusions = globalDict.inclusions || [];
-    const missingKeys = abbrevKeys.filter(key => !currentInclusions.includes(key));
-    if (missingKeys.length > 0) {
-      const nextInclusions = Array.from(new Set([...currentInclusions, ...missingKeys]));
-      saveGlobalDict({ ...globalDict, inclusions: nextInclusions });
-    }
-  }, [globalDict, saveGlobalDict]);
-
+  // 💡 [버그 해결] 약어 추가 시 오직 약어 DB(abbrs)에만 넣도록 수정. 필수 포함 단어(inclusions) 침범 삭제
   const handleAddStopWord = () => {
     if (!newStopWord.trim()) return;
     const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
@@ -156,10 +146,9 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     if (!newAbbrevOrig.trim() || !newAbbrevShort.trim()) return;
     const orig = newAbbrevOrig.trim(); const short = newAbbrevShort.trim();
     const currentAbbrevs = globalDict?.abbrs || {};
-    const currentInclusions = globalDict?.inclusions || [];
-    const nextInclusions = Array.from(new Set([...currentInclusions, orig]));
-
-    saveGlobalDict({ ...globalDict, abbrs: { ...currentAbbrevs, [orig]: short }, inclusions: nextInclusions });
+    
+    // 💡 오직 스마트 약어만 저장 (필수 포함 단어 복사 방지)
+    saveGlobalDict({ ...globalDict, abbrs: { ...currentAbbrevs, [short]: orig } });
     setNewAbbrevOrig(""); setNewAbbrevShort("");
   };
 
@@ -220,6 +209,8 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
 
   const applyTextToState = (textBody: string) => {
     const currentCustomStopWords = globalDict?.stopwords || [];
+    
+    // 💡 [지능형 엔진] 화면엔 약어가 포함단어에 안 보이지만, 백그라운드 엔진에서는 합쳐서 완벽히 뚫리게 처리
     const abbrevKeys = Object.keys(globalDict?.abbrs || {});
     const abbrevValues = Object.values(globalDict?.abbrs || {});
     const currentCustomIncludeWords = Array.from(new Set([
