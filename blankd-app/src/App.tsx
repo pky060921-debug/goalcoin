@@ -210,7 +210,7 @@ function MainApp() {
     }
   };
 
-  // 💡 불필요하게 [스마트 약어]를 [필수포함]으로 자동 복사해서 오염시키던 useEffect 삭제됨
+  // 💡 [치명적 버그 수정] 기존에 App.tsx에 숨어있던 '약어 등록 시 필수 단어로 강제 복사하는 감시 코드(useEffect)' 완전 삭제 완료!
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
@@ -677,7 +677,7 @@ function MainApp() {
     );
   }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs]);
 
-  // 💡 [버그 해결] 약어가 필수 포함 단어에 섞이지 않고 자기 자리에만 저장되도록 수정
+  // 💡 [치명적 버그 수정] 여기서도 약어가 필수 포함 단어에 섞이지 않도록 완벽히 분리!
   const handleAddDictItem = () => {
     if (dictTab === 'abbr' && tempKey && tempValue) {
       const k = tempKey.trim(); const v = tempValue.trim();
