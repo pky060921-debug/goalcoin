@@ -22,7 +22,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return typeof window !== 'undefined' && window.innerWidth < 768 ? 'smart' : 'editor';
   });
 
-  // 💡 [추가] 정관 폴더에서 데이터를 불러오기 위한 드롭다운 토글 상태
   const [showJeonggwanSelector, setShowJeonggwanSelector] = useState(false);
 
   const [localCards, setLocalCards] = useState<any[]>([]);
@@ -151,8 +150,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
     const stopWords = globalDict.stopwords || [];
     
+    // 💡 [핵심 복구] 약어 중에서 "원래 정답(Values)"만 추출해서 자동 빈칸 타겟에 포함시킵니다!
+    const abbrevValues = Object.values(globalDict.abbrs || {});
+
     const includeWords = Array.from(new Set([
-        ...(globalDict.inclusions || [])
+        ...(globalDict.inclusions || []),
+        ...(abbrevValues as string[])
     ])).filter((w: any) => typeof w === 'string' && w.trim() !== '').sort((a: any, b: any) => b.length - a.length);
 
     let tokens = restContent.split(/(\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g);
@@ -211,7 +214,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     setEditingId(tempId);
     setEditContent(newCard.content);
     setActiveTool(window.innerWidth < 768 ? 'smart' : 'editor');
-    setShowJeonggwanSelector(false); // 💡 새 에디터를 열 때 드롭다운 상태 초기화
+    setShowJeonggwanSelector(false);
   };
 
   const handleSaveEdit = async (card: any) => {
@@ -280,7 +283,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
       
       if (typeof loadAllData === 'function') await loadAllData();
       setEditingId(null); 
-      setShowJeonggwanSelector(false); // 💡 저장 성공 시 드롭다운 닫기
+      setShowJeonggwanSelector(false);
     } catch (error: any) { setErrorMsg(error.message || "서버 통신 실패"); } finally { setIsSaving(false); }
   };
 
@@ -442,7 +445,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                       {editingId === card.id ? (
                         <div className="relative flex flex-col p-4 rounded-sm border border-amber-500/50 bg-[#0a0a0c] transition-all duration-300 w-full shadow-[0_0_15px_rgba(245,158,11,0.15)]">
                           
-                          {/* 💡 [수정됨] 툴바 상단 구성: 정관 불러오기 버튼 추가 */}
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-3">
                             <span className="text-[12px] text-amber-500 font-bold flex items-center gap-2">빈칸 직접 수정 모드</span>
                             
@@ -460,7 +462,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                             </div>
                           </div>
 
-                          {/* 💡 [추가됨] 정관 선택 드롭다운 UI */}
                           {showJeonggwanSelector && (
                             <div className="mb-3 p-2 bg-yellow-950/20 border border-yellow-500/30 rounded-sm animate-in fade-in flex items-center gap-2 shadow-inner">
                               <select
@@ -471,9 +472,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                   if (targetCard) {
                                     const lines = targetCard.content.split('\n');
                                     let firstLine = lines[0].replace(/\[(법|령|칙|규|정관)\]/g, '').trim();
-                                    lines[0] = `[정관] ${firstLine}`; // 💡 기존 접두사를 지우고 [정관]으로 덮어씌움
+                                    lines[0] = `[정관] ${firstLine}`; 
                                     setEditContent(lines.join('\n'));
-                                    setShowJeonggwanSelector(false); // 선택 후 창 닫기
+                                    setShowJeonggwanSelector(false); 
                                   }
                                 }}
                                 defaultValue=""
@@ -501,7 +502,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           </div>
                         </div>
                       ) : (
-                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm flex flex-col justify-center gap-0.5 ${movingId === card.id ? "shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "bg-red-900/20" : "bg-indigo-900/20 hover:bg-indigo-900/40"} transition-all duration-200`}>
+                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm border flex flex-col justify-center gap-0.5 ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
                           
                           <div className="flex w-full overflow-hidden mb-1">
                             <div className={`${titleColor} font-bold ${titleSizing} w-full text-left truncate leading-tight`} title={displayTitle}>
@@ -522,18 +523,18 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                               </button>
                             </div>
                           ) : (
-                            <div className="flex flex-col w-full pt-1">
+                            <div className="flex flex-col w-full pt-1 border-t border-white/5">
                               <div className="flex flex-row justify-between items-center w-full">
                                 <div className="flex flex-nowrap gap-0.5">
                                   <span className="text-[7px] sm:text-[8px] text-indigo-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">빈칸:{totalBlanks}</span>
                                   <span className="text-[7px] sm:text-[8px] text-teal-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">반복:{stats.filled}</span>
-                                  <span className={`text-[7px] sm:text-[8px] px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center ${hasWrong ? 'text-white bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30'}`}>틀림:{stats.wrongIndices.length}</span>
+                                  <span className={`text-[7px] sm:text-[8px] px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center ${hasWrong ? 'text-white bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                                 </div>
                                 <div className="flex items-center gap-0.5 opacity-80 hover:opacity-100 transition-opacity">
-                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
-                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
-                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool(window.innerWidth < 768 ? 'smart' : 'editor'); setShowJeonggwanSelector(false); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
-                                  <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-0.5 px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[8px] hover:bg-red-500/10 hover:text-red-500 transition-all flex items-center justify-center leading-none h-4" title="삭제">✕</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
+                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool(window.innerWidth < 768 ? 'smart' : 'editor'); setShowJeonggwanSelector(false); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
+                                  <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-0.5 px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[8px] hover:bg-red-500/10 hover:text-red-500 transition-all flex items-center justify-center leading-none h-4" title="삭제">✕</button>
                                 </div>
                               </div>
                             </div>
