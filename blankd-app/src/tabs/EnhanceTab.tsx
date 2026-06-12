@@ -134,7 +134,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [movingId, safeAddress, loadAllData]);
 
-  // 💡 [버그 해결] 약어 데이터(abbrevKeys, abbrevValues)를 실시간으로 가져와 포함단어로 스캔합니다.
   const autoApplyDict = (content: string) => {
     if (!globalDict) return content;
     
@@ -147,7 +146,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     const stopWords = globalDict.stopwords || [];
     const abbrevKeys = Object.keys(globalDict.abbrs || {});
     const abbrevValues = Object.values(globalDict.abbrs || {});
-    
     const includeWords = Array.from(new Set([
         ...(globalDict.inclusions || []), 
         ...abbrevKeys, 
@@ -283,7 +281,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
   const renderInteractiveText = () => {
     const lines = editContent.split('\n');
-    const titleLine = (lines[0] || '').replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '').trim();
+    const titleLine = (lines[0] || '').replace(/\[(법|령|칙|규)\]/g, '').trim();
     const restLines = lines.slice(1).join('\n');
     
     const tokens = restLines.split(/(\s+|\n|---|\[\[?ORIG_ID:\d+\]?\]?|\[[^\]]+\])/g).filter(Boolean);
@@ -353,7 +351,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                   const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
                   
                   let displayTitle = (cleanContent.split('\n')[0] || "")
-                    .replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '')
+                    .replace(/\[(법|령|칙|규)\]/g, '')
                     .replace(/\(\s*내용\s*\)/g, '')
                     .replace(/내용/g, '')
                     .trim();
@@ -418,7 +416,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           </div>
                           
                           {movingId === card.id ? (
-                            <div className="flex items-center justify-between w-full border-t border-blue-500/30 pt-1 animate-in fade-in">
+                            <div className="flex items-center justify-between w-full pt-1 animate-in fade-in">
                               <span className="text-blue-300 text-[10px] font-bold flex items-center">
                                 방향키(↑, ↓)로 이동 후 Enter 입력
                               </span>
@@ -430,12 +428,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                               </button>
                             </div>
                           ) : (
-                            <div className="flex flex-col w-full border-t border-white/5 pt-1">
+                            <div className="flex flex-col w-full pt-1">
                               <div className="flex flex-row justify-between items-center w-full">
                                 <div className="flex flex-nowrap gap-0.5">
-                                  <span className="text-[7px] sm:text-[8px] text-indigo-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">빈칸:{totalBlanks}</span>
-                                  <span className="text-[7px] sm:text-[8px] text-teal-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">반복:{stats.filled}</span>
-                                  <span className={`text-[7px] sm:text-[8px] px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center ${hasWrong ? 'text-white font-bold animate-pulse' : 'text-white/30'}`}>틀림:{stats.wrongIndices.length}</span>
+                                  <span className="text-[7px] sm:text-[8px] text-indigo-300 px-1 py-[1px] rounded bg-indigo-900/40 font-mono whitespace-nowrap leading-none flex items-center">빈칸:{totalBlanks}</span>
+                                  <span className="text-[7px] sm:text-[8px] text-teal-300 px-1 py-[1px] rounded bg-teal-900/40 font-mono whitespace-nowrap leading-none flex items-center">반복:{stats.filled}</span>
+                                  <span className={`text-[7px] sm:text-[8px] px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center ${hasWrong ? 'text-white bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                                 </div>
                                 <div className="flex items-center gap-0.5 opacity-80 hover:opacity-100 transition-opacity">
                                   <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
