@@ -11,7 +11,6 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-// 💡 [핵심] App.tsx에서 정상적으로 Import 하려면 반드시 아래처럼 export const EnhanceTab 으로 시작해야 합니다!
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, loadAllData, safeAddress, globalDict }: any) => {
   
   const [editingId, setEditingId] = useState<number | string | null>(null);
@@ -277,7 +276,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
   const renderInteractiveText = () => {
     const lines = editContent.split('\n');
-    const titleLine = (lines[0] || '').replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '').trim();
+    const titleLine = (lines[0] || '').trim();
     const restLines = lines.slice(1).join('\n');
     
     const tokens = restLines.split(/(\s+|\n|---|\[\[?ORIG_ID:\d+\]?\]?|\[[^\]]+\])/g).filter(Boolean);
@@ -346,22 +345,26 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                 try {
                   const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
                   
-                  // 화면상 노출되는 제목에서만 [법], [령], [칙] 제거
+                  let colClass = "md:col-start-1 md:col-span-1"; 
+                  let titleColor = "text-red-500";
+                  let diagnosticInfo = "[법]"; // 진단용 텍스트
+                  
+                  // 💡 [지능형 정렬 스캔] 첫줄이 아니라 '전체 텍스트'에서 [칙] -> [령] -> [법] 순서로 최하위 법령을 우선 탐지합니다.
+                  if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { 
+                    colClass = "md:col-start-3 md:col-span-1"; titleColor = "text-green-500"; diagnosticInfo = "[칙]";
+                  } else if (cleanContent.includes('[령]')) { 
+                    colClass = "md:col-start-2 md:col-span-1"; titleColor = "text-blue-400"; diagnosticInfo = "[령]";
+                  } else { 
+                    colClass = "md:col-start-1 md:col-span-1"; titleColor = "text-red-500"; diagnosticInfo = "[법]";
+                  }
+
+                  // 화면에 노출되는 제목에서만 [법], [령], [칙] 글자를 깔끔하게 지워줍니다.
                   let displayTitle = (cleanContent.split('\n')[0] || "")
-                    .replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '')
+                    .replace(/\[(법|령|칙|규)\]/g, '')
                     .replace(/\(\s*내용\s*\)/g, '')
                     .replace(/내용/g, '')
                     .trim();
                   if (!displayTitle) displayTitle = "제목 없음";
-
-                  let colClass = "md:col-start-1 md:col-span-1"; 
-                  let titleColor = "text-red-500";
-                  
-                  // 백그라운드 데이터의 [법] [령] [칙] 을 분석하여 열 위치 결정 (정렬 기능 정상화)
-                  const firstLineData = cleanContent.split('\n')[0] || "";
-                  if (firstLineData.includes('[법]')) { colClass = "md:col-start-1 md:col-span-1"; titleColor = "text-red-500"; }
-                  else if (firstLineData.includes('[령]')) { colClass = "md:col-start-2 md:col-span-1"; titleColor = "text-blue-400"; }
-                  else if (firstLineData.includes('[칙]') || firstLineData.includes('[규]')) { colClass = "md:col-start-3 md:col-span-1"; titleColor = "text-green-500"; }
 
                   const lines = cleanContent.split('\n');
                   const bodyOnlyForStats = lines.slice(1).join('\n');
@@ -416,17 +419,23 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                               </button>
                             </div>
                           ) : (
-                            <div className="flex flex-row justify-between items-center w-full mt-1 border-t border-white/5 pt-2">
-                              <div className="flex flex-nowrap gap-1">
-                                <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
-                                <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">반복:{stats.filled}</span>
-                                <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
+                            <div className="flex flex-col w-full mt-1 border-t border-white/5 pt-2">
+                              <div className="flex flex-row justify-between items-center w-full">
+                                <div className="flex flex-nowrap gap-1">
+                                  <span className="text-[8px] sm:text-[9px] text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded bg-indigo-900/40 font-mono whitespace-nowrap">빈칸:{totalBlanks}</span>
+                                  <span className="text-[8px] sm:text-[9px] text-teal-300 border border-teal-500/30 px-1.5 py-0.5 rounded bg-teal-900/40 font-mono whitespace-nowrap">반복:{stats.filled}</span>
+                                  <span className={`text-[8px] sm:text-[9px] px-1.5 py-0.5 rounded font-mono border whitespace-nowrap ${hasWrong ? 'text-white border-red-500/60 bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 border-white/5 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
+                                </div>
+                                <div className="flex items-center gap-1 opacity-80 hover:opacity-100 transition-opacity">
+                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-blue-500/10 hover:text-blue-500 hover:border-blue-500/30 transition-all cursor-pointer">이동</button>
+                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-green-500/10 hover:text-green-600 hover:border-green-500/30 transition-all cursor-pointer">➕ 추가</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('editor'); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/30 transition-all">수정</button>
+                                  <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-1 px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-red-500/10 hover:text-red-500 hover:border-red-500/30 transition-all">✕</button>
+                                </div>
                               </div>
-                              <div className="flex items-center gap-1 opacity-80 hover:opacity-100 transition-opacity">
-                                <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-blue-500/10 hover:text-blue-500 hover:border-blue-500/30 transition-all cursor-pointer">이동</button>
-                                <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-green-500/10 hover:text-green-600 hover:border-green-500/30 transition-all cursor-pointer">➕ 추가</button>
-                                <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('editor'); }} className="px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-amber-500/10 hover:text-amber-600 hover:border-amber-500/30 transition-all">수정</button>
-                                <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-1 px-2 py-1 bg-white/5 text-white/50 border border-white/10 rounded-sm font-mono text-[10px] hover:bg-red-500/10 hover:text-red-500 hover:border-red-500/30 transition-all">✕</button>
+                              {/* 💡 개발자 전용 진단 로그 UI */}
+                              <div className="text-left mt-1.5 text-[8px] text-white/20 font-mono opacity-50">
+                                [진단: 스캔된 기호 {diagnosticInfo}]
                               </div>
                             </div>
                           )}
