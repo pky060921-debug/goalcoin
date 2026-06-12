@@ -111,7 +111,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
-  // 💡 [버그 해결] 약어 추가 시 오직 약어 DB(abbrs)에만 넣도록 수정. 필수 포함 단어(inclusions) 침범 삭제
   const handleAddStopWord = () => {
     if (!newStopWord.trim()) return;
     const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
@@ -146,8 +145,6 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     if (!newAbbrevOrig.trim() || !newAbbrevShort.trim()) return;
     const orig = newAbbrevOrig.trim(); const short = newAbbrevShort.trim();
     const currentAbbrevs = globalDict?.abbrs || {};
-    
-    // 💡 오직 스마트 약어만 저장 (필수 포함 단어 복사 방지)
     saveGlobalDict({ ...globalDict, abbrs: { ...currentAbbrevs, [short]: orig } });
     setNewAbbrevOrig(""); setNewAbbrevShort("");
   };
@@ -207,16 +204,13 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     } else { localStorage.removeItem('blankd_craft_expanded'); }
   }, [expandedId, categories]);
 
+  // 💡 [버그 완벽 수정] 약어 스캔 로직을 완전히 삭제하여 필수포함 단어만 뚫리게 처리
   const applyTextToState = (textBody: string) => {
     const currentCustomStopWords = globalDict?.stopwords || [];
     
-    // 💡 [지능형 엔진] 화면엔 약어가 포함단어에 안 보이지만, 백그라운드 엔진에서는 합쳐서 완벽히 뚫리게 처리
-    const abbrevKeys = Object.keys(globalDict?.abbrs || {});
-    const abbrevValues = Object.values(globalDict?.abbrs || {});
+    // 오직 순수한 필수 포함 단어만 사용
     const currentCustomIncludeWords = Array.from(new Set([
-        ...(globalDict?.inclusions || []), 
-        ...abbrevKeys, 
-        ...(abbrevValues as string[])
+        ...(globalDict?.inclusions || [])
     ])).filter((w: any) => typeof w === 'string' && w.trim() !== '');
     
     let processedText = textBody.replace(/\[|\]/g, '');
@@ -379,7 +373,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
           </div>
 
           <div className="bg-black/30 p-3 border border-white/5 rounded-sm">
-             <div className="text-xs sm:text-sm text-indigo-400 font-bold mb-3">💡 스마트 약어 (등록 시 원본 정답은 필수 포함 단어에 자동 등록됨)</div>
+             <div className="text-xs sm:text-sm text-indigo-400 font-bold mb-3">💡 스마트 약어 (정답 채점용으로만 작동합니다)</div>
              <div className="flex flex-wrap sm:flex-nowrap gap-2 mb-3">
                 <input type="text" value={newAbbrevOrig} onChange={(e) => setNewAbbrevOrig(e.target.value)} placeholder="원래 정답 (예: 행정안전부장관)" className="flex-1 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-indigo-400/50" />
                 <input type="text" value={newAbbrevShort} onChange={(e) => setNewAbbrevShort(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddAbbrev(); }} placeholder="약어 (예: 행안부장관)" className="w-1/3 sm:w-32 bg-black/50 border border-white/20 p-2 text-xs text-white/80 outline-none rounded-sm focus:border-indigo-400/50" />
