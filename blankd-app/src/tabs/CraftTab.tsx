@@ -31,15 +31,21 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     try {
       const raw = cat.title || cat.content || "";
       
-      let prefix = "[법]";
-      if (raw.includes('[령]')) prefix = "[령]";
-      else if (raw.includes('[칙]') || raw.includes('[규]')) prefix = "[칙]";
+      let prefix = "[법] ";
+      if (raw.includes('[칙]') || raw.includes('[규]')) prefix = "[칙] ";
+      else if (raw.includes('[령]')) prefix = "[령] ";
 
-      let fallbackTitle = raw.split('\n')[0].replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
+      const match = raw.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
+      if (match && match[2].trim() !== "내용") return `${prefix}${match[1].replace(/\s+/g, '')} ${match[2].trim()}`;
       
-      // 💡 깨끗하게 정리해서 이름표를 달아줌
+      if (cat.content) {
+        const bodyMatch = cat.content.match(/(제\s*\d+\s*조(?:\s*의\s*\d+)?)\s*\((.*?)\)/);
+        if (bodyMatch && bodyMatch[2].trim() !== "내용") return `${prefix}${bodyMatch[1].replace(/\s+/g, '')} ${bodyMatch[2].trim()}`;
+      }
+      
+      const fallbackTitle = raw.split('\n')[0].replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
       let cleanTitle = fallbackTitle.replace(/\[(법|령|칙|규)\]/g, '').trim();
-      return `${prefix} ${cleanTitle}` || "제목 없음";
+      return `${prefix}${cleanTitle}` || "제목 없음";
     } catch (error) { return "제목 추출 에러"; }
   };
 
