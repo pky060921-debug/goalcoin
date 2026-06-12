@@ -316,7 +316,7 @@ function MainApp() {
     }
   };
 
-  // 💡 [버그 완벽 차단] 시스템에 카드를 저장하는 핵심 엔진
+  // 💡 [치명적 버그 수정 완료] 시스템에 카드를 저장하는 핵심 엔진
   const handleMakeBlankCard = async (
     cat: any, wordsArray: string[], selectedIndices: Set<number>, pageBreaks: Set<number>, memo: string, cardId: any, onComplete: () => void
   ) => {
@@ -338,18 +338,21 @@ function MainApp() {
     );
     const targetCardId = existingCard ? existingCard.id : null; 
 
-    // 💡 [핵심 스캔 엔진] 맨 앞글자만 대충 검사하는게 아니라, 전체 텍스트 어딘가에 [령], [칙]이 있는지 찾아냅니다.
+    // 💡 [핵심 정렬 지능 엔진] 위치와 무관하게 전체 텍스트에서 령/칙을 우선으로 찾아냅니다!
     const rawContent = cat.content || cat.title || "";
     let firstLine = rawContent.split('\n')[0] || "";
     
-    let prefix = "[법]";
-    if (rawContent.includes("[령]")) prefix = "[령]";
-    else if (rawContent.includes("[칙]") || rawContent.includes("[규]")) prefix = "[칙]";
+    let detectedPrefix = "[법]"; // 기본값
+    if (rawContent.includes("[령]")) detectedPrefix = "[령]";
+    else if (rawContent.includes("[칙]") || rawContent.includes("[규]")) detectedPrefix = "[칙]";
 
-    // 기존에 있던 쓸데없는 기호를 지우고, 확실하게 1개만 앞에 고정시킵니다.
-    firstLine = `${prefix} ${firstLine.replace(/\[(법|령|칙|규)\]/g, '').trim()}`;
+    // 기존 텍스트에 엉켜있을 수 있는 잡다한 [법][령][칙] 기호들을 싹 치워버립니다.
+    let cleanFirstLine = firstLine.replace(/\[(법|령|칙|규)\]/g, '').trim();
     
-    const finalCardContent = `${firstLine}\n${bodyContent.trim()}\n\n[[ORIG_ID:${cat.id}]]`;
+    // 찾아낸 진짜 이름표 1개만 깔끔하게 맨 앞에 고정 부착! (이래야 1, 2, 3열 정렬이 오작동하지 않습니다)
+    const finalFirstLine = `${detectedPrefix} ${cleanFirstLine}`;
+    
+    const finalCardContent = `${finalFirstLine}\n${bodyContent.trim()}\n\n[[ORIG_ID:${cat.id}]]`;
     const initialMemo = stringifyCardStats(memo, 0, []);
     
     const res = await fetch("https://api.blankd.top/api/save-card", { 
@@ -611,6 +614,7 @@ function MainApp() {
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
+    // 💡 [화면 가림 필터링] 모의고사 뷰에서도 제목에서 [법], [령], [칙] 기호를 화면에서 완전히 가려줍니다.
     let displayTitle = titleLine
       .replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '')
       .replace(/\(\s*내용\s*\)/g, '')
@@ -769,7 +773,6 @@ function MainApp() {
   const getThemeCSS = () => {
     if (theme === 'white') {
       return `
-        /* 1. 기본 배경 및 텍스트 베이스 */
         body { background-color: #f3f4f6; color: #111827; }
         .text-white { color: #111827 !important; }
         .text-white\\/20, .text-white\\/30 { color: #6b7280 !important; font-weight: 600; }
@@ -778,13 +781,11 @@ function MainApp() {
         .text-white\\/80 { color: #1f2937 !important; font-weight: 700; }
         .text-\\[\\#d1d1d1\\] { color: #111827 !important; font-weight: 700; }
         
-        /* 2. 레이아웃 구조 박스 (모달, 카드 등) */
         .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #d1d5db !important; }
         .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(255, 255, 255, 0.95) !important; backdrop-filter: blur(8px); }
         .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border-color: #e5e7eb !important; }
         .bg-\\[\\#0d0d0f\\] { background-color: #f3f4f6 !important; }
         
-        /* 3. 인풋 및 범용 반투명 배경 */
         .bg-black\\/30, .bg-black\\/40, .bg-black\\/50, .bg-black\\/60 { 
           background-color: #f9fafb !important; color: #111827 !important; border-color: #d1d5db !important; 
         }
@@ -792,12 +793,10 @@ function MainApp() {
           background-color: #f3f4f6 !important; border-color: #d1d5db !important; color: #111827 !important; 
         }
         
-        /* 4. 범용 테두리 선명화 */
         .border-white\\/5, .border-white\\/10, .border-white\\/20, .border-white\\/30 { 
           border-color: #d1d5db !important; 
         }
 
-        /* 🎨 5. 브랜드 컬러 강제 교정 (라이트 모드 맞춤형) 🎨 */
         .text-teal-300, .text-teal-400, .text-teal-500 { color: #0f766e !important; font-weight: 800 !important; }
         .bg-teal-900\\/20, .bg-teal-900\\/30, .bg-teal-900\\/40, .bg-teal-950\\/20, .bg-teal-500\\/10, .bg-teal-500\\/20 { 
           background-color: #ccfbf1 !important; border-color: #5eead4 !important; 
