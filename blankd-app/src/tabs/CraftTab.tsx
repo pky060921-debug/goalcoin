@@ -44,7 +44,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
       }
       
       const fallbackTitle = raw.split('\n')[0].replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
-      let cleanTitle = fallbackTitle.replace(/\[(법|령|칙|규)\]/g, '').trim();
+      let cleanTitle = fallbackTitle.replace(/\[(법|령|칙|규|정관)\]/g, '').trim();
       return `${prefix}${cleanTitle}` || "제목 없음";
     } catch (error) { return "제목 추출 에러"; }
   };
@@ -204,13 +204,14 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
     } else { localStorage.removeItem('blankd_craft_expanded'); }
   }, [expandedId, categories]);
 
-  // 💡 [버그 완벽 수정] 약어 스캔 로직을 완전히 삭제하여 필수포함 단어만 뚫리게 처리
+  // 💡 [버그 완벽 수정] 약어의 원래 정답(Values)만 가져와서 필수포함 단어와 함께 자동 스캔
   const applyTextToState = (textBody: string) => {
     const currentCustomStopWords = globalDict?.stopwords || [];
     
-    // 오직 순수한 필수 포함 단어만 사용
+    const abbrevValues = Object.values(globalDict?.abbrs || {});
     const currentCustomIncludeWords = Array.from(new Set([
-        ...(globalDict?.inclusions || [])
+        ...(globalDict?.inclusions || []),
+        ...(abbrevValues as string[])
     ])).filter((w: any) => typeof w === 'string' && w.trim() !== '');
     
     let processedText = textBody.replace(/\[|\]/g, '');
