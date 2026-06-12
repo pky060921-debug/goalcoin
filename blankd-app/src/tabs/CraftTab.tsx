@@ -111,61 +111,62 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<number>>(new Set());
 
+  // 💡 [버그 해결] 글로벌 딕셔너리 연동 속성명(abbrs) 통일
   useEffect(() => {
     if (!globalDict) return;
-    const abbrevKeys = Object.keys(globalDict.abbreviations || {});
-    const currentInclusions = globalDict.custom_inclusions || globalDict.inclusions || [];
+    const abbrevKeys = Object.keys(globalDict.abbrs || {});
+    const currentInclusions = globalDict.inclusions || [];
     const missingKeys = abbrevKeys.filter(key => !currentInclusions.includes(key));
     if (missingKeys.length > 0) {
       const nextInclusions = Array.from(new Set([...currentInclusions, ...missingKeys]));
-      saveGlobalDict({ ...globalDict, custom_inclusions: nextInclusions, inclusions: nextInclusions });
+      saveGlobalDict({ ...globalDict, inclusions: nextInclusions });
     }
   }, [globalDict, saveGlobalDict]);
 
   const handleAddStopWord = () => {
     if (!newStopWord.trim()) return;
     const words = newStopWord.split(',').map(w => w.trim()).filter(w => w);
-    const currentList = globalDict?.custom_stopwords || globalDict?.stopwords || [];
+    const currentList = globalDict?.stopwords || [];
     const nextList = Array.from(new Set([...currentList, ...words]));
-    saveGlobalDict({ ...globalDict, custom_stopwords: nextList, stopwords: nextList });
+    saveGlobalDict({ ...globalDict, stopwords: nextList });
     setNewStopWord("");
   };
 
   const handleRemoveStopWord = (wordToRemove: string) => {
-    const currentList = globalDict?.custom_stopwords || globalDict?.stopwords || [];
+    const currentList = globalDict?.stopwords || [];
     const nextList = currentList.filter((w: string) => w !== wordToRemove);
-    saveGlobalDict({ ...globalDict, custom_stopwords: nextList, stopwords: nextList });
+    saveGlobalDict({ ...globalDict, stopwords: nextList });
   };
 
   const handleAddIncludeWord = () => {
     if (!newIncludeWord.trim()) return;
     const words = newIncludeWord.split(',').map(w => w.trim()).filter(w => w);
-    const currentList = globalDict?.custom_inclusions || globalDict?.inclusions || [];
+    const currentList = globalDict?.inclusions || [];
     const nextList = Array.from(new Set([...currentList, ...words]));
-    saveGlobalDict({ ...globalDict, custom_inclusions: nextList, inclusions: nextList });
+    saveGlobalDict({ ...globalDict, inclusions: nextList });
     setNewIncludeWord("");
   };
 
   const handleRemoveIncludeWord = (wordToRemove: string) => {
-    const currentList = globalDict?.custom_inclusions || globalDict?.inclusions || [];
+    const currentList = globalDict?.inclusions || [];
     const nextList = currentList.filter((w: string) => w !== wordToRemove);
-    saveGlobalDict({ ...globalDict, custom_inclusions: nextList, inclusions: nextList });
+    saveGlobalDict({ ...globalDict, inclusions: nextList });
   };
 
   const handleAddAbbrev = () => {
     if (!newAbbrevOrig.trim() || !newAbbrevShort.trim()) return;
     const orig = newAbbrevOrig.trim(); const short = newAbbrevShort.trim();
-    const currentAbbrevs = globalDict?.abbreviations || {};
-    const currentInclusions = globalDict?.custom_inclusions || globalDict?.inclusions || [];
+    const currentAbbrevs = globalDict?.abbrs || {};
+    const currentInclusions = globalDict?.inclusions || [];
     const nextInclusions = Array.from(new Set([...currentInclusions, orig]));
 
-    saveGlobalDict({ ...globalDict, abbreviations: { ...currentAbbrevs, [orig]: short }, custom_inclusions: nextInclusions, inclusions: nextInclusions });
+    saveGlobalDict({ ...globalDict, abbrs: { ...currentAbbrevs, [orig]: short }, inclusions: nextInclusions });
     setNewAbbrevOrig(""); setNewAbbrevShort("");
   };
 
   const handleRemoveAbbrev = (keyToRemove: string) => {
-    const currentAbbrevs = { ...(globalDict?.abbreviations || {}) }; delete currentAbbrevs[keyToRemove];
-    saveGlobalDict({ ...globalDict, abbreviations: currentAbbrevs });
+    const currentAbbrevs = { ...(globalDict?.abbrs || {}) }; delete currentAbbrevs[keyToRemove];
+    saveGlobalDict({ ...globalDict, abbrs: currentAbbrevs });
   };
 
   useEffect(() => {
@@ -219,9 +220,14 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
   }, [expandedId, categories]);
 
   const applyTextToState = (textBody: string) => {
-    const currentCustomStopWords = globalDict?.stopwords || globalDict?.custom_stopwords || [];
-    const abbrevKeys = Object.keys(globalDict?.abbreviations || {});
-    const currentCustomIncludeWords = Array.from(new Set([...(globalDict?.inclusions || globalDict?.custom_inclusions || []), ...abbrevKeys]));
+    const currentCustomStopWords = globalDict?.stopwords || [];
+    const abbrevKeys = Object.keys(globalDict?.abbrs || {});
+    const abbrevValues = Object.values(globalDict?.abbrs || {}); // 💡 [추가] 약어 자체도 빈칸으로 만들 수 있도록 포함
+    const currentCustomIncludeWords = Array.from(new Set([
+        ...(globalDict?.inclusions || []), 
+        ...abbrevKeys, 
+        ...(abbrevValues as string[])
+    ])).filter((w: any) => typeof w === 'string' && w.trim() !== '');
     
     let processedText = textBody.replace(/\[|\]/g, '');
     if (currentCustomStopWords.length > 0) {
@@ -358,7 +364,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                 <button onClick={handleAddStopWord} className="px-4 bg-amber-600/20 text-amber-400 border border-amber-500/30 text-xs font-bold rounded-sm hover:bg-amber-600/40 transition-colors">추가</button>
               </div>
               <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto custom-scrollbar content-start p-1">
-                  {[...(globalDict?.custom_stopwords || globalDict?.stopwords || [])].sort((a, b) => a.localeCompare(b, 'ko')).map((word: string) => (
+                  {[...(globalDict?.stopwords || [])].sort((a, b) => a.localeCompare(b, 'ko')).map((word: string) => (
                     <span key={word} className="px-2 py-1 bg-white/5 border border-white/10 rounded text-[10px] sm:text-[11px] text-white/70 flex items-center gap-1.5 whitespace-nowrap">
                       {word} <button onClick={() => handleRemoveStopWord(word)} className="text-white/30 hover:text-red-400">✕</button>
                     </span>
@@ -373,7 +379,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                 <button onClick={handleAddIncludeWord} className="px-4 bg-teal-600/20 text-teal-400 border border-teal-500/30 text-xs font-bold rounded-sm hover:bg-teal-600/40 transition-colors">추가</button>
               </div>
               <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto custom-scrollbar content-start p-1">
-                  {[...(globalDict?.custom_inclusions || globalDict?.inclusions || [])].sort((a, b) => a.localeCompare(b, 'ko')).map((word: string) => (
+                  {[...(globalDict?.inclusions || [])].sort((a, b) => a.localeCompare(b, 'ko')).map((word: string) => (
                     <span key={word} className="px-2 py-1 bg-teal-900/30 border border-teal-500/30 rounded text-[10px] sm:text-[11px] text-teal-300 flex items-center gap-1.5 whitespace-nowrap">
                       {word} <button onClick={() => handleRemoveIncludeWord(word)} className="text-teal-500/50 hover:text-teal-300">✕</button>
                     </span>
@@ -390,7 +396,7 @@ export const CraftTab = ({ categories, savedCards, colCount, viewMode, useAiReco
                 <button onClick={handleAddAbbrev} className="px-4 bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 text-xs font-bold rounded-sm hover:bg-indigo-600/40 transition-colors">등록</button>
              </div>
              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto custom-scrollbar content-start p-1">
-                 {Object.entries(globalDict?.abbreviations || {}).sort((a, b) => a[0].localeCompare(b[0], 'ko')).map(([orig, short]: any) => (
+                 {Object.entries(globalDict?.abbrs || {}).sort((a, b) => a[0].localeCompare(b[0], 'ko')).map(([orig, short]: any) => (
                    <span key={orig} className="px-2 py-1 bg-indigo-900/30 border border-indigo-500/30 rounded text-[10px] sm:text-[11px] text-indigo-300 flex items-center gap-1.5 whitespace-nowrap">
                      <span className="opacity-60">{orig}</span> → <strong>{short}</strong>
                      <button onClick={() => handleRemoveAbbrev(orig)} className="text-indigo-500/50 hover:text-indigo-300 ml-1">✕</button>
