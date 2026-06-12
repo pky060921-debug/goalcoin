@@ -10,7 +10,6 @@ import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
-// ── 인라인 빈칸 입력 컴포넌트 ─────────────────
 const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
@@ -317,7 +316,7 @@ function MainApp() {
     }
   };
 
-  // 💡 [치명적 누락 기능 완벽 복구] 여기서부터 누락되었던 핵심 저장 통신 모듈입니다.
+  // 💡 [버그 완벽 차단] 시스템에 카드를 저장하는 핵심 엔진
   const handleMakeBlankCard = async (
     cat: any, wordsArray: string[], selectedIndices: Set<number>, pageBreaks: Set<number>, memo: string, cardId: any, onComplete: () => void
   ) => {
@@ -339,13 +338,16 @@ function MainApp() {
     );
     const targetCardId = existingCard ? existingCard.id : null; 
 
+    // 💡 [핵심 스캔 엔진] 맨 앞글자만 대충 검사하는게 아니라, 전체 텍스트 어딘가에 [령], [칙]이 있는지 찾아냅니다.
     const rawContent = cat.content || cat.title || "";
     let firstLine = rawContent.split('\n')[0] || "";
     
-    // 💡 [핵심 교정] DB 저장 직전, 제목에 [법][령][칙][규] 중 하나도 없다면 강제로 [법]을 주입합니다.
-    if (!/^\[(법|령|칙|규)\]/.test(firstLine)) {
-        firstLine = `[법] ${firstLine.trim()}`;
-    }
+    let prefix = "[법]";
+    if (rawContent.includes("[령]")) prefix = "[령]";
+    else if (rawContent.includes("[칙]") || rawContent.includes("[규]")) prefix = "[칙]";
+
+    // 기존에 있던 쓸데없는 기호를 지우고, 확실하게 1개만 앞에 고정시킵니다.
+    firstLine = `${prefix} ${firstLine.replace(/\[(법|령|칙|규)\]/g, '').trim()}`;
     
     const finalCardContent = `${firstLine}\n${bodyContent.trim()}\n\n[[ORIG_ID:${cat.id}]]`;
     const initialMemo = stringifyCardStats(memo, 0, []);
@@ -609,7 +611,6 @@ function MainApp() {
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
-    // 💡 모의고사 뷰에서도 시각적으로 [법][령][칙] 기호를 감쪽같이 지워줌 (데이터상 정렬은 그대로 유지됨)
     let displayTitle = titleLine
       .replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '')
       .replace(/\(\s*내용\s*\)/g, '')
@@ -867,7 +868,7 @@ function MainApp() {
 
               {nextStudyCard ? (
                 <button onClick={() => { setActiveCard(nextStudyCard); }} className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]">
-                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span><span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{nextStudyCard.content.split('\n')[0].replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim()}</span>
+                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span><span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{nextStudyCard.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim()}</span>
                 </button>
               ) : (<div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 완료</div>)}
             </div>
