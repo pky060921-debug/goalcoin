@@ -17,7 +17,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
   const [editContent, setEditContent] = useState<string>("");
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [activeTool, setActiveTool] = useState<'editor' | 'include' | 'exclude' | null>('include');
+  
+  // 💡 [개선] 복잡한 포함/제외 모드를 버리고 'smart' 모드 하나로 통합
+  const [activeTool, setActiveTool] = useState<'editor' | 'smart' | null>('smart');
 
   const [localCards, setLocalCards] = useState<any[]>([]);
   const [movingId, setMovingId] = useState<number | null>(null);
@@ -134,7 +136,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [movingId, safeAddress, loadAllData]);
 
-  // 💡 [버그 완벽 수정] 약어(abbrs) 데이터를 완전히 빼버리고 오직 inclusions(필수포함)만 빈칸으로 뚫습니다!
   const autoApplyDict = (content: string) => {
     if (!globalDict) return content;
     
@@ -145,8 +146,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     const restContent = lines.length > 1 ? lines.slice(1).join('\n') : '';
 
     const stopWords = globalDict.stopwords || [];
-    
-    // 오직 순수한 필수 포함 단어만 사용
     const includeWords = Array.from(new Set([
         ...(globalDict.inclusions || [])
     ])).filter((w: any) => typeof w === 'string' && w.trim() !== '').sort((a: any, b: any) => b.length - a.length);
@@ -280,7 +279,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
   const renderInteractiveText = () => {
     const lines = editContent.split('\n');
-    const titleLine = (lines[0] || '').replace(/\[(법|령|칙|규)\]/g, '').trim();
+    const titleLine = (lines[0] || '').replace(/\[법\]|\[령\]|\[칙\]|\[규\]/g, '').trim();
     const restLines = lines.slice(1).join('\n');
     
     const tokens = restLines.split(/(\s+|\n|---|\[\[?ORIG_ID:\d+\]?\]?|\[[^\]]+\])/g).filter(Boolean);
@@ -303,28 +302,80 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           if (isWhitespace) return <span key={idx}>{token}</span>;
 
           let btnClass = "inline-block rounded px-1.5 py-0.5 mx-0.5 transition-all ";
-          if (activeTool === 'include') {
-            if (isBracketed) btnClass += "bg-teal-900/20 text-teal-500/50 border border-teal-500/10 cursor-not-allowed";
-            else btnClass += "text-white/80 cursor-pointer bg-white/5 hover:bg-teal-500/40 hover:text-white hover:scale-105 active:scale-95 border border-transparent hover:border-teal-400/50 shadow-sm";
-          } else if (activeTool === 'exclude') {
-            if (isBracketed) btnClass += "bg-teal-900/60 text-teal-200 border border-teal-500/60 cursor-pointer hover:bg-red-600/80 hover:text-white hover:border-red-400 hover:scale-105 active:scale-95 hover:line-through shadow-md";
-            else btnClass += "text-white/30 cursor-default";
+          
+          if (activeTool === 'smart') {
+            if (isBracketed) btnClass += "bg-teal-900/60 text-teal-200 border border-teal-500/60 cursor-pointer hover:bg-red-600/80 hover:text-white hover:border-red-400 shadow-md hover:scale-105 active:scale-95";
+            else btnClass += "text-white/80 cursor-pointer bg-white/5 hover:bg-teal-500/40 hover:text-white border border-transparent hover:border-teal-400/50 shadow-sm hover:scale-105 active:scale-95";
           } else {
             if (isBracketed) btnClass += "bg-teal-900/30 text-teal-400 border border-teal-500/30 cursor-default";
             else btnClass += "text-white/77 cursor-default";
           }
 
           return (
-            <span key={idx} onClick={() => {
-                if (activeTool === 'include' && !isBracketed) {
-                  const newTokens = [...tokens]; newTokens[idx] = `[${token}]`; 
-                  setEditContent(lines[0] + '\n' + newTokens.join(''));
-                } else if (activeTool === 'exclude' && isBracketed) {
-                  const newTokens = [...tokens]; newTokens[idx] = token.slice(1, -1); 
-                  setEditContent(lines[0] + '\n' + newTokens.join(''));
+            <span 
+              key={idx} 
+              onClick={(e) => {
+                if (activeTool !== 'smart') return;
+                e.preventDefault();
+                
+                // 💡 [Shift + 클릭] 분리 로직: 빈칸 내부의 띄어쓰기를 감지하여 분할합니다.
+                if (e.shiftKey) {
+                  let currentText = isBracketed ? token.slice(1, -1) : token;
+                  if (currentText.includes(' ')) {
+                     const parts = currentText.split(/(\s+)/);
+                     let replacement = "";
+                     parts.forEach(p => {
+                         if (/^\s+$/.test(p)) replacement += p; // 띄어쓰기는 빈칸 처리 안함
+                         else replacement += isBracketed ? `[${p}]` : p; // 문자는 괄호 유지
+                     });
+                     const newTokens = [...tokens];
+                     newTokens[idx] = replacement;
+                     setEditContent(lines[0] + '\n' + newTokens.join(''));
+                  }
+                  return;
                 }
-              }} className={btnClass}
-            >{isBracketed ? token.slice(1, -1) : token}</span>
+
+                // 💡 [좌클릭] 일반 토글 로직
+                const newTokens = [...tokens]; 
+                newTokens[idx] = isBracketed ? token.slice(1, -1) : `[${token}]`; 
+                setEditContent(lines[0] + '\n' + newTokens.join(''));
+              }} 
+              onContextMenu={(e) => {
+                if (activeTool !== 'smart') return;
+                e.preventDefault();
+                
+                // 💡 [우클릭] 병합 로직: 현재 단어와 바로 다음 단어를 띄어쓰기 포함하여 합칩니다.
+                let nextIdx = idx + 1;
+                let spaces = "";
+                while (nextIdx < tokens.length) {
+                   if (tokens[nextIdx] === '---' || tokens[nextIdx] === '\n' || tokens[nextIdx].startsWith('[[ORIG_ID:')) return; // 경계선 만나면 정지
+                   if (/^\s+$/.test(tokens[nextIdx])) { 
+                       spaces += tokens[nextIdx]; 
+                       nextIdx++; 
+                   } else {
+                       break; // 다음 단어 발견!
+                   }
+                }
+                
+                if (nextIdx < tokens.length) {
+                   const newTokens = [...tokens];
+                   let currentText = isBracketed ? token.slice(1, -1) : token;
+                   let nextText = tokens[nextIdx].startsWith('[') && tokens[nextIdx].endsWith(']') ? tokens[nextIdx].slice(1, -1) : tokens[nextIdx];
+                   
+                   let merged = currentText + spaces + nextText;
+                   newTokens[idx] = isBracketed ? `[${merged}]` : merged; // 원래 괄호가 있었으면 합친 것도 괄호 처리
+                   
+                   for (let i = idx + 1; i <= nextIdx; i++) {
+                       newTokens[i] = ""; // 합쳐진 뒤쪽 토큰들 삭제
+                   }
+                   setEditContent(lines[0] + '\n' + newTokens.join(''));
+                }
+              }}
+              className={btnClass}
+              title={activeTool === 'smart' ? "좌클릭: 토글 / 우클릭: 다음 단어와 합치기 / Shift+클릭: 분리" : ""}
+            >
+              {isBracketed ? token.slice(1, -1) : token}
+            </span>
           );
         })}
       </div>
@@ -386,16 +437,23 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                         <div className="relative flex flex-col p-4 rounded-sm border border-amber-500/50 bg-[#0a0a0c] transition-all duration-300 w-full shadow-[0_0_15px_rgba(245,158,11,0.15)]">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
                             <span className="text-[12px] text-amber-500 font-bold flex items-center gap-2">빈칸 직접 수정 모드</span>
-                            <div className="flex items-center gap-1.5 bg-black/50 p-1 rounded-sm border border-white/10">
-                              <button onClick={() => setActiveTool(activeTool === 'editor' ? null : 'editor')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'editor' ? 'bg-amber-500/80 text-white' : 'bg-white/5 text-white/50'}`}>직접 타이핑</button>
-                              <div className="w-px h-3 bg-white/10 mx-0.5"></div>
-                              <button onClick={() => setActiveTool(activeTool === 'include' ? null : 'include')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'include' ? 'bg-teal-500/80 text-white' : 'bg-white/5 text-white/50'}`}>클릭 포함</button>
-                              <button onClick={() => setActiveTool(activeTool === 'exclude' ? null : 'exclude')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'exclude' ? 'bg-red-500/80 text-white' : 'bg-white/5 text-white/50'}`}>클릭 제외</button>
+                            
+                            {/* 💡 [개선] 툴바 버튼을 스마트 클릭과 직접 타이핑 두 개로 압축 통합했습니다. */}
+                            <div className="flex flex-col sm:flex-row items-center gap-2 bg-black/50 p-1.5 rounded-sm border border-white/10">
+                              <div className="flex gap-1">
+                                <button onClick={() => setActiveTool(activeTool === 'editor' ? null : 'editor')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'editor' ? 'bg-amber-500/80 text-white' : 'bg-white/5 text-white/50'}`}>직접 타이핑</button>
+                                <div className="w-px h-3 bg-white/10 mx-0.5 self-center"></div>
+                                <button onClick={() => setActiveTool(activeTool === 'smart' ? null : 'smart')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'smart' ? 'bg-teal-500/80 text-white' : 'bg-white/5 text-white/50'}`}>스마트 클릭</button>
+                              </div>
+                              {activeTool === 'smart' && (
+                                <span className="text-[9px] text-teal-300/80 ml-1 hidden sm:inline-block">좌클릭:토글 / 우클릭:합치기 / Shift+클릭:분리</span>
+                              )}
                             </div>
+
                           </div>
                           
                           {activeTool === 'editor' ? (
-                            <textarea value={editContent} onChange={(e) => { setEditContent(e.target.value); }} className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] p-4 rounded border border-white/10 outline-none resize-none custom-scrollbar" placeholder="직접 입력하거나 [ ] 기호로 감싸세요." />
+                            <textarea value={editContent} onChange={(e) => { setEditContent(e.target.value); }} className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] p-4 rounded border border-white/10 outline-none resize-none custom-scrollbar" placeholder="직접 입력하거나 [ ] 기호로 감싸세요. (아예 띄어쓰기가 없는 문장에 빈 공간을 넣을 땐 여기서 입력하세요.)" />
                           ) : renderInteractiveText()}
                           
                           {errorMsg && <div className="text-red-400 text-[10px] mt-3 font-bold">{errorMsg}</div>}
@@ -437,7 +495,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                 <div className="flex items-center gap-0.5 opacity-80 hover:opacity-100 transition-opacity">
                                   <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
                                   <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
-                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('editor'); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool('smart'); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
                                   <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-0.5 px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[8px] hover:bg-red-500/10 hover:text-red-500 transition-all flex items-center justify-center leading-none h-4" title="삭제">✕</button>
                                 </div>
                               </div>
