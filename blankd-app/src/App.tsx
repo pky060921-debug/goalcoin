@@ -10,7 +10,7 @@ import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
-// 💡 [혁신 엔진] 사전에 단어가 등록되는 순간, 모든 카드 텍스트를 스캔하여 띄어쓰기 무관하게 빈칸을 뚫는 함수
+// 💡 [치명적 버그 수정 완료] 글자 단위로 쪼개어 정규식 방어막을 씌우는 무결성 엔진 탑재
 const autoApplyDictHelper = (content: string, dict: any) => {
   if (!dict) return content;
   let fixedContent = content.replace(/\[ORIG_ID:(\d+)\]/g, '[[ORIG_ID:$1]]');
@@ -22,10 +22,10 @@ const autoApplyDictHelper = (content: string, dict: any) => {
   const abbrevKeys = Object.keys(dict.abbrs || {});
   const abbrevValues = Object.values(dict.abbrs || {});
   
-  // 필수포함 단어 + 약어(원래 정답) + 약어(짧은 정답) 모두 타겟으로 지정
+  const wordsToUnbracket = [...stopWords, ...abbrevKeys];
+
   const includeWords = Array.from(new Set([
       ...(dict.inclusions || []),
-      ...abbrevKeys,
       ...(abbrevValues as string[])
   ])).filter((w: any) => typeof w === 'string' && w.trim() !== '').sort((a: any, b: any) => b.length - a.length);
 
@@ -37,33 +37,28 @@ const autoApplyDictHelper = (content: string, dict: any) => {
     if (tokens[i].startsWith('[') && tokens[i].endsWith(']')) {
       let innerText = tokens[i].slice(1, -1);
       let cleanInner = innerText.replace(/\s+/g, '');
-      if (stopWords.some((sw:string) => sw.replace(/\s+/g,'') === cleanInner)) {
-          tokens[i] = innerText; // 제외 단어면 괄호 박탈
+      if (wordsToUnbracket.some(w => w.replace(/\s+/g,'') === cleanInner)) {
+          tokens[i] = innerText;
       }
-    } else {
-      let text = tokens[i];
-      includeWords.forEach((iw: string) => {
-        // 💡 띄어쓰기가 어떻게 되어있든 귀신같이 찾아내는 정규식 마법 (가나다 -> 가\s*나\s*다)
-        const escaped = iw.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const flexibleRegexStr = escaped.split('').join('\\s*');
-        const regex = new RegExp(`(${flexibleRegexStr})`, 'g');
-        
-        let parts = text.split(/(\[[^\]]+\])/g);
-        for(let j=0; j<parts.length; j++){
-          if(!parts[j].startsWith('[')){ parts[j] = parts[j].replace(regex, '[$1]'); }
-        }
-        text = parts.join('');
-      });
-      tokens[i] = text;
     }
   }
   
-  for (let i = 0; i < tokens.length; i++) {
-    if (!tokens[i].startsWith('[[ORIG_ID:')) {
-       tokens[i] = tokens[i].replace(/\[+/g, '[').replace(/\]+/g, ']');
+  let currentText = tokens.join('');
+  
+  includeWords.forEach((iw: string) => {
+    // 💡 [수정] 방어막 분리 현상을 막기 위해, 글자를 쪼갠 뒤 각각 방어막을 씌웁니다!
+    const chars = iw.replace(/\s+/g, '').split('');
+    const flexibleRegexStr = chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
+    const regex = new RegExp(`(${flexibleRegexStr})`, 'gi');
+    
+    let parts = currentText.split(/(\[[^\]]+\])/g);
+    for(let j=0; j<parts.length; j++){
+      if(!parts[j].startsWith('[')){ parts[j] = parts[j].replace(regex, '[$1]'); }
     }
-  }
-  return titleLine + (lines.length > 1 ? '\n' : '') + tokens.join('');
+    currentText = parts.join('');
+  });
+  
+  return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
 };
 
 const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict }: {
@@ -233,6 +228,7 @@ function MainApp() {
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
         api.getGoalCoinBalance(safeAddress).catch(() => 0),
         api.getGlobalDict(safeAddress).catch((e) => {
+          console.error("전역 단어장 로드 실패:", e);
           return { stopwords: [], inclusions: [], abbrs: {} };
         })
       ]);
@@ -251,21 +247,20 @@ function MainApp() {
         abbrs: finalAbbrs
       });
     } catch (e: any) {
+      console.error("데이터 동기화 실패:", e);
       addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
     }
   };
 
-  // 💡 [혁신적 자동화] 사전에 새로운 단어가 추가되면 모든 카드에 빈칸을 자동 적용하여 즉시 업데이트!
   const saveGlobalDict = async (newDict: any) => {
-    setGlobalDict(newDict); // 1. 화면 즉시 반영
+    setGlobalDict(newDict); 
     
     try {
-      await api.updateGlobalDict(safeAddress, newDict); // 2. DB에 사전 저장
+      await api.updateGlobalDict(safeAddress, newDict);
     } catch (err) {
       console.error("단어장 DB 동기화 실패:", err);
     }
 
-    // 3. 백그라운드 카드 스캔 & 자동 빈칸 업데이트 프로세스 가동
     setSavedCards(prevCards => {
       let changeCount = 0;
       const updatedCards = prevCards.map(card => {
@@ -280,14 +275,12 @@ function MainApp() {
       if (changeCount > 0) {
         addLog(`🔄 스마트 스캔 중: ${changeCount}개 카드에 빈칸 자동 생성 및 동기화 진행...`);
         updatedCards.filter(c => c._isModified).forEach(card => {
-           // 새롭게 뚫린 빈칸 정답들 추출
            const newAnswers = (card.content.match(/\[\s*(.*?)\s*\]/g) || [])
               .map((b: string) => b.replace(/\[|\]/g, '').trim())
               .filter((a: string) => !a.startsWith('ORIG_ID:'))
               .filter(Boolean)
               .join(", ");
            
-           // 개별 카드의 DB 업데이트 전송
            fetch("https://api.blankd.top/api/save-card", {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -766,7 +759,6 @@ function MainApp() {
     );
   }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs]);
 
-  // 💡 [개선] 약어(abbrs)는 오직 약어 DB에만 저장하고, 포함단어(inclusions)와 완벽히 분리
   const handleAddDictItem = () => {
     if (dictTab === 'abbr' && tempKey && tempValue) {
       const k = tempKey.trim(); const v = tempValue.trim();
