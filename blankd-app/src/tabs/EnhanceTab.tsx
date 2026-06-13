@@ -139,7 +139,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [movingId, safeAddress, loadAllData]);
 
-  // 💡 [궁극의 엔진 교체] 글자 쪼개기를 없애고, 강력한 정규식 교체(Replace) 기법을 사용합니다!
+  // 💡 [초강력 수정] 띄어쓰기 무시 + 잘못된 약어 괄호 박탈 기능 추가 완료!
   const autoApplyDict = (content: string) => {
     if (!globalDict) return content;
     
@@ -150,49 +150,55 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     const restContent = lines.length > 1 ? lines.slice(1).join('\n') : '';
 
     const stopWords = globalDict.stopwords || [];
-    const abbrevKeys = Object.keys(globalDict.abbrs || {});
-    const abbrevValues = Object.values(globalDict.abbrs || {});
+    const abbrevKeys = Object.keys(globalDict.abbrs || {}); // 짧은 약어 (강제로 벗길 타겟)
+    const abbrevValues = Object.values(globalDict.abbrs || {}); // 긴 원래 정답 (빈칸 타겟)
     
-    // 잘못 뚫렸을 때 괄호를 부숴버릴 타겟 (제외단어 + 약어의 짧은 정답)
+    // 잘못 뚫려있으면 강제로 괄호를 부숴버릴 대상 (제외 단어 + 짧은 약어)
     const wordsToUnbracket = [...stopWords, ...abbrevKeys];
 
-    // 무조건 뚫어버릴 타겟 (필수단어 + 약어의 원래 정답)
+    // 무조건 빈칸으로 만들어버릴 대상
     const includeWords = Array.from(new Set([
         ...(globalDict.inclusions || []),
         ...(abbrevValues as string[])
     ])).filter((w: any) => typeof w === 'string' && w.trim() !== '').sort((a: any, b: any) => b.length - a.length);
 
-    let currentText = restContent;
-
-    // 1단계: 잘못 뚫린 괄호 파괴 공작
-    if (wordsToUnbracket.length > 0) {
-      currentText = currentText.replace(/\[([^\]]+)\]/g, (match, inner) => {
-        if (match.startsWith('[[ORIG_ID')) return match; // 시스템 태그 보호
-        let cleanInner = inner.replace(/\s+/g, '');
+    let tokens = restContent.split(/(\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g);
+    for (let i = 0; i < tokens.length; i++) {
+      if (!tokens[i]) continue;
+      if (tokens[i].startsWith('[[ORIG_ID:')) continue;
+      
+      if (tokens[i].startsWith('[') && tokens[i].endsWith(']')) {
+        let innerText = tokens[i].slice(1, -1);
+        let cleanInner = innerText.replace(/\s+/g, '');
+        // 💡 기존에 잘못 묶여있던 단어가 약어이거나 제외단어라면 괄호를 파괴합니다.
         if (wordsToUnbracket.some(w => w.replace(/\s+/g, '') === cleanInner)) {
-          return inner; // 괄호를 벗겨서 텍스트만 리턴
+           tokens[i] = innerText; 
         }
-        return match;
-      });
+      } else {
+        let text = tokens[i];
+        includeWords.forEach((iw: string) => {
+          // 💡 띄어쓰기 무시하고 스캔하는 마법의 정규식
+          const escaped = iw.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const flexibleRegexStr = escaped.split('').join('\\s*');
+          const regex = new RegExp(`(${flexibleRegexStr})`, 'g');
+          
+          let parts = text.split(/(\[[^\]]+\])/g);
+          for(let j=0; j<parts.length; j++){
+            if(!parts[j].startsWith('[')){ parts[j] = parts[j].replace(regex, '[$1]'); }
+          }
+          text = parts.join('');
+        });
+        tokens[i] = text;
+      }
+    }
+    
+    for (let i = 0; i < tokens.length; i++) {
+      if (!tokens[i].startsWith('[[ORIG_ID:')) {
+         tokens[i] = tokens[i].replace(/\[+/g, '[').replace(/\]+/g, ']');
+      }
     }
 
-    // 2단계: 필수 단어 및 약어 원래 정답 자동 빈칸 스캔
-    includeWords.forEach((iw: string) => {
-      const chars = iw.replace(/\s+/g, '').split('');
-      const flexibleRegexStr = chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
-      
-      // 💡 핵심: 이미 괄호가 쳐진 텍스트도 매칭 시키되, 함수 내부에서 걸러냅니다.
-      const regex = new RegExp(`\\[[^\\]]+\\]|(${flexibleRegexStr})`, 'gi');
-      
-      currentText = currentText.replace(regex, (match, p1) => {
-        // 이미 괄호에 싸여있거나 시스템 태그라면 원본 유지
-        if (match.startsWith('[')) return match; 
-        // 괄호가 없다면 목표 단어를 괄호로 포장!
-        return `[${p1}]`; 
-      });
-    });
-
-    return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
+    return titleLine + (lines.length > 1 ? '\n' : '') + tokens.join('');
   };
 
   const handleAddAdjacent = (folder: string, index: number) => {
@@ -455,13 +461,14 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                             
                             <div className="flex flex-col sm:flex-row items-center gap-2 bg-black/50 p-1.5 rounded-sm border border-white/10">
                               <div className="flex gap-1 items-center">
+                                {/* 💡 [마법 버튼] 기존에 오염된 빈칸을 폭파시키고 사전 기준으로 싹 재정렬하는 버튼 추가! */}
                                 <button onClick={(e) => {
                                   e.preventDefault();
                                   let stripped = editContent.replace(/\[\[ORIG_ID:\d+\]\]/g, (m) => `__ORIG_ID__${m}__ORIG_ID__`);
-                                  stripped = stripped.replace(/\[|\]/g, ''); 
+                                  stripped = stripped.replace(/\[|\]/g, ''); // 기존 모든 괄호 박탈
                                   stripped = stripped.replace(/__ORIG_ID__(.*?)__ORIG_ID__/g, '$1'); 
-                                  setEditContent(autoApplyDict(stripped)); 
-                                }} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-blue-900/30 text-blue-400 border border-blue-500/30 hover:bg-blue-500/20 transition-all shadow-sm">
+                                  setEditContent(autoApplyDict(stripped)); // 새로운 룰로 재적용
+                                }} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-blue-900/30 text-blue-400 border border-blue-500/30 hover:bg-blue-500/20 transition-all">
                                   🪄 사전 기준 전면 재적용
                                 </button>
                                 <div className="w-px h-3 bg-white/10 mx-0.5"></div>
