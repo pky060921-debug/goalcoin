@@ -10,7 +10,7 @@ import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
-// 💡 [치명적 버그 수정 완료] 글자 단위로 쪼개어 정규식 방어막을 씌우는 무결성 엔진 탑재
+// 💡 [궁극의 엔진 교체] 글자 쪼개기를 없애고, 강력한 정규식 교체(Replace) 기법을 사용합니다!
 const autoApplyDictHelper = (content: string, dict: any) => {
   if (!dict) return content;
   let fixedContent = content.replace(/\[ORIG_ID:(\d+)\]/g, '[[ORIG_ID:$1]]');
@@ -29,35 +29,30 @@ const autoApplyDictHelper = (content: string, dict: any) => {
       ...(abbrevValues as string[])
   ])).filter((w: any) => typeof w === 'string' && w.trim() !== '').sort((a: any, b: any) => b.length - a.length);
 
-  let tokens = restContent.split(/(\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g);
-  for (let i = 0; i < tokens.length; i++) {
-    if (!tokens[i]) continue;
-    if (tokens[i].startsWith('[[ORIG_ID:')) continue;
-    
-    if (tokens[i].startsWith('[') && tokens[i].endsWith(']')) {
-      let innerText = tokens[i].slice(1, -1);
-      let cleanInner = innerText.replace(/\s+/g, '');
-      if (wordsToUnbracket.some(w => w.replace(/\s+/g,'') === cleanInner)) {
-          tokens[i] = innerText;
+  let currentText = restContent;
+
+  if (wordsToUnbracket.length > 0) {
+    currentText = currentText.replace(/\[([^\]]+)\]/g, (match, inner) => {
+      if (match.startsWith('[[ORIG_ID')) return match; 
+      let cleanInner = inner.replace(/\s+/g, '');
+      if (wordsToUnbracket.some(w => w.replace(/\s+/g, '') === cleanInner)) {
+        return inner; 
       }
-    }
+      return match;
+    });
   }
-  
-  let currentText = tokens.join('');
-  
+
   includeWords.forEach((iw: string) => {
-    // 💡 [수정] 방어막 분리 현상을 막기 위해, 글자를 쪼갠 뒤 각각 방어막을 씌웁니다!
     const chars = iw.replace(/\s+/g, '').split('');
     const flexibleRegexStr = chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
-    const regex = new RegExp(`(${flexibleRegexStr})`, 'gi');
+    const regex = new RegExp(`\\[[^\\]]+\\]|(${flexibleRegexStr})`, 'gi');
     
-    let parts = currentText.split(/(\[[^\]]+\])/g);
-    for(let j=0; j<parts.length; j++){
-      if(!parts[j].startsWith('[')){ parts[j] = parts[j].replace(regex, '[$1]'); }
-    }
-    currentText = parts.join('');
+    currentText = currentText.replace(regex, (match, p1) => {
+      if (match.startsWith('[')) return match; 
+      return `[${p1}]`; 
+    });
   });
-  
+
   return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
 };
 
