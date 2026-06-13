@@ -139,7 +139,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [movingId, safeAddress, loadAllData]);
 
-  // 💡 [치명적 버그 수정] 정규식 파괴 버그 완벽 수리 완료!
+  // 💡 [궁극의 엔진 교체] 글자 쪼개기를 없애고, 강력한 정규식 교체(Replace) 기법을 사용합니다!
   const autoApplyDict = (content: string) => {
     if (!globalDict) return content;
     
@@ -150,49 +150,46 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     const restContent = lines.length > 1 ? lines.slice(1).join('\n') : '';
 
     const stopWords = globalDict.stopwords || [];
-    const abbrevKeys = Object.keys(globalDict.abbrs || {}); // 짧은 약어 (강제로 벗길 타겟)
-    const abbrevValues = Object.values(globalDict.abbrs || {}); // 긴 원래 정답 (빈칸 타겟)
+    const abbrevKeys = Object.keys(globalDict.abbrs || {});
+    const abbrevValues = Object.values(globalDict.abbrs || {});
     
-    // 잘못 뚫려있으면 강제로 괄호를 부숴버릴 대상
+    // 잘못 뚫렸을 때 괄호를 부숴버릴 타겟 (제외단어 + 약어의 짧은 정답)
     const wordsToUnbracket = [...stopWords, ...abbrevKeys];
 
-    // 무조건 빈칸으로 만들어버릴 대상 (필수포함 + 원래 정답)
+    // 무조건 뚫어버릴 타겟 (필수단어 + 약어의 원래 정답)
     const includeWords = Array.from(new Set([
         ...(globalDict.inclusions || []),
         ...(abbrevValues as string[])
     ])).filter((w: any) => typeof w === 'string' && w.trim() !== '').sort((a: any, b: any) => b.length - a.length);
 
-    let tokens = restContent.split(/(\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g);
-    for (let i = 0; i < tokens.length; i++) {
-      if (!tokens[i]) continue;
-      if (tokens[i].startsWith('[[ORIG_ID:')) continue;
-      
-      if (tokens[i].startsWith('[') && tokens[i].endsWith(']')) {
-        let innerText = tokens[i].slice(1, -1);
-        let cleanInner = innerText.replace(/\s+/g, '');
+    let currentText = restContent;
+
+    // 1단계: 잘못 뚫린 괄호 파괴 공작
+    if (wordsToUnbracket.length > 0) {
+      currentText = currentText.replace(/\[([^\]]+)\]/g, (match, inner) => {
+        if (match.startsWith('[[ORIG_ID')) return match; // 시스템 태그 보호
+        let cleanInner = inner.replace(/\s+/g, '');
         if (wordsToUnbracket.some(w => w.replace(/\s+/g, '') === cleanInner)) {
-           tokens[i] = innerText; 
+          return inner; // 괄호를 벗겨서 텍스트만 리턴
         }
-      }
+        return match;
+      });
     }
-    
-    let currentText = tokens.join('');
-    
+
+    // 2단계: 필수 단어 및 약어 원래 정답 자동 빈칸 스캔
     includeWords.forEach((iw: string) => {
-      // 💡 [핵심 수정] 글자를 먼저 쪼개고, 그 다음 특수기호 방어막을 씌워야 정규식이 고장나지 않습니다!
       const chars = iw.replace(/\s+/g, '').split('');
       const flexibleRegexStr = chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
       
-      // 'gi' 플래그를 추가해 영어 대소문자도 무시하고 모두 찾습니다.
-      const regex = new RegExp(`(${flexibleRegexStr})`, 'gi');
+      // 💡 핵심: 이미 괄호가 쳐진 텍스트도 매칭 시키되, 함수 내부에서 걸러냅니다.
+      const regex = new RegExp(`\\[[^\\]]+\\]|(${flexibleRegexStr})`, 'gi');
       
-      let parts = currentText.split(/(\[[^\]]+\])/g);
-      for(let j=0; j<parts.length; j++){
-        if(!parts[j].startsWith('[')){ 
-           parts[j] = parts[j].replace(regex, '[$1]'); 
-        }
-      }
-      currentText = parts.join('');
+      currentText = currentText.replace(regex, (match, p1) => {
+        // 이미 괄호에 싸여있거나 시스템 태그라면 원본 유지
+        if (match.startsWith('[')) return match; 
+        // 괄호가 없다면 목표 단어를 괄호로 포장!
+        return `[${p1}]`; 
+      });
     });
 
     return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
@@ -464,7 +461,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                   stripped = stripped.replace(/\[|\]/g, ''); 
                                   stripped = stripped.replace(/__ORIG_ID__(.*?)__ORIG_ID__/g, '$1'); 
                                   setEditContent(autoApplyDict(stripped)); 
-                                }} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-blue-900/30 text-blue-400 border border-blue-500/30 hover:bg-blue-500/20 transition-all">
+                                }} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-blue-900/30 text-blue-400 border border-blue-500/30 hover:bg-blue-500/20 transition-all shadow-sm">
                                   🪄 사전 기준 전면 재적용
                                 </button>
                                 <div className="w-px h-3 bg-white/10 mx-0.5"></div>
