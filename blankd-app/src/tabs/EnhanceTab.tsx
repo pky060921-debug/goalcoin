@@ -139,7 +139,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [movingId, safeAddress, loadAllData]);
 
-  // 💡 [초강력 수정] 띄어쓰기 무시 + 잘못된 약어 괄호 박탈 기능 추가 완료!
+  // 💡 [치명적 버그 수정] 정규식 파괴 버그 완벽 수리 완료!
   const autoApplyDict = (content: string) => {
     if (!globalDict) return content;
     
@@ -153,10 +153,10 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     const abbrevKeys = Object.keys(globalDict.abbrs || {}); // 짧은 약어 (강제로 벗길 타겟)
     const abbrevValues = Object.values(globalDict.abbrs || {}); // 긴 원래 정답 (빈칸 타겟)
     
-    // 잘못 뚫려있으면 강제로 괄호를 부숴버릴 대상 (제외 단어 + 짧은 약어)
+    // 잘못 뚫려있으면 강제로 괄호를 부숴버릴 대상
     const wordsToUnbracket = [...stopWords, ...abbrevKeys];
 
-    // 무조건 빈칸으로 만들어버릴 대상
+    // 무조건 빈칸으로 만들어버릴 대상 (필수포함 + 원래 정답)
     const includeWords = Array.from(new Set([
         ...(globalDict.inclusions || []),
         ...(abbrevValues as string[])
@@ -170,35 +170,32 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
       if (tokens[i].startsWith('[') && tokens[i].endsWith(']')) {
         let innerText = tokens[i].slice(1, -1);
         let cleanInner = innerText.replace(/\s+/g, '');
-        // 💡 기존에 잘못 묶여있던 단어가 약어이거나 제외단어라면 괄호를 파괴합니다.
         if (wordsToUnbracket.some(w => w.replace(/\s+/g, '') === cleanInner)) {
            tokens[i] = innerText; 
         }
-      } else {
-        let text = tokens[i];
-        includeWords.forEach((iw: string) => {
-          // 💡 띄어쓰기 무시하고 스캔하는 마법의 정규식
-          const escaped = iw.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          const flexibleRegexStr = escaped.split('').join('\\s*');
-          const regex = new RegExp(`(${flexibleRegexStr})`, 'g');
-          
-          let parts = text.split(/(\[[^\]]+\])/g);
-          for(let j=0; j<parts.length; j++){
-            if(!parts[j].startsWith('[')){ parts[j] = parts[j].replace(regex, '[$1]'); }
-          }
-          text = parts.join('');
-        });
-        tokens[i] = text;
       }
     }
     
-    for (let i = 0; i < tokens.length; i++) {
-      if (!tokens[i].startsWith('[[ORIG_ID:')) {
-         tokens[i] = tokens[i].replace(/\[+/g, '[').replace(/\]+/g, ']');
+    let currentText = tokens.join('');
+    
+    includeWords.forEach((iw: string) => {
+      // 💡 [핵심 수정] 글자를 먼저 쪼개고, 그 다음 특수기호 방어막을 씌워야 정규식이 고장나지 않습니다!
+      const chars = iw.replace(/\s+/g, '').split('');
+      const flexibleRegexStr = chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
+      
+      // 'gi' 플래그를 추가해 영어 대소문자도 무시하고 모두 찾습니다.
+      const regex = new RegExp(`(${flexibleRegexStr})`, 'gi');
+      
+      let parts = currentText.split(/(\[[^\]]+\])/g);
+      for(let j=0; j<parts.length; j++){
+        if(!parts[j].startsWith('[')){ 
+           parts[j] = parts[j].replace(regex, '[$1]'); 
+        }
       }
-    }
+      currentText = parts.join('');
+    });
 
-    return titleLine + (lines.length > 1 ? '\n' : '') + tokens.join('');
+    return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
   };
 
   const handleAddAdjacent = (folder: string, index: number) => {
@@ -461,13 +458,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                             
                             <div className="flex flex-col sm:flex-row items-center gap-2 bg-black/50 p-1.5 rounded-sm border border-white/10">
                               <div className="flex gap-1 items-center">
-                                {/* 💡 [마법 버튼] 기존에 오염된 빈칸을 폭파시키고 사전 기준으로 싹 재정렬하는 버튼 추가! */}
                                 <button onClick={(e) => {
                                   e.preventDefault();
                                   let stripped = editContent.replace(/\[\[ORIG_ID:\d+\]\]/g, (m) => `__ORIG_ID__${m}__ORIG_ID__`);
-                                  stripped = stripped.replace(/\[|\]/g, ''); // 기존 모든 괄호 박탈
+                                  stripped = stripped.replace(/\[|\]/g, ''); 
                                   stripped = stripped.replace(/__ORIG_ID__(.*?)__ORIG_ID__/g, '$1'); 
-                                  setEditContent(autoApplyDict(stripped)); // 새로운 룰로 재적용
+                                  setEditContent(autoApplyDict(stripped)); 
                                 }} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-blue-900/30 text-blue-400 border border-blue-500/30 hover:bg-blue-500/20 transition-all">
                                   🪄 사전 기준 전면 재적용
                                 </button>
