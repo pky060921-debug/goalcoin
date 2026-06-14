@@ -10,11 +10,9 @@ import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
-// 💡 [혁신 엔진] 사전에 단어가 등록되는 순간, 모든 카드 텍스트를 스캔하여 띄어쓰기 무관하게 빈칸을 뚫는 함수
 const autoApplyDictHelper = (content: string, dict: any) => {
   if (!dict) return content;
-  let fixedContent = content.replace(/\[ORIG_ID:(\d+)\]/g, '[[ORIG_ID:$1]]');
-  const lines = fixedContent.split('\n');
+  const lines = content.split('\n');
   const titleLine = lines[0] || '';
   const restContent = lines.length > 1 ? lines.slice(1).join('\n') : '';
 
@@ -22,48 +20,37 @@ const autoApplyDictHelper = (content: string, dict: any) => {
   const abbrevKeys = Object.keys(dict.abbrs || {});
   const abbrevValues = Object.values(dict.abbrs || {});
   
-  // 필수포함 단어 + 약어(원래 정답) + 약어(짧은 정답) 모두 타겟으로 지정
+  const wordsToUnbracket = [...stopWords, ...abbrevKeys];
+
   const includeWords = Array.from(new Set([
       ...(dict.inclusions || []),
-      ...abbrevKeys,
       ...(abbrevValues as string[])
   ])).filter((w: any) => typeof w === 'string' && w.trim() !== '').sort((a: any, b: any) => b.length - a.length);
 
-  let tokens = restContent.split(/(\[\[ORIG_ID:\d+\]\]|\[[^\]]+\])/g);
-  for (let i = 0; i < tokens.length; i++) {
-    if (!tokens[i]) continue;
-    if (tokens[i].startsWith('[[ORIG_ID:')) continue;
-    
-    if (tokens[i].startsWith('[') && tokens[i].endsWith(']')) {
-      let innerText = tokens[i].slice(1, -1);
-      let cleanInner = innerText.replace(/\s+/g, '');
-      if (stopWords.some((sw:string) => sw.replace(/\s+/g,'') === cleanInner)) {
-          tokens[i] = innerText; // 제외 단어면 괄호 박탈
+  let currentText = restContent;
+
+  if (wordsToUnbracket.length > 0) {
+    currentText = currentText.replace(/\[([^\]]+)\]/g, (match, inner) => {
+      let cleanInner = inner.replace(/\s+/g, '');
+      if (wordsToUnbracket.some(w => w.replace(/\s+/g, '') === cleanInner)) {
+        return inner; 
       }
-    } else {
-      let text = tokens[i];
-      includeWords.forEach((iw: string) => {
-        // 💡 띄어쓰기가 어떻게 되어있든 귀신같이 찾아내는 정규식 마법 (가나다 -> 가\s*나\s*다)
-        const escaped = iw.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const flexibleRegexStr = escaped.split('').join('\\s*');
-        const regex = new RegExp(`(${flexibleRegexStr})`, 'g');
-        
-        let parts = text.split(/(\[[^\]]+\])/g);
-        for(let j=0; j<parts.length; j++){
-          if(!parts[j].startsWith('[')){ parts[j] = parts[j].replace(regex, '[$1]'); }
-        }
-        text = parts.join('');
-      });
-      tokens[i] = text;
-    }
+      return match;
+    });
   }
-  
-  for (let i = 0; i < tokens.length; i++) {
-    if (!tokens[i].startsWith('[[ORIG_ID:')) {
-       tokens[i] = tokens[i].replace(/\[+/g, '[').replace(/\]+/g, ']');
-    }
-  }
-  return titleLine + (lines.length > 1 ? '\n' : '') + tokens.join('');
+
+  includeWords.forEach((iw: string) => {
+    const chars = iw.replace(/\s+/g, '').split('');
+    const flexibleRegexStr = chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
+    const regex = new RegExp(`\\[[^\\]]+\\]|(${flexibleRegexStr})`, 'gi');
+    
+    currentText = currentText.replace(regex, (match, p1) => {
+      if (match.startsWith('[')) return match; 
+      return `[${p1}]`; 
+    });
+  });
+
+  return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
 };
 
 const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict }: {
@@ -435,7 +422,7 @@ function MainApp() {
       let cleanFirstLine = firstLineRaw.replace(/\[(법|령|칙|규|정관)\]/g, '').trim();
       const finalFirstLine = `${detectedPrefix} ${cleanFirstLine}`;
       
-      const finalCardContent = `${finalFirstLine}\n${bodyContent.trim()}\n\n[[ORIG_ID:${cat.id}]]`;
+      const finalCardContent = `${finalFirstLine}\n${bodyContent.trim()}`;
       const initialMemo = stringifyCardStats(memo, 0, []);
       
       const res = await fetch("https://api.blankd.top/api/save-card", { 
@@ -682,8 +669,7 @@ function MainApp() {
     if (savedCards && savedCards.length > 0) {
       const cardsWithStatus = savedCards.map(c => {
          const stats = parseCardStats(c.memo);
-         const origId = parseInt((c.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || c.id, 10);
-         return { ...c, repetitions: stats.filled || 0, origId };
+         return { ...c, repetitions: stats.filled || 0, origId: parseInt(c.id, 10) };
       }).sort((a, b) => a.origId - b.origId);
       const minReps = Math.min(...cardsWithStatus.map(c => c.repetitions));
       studyTarget = cardsWithStatus.find(c => c.repetitions === minReps) || cardsWithStatus[0];
