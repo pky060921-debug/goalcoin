@@ -151,10 +151,15 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     const abbrevValues = Object.values(globalDict.abbrs || {}); 
     
     const wordsToUnbracket = [...stopWords, ...abbrevKeys];
+    
+    // 💡 [핵심 수정] DB 찌꺼기에 남아있는 약어(짧은 정답)가 빈칸으로 뚫리는 것을 2중 차단!
     const includeWords = Array.from(new Set([
         ...(globalDict.inclusions || []),
         ...(abbrevValues as string[])
-    ])).filter((w: any) => typeof w === 'string' && w.trim() !== '').sort((a: any, b: any) => b.length - a.length);
+    ]))
+    .filter((w: any) => typeof w === 'string' && w.trim() !== '')
+    .filter(w => !abbrevKeys.some(key => key.replace(/\s+/g, '') === w.replace(/\s+/g, ''))) // 💡 약어는 절대 포함 안 되게 거름
+    .sort((a: any, b: any) => b.length - a.length);
 
     let currentText = restContent;
 
@@ -182,7 +187,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
   };
 
-  // 💡 [기능 1] 단어 전역 일괄 삭제 (ORIG_ID 완벽 정리 엔진)
   const handleWordDelete = async (e: any) => {
     e.preventDefault();
     const input = window.prompt("삭제할 단어나 패턴을 입력하세요.\n(모든 ORIG_ID를 삭제하려면 '[ORIG_ID:*]' 라고 입력하세요)");
@@ -253,7 +257,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     }
   };
 
-  // 💡 [기능 2 신규 탑재] 찾아바꾸기 (Find and Replace)
   const handleFindAndReplace = async (e: any) => {
     e.preventDefault();
     const findText = window.prompt("찾을 단어(또는 기호)를 입력하세요:");
@@ -579,7 +582,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                 </button>
                                 <div className="w-px h-3 bg-white/10 mx-0.5"></div>
 
-                                {/* 💡 [추가] 찾아바꾸기 버튼 */}
                                 <button onClick={handleFindAndReplace} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-indigo-900/30 text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/20 transition-all shadow-sm">
                                   🔄 찾아바꾸기
                                 </button>
@@ -635,7 +637,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           </div>
                         </div>
                       ) : (
-                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm flex flex-col justify-center gap-0.5 ${movingId === card.id ? "shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "bg-red-900/20" : "bg-indigo-900/20 hover:bg-indigo-900/40"} transition-all duration-200`}>
+                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm border flex flex-col justify-center gap-0.5 ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
                           
                           <div className="flex w-full overflow-hidden mb-1">
                             <div className={`${titleColor} font-bold ${titleSizing} w-full text-left truncate leading-tight`} title={displayTitle}>
