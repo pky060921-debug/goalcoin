@@ -139,7 +139,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [movingId, safeAddress, loadAllData]);
 
-  // 💡 ORIG_ID 파싱 로직을 완전히 삭제한 정규식 스캔 엔진
   const autoApplyDict = (content: string) => {
     if (!globalDict) return content;
     
@@ -183,6 +182,78 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
   };
 
+  // 💡 [핵심 추가] 단어 전역 일괄 삭제 (ORIG_ID 완벽 정리 엔진)
+  const handleWordDelete = async (e: any) => {
+    e.preventDefault();
+    const input = window.prompt("삭제할 단어나 패턴을 입력하세요.\n(모든 ORIG_ID를 삭제하려면 '[ORIG_ID:*]' 라고 입력하세요)");
+    if (!input) return;
+
+    let regex: RegExp;
+    if (input.includes('[ORIG_ID:*]') || input.includes('ORIG_ID:*')) {
+        // 줄바꿈이나 띄어쓰기 찌꺼기까지 함께 흡수해서 삭제
+        regex = /(?:\s+)?(?:\[\[?)?ORIG_ID:\d+(?:\]\]?)?/g;
+    } else {
+        const escaped = input.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*');
+        regex = new RegExp(escaped, 'g');
+    }
+
+    const isGlobal = window.confirm(`'${input}' 패턴을 어떻게 삭제하시겠습니까?\n\n[확인] 앱 전체 모든 카드에서 일괄 삭제\n[취소] 현재 열려있는 카드에서만 삭제`);
+
+    if (!isGlobal) {
+        setEditContent(prev => prev.replace(regex, '').trim());
+        return;
+    }
+
+    setIsSaving(true);
+    try {
+        let changeCount = 0;
+        const updateFns: any[] = [];
+
+        for (const card of savedCards) {
+            if (!card || !card.content) continue;
+            const newContent = card.content.replace(regex, '').trim();
+            if (newContent !== card.content) {
+                changeCount++;
+                const newAnswers = (newContent.match(/\[\s*(.*?)\s*\]/g) || [])
+                    .map((b: string) => b.replace(/\[|\]/g, '').trim())
+                    .filter(Boolean)
+                    .join(", ");
+
+                const payload = {
+                    wallet_address: safeAddress || "ENOKI_USER",
+                    card_id: parseInt(card.id, 10),
+                    card_content: newContent,
+                    answer_text: newAnswers,
+                    folder_name: card.folder_name,
+                    memo: card.memo
+                };
+
+                updateFns.push(() => fetch("https://api.blankd.top/api/save-card", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                }));
+            }
+        }
+
+        if (changeCount > 0) {
+            for (let i = 0; i < updateFns.length; i += 5) {
+                await Promise.all(updateFns.slice(i, i + 5).map(fn => fn()));
+            }
+            alert(`✅ 총 ${changeCount}개의 카드에서 해당 단어가 완벽하게 삭제되었습니다.`);
+            setEditContent(prev => prev.replace(regex, '').trim());
+            if (loadAllData) await loadAllData();
+        } else {
+            alert("전체 DB에 삭제할 대상이 없습니다.\n(현재 열려있는 카드에만 내용이 반영되었습니다.)");
+            setEditContent(prev => prev.replace(regex, '').trim());
+        }
+    } catch (error) {
+        alert("전역 삭제 중 서버 오류가 발생했습니다.");
+    } finally {
+        setIsSaving(false);
+    }
+  };
+
   const handleAddAdjacent = (folder: string, index: number) => {
     const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
     const origCard = folderCards[index];
@@ -210,7 +281,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     setShowJeonggwanSelector(false);
   };
 
-  // 💡 저장 시 불필요한 ORIG_ID를 처리하던 로직을 완전히 삭제
   const handleSaveEdit = async (card: any) => {
     setIsSaving(true); setErrorMsg(null);
     try {
@@ -267,7 +337,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     } catch (error: any) { setErrorMsg(error.message || "서버 통신 실패"); } finally { setIsSaving(false); }
   };
 
-  // 💡 에디터 상단 UI 렌더링 시 ORIG_ID 시스템 블록을 생성하던 로직 완전 제거
   const renderInteractiveText = () => {
     const lines = editContent.split('\n');
     const titleLine = (lines[0] || '').replace(/\[(법|령|칙|규|정관)\]/g, '').trim();
@@ -384,7 +453,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-1.5 sm:gap-2 items-start`}>
             {localCards.filter((c:any) => c && c.content && c.folder_name === folder).map((card: any, idx: number, folderCards: any[]) => {
                 try {
-                  // 기존 데이터 호환을 위해 불러올 때만 임시로 가림 (실제 저장 로직에선 삭제됨)
                   const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
                   
                   let displayTitle = (cleanContent.split('\n')[0] || "")
@@ -430,7 +498,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                             
                             <div className="flex flex-col sm:flex-row items-center gap-2 bg-black/50 p-1.5 rounded-sm border border-white/10">
                               <div className="flex gap-1 items-center">
-                                {/* 💡 [마법 버튼] ORIG_ID 박탈 후 사전 기준 전면 재적용 */}
                                 <button onClick={(e) => {
                                   e.preventDefault();
                                   let stripped = editContent.replace(/\[|\]/g, ''); 
@@ -439,6 +506,13 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                   🪄 사전 기준 전면 재적용
                                 </button>
                                 <div className="w-px h-3 bg-white/10 mx-0.5"></div>
+                                
+                                {/* 💡 [신규] 단어 전역 삭제 버튼 */}
+                                <button onClick={handleWordDelete} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-red-900/30 text-red-400 border border-red-500/30 hover:bg-red-500/20 transition-all shadow-sm">
+                                  🗑️ 단어삭제
+                                </button>
+                                <div className="w-px h-3 bg-white/10 mx-0.5"></div>
+
                                 <button onClick={() => setActiveTool(activeTool === 'editor' ? null : 'editor')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'editor' ? 'bg-amber-500/80 text-white' : 'bg-white/5 text-white/50'}`}>직접 타이핑</button>
                                 <button onClick={() => setActiveTool(activeTool === 'smart' ? null : 'smart')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'smart' ? 'bg-teal-500/80 text-white' : 'bg-white/5 text-white/50'}`}>스마트 클릭</button>
                                 <button onClick={() => setShowJeonggwanSelector(!showJeonggwanSelector)} className={`px-2 py-1 rounded-sm text-[10px] font-bold transition-all ${showJeonggwanSelector ? 'bg-yellow-500 text-black' : 'bg-yellow-900/30 text-yellow-500 border border-yellow-500/30 hover:bg-yellow-500/20'}`}>📜 정관 불러오기</button>
