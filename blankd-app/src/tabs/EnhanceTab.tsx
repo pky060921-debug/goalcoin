@@ -139,8 +139,8 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [movingId, safeAddress, loadAllData]);
 
-  // 💡 [치명적 버그 수정] 괄호 증식 방지 처리 ( \[+ORIG_ID:(\d+)\]+ 사용 )
-    const autoApplyDict = (content: string) => {
+  // 💡 ORIG_ID 파싱 로직을 완전히 삭제한 정규식 스캔 엔진
+  const autoApplyDict = (content: string) => {
     if (!globalDict) return content;
     
     const lines = content.split('\n');
@@ -183,22 +183,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
   };
 
-
-    includeWords.forEach((iw: string) => {
-      const chars = iw.replace(/\s+/g, '').split('');
-      const flexibleRegexStr = chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
-      
-      const regex = new RegExp(`\\[[^\\]]+\\]|(${flexibleRegexStr})`, 'gi');
-      
-      currentText = currentText.replace(regex, (match, p1) => {
-        if (match.startsWith('[')) return match; 
-        return `[${p1}]`; 
-      });
-    });
-
-    return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
-  };
-
   const handleAddAdjacent = (folder: string, index: number) => {
     const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
     const origCard = folderCards[index];
@@ -226,7 +210,8 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     setShowJeonggwanSelector(false);
   };
 
-    const handleSaveEdit = async (card: any) => {
+  // 💡 저장 시 불필요한 ORIG_ID를 처리하던 로직을 완전히 삭제
+  const handleSaveEdit = async (card: any) => {
     setIsSaving(true); setErrorMsg(null);
     try {
       let sanitizedContent = editContent.replace(/\[+/g, '[').replace(/\]+/g, ']'); 
@@ -282,12 +267,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     } catch (error: any) { setErrorMsg(error.message || "서버 통신 실패"); } finally { setIsSaving(false); }
   };
 
-    const renderInteractiveText = () => {
+  // 💡 에디터 상단 UI 렌더링 시 ORIG_ID 시스템 블록을 생성하던 로직 완전 제거
+  const renderInteractiveText = () => {
     const lines = editContent.split('\n');
     const titleLine = (lines[0] || '').replace(/\[(법|령|칙|규|정관)\]/g, '').trim();
     const restLines = lines.slice(1).join('\n');
     
-    // ORIG_ID 파싱 정규식 완전 제거
     const tokens = restLines.split(/(\s+|\n|---|\[[^\]]+\])/g).filter(Boolean);
 
     return (
@@ -399,8 +384,8 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-1.5 sm:gap-2 items-start`}>
             {localCards.filter((c:any) => c && c.content && c.folder_name === folder).map((card: any, idx: number, folderCards: any[]) => {
                 try {
-                  // 💡 화면 렌더링 시 오염된 괄호를 싹 지우고 깨끗하게 표시!
-                  const cleanContent = card.content.replace(/\s*\[+ORIG_ID:\d+\]+/g, '');
+                  // 기존 데이터 호환을 위해 불러올 때만 임시로 가림 (실제 저장 로직에선 삭제됨)
+                  const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
                   
                   let displayTitle = (cleanContent.split('\n')[0] || "")
                     .replace(/\[(법|령|칙|규|정관)\]/g, '')
@@ -445,6 +430,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                             
                             <div className="flex flex-col sm:flex-row items-center gap-2 bg-black/50 p-1.5 rounded-sm border border-white/10">
                               <div className="flex gap-1 items-center">
+                                {/* 💡 [마법 버튼] ORIG_ID 박탈 후 사전 기준 전면 재적용 */}
                                 <button onClick={(e) => {
                                   e.preventDefault();
                                   let stripped = editContent.replace(/\[|\]/g, ''); 
@@ -452,7 +438,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                 }} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-blue-900/30 text-blue-400 border border-blue-500/30 hover:bg-blue-500/20 transition-all shadow-sm">
                                   🪄 사전 기준 전면 재적용
                                 </button>
-
                                 <div className="w-px h-3 bg-white/10 mx-0.5"></div>
                                 <button onClick={() => setActiveTool(activeTool === 'editor' ? null : 'editor')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'editor' ? 'bg-amber-500/80 text-white' : 'bg-white/5 text-white/50'}`}>직접 타이핑</button>
                                 <button onClick={() => setActiveTool(activeTool === 'smart' ? null : 'smart')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'smart' ? 'bg-teal-500/80 text-white' : 'bg-white/5 text-white/50'}`}>스마트 클릭</button>
@@ -535,7 +520,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                 <div className="flex items-center gap-0.5 opacity-80 hover:opacity-100 transition-opacity">
                                   <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
                                   <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
-                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); const preProcessedContent = autoApplyDict(card.content); setEditContent(preProcessedContent); setActiveTool(window.innerWidth < 768 ? 'smart' : 'editor'); setShowJeonggwanSelector(false); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); setEditContent(card.content); setActiveTool(window.innerWidth < 768 ? 'smart' : 'editor'); setShowJeonggwanSelector(false); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
                                   <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-0.5 px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[8px] hover:bg-red-500/10 hover:text-red-500 transition-all flex items-center justify-center leading-none h-4" title="삭제">✕</button>
                                 </div>
                               </div>
