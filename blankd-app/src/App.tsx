@@ -10,6 +10,7 @@ import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
+// 💡 [혁신 엔진] 사전에 단어가 등록되는 순간 띄어쓰기 무관하게 빈칸을 뚫는 무결성 함수
 const autoApplyDictHelper = (content: string, dict: any) => {
   if (!dict) return content;
   const lines = content.split('\n');
@@ -25,7 +26,9 @@ const autoApplyDictHelper = (content: string, dict: any) => {
   const includeWords = Array.from(new Set([
       ...(dict.inclusions || []),
       ...(abbrevValues as string[])
-  ])).filter((w: any) => typeof w === 'string' && w.trim() !== '').sort((a: any, b: any) => b.length - a.length);
+  ])).filter((w: any) => typeof w === 'string' && w.trim() !== '')
+    .filter(w => !abbrevKeys.some(key => key.replace(/\s+/g, '') === w.replace(/\s+/g, ''))) // 💡 약어는 제외되도록 이중 필터링
+    .sort((a: any, b: any) => b.length - a.length);
 
   let currentText = restContent;
 
@@ -220,6 +223,7 @@ function MainApp() {
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
         api.getGoalCoinBalance(safeAddress).catch(() => 0),
         api.getGlobalDict(safeAddress).catch((e) => {
+          console.error("전역 단어장 로드 실패:", e);
           return { stopwords: [], inclusions: [], abbrs: {} };
         })
       ]);
@@ -238,21 +242,20 @@ function MainApp() {
         abbrs: finalAbbrs
       });
     } catch (e: any) {
+      console.error("데이터 동기화 실패:", e);
       addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
     }
   };
 
-  // 💡 [혁신적 자동화] 사전에 새로운 단어가 추가되면 모든 카드에 빈칸을 자동 적용하여 즉시 업데이트!
   const saveGlobalDict = async (newDict: any) => {
-    setGlobalDict(newDict); // 1. 화면 즉시 반영
+    setGlobalDict(newDict); 
     
     try {
-      await api.updateGlobalDict(safeAddress, newDict); // 2. DB에 사전 저장
+      await api.updateGlobalDict(safeAddress, newDict);
     } catch (err) {
       console.error("단어장 DB 동기화 실패:", err);
     }
 
-    // 3. 백그라운드 카드 스캔 & 자동 빈칸 업데이트 프로세스 가동
     setSavedCards(prevCards => {
       let changeCount = 0;
       const updatedCards = prevCards.map(card => {
@@ -267,14 +270,11 @@ function MainApp() {
       if (changeCount > 0) {
         addLog(`🔄 스마트 스캔 중: ${changeCount}개 카드에 빈칸 자동 생성 및 동기화 진행...`);
         updatedCards.filter(c => c._isModified).forEach(card => {
-           // 새롭게 뚫린 빈칸 정답들 추출
            const newAnswers = (card.content.match(/\[\s*(.*?)\s*\]/g) || [])
               .map((b: string) => b.replace(/\[|\]/g, '').trim())
-              .filter((a: string) => !a.startsWith('ORIG_ID:'))
-              .filter(Boolean)
+              .filter(Boolean) // ORIG_ID 조건도 삭제됨
               .join(", ");
            
-           // 개별 카드의 DB 업데이트 전송
            fetch("https://api.blankd.top/api/save-card", {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -397,7 +397,7 @@ function MainApp() {
       if (isBlanking) bodyContent += " ]";
       
       const existingCard = savedCards.find((c: any) => 
-        c && c.content && (c.content.includes(`[[ORIG_ID:${cat.id}]]`) || c.content.trim().startsWith(cat.title.trim()))
+        c && c.content && (c.content.trim().startsWith(cat.title.trim()))
       );
       const targetCardId = existingCard ? existingCard.id : null; 
 
@@ -422,6 +422,7 @@ function MainApp() {
       let cleanFirstLine = firstLineRaw.replace(/\[(법|령|칙|규|정관)\]/g, '').trim();
       const finalFirstLine = `${detectedPrefix} ${cleanFirstLine}`;
       
+      // 💡 [수정됨] ORIG_ID 부착 완전히 제거
       const finalCardContent = `${finalFirstLine}\n${bodyContent.trim()}`;
       const initialMemo = stringifyCardStats(memo, 0, []);
       
@@ -449,7 +450,7 @@ function MainApp() {
   useEffect(() => {
     if (activeCard) {
       isClosingRef.current = false;
-      const cleanContent = activeCard.content.replace(/\s*\[\[ORIG_ID:\d+\]\]/g, '');
+      const cleanContent = activeCard.content; // ORIG_ID 삭제되었으므로 그대로 씀
       const lines = cleanContent.split('\n');
       const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
@@ -524,10 +525,9 @@ function MainApp() {
 
     const nextReviewDate = new Date(); nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
 
+    // 💡 [수정] ORIG_ID 파싱 삭제
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
-        const origIdA = parseInt((a.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || a.id, 10);
-        const origIdB = parseInt((b.content.match(/\[\[ORIG_ID:(\d+)\]\]/) || [])[1] || b.id, 10);
-        return origIdA - origIdB;
+        return parseInt(a.id, 10) - parseInt(b.id, 10);
     });
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
     const nextCard = folderCards[currentIdx + 1] || null;
@@ -654,19 +654,18 @@ function MainApp() {
       const craftedOrigIds = new Set(); const craftedTitles: string[] = [];
       const cleanText = (text: string) => text ? text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '').replace(/[^가-힣a-zA-Z0-9一-龥]/g, '') : "";
       savedCards.forEach((c: any) => {
-        const match = c.content.match(/\[\[ORIG_ID:(\d+)\]\]/);
-        if (match) craftedOrigIds.add(parseInt(match[1], 10));
         const firstLine = c.content.split('\n')[0];
         if (firstLine) craftedTitles.push(cleanText(firstLine));
       });
       const sortedCats = [...categories].sort((a: any, b: any) => a.id - b.id);
       craftTarget = sortedCats.find((cat: any) => {
         const cleanTitle = cleanText(cat.title || "");
-        return !craftedOrigIds.has(cat.id) && !(cleanTitle && craftedTitles.some(t => t === cleanTitle || t.endsWith(cleanTitle)));
+        return !(cleanTitle && craftedTitles.some(t => t === cleanTitle || t.endsWith(cleanTitle)));
       });
     }
 
     if (savedCards && savedCards.length > 0) {
+      // 💡 [수정] ORIG_ID 파싱 삭제
       const cardsWithStatus = savedCards.map(c => {
          const stats = parseCardStats(c.memo);
          return { ...c, repetitions: stats.filled || 0, origId: parseInt(c.id, 10) };
@@ -679,7 +678,7 @@ function MainApp() {
 
   const renderContent = React.useCallback(() => {
     if (!activeCard) return null;
-    const cleanContent = activeCard.content.replace(/\s*\[\[ORIG_ID:\d+\]\]/g, '');
+    const cleanContent = activeCard.content; // ORIG_ID 없으므로 그대로 씀
     const lines = cleanContent.split('\n');
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
@@ -752,7 +751,6 @@ function MainApp() {
     );
   }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs]);
 
-  // 💡 [개선] 약어(abbrs)는 오직 약어 DB에만 저장하고, 포함단어(inclusions)와 완벽히 분리
   const handleAddDictItem = () => {
     if (dictTab === 'abbr' && tempKey && tempValue) {
       const k = tempKey.trim(); const v = tempValue.trim();
