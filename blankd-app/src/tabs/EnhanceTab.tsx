@@ -182,7 +182,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
   };
 
-  // 💡 [핵심 추가] 단어 전역 일괄 삭제 (ORIG_ID 완벽 정리 엔진)
+  // 💡 [기능 1] 단어 전역 일괄 삭제 (ORIG_ID 완벽 정리 엔진)
   const handleWordDelete = async (e: any) => {
     e.preventDefault();
     const input = window.prompt("삭제할 단어나 패턴을 입력하세요.\n(모든 ORIG_ID를 삭제하려면 '[ORIG_ID:*]' 라고 입력하세요)");
@@ -190,7 +190,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
     let regex: RegExp;
     if (input.includes('[ORIG_ID:*]') || input.includes('ORIG_ID:*')) {
-        // 줄바꿈이나 띄어쓰기 찌꺼기까지 함께 흡수해서 삭제
         regex = /(?:\s+)?(?:\[\[?)?ORIG_ID:\d+(?:\]\]?)?/g;
     } else {
         const escaped = input.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '.*');
@@ -249,6 +248,74 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         }
     } catch (error) {
         alert("전역 삭제 중 서버 오류가 발생했습니다.");
+    } finally {
+        setIsSaving(false);
+    }
+  };
+
+  // 💡 [기능 2 신규 탑재] 찾아바꾸기 (Find and Replace)
+  const handleFindAndReplace = async (e: any) => {
+    e.preventDefault();
+    const findText = window.prompt("찾을 단어(또는 기호)를 입력하세요:");
+    if (!findText) return;
+
+    const replaceText = window.prompt(`'${findText}'을(를) 무엇으로 바꾸시겠습니까?\n(입력하지 않고 확인을 누르시면 삭제 처리됩니다.)`, "") || "";
+
+    const isGlobal = window.confirm(`'${findText}' ➔ '${replaceText}'\n어떻게 변경하시겠습니까?\n\n[확인] 앱 전체 모든 카드에서 일괄 변경\n[취소] 현재 열려있는 카드에서만 변경`);
+
+    const escaped = findText.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(escaped, 'g');
+
+    if (!isGlobal) {
+        setEditContent(prev => prev.replace(regex, replaceText));
+        return;
+    }
+
+    setIsSaving(true);
+    try {
+        let changeCount = 0;
+        const updateFns: any[] = [];
+
+        for (const card of savedCards) {
+            if (!card || !card.content) continue;
+            const newContent = card.content.replace(regex, replaceText);
+            if (newContent !== card.content) {
+                changeCount++;
+                const newAnswers = (newContent.match(/\[\s*(.*?)\s*\]/g) || [])
+                    .map((b: string) => b.replace(/\[|\]/g, '').trim())
+                    .filter(Boolean)
+                    .join(", ");
+
+                const payload = {
+                    wallet_address: safeAddress || "ENOKI_USER",
+                    card_id: parseInt(card.id, 10),
+                    card_content: newContent,
+                    answer_text: newAnswers,
+                    folder_name: card.folder_name,
+                    memo: card.memo
+                };
+
+                updateFns.push(() => fetch("https://api.blankd.top/api/save-card", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                }));
+            }
+        }
+
+        if (changeCount > 0) {
+            for (let i = 0; i < updateFns.length; i += 5) {
+                await Promise.all(updateFns.slice(i, i + 5).map(fn => fn()));
+            }
+            alert(`✅ 총 ${changeCount}개의 카드에서 단어가 완벽하게 변경되었습니다.`);
+            setEditContent(prev => prev.replace(regex, replaceText));
+            if (loadAllData) await loadAllData();
+        } else {
+            alert("전체 DB에 변경할 대상이 없습니다.\n(현재 열려있는 카드에만 내용이 반영되었습니다.)");
+            setEditContent(prev => prev.replace(regex, replaceText));
+        }
+    } catch (error) {
+        alert("전역 변경 중 서버 오류가 발생했습니다.");
     } finally {
         setIsSaving(false);
     }
@@ -507,9 +574,14 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                 </button>
                                 <div className="w-px h-3 bg-white/10 mx-0.5"></div>
                                 
-                                {/* 💡 [신규] 단어 전역 삭제 버튼 */}
                                 <button onClick={handleWordDelete} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-red-900/30 text-red-400 border border-red-500/30 hover:bg-red-500/20 transition-all shadow-sm">
                                   🗑️ 단어삭제
+                                </button>
+                                <div className="w-px h-3 bg-white/10 mx-0.5"></div>
+
+                                {/* 💡 [추가] 찾아바꾸기 버튼 */}
+                                <button onClick={handleFindAndReplace} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-indigo-900/30 text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/20 transition-all shadow-sm">
+                                  🔄 찾아바꾸기
                                 </button>
                                 <div className="w-px h-3 bg-white/10 mx-0.5"></div>
 
@@ -584,18 +656,18 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                               </button>
                             </div>
                           ) : (
-                            <div className="flex flex-col w-full pt-1">
+                            <div className="flex flex-col w-full pt-1 border-t border-white/5">
                               <div className="flex flex-row justify-between items-center w-full">
                                 <div className="flex flex-nowrap gap-0.5">
                                   <span className="text-[7px] sm:text-[8px] text-indigo-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">빈칸:{totalBlanks}</span>
                                   <span className="text-[7px] sm:text-[8px] text-teal-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">반복:{stats.filled}</span>
-                                  <span className={`text-[7px] sm:text-[8px] px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center ${hasWrong ? 'text-white bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30'}`}>틀림:{stats.wrongIndices.length}</span>
+                                  <span className={`text-[7px] sm:text-[8px] px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center ${hasWrong ? 'text-white bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                                 </div>
                                 <div className="flex items-center gap-0.5 opacity-80 hover:opacity-100 transition-opacity">
-                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
-                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
-                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); setEditContent(card.content); setActiveTool(window.innerWidth < 768 ? 'smart' : 'editor'); setShowJeonggwanSelector(false); }} className="px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
-                                  <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-0.5 px-1.5 py-0.5 text-white/50 rounded-sm font-mono text-[8px] hover:bg-red-500/10 hover:text-red-500 transition-all flex items-center justify-center leading-none h-4" title="삭제">✕</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
+                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); setEditContent(card.content); setActiveTool(window.innerWidth < 768 ? 'smart' : 'editor'); setShowJeonggwanSelector(false); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
+                                  <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-0.5 px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[8px] hover:bg-red-500/10 hover:text-red-500 transition-all flex items-center justify-center leading-none h-4" title="삭제">✕</button>
                                 </div>
                               </div>
                             </div>
