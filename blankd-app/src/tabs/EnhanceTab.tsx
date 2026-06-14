@@ -140,21 +140,18 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
   }, [movingId, safeAddress, loadAllData]);
 
   // 💡 [치명적 버그 수정] 괄호 증식 방지 처리 ( \[+ORIG_ID:(\d+)\]+ 사용 )
-  const autoApplyDict = (content: string) => {
+    const autoApplyDict = (content: string) => {
     if (!globalDict) return content;
     
-    let fixedContent = content.replace(/\[+ORIG_ID:(\d+)\]+/g, '[[ORIG_ID:$1]]');
-    
-    const lines = fixedContent.split('\n');
+    const lines = content.split('\n');
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n') : '';
 
     const stopWords = globalDict.stopwords || [];
-    const abbrevKeys = Object.keys(globalDict.abbrs || {});
-    const abbrevValues = Object.values(globalDict.abbrs || {});
+    const abbrevKeys = Object.keys(globalDict.abbrs || {}); 
+    const abbrevValues = Object.values(globalDict.abbrs || {}); 
     
     const wordsToUnbracket = [...stopWords, ...abbrevKeys];
-
     const includeWords = Array.from(new Set([
         ...(globalDict.inclusions || []),
         ...(abbrevValues as string[])
@@ -164,7 +161,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
     if (wordsToUnbracket.length > 0) {
       currentText = currentText.replace(/\[([^\]]+)\]/g, (match, inner) => {
-        if (match.startsWith('[[ORIG_ID')) return match;
         let cleanInner = inner.replace(/\s+/g, '');
         if (wordsToUnbracket.some(w => w.replace(/\s+/g, '') === cleanInner)) {
           return inner; 
@@ -172,6 +168,21 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         return match;
       });
     }
+
+    includeWords.forEach((iw: string) => {
+      const chars = iw.replace(/\s+/g, '').split('');
+      const flexibleRegexStr = chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
+      const regex = new RegExp(`\\[[^\\]]+\\]|(${flexibleRegexStr})`, 'gi');
+      
+      currentText = currentText.replace(regex, (match, p1) => {
+        if (match.startsWith('[')) return match; 
+        return `[${p1}]`; 
+      });
+    });
+
+    return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
+  };
+
 
     includeWords.forEach((iw: string) => {
       const chars = iw.replace(/\s+/g, '').split('');
@@ -215,32 +226,13 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     setShowJeonggwanSelector(false);
   };
 
-  const handleSaveEdit = async (card: any) => {
+    const handleSaveEdit = async (card: any) => {
     setIsSaving(true); setErrorMsg(null);
     try {
-      let sanitizedContent = editContent;
-      
-      // 💡 [치명적 버그 수정] 오염된 괄호를 모조리 잡아내어 시스템 태그 추출
-      const origIdMatch = editContent.match(/\[+ORIG_ID:(\d+)\]+/);
-      if (origIdMatch) {
-        const systemTag = origIdMatch[0];
-        const origIdNum = origIdMatch[1];
-        const correctSystemTag = `[[ORIG_ID:${origIdNum}]]`;
-        
-        const bodyText = editContent.replace(systemTag, '');
-        let cleanBody = bodyText.replace(/\[+/g, '[').replace(/\]+/g, ']');
-        
-        // 💡 [복구 엔진] 뒤쪽에 떨어져나간 불필요한 ']' 쓰레기 괄호들을 싹 청소합니다.
-        cleanBody = cleanBody.replace(/\s*\]\s*$/, '');
-        
-        sanitizedContent = cleanBody.trim() + '\n\n' + correctSystemTag;
-      } else { 
-        sanitizedContent = editContent.replace(/\[+/g, '[').replace(/\]+/g, ']'); 
-      }
+      let sanitizedContent = editContent.replace(/\[+/g, '[').replace(/\]+/g, ']'); 
 
       const newAnswers = (sanitizedContent.match(/\[\s*(.*?)\s*\]/g) || [])
         .map(b => b.replace(/\[|\]/g, '').trim())
-        .filter(a => !a.startsWith('ORIG_ID:'))
         .filter(Boolean)
         .join(", ");
         
@@ -290,13 +282,13 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     } catch (error: any) { setErrorMsg(error.message || "서버 통신 실패"); } finally { setIsSaving(false); }
   };
 
-  const renderInteractiveText = () => {
+    const renderInteractiveText = () => {
     const lines = editContent.split('\n');
     const titleLine = (lines[0] || '').replace(/\[(법|령|칙|규|정관)\]/g, '').trim();
     const restLines = lines.slice(1).join('\n');
     
-    // 💡 화면 렌더링용 토큰 분해시에도 오염된 괄호를 견디도록 정규식 개선
-    const tokens = restLines.split(/(\s+|\n|---|\[+ORIG_ID:\d+\]+|\[[^\]]+\])/g).filter(Boolean);
+    // ORIG_ID 파싱 정규식 완전 제거
+    const tokens = restLines.split(/(\s+|\n|---|\[[^\]]+\])/g).filter(Boolean);
 
     return (
       <div className={`w-full bg-black/40 p-4 rounded border border-white/10 leading-loose font-sans ${activeTool ? 'select-none' : ''} min-h-[160px] max-h-[400px] overflow-y-auto custom-scrollbar`}>
@@ -304,13 +296,11 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           {titleLine}
         </div>
         {tokens.map((token, idx) => {
-          const isOrigId = token.startsWith('[[ORIG_ID:') || token.startsWith('[ORIG_ID:');
-          const isBracketed = token.startsWith('[') && token.endsWith(']') && !isOrigId;
+          const isBracketed = token.startsWith('[') && token.endsWith(']');
           const isPageBreak = token === '---';
           const isNewline = token === '\n';
           const isWhitespace = /^\s+$/.test(token);
           
-          if (isOrigId) return <div key={idx} className="inline-block text-[10px] text-white/20 font-mono bg-white/5 px-2 py-0.5 rounded mr-2 mb-2 select-none cursor-default">🔗 시스템 태그 보호중</div>;
           if (isPageBreak) return <div key={idx} className="my-6 border-b-2 border-dashed border-white/20 relative flex justify-center cursor-default"><span className="absolute -top-3 bg-[#0a0a0c] px-3 py-0.5 rounded-full text-[10px] text-white/40 font-bold border border-white/10">✂️ PAGE BREAK (---)</span></div>;
           if (isNewline) return <br key={idx} />;
           if (isWhitespace) return <span key={idx}>{token}</span>;
@@ -359,7 +349,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                 let nextIdx = idx + 1;
                 let spaces = "";
                 while (nextIdx < tokens.length) {
-                   if (tokens[nextIdx] === '---' || tokens[nextIdx] === '\n' || tokens[nextIdx].includes('ORIG_ID:')) return; 
+                   if (tokens[nextIdx] === '---' || tokens[nextIdx] === '\n') return; 
                    if (/^\s+$/.test(tokens[nextIdx])) { 
                        spaces += tokens[nextIdx]; 
                        nextIdx++; 
@@ -457,14 +447,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                               <div className="flex gap-1 items-center">
                                 <button onClick={(e) => {
                                   e.preventDefault();
-                                  // 💡 [치명적 버그 수정] 마법 버튼 동작 시 괄호가 몇 개든 포획해서 안전한 형태로 처리!
-                                  let stripped = editContent.replace(/\[+ORIG_ID:(\d+)\]+/g, '__ORIG_ID__[[ORIG_ID:$1]]__ORIG_ID__');
-                                  stripped = stripped.replace(/\[|\]/g, ''); 
-                                  stripped = stripped.replace(/__ORIG_ID__(.*?)__ORIG_ID__/g, '$1'); 
+                                  let stripped = editContent.replace(/\[|\]/g, ''); 
                                   setEditContent(autoApplyDict(stripped)); 
                                 }} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-blue-900/30 text-blue-400 border border-blue-500/30 hover:bg-blue-500/20 transition-all shadow-sm">
                                   🪄 사전 기준 전면 재적용
                                 </button>
+
                                 <div className="w-px h-3 bg-white/10 mx-0.5"></div>
                                 <button onClick={() => setActiveTool(activeTool === 'editor' ? null : 'editor')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'editor' ? 'bg-amber-500/80 text-white' : 'bg-white/5 text-white/50'}`}>직접 타이핑</button>
                                 <button onClick={() => setActiveTool(activeTool === 'smart' ? null : 'smart')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'smart' ? 'bg-teal-500/80 text-white' : 'bg-white/5 text-white/50'}`}>스마트 클릭</button>
