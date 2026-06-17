@@ -6,23 +6,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
     <meta name="theme-color" content="#0d0d0f" />
     <meta name="description" content="BlankD - 인지부하 이론 기반 학습" />
-    <!-- 💡 매니페스트 연결 -->
-    <link rel="manifest" href="/manifest.json" />
     <title>BlankD</title>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
-
-    <!-- 💡 서비스 워커 등록 스크립트 -->
+    <script type="module" src="/src/main.tsx"></script>
+    
+    <!-- 💡 만약 화면이 하얗게 뜬다면, 아래 콘솔의 에러를 확인하여 진단할 수 있도록 자가 진단 코드를 추가해두었습니다. -->
     <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then(reg => console.log('Service Worker 등록 완료:', reg.scope))
-            .catch(err => console.error('Service Worker 등록 실패:', err));
-        });
-      }
+      window.addEventListener('error', function(event) {
+        console.error("🚨 앱 렌더링 치명적 오류 진단:", event.error || event.message);
+      });
     </script>
   </body>
 </html>
