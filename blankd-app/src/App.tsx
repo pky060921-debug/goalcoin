@@ -10,10 +10,10 @@ import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
-// 💡 [혁신 엔진] 사전에 단어가 등록되는 순간 띄어쓰기 무관하게 빈칸을 뚫는 무결성 함수
 const autoApplyDictHelper = (content: string, dict: any) => {
   if (!dict) return content;
-  const lines = content.split('\n');
+  let fixedContent = content.replace(/\[ORIG_ID:(\d+)\]/g, '[[ORIG_ID:$1]]');
+  const lines = fixedContent.split('\n');
   const titleLine = lines[0] || '';
   const restContent = lines.length > 1 ? lines.slice(1).join('\n') : '';
 
@@ -27,7 +27,7 @@ const autoApplyDictHelper = (content: string, dict: any) => {
       ...(dict.inclusions || []),
       ...(abbrevValues as string[])
   ])).filter((w: any) => typeof w === 'string' && w.trim() !== '')
-    .filter(w => !abbrevKeys.some(key => key.replace(/\s+/g, '') === w.replace(/\s+/g, ''))) // 💡 약어는 제외되도록 이중 필터링
+    .filter(w => !abbrevKeys.some(key => key.replace(/\s+/g, '') === w.replace(/\s+/g, ''))) 
     .sort((a: any, b: any) => b.length - a.length);
 
   let currentText = restContent;
@@ -215,35 +215,81 @@ function MainApp() {
   const [tempKey, setTempKey] = useState("");
   const [tempValue, setTempValue] = useState("");
 
+  // 💡 [PWA] 오프라인 상태 감지 및 앱 설치 권유 프롬프트
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    });
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const handleInstallClick = () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then((choiceResult: any) => {
+        if (choiceResult.outcome === 'accepted') addLog('✅ PWA 오프라인 앱 설치 완료');
+        setDeferredPrompt(null);
+      });
+    }
+  };
+
+  // 💡 [오프라인 모드] 네트워크 에러 시 기기에 저장된 캐시 데이터 강제 로드
   const loadAllData = async () => {
     if (!safeAddress) return;
     try {
       const [catRes, cardRes, balance, dictRes] = await Promise.all([
-        fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
-        fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()),
+        fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => { if(!r.ok) throw new Error(); return r.json(); }),
+        fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => { if(!r.ok) throw new Error(); return r.json(); }),
         api.getGoalCoinBalance(safeAddress).catch(() => 0),
-        api.getGlobalDict(safeAddress).catch((e) => {
-          console.error("전역 단어장 로드 실패:", e);
-          return { stopwords: [], inclusions: [], abbrs: {} };
-        })
+        api.getGlobalDict(safeAddress).catch(() => ({ stopwords: [], inclusions: [], abbrs: {} }))
       ]);
-
-      setCategories([...(catRes.categories || [])]);
-      setSavedCards([...(cardRes.cards || [])]);
-      setGoalBalance(balance);
 
       const serverStopwords = Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [];
       const serverInclusions = Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [];
       let finalAbbrs = (dictRes.abbrs && typeof dictRes.abbrs === 'object' && !Array.isArray(dictRes.abbrs)) ? dictRes.abbrs : {};
+      const newDict = { stopwords: serverStopwords, inclusions: serverInclusions, abbrs: finalAbbrs };
 
-      setGlobalDict({
-        stopwords: serverStopwords,
-        inclusions: serverInclusions,
-        abbrs: finalAbbrs
-      });
+      setCategories([...(catRes.categories || [])]);
+      setSavedCards([...(cardRes.cards || [])]);
+      setGoalBalance(balance);
+      setGlobalDict(newDict);
+
+      // 오프라인 학습을 위한 로컬 캐시 덮어쓰기
+      localStorage.setItem(`blankd_off_cat_${safeAddress}`, JSON.stringify(catRes.categories || []));
+      localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(cardRes.cards || []));
+      localStorage.setItem(`blankd_off_bal_${safeAddress}`, balance.toString());
+      localStorage.setItem(`blankd_off_dict_${safeAddress}`, JSON.stringify(newDict));
+      
+      setIsOffline(false);
     } catch (e: any) {
-      console.error("데이터 동기화 실패:", e);
-      addLog(`⚠️ 데이터 동기화 실패: ${e.message}`);
+      setIsOffline(true);
+      addLog(`⚠️ 오프라인 모드: 통신 끊김. 기기에 임시 저장된 데이터를 불러옵니다.`);
+      try {
+        const offCat = JSON.parse(localStorage.getItem(`blankd_off_cat_${safeAddress}`) || '[]');
+        const offCard = JSON.parse(localStorage.getItem(`blankd_off_card_${safeAddress}`) || '[]');
+        const offBal = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
+        const offDict = JSON.parse(localStorage.getItem(`blankd_off_dict_${safeAddress}`) || '{"stopwords":[],"inclusions":[],"abbrs":{}}');
+
+        setCategories(offCat);
+        setSavedCards(offCard);
+        setGoalBalance(offBal);
+        setGlobalDict(offDict);
+      } catch(cacheError) {
+         addLog(`🚨 캐시 로드 실패: 저장된 오프라인 데이터가 없습니다.`);
+      }
     }
   };
 
@@ -272,7 +318,8 @@ function MainApp() {
         updatedCards.filter(c => c._isModified).forEach(card => {
            const newAnswers = (card.content.match(/\[\s*(.*?)\s*\]/g) || [])
               .map((b: string) => b.replace(/\[|\]/g, '').trim())
-              .filter(Boolean) // ORIG_ID 조건도 삭제됨
+              .filter((a: string) => !a.startsWith('ORIG_ID:'))
+              .filter(Boolean)
               .join(", ");
            
            fetch("https://api.blankd.top/api/save-card", {
@@ -298,7 +345,7 @@ function MainApp() {
 
   const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-40));
 
-  useEffect(() => { document.title = "BlankD | 인지 과학 기반 학습"; }, []);
+  useEffect(() => document.title = "BlankD | 인지 과학 기반 학습", []);
 
   useEffect(() => {
     if (window.location.hash) {
@@ -311,7 +358,7 @@ function MainApp() {
   }, [isLoggedIn, safeAddress, enokiFlow]);
 
   const flushQueue = async () => {
-    if (!safeAddress) return;
+    if (!safeAddress || isOffline) return; // 💡 오프라인일 땐 큐 전송 시도 중단
     try {
       const qStr = localStorage.getItem('blankd_sync_queue');
       if (!qStr) return;
@@ -334,13 +381,11 @@ function MainApp() {
         addLog(`✅ 백그라운드 동기화 완료`);
         const newBalance = await api.getGoalCoinBalance(safeAddress).catch(()=>goalBalance);
         setGoalBalance(newBalance);
-      } else {
-        if(res.status >= 500) {
-            localStorage.removeItem('blankd_sync_queue');
-        }
+        setIsOffline(false);
       }
     } catch (e) { 
-      addLog("⚠️ 오프라인 감지: 데이터는 로컬에 안전하게 보관 중입니다.");
+      setIsOffline(true);
+      addLog("⚠️ 동기화 큐 적재: 오프라인 모드로 인해 기기에 학습 내용을 안전하게 보관 중입니다.");
     }
   };
 
@@ -350,7 +395,7 @@ function MainApp() {
     const handleVisibility = () => { if(document.visibilityState === 'hidden') flushQueue(); };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => { clearInterval(interval); document.removeEventListener('visibilitychange', handleVisibility); };
-  }, [safeAddress]);
+  }, [safeAddress, isOffline]);
 
   const uploadLaw = async () => {
     if (!lawFile) return alert("파일을 선택해주세요.");
@@ -422,7 +467,6 @@ function MainApp() {
       let cleanFirstLine = firstLineRaw.replace(/\[(법|령|칙|규|정관)\]/g, '').trim();
       const finalFirstLine = `${detectedPrefix} ${cleanFirstLine}`;
       
-      // 💡 [수정됨] ORIG_ID 부착 완전히 제거
       const finalCardContent = `${finalFirstLine}\n${bodyContent.trim()}`;
       const initialMemo = stringifyCardStats(memo, 0, []);
       
@@ -450,7 +494,7 @@ function MainApp() {
   useEffect(() => {
     if (activeCard) {
       isClosingRef.current = false;
-      const cleanContent = activeCard.content; // ORIG_ID 삭제되었으므로 그대로 씀
+      const cleanContent = activeCard.content;
       const lines = cleanContent.split('\n');
       const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
@@ -525,7 +569,6 @@ function MainApp() {
 
     const nextReviewDate = new Date(); nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
 
-    // 💡 [수정] ORIG_ID 파싱 삭제
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
         return parseInt(a.id, 10) - parseInt(b.id, 10);
     });
@@ -535,10 +578,17 @@ function MainApp() {
     localStorage.removeItem(`blankd_progress_${currentId}`);
     setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
+    
+    // 💡 오프라인 큐 시스템 연동
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
-    addLog(`✅ 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
-    flushQueue();
+    
+    if (isOffline) {
+      addLog(`💾 오프라인 기록 완료 (ID:${currentId}) | 온라인 전환 시 일괄 동기화됩니다.`);
+    } else {
+      addLog(`✅ 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
+      flushQueue();
+    }
   };
 
   const handleReviewSelect = (days: number) => { if (!activeCard) return; statsRef.current.filled += 1; finishCard(days); };
@@ -665,7 +715,6 @@ function MainApp() {
     }
 
     if (savedCards && savedCards.length > 0) {
-      // 💡 [수정] ORIG_ID 파싱 삭제
       const cardsWithStatus = savedCards.map(c => {
          const stats = parseCardStats(c.memo);
          return { ...c, repetitions: stats.filled || 0, origId: parseInt(c.id, 10) };
@@ -678,7 +727,7 @@ function MainApp() {
 
   const renderContent = React.useCallback(() => {
     if (!activeCard) return null;
-    const cleanContent = activeCard.content; // ORIG_ID 없으므로 그대로 씀
+    const cleanContent = activeCard.content; 
     const lines = cleanContent.split('\n');
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
@@ -947,6 +996,18 @@ function MainApp() {
 
             {isLoggedIn && (
               <div className="flex items-center gap-3 sm:gap-4 shrink-0 font-mono">
+                {/* 💡 PWA 설치 권유 버튼 및 오프라인 상태 뱃지 */}
+                {deferredPrompt && (
+                  <button onClick={handleInstallClick} className="bg-teal-600/50 border border-teal-500 text-teal-200 px-2 py-1 text-[9px] sm:text-[10px] rounded hover:bg-teal-600 transition-colors flex items-center shadow-md">
+                    앱 설치하기
+                  </button>
+                )}
+                {isOffline && (
+                  <span className="bg-red-900/80 border border-red-500 text-red-300 px-2 py-1 text-[9px] sm:text-[10px] rounded font-bold animate-pulse shadow-md">
+                    오프라인 모드
+                  </span>
+                )}
+                
                 <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">누적 회독수</span><span className="text-[10px] sm:text-xs font-bold text-amber-400">{minFilledCount} 회독</span></div>
                 <div className="h-5 sm:h-6 w-px bg-white/10"></div>
                 <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">예상 합격률</span><span className="text-[10px] sm:text-xs font-bold text-indigo-400">{passProbability}%</span></div>
