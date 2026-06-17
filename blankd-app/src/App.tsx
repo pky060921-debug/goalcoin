@@ -10,50 +10,55 @@ import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
+// 💡 [혁신 엔진] 사전에 단어가 등록되는 순간 띄어쓰기 무관하게 빈칸을 뚫는 무결성 함수
 const autoApplyDictHelper = (content: string, dict: any) => {
-  if (!dict) return content;
-  let fixedContent = content.replace(/\[ORIG_ID:(\d+)\]/g, '[[ORIG_ID:$1]]');
-  const lines = fixedContent.split('\n');
-  const titleLine = lines[0] || '';
-  const restContent = lines.length > 1 ? lines.slice(1).join('\n') : '';
+  try {
+    if (!dict) return content;
+    const lines = content.split('\n');
+    const titleLine = lines[0] || '';
+    const restContent = lines.length > 1 ? lines.slice(1).join('\n') : '';
 
-  const stopWords = dict.stopwords || [];
-  const abbrevKeys = Object.keys(dict.abbrs || {});
-  const abbrevValues = Object.values(dict.abbrs || {});
-  
-  const wordsToUnbracket = [...stopWords, ...abbrevKeys];
-
-  const includeWords = Array.from(new Set([
-      ...(dict.inclusions || []),
-      ...(abbrevValues as string[])
-  ])).filter((w: any) => typeof w === 'string' && w.trim() !== '')
-    .filter(w => !abbrevKeys.some(key => key.replace(/\s+/g, '') === w.replace(/\s+/g, ''))) 
-    .sort((a: any, b: any) => b.length - a.length);
-
-  let currentText = restContent;
-
-  if (wordsToUnbracket.length > 0) {
-    currentText = currentText.replace(/\[([^\]]+)\]/g, (match, inner) => {
-      let cleanInner = inner.replace(/\s+/g, '');
-      if (wordsToUnbracket.some(w => w.replace(/\s+/g, '') === cleanInner)) {
-        return inner; 
-      }
-      return match;
-    });
-  }
-
-  includeWords.forEach((iw: string) => {
-    const chars = iw.replace(/\s+/g, '').split('');
-    const flexibleRegexStr = chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
-    const regex = new RegExp(`\\[[^\\]]+\\]|(${flexibleRegexStr})`, 'gi');
+    const stopWords = dict.stopwords || [];
+    const abbrevKeys = Object.keys(dict.abbrs || {});
+    const abbrevValues = Object.values(dict.abbrs || {});
     
-    currentText = currentText.replace(regex, (match, p1) => {
-      if (match.startsWith('[')) return match; 
-      return `[${p1}]`; 
-    });
-  });
+    const wordsToUnbracket = [...stopWords, ...abbrevKeys];
 
-  return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
+    const includeWords = Array.from(new Set([
+        ...(dict.inclusions || []),
+        ...(abbrevValues as string[])
+    ])).filter((w: any) => typeof w === 'string' && w.trim() !== '')
+      .filter(w => !abbrevKeys.some(key => key.replace(/\s+/g, '') === w.replace(/\s+/g, ''))) 
+      .sort((a: any, b: any) => b.length - a.length);
+
+    let currentText = restContent;
+
+    if (wordsToUnbracket.length > 0) {
+      currentText = currentText.replace(/\[([^\]]+)\]/g, (match, inner) => {
+        let cleanInner = inner.replace(/\s+/g, '');
+        if (wordsToUnbracket.some(w => w.replace(/\s+/g, '') === cleanInner)) {
+          return inner; 
+        }
+        return match;
+      });
+    }
+
+    includeWords.forEach((iw: string) => {
+      const chars = iw.replace(/\s+/g, '').split('');
+      const flexibleRegexStr = chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
+      const regex = new RegExp(`\\[[^\\]]+\\]|(${flexibleRegexStr})`, 'gi');
+      
+      currentText = currentText.replace(regex, (match, p1) => {
+        if (match.startsWith('[')) return match; 
+        return `[${p1}]`; 
+      });
+    });
+
+    return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
+  } catch (err: any) {
+    console.error("사전 자동 적용 엔진 오류 진단:", err.message);
+    return content;
+  }
 };
 
 const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict }: {
@@ -131,12 +136,12 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
     return { hasError: true, errorMessage: error.message }; 
   }
   componentDidCatch(error: any, errorInfo: any) { 
-    this.props.fallbackLog(`🚨 코어 엔진 가동 예외 핸들링: ${error.message}`); 
+    this.props.fallbackLog(`🚨 렌더링 예외 발생 핸들링 진단: ${error.message}`); 
   }
   render() {
     if (this.state.hasError) return (
       <div className="p-6 text-red-400 font-mono border border-red-500/30 bg-red-900/10 rounded-sm shadow-xl">
-        <h3 className="text-lg font-bold mb-2">🔥 시스템 코어 가동 오류 (자가 복구 활성화)</h3>
+        <h3 className="text-lg font-bold mb-2">🔥 화면 렌더링 복구 활성화</h3>
         <p className="text-sm opacity-80">{this.state.errorMessage}</p>
       </div>
     );
@@ -215,7 +220,6 @@ function MainApp() {
   const [tempKey, setTempKey] = useState("");
   const [tempValue, setTempValue] = useState("");
 
-  // 💡 [PWA] 오프라인 상태 감지 및 앱 설치 권유 프롬프트
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
@@ -240,13 +244,12 @@ function MainApp() {
     if (deferredPrompt) {
       deferredPrompt.prompt();
       deferredPrompt.userChoice.then((choiceResult: any) => {
-        if (choiceResult.outcome === 'accepted') addLog('✅ PWA 오프라인 앱 설치 완료');
+        if (choiceResult.outcome === 'accepted') addLog('✅ PWA 앱 설치 완료');
         setDeferredPrompt(null);
       });
     }
   };
 
-  // 💡 [오프라인 모드] 네트워크 에러 시 기기에 저장된 캐시 데이터 강제 로드
   const loadAllData = async () => {
     if (!safeAddress) return;
     try {
@@ -267,7 +270,6 @@ function MainApp() {
       setGoalBalance(balance);
       setGlobalDict(newDict);
 
-      // 오프라인 학습을 위한 로컬 캐시 덮어쓰기
       localStorage.setItem(`blankd_off_cat_${safeAddress}`, JSON.stringify(catRes.categories || []));
       localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(cardRes.cards || []));
       localStorage.setItem(`blankd_off_bal_${safeAddress}`, balance.toString());
@@ -327,7 +329,9 @@ function MainApp() {
               body: JSON.stringify({
                   wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: newAnswers, folder_name: card.folder_name, memo: card.memo
               })
-           }).catch(()=>{});
+           }).catch((e)=>{
+              console.error("카드 자동 생성 오류 진단:", e);
+           });
         });
         setTimeout(() => addLog(`✅ 전역 빈칸 자동 생성 완료!`), 1000);
       }
@@ -345,20 +349,20 @@ function MainApp() {
 
   const addLog = (msg: string) => setSystemLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`].slice(-40));
 
-  useEffect(() => document.title = "BlankD | 인지 과학 기반 학습", []);
+  useEffect(() => { document.title = "BlankD | 인지 과학 기반 학습"; }, []);
 
   useEffect(() => {
     if (window.location.hash) {
       enokiFlow.handleAuthCallback().then(() => { 
         window.history.replaceState(null, '', window.location.pathname); 
         addLog("✅ 로그인 콜백 처리 완료"); 
-      }).catch((err: any) => addLog(`🚨 인증 실패: ${err.message}`));
+      }).catch((err: any) => addLog(`🚨 인증 실패 진단: ${err.message}`));
     }
     if (isLoggedIn) loadAllData();
   }, [isLoggedIn, safeAddress, enokiFlow]);
 
   const flushQueue = async () => {
-    if (!safeAddress || isOffline) return; // 💡 오프라인일 땐 큐 전송 시도 중단
+    if (!safeAddress || isOffline) return; 
     try {
       const qStr = localStorage.getItem('blankd_sync_queue');
       if (!qStr) return;
@@ -385,7 +389,7 @@ function MainApp() {
       }
     } catch (e) { 
       setIsOffline(true);
-      addLog("⚠️ 동기화 큐 적재: 오프라인 모드로 인해 기기에 학습 내용을 안전하게 보관 중입니다.");
+      addLog("⚠️ 동기화 큐 적재 진단: 오프라인 상태");
     }
   };
 
@@ -420,7 +424,7 @@ function MainApp() {
           await loadAllData();
         }
     } catch (e: any) { 
-      addLog(`🚨 분할 처리 통신 에러`);
+      addLog(`🚨 분할 처리 통신 에러 진단`);
     }
   };
 
@@ -483,7 +487,9 @@ function MainApp() {
         addLog(targetCardId ? "✅ 덮어쓰기 완료" : "✅ 신규 생성 완료");
         await loadAllData(); onComplete(); 
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("카드 생성 오류 진단:", e);
+    }
   };
 
   const handleUpdateMemoBackground = (id: number, memo: string) => {
@@ -579,7 +585,6 @@ function MainApp() {
     setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     
-    // 💡 오프라인 큐 시스템 연동
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
     
@@ -996,7 +1001,6 @@ function MainApp() {
 
             {isLoggedIn && (
               <div className="flex items-center gap-3 sm:gap-4 shrink-0 font-mono">
-                {/* 💡 PWA 설치 권유 버튼 및 오프라인 상태 뱃지 */}
                 {deferredPrompt && (
                   <button onClick={handleInstallClick} className="bg-teal-600/50 border border-teal-500 text-teal-200 px-2 py-1 text-[9px] sm:text-[10px] rounded hover:bg-teal-600 transition-colors flex items-center shadow-md">
                     앱 설치하기
@@ -1036,13 +1040,15 @@ function MainApp() {
           <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-[#111827] text-white text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
         </main>
       ) : (
-        <div className="max-w-[1500px] mx-auto w-full flex gap-4 sm:gap-6 px-4 lg:px-6 items-start pb-10">
+        // 💡 [수정됨] 오른쪽 사전 패널 너비 확장에 맞춰 max-w-[1500px]에서 max-w-[1600px]로 밸런스 조정
+        <div className="max-w-[1600px] mx-auto w-full flex gap-4 sm:gap-6 px-4 lg:px-6 items-start pb-10">
           <main className="flex-1 w-full min-w-0">
             <ErrorBoundary fallbackLog={addLog}>
               {memoizedTabs}
             </ErrorBoundary>
           </main>
-          <aside className="hidden lg:flex flex-col w-[320px] xl:w-[360px] shrink-0 sticky top-[100px] h-[calc(100vh-140px)]">
+          {/* 💡 [수정됨] 오른쪽 사전 패널 너비 1.3배 확대 적용 (w-[416px], xl:w-[468px]) */}
+          <aside className="hidden lg:flex flex-col w-[416px] xl:w-[468px] shrink-0 sticky top-[100px] h-[calc(100vh-140px)]">
             {renderDictionaryUI(false)}
           </aside>
         </div>
