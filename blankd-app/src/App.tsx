@@ -250,7 +250,7 @@ function MainApp() {
     }
   };
 
-  const loadAllData = async () => {
+    const loadAllData = async () => {
     if (!safeAddress) return;
     try {
       const [catRes, cardRes, balance, dictRes] = await Promise.all([
@@ -265,20 +265,38 @@ function MainApp() {
       let finalAbbrs = (dictRes.abbrs && typeof dictRes.abbrs === 'object' && !Array.isArray(dictRes.abbrs)) ? dictRes.abbrs : {};
       const newDict = { stopwords: serverStopwords, inclusions: serverInclusions, abbrs: finalAbbrs };
 
+      // 💡 [핵심 수정] 서버에서 카드를 가져온 직후, 아직 전역 큐에 남아있는 로컬 카운트(memo)가 있다면 강제로 결합합니다.
+      let finalCards = cardRes.cards || [];
+      try {
+        const qStr = localStorage.getItem('blankd_sync_queue');
+        if (qStr) {
+          const q = JSON.parse(qStr);
+          if (q && Array.isArray(q.memos) && q.memos.length > 0) {
+            finalCards = finalCards.map((c: any) => {
+              // 아직 서버에 반영 안 된 로컬 메모 기록 매칭
+              const pendingMemo = q.memos.find((m: any) => String(m.id) === String(c.id));
+              return pendingMemo ? { ...c, memo: pendingMemo.memo } : c;
+            });
+          }
+        }
+      } catch (queueMergeError: any) {
+        console.error("🚨 로컬 큐 데이터 병합 무결성 오류 진단:", queueMergeError.message);
+      }
+
       setCategories([...(catRes.categories || [])]);
-      setSavedCards([...(cardRes.cards || [])]);
+      setSavedCards(finalCards); // 💡 오염되지 않은 병합 데이터로 화면 렌더링
       setGoalBalance(balance);
       setGlobalDict(newDict);
 
       localStorage.setItem(`blankd_off_cat_${safeAddress}`, JSON.stringify(catRes.categories || []));
-      localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(cardRes.cards || []));
+      localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(finalCards));
       localStorage.setItem(`blankd_off_bal_${safeAddress}`, balance.toString());
       localStorage.setItem(`blankd_off_dict_${safeAddress}`, JSON.stringify(newDict));
       
       setIsOffline(false);
     } catch (e: any) {
       setIsOffline(true);
-      addLog(`⚠️ 오프라인 모드: 통신 끊김. 기기에 임시 저장된 데이터를 불러옵니다.`);
+      addLog(`⚠️ 오프라인 모드 진단: 통신 끊김. 기기에 임시 저장된 데이터를 불러옵니다.`);
       try {
         const offCat = JSON.parse(localStorage.getItem(`blankd_off_cat_${safeAddress}`) || '[]');
         const offCard = JSON.parse(localStorage.getItem(`blankd_off_card_${safeAddress}`) || '[]');
@@ -289,8 +307,8 @@ function MainApp() {
         setSavedCards(offCard);
         setGoalBalance(offBal);
         setGlobalDict(offDict);
-      } catch(cacheError) {
-         addLog(`🚨 캐시 로드 실패: 저장된 오프라인 데이터가 없습니다.`);
+      } catch(cacheError: any) {
+         addLog(`🚨 캐시 로드 복구 실패 진단: ${cacheError.message}`);
       }
     }
   };
