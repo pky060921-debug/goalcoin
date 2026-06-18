@@ -470,14 +470,15 @@ function MainApp() {
       const rawContent = cat.content || "";
       const rawFolder = cat.folder_name || "";
       
-      const fullTextToScan = `${rawTitle} ${rawContent} ${rawFolder} ${bodyContent}`;
-      
+      // 본문 전체가 아닌 제목과 내용의 첫 줄만 검사하도록 수정
+      const firstLineToScan = `${rawTitle} ${rawContent.split('\n')[0]}`;
+
       let detectedPrefix = "[법]"; 
-      if (fullTextToScan.includes("[칙]") || fullTextToScan.includes("[규]") || fullTextToScan.includes("시행규칙")) {
+      if (firstLineToScan.includes("[칙]") || firstLineToScan.includes("[규]") || firstLineToScan.includes("시행규칙")) {
         detectedPrefix = "[칙]";
-      } else if (fullTextToScan.includes("[령]") || fullTextToScan.includes("시행령")) {
+      } else if (firstLineToScan.includes("[령]") || firstLineToScan.includes("시행령")) {
         detectedPrefix = "[령]";
-      } else if (fullTextToScan.includes("[정관]")) {
+      } else if (firstLineToScan.includes("[정관]")) {
         detectedPrefix = "[정관]";
       } else {
         detectedPrefix = "[법]";
