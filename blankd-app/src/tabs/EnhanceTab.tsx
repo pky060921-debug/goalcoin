@@ -2,9 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { formatCardText, parseCardStats, SPLIT_REGEX } from '../utils/constants';
 import { api } from '../services/api';
 
-// 💡 [수정] 카드가 가로로 시원하게 길어지도록 2단으로 고정합니다.
+// 💡 [수정됨] 3번 요청: 원래의 3단 그리드 구조로 원복했습니다.
 const getGridClass = (cols: number) => {
-  return "md:grid-cols-2";
+  if(cols === 1) return "md:grid-cols-1";
+  if(cols === 2) return "md:grid-cols-2";
+  if(cols === 3) return "md:grid-cols-3";
+  if(cols === 4) return "md:grid-cols-4";
+  if(cols === 5) return "md:grid-cols-5";
+  return "md:grid-cols-3";
 };
 
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, loadAllData, safeAddress, globalDict }: any) => {
@@ -320,12 +325,22 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
   };
 
   const handleAddAdjacent = (folder: string, index: number) => {
+    // 💡 [수정됨] 2번 요청: 사용자에게 선택할 수 있는 창을 띄웁니다.
+    const choice = window.prompt("추가할 카드의 분류를 선택하세요.\n1: [령]\n2: [칙]\n3: [정관]\n4: [규정]\n(숫자나 이름을 입력하세요)", "1");
+    if (choice === null) return; // 취소 버튼을 누르면 종료
+
+    let prefix = "법";
+    if (choice === "1" || choice === "령") prefix = "령";
+    else if (choice === "2" || choice === "칙") prefix = "칙";
+    else if (choice === "3" || choice === "정관") prefix = "정관";
+    else if (choice === "4" || choice === "규정") prefix = "규정";
+    else prefix = choice.replace(/[\[\]]/g, '').trim() || "법"; // 예외적인 경우 입력한 텍스트 그대로 사용
+
     const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
     const origCard = folderCards[index];
     const tempId = `temp_${Date.now()}`;
     
-    // 💡 [수정] '+' 버튼 클릭 시 무조건 [정관]으로 텍스트 자동 삽입
-    const newTitle = '[정관] 조항명 입력';
+    const newTitle = `[${prefix}] 조항명 입력`;
     
     const newCard = {
         id: tempId,
@@ -406,7 +421,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
   const renderInteractiveText = () => {
     const lines = editContent.split('\n');
-    const titleLine = (lines[0] || '').replace(/\[(법|령|칙|규|정관)\]/g, '').trim();
+    const titleLine = (lines[0] || '').replace(/\[(법|령|칙|규|정관|규정)\]/g, '').trim();
     const restLines = lines.slice(1).join('\n');
     
     const tokens = restLines.split(/(\s+|\n|---|\[[^\]]+\])/g).filter(Boolean);
@@ -522,28 +537,32 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                 try {
                   const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
                   
-                  // 💡 [수정] 오작동 방지: 색상을 칠할 때 '본문'은 절대 안 보고 오직 '첫 번째 줄(제목)'만 읽어옵니다.
                   const lines = cleanContent.split('\n');
                   const firstLine = lines[0] || "";
                   
                   let displayTitle = firstLine
-                    .replace(/\[(법|령|칙|규|정관)\]/g, '')
+                    .replace(/\[(법|령|칙|규|정관|규정)\]/g, '')
                     .replace(/\(\s*내용\s*\)/g, '')
                     .replace(/내용/g, '')
                     .trim();
                   if (!displayTitle) displayTitle = "제목 없음";
 
-                  // 💡 [수정] 가로 꽉 차게 확장: 좁은 1,2,3열 위치 고정 클래스를 모두 없애고 자유롭게 나열합니다.
-                  let colClass = "md:col-span-1"; 
+                  // 💡 [수정됨] 3번 요청: 이전과 동일하게 첫 번째 줄의 태그를 찾아 1열, 2열, 3열 위치 및 색상을 지정합니다.
+                  let colClass = "md:col-start-1 md:col-span-1"; 
                   let titleColor = "text-red-500";
                   
-                  // 💡 본문이 아닌 첫 번째 줄에서만 태그를 찾아 색상을 입힙니다.
                   if (firstLine.includes('[정관]')) {
+                    colClass = "md:col-start-1 md:col-span-1";
                     titleColor = "text-yellow-500";
-                  } else if (firstLine.includes('[칙]') || firstLine.includes('[규]')) { 
+                  } else if (firstLine.includes('[칙]') || firstLine.includes('[규]') || firstLine.includes('[규정]')) { 
+                    colClass = "md:col-start-3 md:col-span-1";
                     titleColor = "text-green-500";
                   } else if (firstLine.includes('[령]')) { 
+                    colClass = "md:col-start-2 md:col-span-1";
                     titleColor = "text-blue-400";
+                  } else {
+                    colClass = "md:col-start-1 md:col-span-1";
+                    titleColor = "text-red-500";
                   }
 
                   const bodyOnlyForStats = lines.slice(1).join('\n');
@@ -606,7 +625,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                   const targetCard = localCards.find(c => String(c.id) === String(e.target.value));
                                   if (targetCard) {
                                     const lines = targetCard.content.split('\n');
-                                    let firstLine = lines[0].replace(/\[(법|령|칙|규|정관)\]/g, '').trim();
+                                    let firstLine = lines[0].replace(/\[(법|령|칙|규|정관|규정)\]/g, '').trim();
                                     lines[0] = `[정관] ${firstLine}`; 
                                     setEditContent(lines.join('\n'));
                                     setShowJeonggwanSelector(false); 
