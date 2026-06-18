@@ -478,14 +478,12 @@ function MainApp() {
         detectedPrefix = "[칙]";
       } else if (firstLineToScan.includes("[령]") || firstLineToScan.includes("시행령")) {
         detectedPrefix = "[령]";
-      } else if (firstLineToScan.includes("[정관]")) {
-        detectedPrefix = "[정관]";
       } else {
         detectedPrefix = "[법]";
       }
 
       let firstLineRaw = rawTitle.length > rawContent.split('\n')[0].length ? rawTitle : rawContent.split('\n')[0];
-      let cleanFirstLine = firstLineRaw.replace(/\[(법|령|칙|규|정관)\]/g, '').trim();
+      let cleanFirstLine = firstLineRaw.replace(/\[(법|령|칙|규)\]/g, '').trim();
       const finalFirstLine = `${detectedPrefix} ${cleanFirstLine}`;
       
       const finalCardContent = `${finalFirstLine}\n${bodyContent.trim()}`;
