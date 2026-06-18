@@ -470,7 +470,6 @@ function MainApp() {
       const rawContent = cat.content || "";
       const rawFolder = cat.folder_name || "";
       
-      // 본문 전체가 아닌 제목과 내용의 첫 줄만 검사하도록 수정
       const firstLineToScan = `${rawTitle} ${rawContent.split('\n')[0]}`;
 
       let detectedPrefix = "[법]"; 
@@ -507,9 +506,20 @@ function MainApp() {
     }
   };
 
-  const handleUpdateMemoBackground = (id: number, memo: string) => {
+  const handleUpdateMemoBackground = async (id: number, memo: string) => {
     setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
     pushToQueue('MEMO', { id, memo });
+    
+    // 💡 즉시 저장 엔진 탑재
+    if (!isOffline) {
+      const target = savedCards.find((c:any) => c.id === id);
+      if (target) {
+        fetch("https://api.blankd.top/api/save-card", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: safeAddress, card_id: id, card_content: target.content, answer_text: target.answer_text || "", folder_name: target.folder_name, memo })
+        }).catch(() => {});
+      }
+    }
   };
 
   useEffect(() => {
@@ -551,7 +561,7 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  const finishCard = (customDays?: number) => {
+  const finishCard = async (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
     const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = elapsed;
@@ -607,13 +617,21 @@ function MainApp() {
       addLog(`💾 오프라인 기록 완료 (ID:${currentId}) | 온라인 전환 시 일괄 동기화됩니다.`);
     } else {
       addLog(`✅ 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
+      
+      // 💡 즉시 저장 엔진 탑재
+      try {
+        await fetch("https://api.blankd.top/api/save-card", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
+        });
+      } catch(e) {}
       flushQueue();
     }
   };
 
   const handleReviewSelect = (days: number) => { if (!activeCard) return; statsRef.current.filled += 1; finishCard(days); };
 
-  const handleCloseModal = () => {
+  const handleCloseModal = async () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
     const currentId = activeCard.id;
@@ -622,6 +640,16 @@ function MainApp() {
     setActiveCard(null);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
+    
+    // 💡 즉시 저장 엔진 탑재
+    if (!isOffline) {
+      try {
+        await fetch("https://api.blankd.top/api/save-card", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
+        });
+      } catch(e) {}
+    }
     flushQueue();
   };
 
@@ -716,6 +744,7 @@ function MainApp() {
   const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => parseCardStats(card.memo || "").filled || 0)) : 0;
   const passProbability = Math.min(minFilledCount * 2, 100);
 
+  // 💡 가짜 카드(임시 카드) 필터링 엔진 탑재
   const { nextCatToCraft, nextStudyCard } = useMemo(() => {
     let craftTarget = null; let studyTarget = null;
     if (!isLoggedIn) return { nextCatToCraft: null, nextStudyCard: null };
@@ -738,9 +767,12 @@ function MainApp() {
       const cardsWithStatus = savedCards.map(c => {
          const stats = parseCardStats(c.memo);
          return { ...c, repetitions: stats.filled || 0, origId: parseInt(c.id, 10) };
-      }).sort((a, b) => a.origId - b.origId);
-      const minReps = Math.min(...cardsWithStatus.map(c => c.repetitions));
-      studyTarget = cardsWithStatus.find(c => c.repetitions === minReps) || cardsWithStatus[0];
+      }).filter(c => !isNaN(c.origId)).sort((a, b) => a.origId - b.origId);
+      
+      if (cardsWithStatus.length > 0) {
+        const minReps = Math.min(...cardsWithStatus.map(c => c.repetitions));
+        studyTarget = cardsWithStatus.find(c => c.repetitions === minReps) || cardsWithStatus[0];
+      }
     }
     return { nextCatToCraft: craftTarget, nextStudyCard: studyTarget };
   }, [isLoggedIn, categories, savedCards]);
@@ -1000,7 +1032,7 @@ function MainApp() {
               ) : (<div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">만들기 완료</div>)}
 
               {nextStudyCard ? (
-                <button onClick={() => { setActiveCard(nextStudyCard); }} className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]">
+                <button onClick={() => { setActiveTab('enhance'); setActiveCard(nextStudyCard); }} className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]">
                   <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span><span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{nextStudyCard.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim()}</span>
                 </button>
               ) : (<div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 완료</div>)}
@@ -1031,7 +1063,6 @@ function MainApp() {
                 <div className="h-5 sm:h-6 w-px bg-white/10"></div>
                 <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">예상 합격률</span><span className="text-[10px] sm:text-xs font-bold text-indigo-400">{passProbability}%</span></div>
                 <div className="h-5 sm:h-6 w-px bg-white/10 hidden sm:block"></div>
-                {/* 💡 [로그아웃 버튼 수정] 강제 동기화 후 로그아웃하도록 안전장치 추가 */}
                 <button onClick={async () => { 
                   try {
                     addLog("🔄 로그아웃 전 데이터 안전 동기화 중...");
