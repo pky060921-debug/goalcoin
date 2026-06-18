@@ -2,13 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { formatCardText, parseCardStats, SPLIT_REGEX } from '../utils/constants';
 import { api } from '../services/api';
 
+// 💡 [수정] 카드가 가로로 시원하게 길어지도록 2단으로 고정합니다.
 const getGridClass = (cols: number) => {
-  if(cols === 1) return "md:grid-cols-1";
-  if(cols === 2) return "md:grid-cols-2";
-  if(cols === 3) return "md:grid-cols-3";
-  if(cols === 4) return "md:grid-cols-4";
-  if(cols === 5) return "md:grid-cols-5";
-  return "md:grid-cols-3";
+  return "md:grid-cols-2";
 };
 
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, loadAllData, safeAddress, globalDict }: any) => {
@@ -152,13 +148,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     
     const wordsToUnbracket = [...stopWords, ...abbrevKeys];
     
-    // 💡 [핵심 수정] DB 찌꺼기에 남아있는 약어(짧은 정답)가 빈칸으로 뚫리는 것을 2중 차단!
     const includeWords = Array.from(new Set([
         ...(globalDict.inclusions || []),
         ...(abbrevValues as string[])
     ]))
     .filter((w: any) => typeof w === 'string' && w.trim() !== '')
-    .filter(w => !abbrevKeys.some(key => key.replace(/\s+/g, '') === w.replace(/\s+/g, ''))) // 💡 약어는 절대 포함 안 되게 거름
+    .filter(w => !abbrevKeys.some(key => key.replace(/\s+/g, '') === w.replace(/\s+/g, ''))) 
     .sort((a: any, b: any) => b.length - a.length);
 
     let currentText = restContent;
@@ -328,7 +323,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
     const origCard = folderCards[index];
     const tempId = `temp_${Date.now()}`;
-    const newTitle = '[령/칙/정관] 조항명 입력';
+    
+    // 💡 [수정] '+' 버튼 클릭 시 무조건 [정관]으로 텍스트 자동 삽입
+    const newTitle = '[정관] 조항명 입력';
     
     const newCard = {
         id: tempId,
@@ -525,27 +522,30 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                 try {
                   const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
                   
-                  let displayTitle = (cleanContent.split('\n')[0] || "")
+                  // 💡 [수정] 오작동 방지: 색상을 칠할 때 '본문'은 절대 안 보고 오직 '첫 번째 줄(제목)'만 읽어옵니다.
+                  const lines = cleanContent.split('\n');
+                  const firstLine = lines[0] || "";
+                  
+                  let displayTitle = firstLine
                     .replace(/\[(법|령|칙|규|정관)\]/g, '')
                     .replace(/\(\s*내용\s*\)/g, '')
                     .replace(/내용/g, '')
                     .trim();
                   if (!displayTitle) displayTitle = "제목 없음";
 
-                  let colClass = "md:col-start-1 md:col-span-1"; 
+                  // 💡 [수정] 가로 꽉 차게 확장: 좁은 1,2,3열 위치 고정 클래스를 모두 없애고 자유롭게 나열합니다.
+                  let colClass = "md:col-span-1"; 
                   let titleColor = "text-red-500";
                   
-                  if (cleanContent.includes('[정관]')) {
-                    colClass = "md:col-start-1 md:col-span-1"; titleColor = "text-yellow-500";
-                  } else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { 
-                    colClass = "md:col-start-3 md:col-span-1"; titleColor = "text-green-500";
-                  } else if (cleanContent.includes('[령]')) { 
-                    colClass = "md:col-start-2 md:col-span-1"; titleColor = "text-blue-400";
-                  } else { 
-                    colClass = "md:col-start-1 md:col-span-1"; titleColor = "text-red-500";
+                  // 💡 본문이 아닌 첫 번째 줄에서만 태그를 찾아 색상을 입힙니다.
+                  if (firstLine.includes('[정관]')) {
+                    titleColor = "text-yellow-500";
+                  } else if (firstLine.includes('[칙]') || firstLine.includes('[규]')) { 
+                    titleColor = "text-green-500";
+                  } else if (firstLine.includes('[령]')) { 
+                    titleColor = "text-blue-400";
                   }
 
-                  const lines = cleanContent.split('\n');
                   const bodyOnlyForStats = lines.slice(1).join('\n');
                   const totalBlanks = (bodyOnlyForStats.match(/\[\s*(.*?)\s*\]/g) || []).length;
                   const stats = parseCardStats(card.memo);
