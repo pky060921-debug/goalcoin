@@ -51,7 +51,8 @@ export const CardModal = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-[#0a0a0c] border border-white/10 rounded-sm shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col relative overflow-hidden">
+      {/* 💡 수정된 부분: max-w-2xl을 max-w-6xl w-[95vw]로 변경하여 팝업창 너비를 대폭 확장했습니다. */}
+      <div className="bg-[#0a0a0c] border border-white/10 rounded-sm shadow-2xl w-[95vw] max-w-6xl max-h-[85vh] flex flex-col relative overflow-hidden">
         <div className="absolute top-0 left-0 h-1 bg-white/10 w-full z-10">
           <div className={`h-full transition-all duration-100 ease-linear ${progressPercent > 80 ? 'bg-red-500' : 'bg-teal-500'}`} style={{ width: `${progressPercent}%` }} />
         </div>
