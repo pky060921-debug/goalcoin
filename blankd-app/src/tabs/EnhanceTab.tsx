@@ -532,14 +532,19 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                     .trim();
                   if (!displayTitle) displayTitle = "제목 없음";
 
-                  let colClass = "md:col-span-1"; 
+                  let colClass = "md:col-start-1 md:col-span-1"; 
                   let titleColor = "text-red-500";
-                  const firstLine = cleanContent.split('\n')[0] || "";
                   
-                  if (firstLine.includes('[정관]')) titleColor = "text-yellow-500";
-                  else if (firstLine.includes('[칙]') || firstLine.includes('[규]')) titleColor = "text-green-500";
-                  else if (firstLine.includes('[령]')) titleColor = "text-blue-400";
-                  
+                  if (cleanContent.includes('[정관]')) {
+                    colClass = "md:col-start-1 md:col-span-1"; titleColor = "text-yellow-500";
+                  } else if (cleanContent.includes('[칙]') || cleanContent.includes('[규]')) { 
+                    colClass = "md:col-start-3 md:col-span-1"; titleColor = "text-green-500";
+                  } else if (cleanContent.includes('[령]')) { 
+                    colClass = "md:col-start-2 md:col-span-1"; titleColor = "text-blue-400";
+                  } else { 
+                    colClass = "md:col-start-1 md:col-span-1"; titleColor = "text-red-500";
+                  }
+
                   const lines = cleanContent.split('\n');
                   const bodyOnlyForStats = lines.slice(1).join('\n');
                   const totalBlanks = (bodyOnlyForStats.match(/\[\s*(.*?)\s*\]/g) || []).length;
