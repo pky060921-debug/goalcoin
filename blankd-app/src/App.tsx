@@ -10,11 +10,11 @@ import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 
-// 💡 [혁신 엔진] 사전에 단어가 등록되는 순간 띄어쓰기 무관하게 빈칸을 뚫는 무결성 함수
 const autoApplyDictHelper = (content: string, dict: any) => {
   try {
     if (!dict) return content;
-    const lines = content.split('\n');
+    let fixedContent = content.replace(/\[ORIG_ID:(\d+)\]/g, '[[ORIG_ID:$1]]');
+    const lines = fixedContent.split('\n');
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n') : '';
 
@@ -165,7 +165,7 @@ const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
     }
     localStorage.setItem('blankd_sync_queue', JSON.stringify(q));
   } catch (e) { 
-    console.error("동기화 가상 큐 적재 실패:", e); 
+    console.error("동기화 가상 큐 적재 실패 진단:", e); 
   }
 };
 
@@ -250,7 +250,7 @@ function MainApp() {
     }
   };
 
-    const loadAllData = async () => {
+  const loadAllData = async () => {
     if (!safeAddress) return;
     try {
       const [catRes, cardRes, balance, dictRes] = await Promise.all([
@@ -265,7 +265,6 @@ function MainApp() {
       let finalAbbrs = (dictRes.abbrs && typeof dictRes.abbrs === 'object' && !Array.isArray(dictRes.abbrs)) ? dictRes.abbrs : {};
       const newDict = { stopwords: serverStopwords, inclusions: serverInclusions, abbrs: finalAbbrs };
 
-      // 💡 [핵심 수정] 서버에서 카드를 가져온 직후, 아직 전역 큐에 남아있는 로컬 카운트(memo)가 있다면 강제로 결합합니다.
       let finalCards = cardRes.cards || [];
       try {
         const qStr = localStorage.getItem('blankd_sync_queue');
@@ -273,7 +272,6 @@ function MainApp() {
           const q = JSON.parse(qStr);
           if (q && Array.isArray(q.memos) && q.memos.length > 0) {
             finalCards = finalCards.map((c: any) => {
-              // 아직 서버에 반영 안 된 로컬 메모 기록 매칭
               const pendingMemo = q.memos.find((m: any) => String(m.id) === String(c.id));
               return pendingMemo ? { ...c, memo: pendingMemo.memo } : c;
             });
@@ -284,7 +282,7 @@ function MainApp() {
       }
 
       setCategories([...(catRes.categories || [])]);
-      setSavedCards(finalCards); // 💡 오염되지 않은 병합 데이터로 화면 렌더링
+      setSavedCards(finalCards); 
       setGoalBalance(balance);
       setGlobalDict(newDict);
 
@@ -319,7 +317,7 @@ function MainApp() {
     try {
       await api.updateGlobalDict(safeAddress, newDict);
     } catch (err) {
-      console.error("단어장 DB 동기화 실패:", err);
+      console.error("단어장 DB 동기화 실패 진단:", err);
     }
 
     setSavedCards(prevCards => {
@@ -1034,7 +1032,18 @@ function MainApp() {
                 <div className="h-5 sm:h-6 w-px bg-white/10"></div>
                 <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">예상 합격률</span><span className="text-[10px] sm:text-xs font-bold text-indigo-400">{passProbability}%</span></div>
                 <div className="h-5 sm:h-6 w-px bg-white/10 hidden sm:block"></div>
-                <button onClick={async () => { await enokiFlow.logout(); localStorage.clear(); window.location.reload(); }} className="border border-white/20 px-2 py-1 text-[9px] sm:text-[10px] hover:bg-white/10 tracking-wider font-mono rounded-sm text-white/70 whitespace-nowrap shrink-0">로그아웃</button>
+                {/* 💡 [로그아웃 버튼 수정] 강제 동기화 후 로그아웃하도록 안전장치 추가 */}
+                <button onClick={async () => { 
+                  try {
+                    addLog("🔄 로그아웃 전 데이터 안전 동기화 중...");
+                    await flushQueue();
+                  } catch(e: any) {
+                    console.error("로그아웃 동기화 예외 진단:", e.message);
+                  }
+                  await enokiFlow.logout(); 
+                  localStorage.clear(); 
+                  window.location.reload(); 
+                }} className="border border-white/20 px-2 py-1 text-[9px] sm:text-[10px] hover:bg-white/10 tracking-wider font-mono rounded-sm text-white/70 whitespace-nowrap shrink-0">로그아웃</button>
               </div>
             )}
           </div>
@@ -1058,15 +1067,13 @@ function MainApp() {
           <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-[#111827] text-white text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
         </main>
       ) : (
-        // 💡 [수정됨] 오른쪽 사전 패널 너비 확장에 맞춰 max-w-[1500px]에서 max-w-[1600px]로 밸런스 조정
         <div className="max-w-[1600px] mx-auto w-full flex gap-4 sm:gap-6 px-4 lg:px-6 items-start pb-10">
           <main className="flex-1 w-full min-w-0">
             <ErrorBoundary fallbackLog={addLog}>
               {memoizedTabs}
             </ErrorBoundary>
           </main>
-          {/* 💡 [수정됨] 오른쪽 사전 패널 너비 1.3배 확대 적용 (w-[416px], xl:w-[468px]) */}
-          <aside className="hidden lg:flex flex-col w-[416px] xl:w-[468px] shrink-0 sticky top-[100px] h-[calc(100vh-140px)]">
+          <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[416px] xl:w-[468px]" style={{ width: '416px', maxWidth: '35vw' }}>
             {renderDictionaryUI(false)}
           </aside>
         </div>
