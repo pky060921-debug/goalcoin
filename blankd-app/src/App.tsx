@@ -61,11 +61,13 @@ const autoApplyDictHelper = (content: string, dict: any) => {
   }
 };
 
-const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict }: {
+// 💡 힌트용 프롭스(hintLetter) 추가
+const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict, hintLetter }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
   expected: string; 
   abbrDict: Record<string, string>;
+  hintLetter?: string | null;
 }) => {
   const [val, setVal] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -90,22 +92,14 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
         const strV = v.replace(/\s+/g, '').toLowerCase();
         const orig = strK.length >= strV.length ? strK : strV;
         const short = strK.length < strV.length ? strK : strV;
-        
-        if (cleanExpected === orig && cleanInput === short) {
-          isMatch = true;
-        }
+        if (cleanExpected === orig && cleanInput === short) { isMatch = true; }
       });
     }
-
-    if (isMatch) {
-      onSubmit(newVal);
-    }
+    if (isMatch) onSubmit(newVal);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      onSubmit(val);
-    }
+    if (e.key === 'Enter') onSubmit(val);
   };
   
   return (
@@ -114,17 +108,18 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
       value={val}
       onChange={handleChange}
       onKeyDown={handleKeyDown}
+      placeholder={hintLetter ? hintLetter : ""}
       className={`inline-block mx-1 px-1.5 py-0.5 text-center font-bold border-b-2 outline-none transition-all ${
-        inputStatus === 'error' ? 'bg-red-900/40 text-red-300 border-red-500' :
+        inputStatus === 'error' ? 'bg-red-900/40 text-red-300 border-red-500 placeholder-red-400' :
         inputStatus === 'correct' ? 'bg-teal-900/40 text-teal-300 border-teal-500' :
+        hintLetter ? 'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
         'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400'
       }`}
       style={{ width: `${Math.max(expected.length * 1.2, 3)}em` }}
-      placeholder=""
     />
   );
 }, (prevProps, nextProps) => {
-  return prevProps.inputStatus === nextProps.inputStatus && prevProps.expected === nextProps.expected && prevProps.abbrDict === nextProps.abbrDict;
+  return prevProps.inputStatus === nextProps.inputStatus && prevProps.expected === nextProps.expected && prevProps.abbrDict === nextProps.abbrDict && prevProps.hintLetter === nextProps.hintLetter;
 });
 
 class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
@@ -203,13 +198,17 @@ function MainApp() {
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
-  const [startTime, setStartTime] = useState<number>(0);
+  
   const [elapsed, setElapsed] = useState<number>(0);
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
+
+  // 💡 상점 시스템 상태 관리
+  const [hintLetter, setHintLetter] = useState<string | null>(null);
+  const [isFrozen, setIsFrozen] = useState<boolean>(false);
 
   const [globalDict, setGlobalDict] = useState<{ stopwords: string[], inclusions: string[], abbrs: Record<string, string> }>({
     stopwords: [], inclusions: [], abbrs: {}
@@ -278,7 +277,7 @@ function MainApp() {
           }
         }
       } catch (queueMergeError: any) {
-        console.error("🚨 로컬 큐 데이터 병합 무결성 오류 진단:", queueMergeError.message);
+        console.error("🚨 로컬 큐 데이터 병합 오류 진단:", queueMergeError.message);
       }
 
       setCategories([...(catRes.categories || [])]);
@@ -345,9 +344,7 @@ function MainApp() {
               body: JSON.stringify({
                   wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: newAnswers, folder_name: card.folder_name, memo: card.memo
               })
-           }).catch((e)=>{
-              console.error("카드 자동 생성 오류 진단:", e);
-           });
+           }).catch(()=>{});
         });
         setTimeout(() => addLog(`✅ 전역 빈칸 자동 생성 완료!`), 1000);
       }
@@ -468,7 +465,6 @@ function MainApp() {
 
       const rawTitle = cat.title || "";
       const rawContent = cat.content || "";
-      const rawFolder = cat.folder_name || "";
       
       const firstLineToScan = `${rawTitle} ${rawContent.split('\n')[0]}`;
 
@@ -509,8 +505,6 @@ function MainApp() {
   const handleUpdateMemoBackground = async (id: number, memo: string) => {
     setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
     pushToQueue('MEMO', { id, memo });
-    
-    // 💡 즉시 저장 엔진 탑재
     if (!isOffline) {
       const target = savedCards.find((c:any) => c.id === id);
       if (target) {
@@ -518,6 +512,34 @@ function MainApp() {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: id, card_content: target.content, answer_text: target.answer_text || "", folder_name: target.folder_name, memo })
         }).catch(() => {});
+      }
+    }
+  };
+
+  // 💡 아이템 상점 로직
+  const handleUseItem = (itemType: 'hint' | 'freeze' | 'magic', cost: number) => {
+    if (goalBalance < cost) {
+      alert("포인트가 부족합니다! 카드를 끝까지 채워서 포인트를 모아보세요.");
+      return;
+    }
+    setGoalBalance(prev => prev - cost);
+    
+    if (itemType === 'hint') {
+      const currentAnswer = blanks[currentBlankIdx]?.answer;
+      if (currentAnswer) {
+        setHintLetter(currentAnswer.charAt(0));
+        addLog(`🔍 첫 글자 힌트 발동! (-${cost}P)`);
+        setTimeout(() => setHintLetter(null), 2000);
+      }
+    } else if (itemType === 'freeze') {
+      setIsFrozen(true);
+      addLog(`⏳ 10초 시간 멈춤 발동! (-${cost}P)`);
+      setTimeout(() => setIsFrozen(false), 10000);
+    } else if (itemType === 'magic') {
+      const currentAnswer = blanks[currentBlankIdx]?.answer;
+      if (currentAnswer) {
+        addLog(`🪄 마법 지팡이 발동! (강제 정답 처리) (-${cost}P)`);
+        handleSequentialInput(currentAnswer);
       }
     }
   };
@@ -546,7 +568,8 @@ function MainApp() {
       const stats = parseCardStats(activeCard.memo);
       const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
-      setStartTime(Date.now()); setElapsed(0); setIsMemoOpen(false);
+      setElapsed(0); setIsMemoOpen(false);
+      setIsFrozen(false); setHintLetter(null); // 상점 상태 초기화
 
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
@@ -561,6 +584,25 @@ function MainApp() {
     }
   }, [activeCard]);
 
+  // 💡 얼음 스킬과 연동된 새로운 타이머 로직
+  useEffect(() => {
+    if (activeCard && currentBlankIdx < blanks.length) {
+      const interval = setInterval(() => {
+        if (isFrozen) return; // ⏳ 시간 정지 발동 중이면 게이지 안 올라감
+        
+        setElapsed(prev => {
+          const next = prev + 0.1;
+          if (next >= totalTimeLimit) {
+            clearInterval(interval);
+            setTimeout(() => { alert("집중 시간 초과! 현재 기록을 저장합니다."); finishCard(); }, 10);
+          }
+          return next;
+        });
+      }, 100);
+      return () => clearInterval(interval);
+    }
+  }, [activeCard, currentBlankIdx, blanks.length, totalTimeLimit, isFrozen]);
+
   const finishCard = async (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
@@ -568,6 +610,13 @@ function MainApp() {
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     const isCorrect = wrongArr.length === 0;
+
+    // 💡 [게임 보상 지급 로직] 완료 시 코인 획득
+    let earnedPoints = 10; // 기본 클리어 보상
+    if (isCorrect) earnedPoints += 5; // 퍼펙트 클리어 추가 보상
+    if (elapsed < totalTimeLimit * 0.5) earnedPoints += 5; // 타임어택 추가 보상
+    
+    setGoalBalance(prev => prev + earnedPoints);
 
     let daysInterval = customDays;
     if (daysInterval === undefined) {
@@ -614,11 +663,9 @@ function MainApp() {
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
     
     if (isOffline) {
-      addLog(`💾 오프라인 기록 완료 (ID:${currentId}) | 온라인 전환 시 일괄 동기화됩니다.`);
+      addLog(`💾 오프라인 기록 (ID:${currentId}) | +${earnedPoints} Point 획득`);
     } else {
-      addLog(`✅ 학습 완료 (ID:${currentId}) | 다음 복습: ${daysInterval}일 후`);
-      
-      // 💡 즉시 저장 엔진 탑재
+      addLog(`🎉 학습 완료! +${earnedPoints} Point 획득`);
       try {
         await fetch("https://api.blankd.top/api/save-card", {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -641,7 +688,6 @@ function MainApp() {
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
     
-    // 💡 즉시 저장 엔진 탑재
     if (!isOffline) {
       try {
         await fetch("https://api.blankd.top/api/save-card", {
@@ -652,16 +698,6 @@ function MainApp() {
     }
     flushQueue();
   };
-
-  useEffect(() => {
-    if (activeCard && currentBlankIdx < blanks.length) {
-      const interval = setInterval(() => {
-        const diff = (Date.now() - startTime) / 1000; setElapsed(diff);
-        if (diff >= totalTimeLimit) { clearInterval(interval); alert("집중 시간 초과! 현재 기록을 저장합니다."); finishCard(); }
-      }, 100);
-      return () => clearInterval(interval);
-    }
-  }, [activeCard, currentBlankIdx, blanks.length, startTime, totalTimeLimit]);
 
   const handleSequentialInput = (overrideInput?: string | any) => {
     if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
@@ -744,7 +780,6 @@ function MainApp() {
   const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => parseCardStats(card.memo || "").filled || 0)) : 0;
   const passProbability = Math.min(minFilledCount * 2, 100);
 
-  // 💡 가짜 카드(임시 카드) 필터링 엔진 탑재
   const { nextCatToCraft, nextStudyCard } = useMemo(() => {
     let craftTarget = null; let studyTarget = null;
     if (!isLoggedIn) return { nextCatToCraft: null, nextStudyCard: null };
@@ -815,7 +850,8 @@ function MainApp() {
               );
             } else if (isCurrent) {
               contentToRender.push(
-                <InlineBlankInput key={`blank-${currentBlankIdx}`} inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} onSubmit={handleSequentialInput}/>
+                // 💡 첫 글자 힌트 프롭스 전달
+                <InlineBlankInput key={`blank-${currentBlankIdx}`} inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
               );
             } else {
               contentToRender.push(<span key={i} className="inline-block min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
@@ -850,7 +886,7 @@ function MainApp() {
         )}
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter]);
 
   const handleAddDictItem = () => {
     if (dictTab === 'abbr' && tempKey && tempValue) {
@@ -1136,8 +1172,19 @@ function MainApp() {
         </div>
       )}
 
+      {/* 💡 [스킬 상점 연동] 팝업창 렌더링 시 스킬 관련 상태와 함수 전달 */}
       {activeCard && (
-        <CardModal activeCard={activeCard} totalTimeLimit={totalTimeLimit} elapsed={elapsed} inputStatus={inputStatus} handleSequentialInput={handleSequentialInput} handleReviewSelect={handleReviewSelect} renderContent={renderContent} onClose={handleCloseModal} />
+        <CardModal 
+          activeCard={activeCard} 
+          totalTimeLimit={totalTimeLimit} 
+          elapsed={elapsed} 
+          inputStatus={inputStatus} 
+          renderContent={renderContent} 
+          onClose={handleCloseModal} 
+          goalBalance={goalBalance}
+          handleUseItem={handleUseItem}
+          isFrozen={isFrozen}
+        />
       )}
     </div>
   );
