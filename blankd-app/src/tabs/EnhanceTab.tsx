@@ -2,6 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { formatCardText, parseCardStats, SPLIT_REGEX } from '../utils/constants';
 import { api } from '../services/api';
 
+// 💡 [수정됨] 3번 요청: 원래의 3단 그리드 구조로 원복했습니다.
+const getGridClass = (cols: number) => {
+  if(cols === 1) return "md:grid-cols-1";
+  if(cols === 2) return "md:grid-cols-2";
+  if(cols === 3) return "md:grid-cols-3";
+  if(cols === 4) return "md:grid-cols-4";
+  if(cols === 5) return "md:grid-cols-5";
+  return "md:grid-cols-3";
+};
+
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, loadAllData, safeAddress, globalDict }: any) => {
   
   const [editingId, setEditingId] = useState<number | string | null>(null);
@@ -93,7 +103,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         if (loadAllData) loadAllData(); 
         return;
       }
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         e.preventDefault();
         setLocalCards(prevCards => {
           const card = prevCards.find(c => c.id === movingId);
@@ -102,24 +112,24 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
           const folderCards = prevCards.filter(c => c && c.content && c.folder_name === folder);
           const idx = folderCards.findIndex(c => c.id === movingId);
           
-          if ((e.key === 'ArrowUp' || e.key === 'ArrowLeft') && idx > 0) {
+          if (e.key === 'ArrowUp' && idx > 0) {
             const targetCard = folderCards[idx - 1];
             triggerMoveApi(folder, idx, 'up', folderCards);
             const next = [...prevCards];
             const g1 = next.findIndex(c => c.id === card.id);
             const g2 = next.findIndex(c => c.id === targetCard.id);
             [next[g1], next[g2]] = [next[g2], next[g1]];
-            setTimeout(() => document.getElementById(`enhance-card-${movingId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' }), 50);
+            setTimeout(() => document.getElementById(`enhance-card-${movingId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
             return next;
           } 
-          else if ((e.key === 'ArrowDown' || e.key === 'ArrowRight') && idx < folderCards.length - 1) {
+          else if (e.key === 'ArrowDown' && idx < folderCards.length - 1) {
             const targetCard = folderCards[idx + 1];
             triggerMoveApi(folder, idx, 'down', folderCards);
             const next = [...prevCards];
             const g1 = next.findIndex(c => c.id === card.id);
             const g2 = next.findIndex(c => c.id === targetCard.id);
             [next[g1], next[g2]] = [next[g2], next[g1]];
-            setTimeout(() => document.getElementById(`enhance-card-${movingId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' }), 50);
+            setTimeout(() => document.getElementById(`enhance-card-${movingId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
             return next;
           }
           return prevCards;
@@ -314,17 +324,19 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     }
   };
 
-  const handleAddAdjacent = (folderCards: any[], index: number, folder: string) => {
+  const handleAddAdjacent = (folder: string, index: number) => {
+    // 💡 [수정됨] 2번 요청: 사용자에게 선택할 수 있는 창을 띄웁니다.
     const choice = window.prompt("추가할 카드의 분류를 선택하세요.\n1: [령]\n2: [칙]\n3: [정관]\n4: [규정]\n(숫자나 이름을 입력하세요)", "1");
-    if (choice === null) return; 
+    if (choice === null) return; // 취소 버튼을 누르면 종료
 
     let prefix = "법";
     if (choice === "1" || choice === "령") prefix = "령";
     else if (choice === "2" || choice === "칙") prefix = "칙";
     else if (choice === "3" || choice === "정관") prefix = "정관";
     else if (choice === "4" || choice === "규정") prefix = "규정";
-    else prefix = choice.replace(/[\[\]]/g, '').trim() || "법"; 
+    else prefix = choice.replace(/[\[\]]/g, '').trim() || "법"; // 예외적인 경우 입력한 텍스트 그대로 사용
 
+    const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
     const origCard = folderCards[index];
     const tempId = `temp_${Date.now()}`;
     
@@ -518,14 +530,13 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
       </div>
       
       {enhanceFolders.map((folder: string) => openFolders[folder] && (
-        <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-2 sm:pl-3 w-full overflow-hidden">
+        <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-2 sm:pl-3">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
-          
-          {/* 💡 [핵심 수정] Grid를 제거하고 가로 방향 스크롤 컨테이너(Flex Row)로 변경 */}
-          <div className="flex flex-nowrap overflow-x-auto overflow-y-hidden gap-3 sm:gap-4 pb-4 custom-scrollbar items-start w-full snap-x">
+          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-1.5 sm:gap-2 items-start`}>
             {localCards.filter((c:any) => c && c.content && c.folder_name === folder).map((card: any, idx: number, folderCards: any[]) => {
                 try {
                   const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
+                  
                   const lines = cleanContent.split('\n');
                   const firstLine = lines[0] || "";
                   
@@ -536,15 +547,21 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                     .trim();
                   if (!displayTitle) displayTitle = "제목 없음";
 
+                  // 💡 [수정됨] 3번 요청: 이전과 동일하게 첫 번째 줄의 태그를 찾아 1열, 2열, 3열 위치 및 색상을 지정합니다.
+                  let colClass = "md:col-start-1 md:col-span-1"; 
                   let titleColor = "text-red-500";
                   
                   if (firstLine.includes('[정관]')) {
+                    colClass = "md:col-start-1 md:col-span-1";
                     titleColor = "text-yellow-500";
                   } else if (firstLine.includes('[칙]') || firstLine.includes('[규]') || firstLine.includes('[규정]')) { 
+                    colClass = "md:col-start-3 md:col-span-1";
                     titleColor = "text-green-500";
                   } else if (firstLine.includes('[령]')) { 
+                    colClass = "md:col-start-2 md:col-span-1";
                     titleColor = "text-blue-400";
                   } else {
+                    colClass = "md:col-start-1 md:col-span-1";
                     titleColor = "text-red-500";
                   }
 
@@ -553,13 +570,15 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                   const stats = parseCardStats(card.memo);
                   const hasWrong = stats.wrongIndices.length > 0;
 
+                  if (editingId === card.id) colClass = "col-span-full";
+
                   const titleLen = displayTitle.length;
                   const titleSizing = titleLen > 25 ? 'text-[10px] sm:text-[11px] tracking-[calc(-0.06em)]' : 
                                       titleLen > 15 ? 'text-[11px] sm:text-[12px] tracking-tighter' : 
                                       'text-[12px] sm:text-[13px] tracking-tight';
 
                   return (
-                    <div key={card.id} id={`enhance-card-${card.id}`} className="relative transition-all shrink-0 snap-start w-[85vw] sm:w-[320px]">
+                    <div key={card.id} id={`enhance-card-${card.id}`} className={`relative transition-all w-full ${colClass}`}>
                       {editingId === card.id ? (
                         <div className="relative flex flex-col p-4 rounded-sm border border-amber-500/50 bg-[#0a0a0c] transition-all duration-300 w-full shadow-[0_0_15px_rgba(245,158,11,0.15)]">
                           
@@ -591,6 +610,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                 <button onClick={() => setActiveTool(activeTool === 'smart' ? null : 'smart')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'smart' ? 'bg-teal-500/80 text-white' : 'bg-white/5 text-white/50'}`}>스마트 클릭</button>
                                 <button onClick={() => setShowJeonggwanSelector(!showJeonggwanSelector)} className={`px-2 py-1 rounded-sm text-[10px] font-bold transition-all ${showJeonggwanSelector ? 'bg-yellow-500 text-black' : 'bg-yellow-900/30 text-yellow-500 border border-yellow-500/30 hover:bg-yellow-500/20'}`}>📜 정관 불러오기</button>
                               </div>
+                              {activeTool === 'smart' && (
+                                <span className="text-[9px] text-teal-300/80 ml-1 hidden sm:inline-block">좌클릭:토글 / 우클릭:합치기 / Shift+클릭:분리</span>
+                              )}
                             </div>
                           </div>
 
@@ -634,10 +656,9 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           </div>
                         </div>
                       ) : (
-                        <div {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm border flex flex-col justify-center gap-0.5 cursor-pointer text-left ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
+                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm border flex flex-col justify-center gap-0.5 ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
                           
                           <div className="flex w-full overflow-hidden mb-1">
-                            {/* 💡 [복구] 카드의 조항명은 원래대로 말줄임표(truncate) 적용 */}
                             <div className={`${titleColor} font-bold ${titleSizing} w-full text-left truncate leading-tight`} title={displayTitle}>
                               {displayTitle}
                             </div>
@@ -646,9 +667,12 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           {movingId === card.id ? (
                             <div className="flex items-center justify-between w-full pt-1 animate-in fade-in">
                               <span className="text-blue-300 text-[10px] font-bold flex items-center">
-                                방향키(←, →)로 이동 후 Enter
+                                방향키(↑, ↓)로 이동 후 Enter 입력
                               </span>
-                              <button onClick={(e) => { e.stopPropagation(); setMovingId(null); if(loadAllData) loadAllData(); }} className="px-2 py-0.5 bg-blue-500 text-white text-[9px] font-bold rounded-sm shadow-md hover:bg-blue-400 transition-colors">
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setMovingId(null); if(loadAllData) loadAllData(); }} 
+                                className="px-2 py-0.5 bg-blue-500 text-white text-[9px] font-bold rounded-sm shadow-md hover:bg-blue-400 transition-colors"
+                              >
                                 완료
                               </button>
                             </div>
@@ -661,15 +685,15 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                   <span className={`text-[7px] sm:text-[8px] px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center ${hasWrong ? 'text-white bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                                 </div>
                                 <div className="flex items-center gap-0.5 opacity-80 hover:opacity-100 transition-opacity">
-                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↔️</button>
-                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folderCards, idx, folder); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
+                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
                                   <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); setEditContent(card.content); setActiveTool(window.innerWidth < 768 ? 'smart' : 'editor'); setShowJeonggwanSelector(false); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
                                   <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-0.5 px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[8px] hover:bg-red-500/10 hover:text-red-500 transition-all flex items-center justify-center leading-none h-4" title="삭제">✕</button>
                                 </div>
                               </div>
                             </div>
                           )}
-                        </div>
+                        </button>
                       )}
                     </div>
                   );
