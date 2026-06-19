@@ -73,7 +73,7 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
         body: JSON.stringify({ wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: card.answer_text || "", folder_name: card.folder_name, memo: newMemo })
       });
       await loadAllData(); 
-    } catch (e) { console.error("강화 실패", e); } finally { setIsEnhancing(false); }
+    } catch (e) {} finally { setIsEnhancing(false); }
   };
 
   const renderTightCard = (card: any) => {
