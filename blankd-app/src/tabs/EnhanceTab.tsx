@@ -530,7 +530,6 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-2 sm:pl-3">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
           
-          {/* 💡 [복구 및 수정] 기존 배열 그리드 구조 원복 + 조항명 가로 스크롤 적용 */}
           <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-1.5 sm:gap-2 items-start`}>
             {localCards.filter((c:any) => c && c.content && c.folder_name === folder).map((card: any, idx: number, folderCards: any[]) => {
                 try {
@@ -650,10 +649,11 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           </div>
                         </div>
                       ) : (
-                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm border flex flex-col justify-center gap-0.5 ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
+                        // 💡 [핵심 수정] <button>을 <div>로 변경하여 터치 및 스크롤 이벤트 해금
+                        <div {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm border flex flex-col justify-center gap-0.5 cursor-pointer text-left ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
                           
                           <div className="flex w-full overflow-hidden mb-1">
-                            {/* 💡 [수정] 조항명(제목) 가로 스크롤 허용 */}
+                            {/* 💡 [핵심 수정] 가로 스크롤 허용 */}
                             <div className={`${titleColor} font-bold ${titleSizing} w-full text-left overflow-x-auto whitespace-nowrap custom-scrollbar pb-0.5`} title={displayTitle}>
                               {displayTitle}
                             </div>
@@ -664,10 +664,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                               <span className="text-blue-300 text-[10px] font-bold flex items-center">
                                 방향키(↑, ↓)로 이동 후 Enter 입력
                               </span>
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); setMovingId(null); if(loadAllData) loadAllData(); }} 
-                                className="px-2 py-0.5 bg-blue-500 text-white text-[9px] font-bold rounded-sm shadow-md hover:bg-blue-400 transition-colors"
-                              >
+                              <button onClick={(e) => { e.stopPropagation(); setMovingId(null); if(loadAllData) loadAllData(); }} className="px-2 py-0.5 bg-blue-500 text-white text-[9px] font-bold rounded-sm shadow-md hover:bg-blue-400 transition-colors">
                                 완료
                               </button>
                             </div>
@@ -688,7 +685,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                               </div>
                             </div>
                           )}
-                        </button>
+                        </div>
                       )}
                     </div>
                   );
