@@ -1,6 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { parseCardStats } from '../utils/constants';
 
+// 💡 [핵심 버그 수정] 구형 데이터 형식에서도 0으로 리셋되지 않게 보호하는 만능 파서
+const safeParseStats = (memoStr: string) => {
+    try {
+        if (memoStr && memoStr.trim().startsWith('{')) {
+            const p = JSON.parse(memoStr);
+            return { filled: p.filled || 0, wrongIndices: p.wrongIndices || [] };
+        }
+    } catch(e) {}
+    return parseCardStats(memoStr);
+};
+
 export const DashboardTab = ({ 
   categories, savedCards, setActiveTab, setExpandedId, setActiveCard, 
   goalBalance, handleUpdateBalance, 
@@ -82,7 +93,8 @@ export const DashboardTab = ({
         const blanksCount = (bodyOnly.match(/\[\s*(.*?)\s*\]/g) || []).filter((b: string) => !b.includes('ORIG_ID')).length;
         total += blanksCount;
         try {
-            const st = parseCardStats(card.memo);
+            // 💡 [수정] 안전 파서(safeParseStats) 사용
+            const st = safeParseStats(card.memo);
             if (st.filled > 0) {
                 wrong += st.wrongIndices.length;
                 correct += Math.max(0, blanksCount - st.wrongIndices.length);
