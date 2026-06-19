@@ -11,17 +11,6 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-// 💡 [핵심 수정] 구형(문자열)과 신형(JSON) 데이터를 모두 안전하게 읽는 만능 파서
-const safeParseStats = (memoStr: string) => {
-  try {
-    if (memoStr && memoStr.trim().startsWith('{')) {
-      const p = JSON.parse(memoStr);
-      return { text: p.text || "", filled: p.filled || 0, wrongIndices: p.wrongIndices || [] };
-    }
-  } catch(e) {}
-  return parseCardStats(memoStr);
-};
-
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, loadAllData, safeAddress, globalDict }: any) => {
   
   const [editingId, setEditingId] = useState<number | string | null>(null);
@@ -538,11 +527,11 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
       </div>
       
       {enhanceFolders.map((folder: string) => openFolders[folder] && (
-        <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-2 sm:pl-3 w-full">
+        <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-2 sm:pl-3">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
           
-          {/* 💡 [핵심 복구] 전체 스크롤을 막는 요소(max-h, overflow) 삭제, 원래의 안정적인 Grid 유지 */}
-          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-1.5 sm:gap-2 items-start w-full`}>
+          {/* 💡 [핵심 수정] 폴더 내부의 카드 리스트 영역에만 세로 스크롤 적용 (max-h-[600px] overflow-y-auto) */}
+          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-1.5 sm:gap-2 items-start w-full max-h-[600px] 2xl:max-h-[800px] overflow-y-auto custom-scrollbar pr-2 pb-2`}>
             {localCards.filter((c:any) => c && c.content && c.folder_name === folder).map((card: any, idx: number, folderCards: any[]) => {
                 try {
                   const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
@@ -556,28 +545,38 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                     .trim();
                   if (!displayTitle) displayTitle = "제목 없음";
 
+                  let colClass = "md:col-start-1 md:col-span-1"; 
                   let titleColor = "text-red-500";
-                  if (firstLine.includes('[정관]')) titleColor = "text-yellow-500";
-                  else if (firstLine.includes('[칙]') || firstLine.includes('[규]') || firstLine.includes('[규정]')) titleColor = "text-green-500";
-                  else if (firstLine.includes('[령]')) titleColor = "text-blue-400";
+                  
+                  if (firstLine.includes('[정관]')) {
+                    colClass = "md:col-start-1 md:col-span-1";
+                    titleColor = "text-yellow-500";
+                  } else if (firstLine.includes('[칙]') || firstLine.includes('[규]') || firstLine.includes('[규정]')) { 
+                    colClass = "md:col-start-3 md:col-span-1";
+                    titleColor = "text-green-500";
+                  } else if (firstLine.includes('[령]')) { 
+                    colClass = "md:col-start-2 md:col-span-1";
+                    titleColor = "text-blue-400";
+                  } else {
+                    colClass = "md:col-start-1 md:col-span-1";
+                    titleColor = "text-red-500";
+                  }
 
                   const bodyOnlyForStats = lines.slice(1).join('\n');
                   const totalBlanks = (bodyOnlyForStats.match(/\[\s*(.*?)\s*\]/g) || []).length;
-                  
-                  // 💡 [핵심 복구] 새로운 파서 엔진(safeParseStats) 사용
-                  const stats = safeParseStats(card.memo);
+                  const stats = parseCardStats(card.memo);
                   const hasWrong = stats.wrongIndices.length > 0;
+
+                  if (editingId === card.id) colClass = "col-span-full";
 
                   const titleLen = displayTitle.length;
                   const titleSizing = titleLen > 25 ? 'text-[10px] sm:text-[11px] tracking-[calc(-0.06em)]' : 
                                       titleLen > 15 ? 'text-[11px] sm:text-[12px] tracking-tighter' : 
                                       'text-[12px] sm:text-[13px] tracking-tight';
 
-                  const isEditing = editingId === card.id;
-
                   return (
-                    <div key={card.id} id={`enhance-card-${card.id}`} className={`relative transition-all w-full ${isEditing ? 'col-span-full' : ''}`}>
-                      {isEditing ? (
+                    <div key={card.id} id={`enhance-card-${card.id}`} className={`relative transition-all w-full ${colClass}`}>
+                      {editingId === card.id ? (
                         <div className="relative flex flex-col p-4 rounded-sm border border-amber-500/50 bg-[#0a0a0c] transition-all duration-300 w-full shadow-[0_0_15px_rgba(245,158,11,0.15)]">
                           
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-3">
@@ -651,11 +650,11 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           </div>
                         </div>
                       ) : (
-                        // 💡 [핵심 복구] 터치 방해 방지를 위해 button이 아닌 div태그를 유지합니다.
+                        // 💡 [수정] 모바일 세로 스크롤 간섭 방지를 위해 div 태그 적용
                         <div {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm border flex flex-col justify-center gap-0.5 cursor-pointer text-left ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
                           
                           <div className="flex w-full overflow-hidden mb-1">
-                            {/* 💡 [핵심 복구] 조항명은 원래대로 예쁜 말줄임표(truncate)로 보여줍니다. */}
+                            {/* 💡 텍스트 가로 스크롤 원복 (말줄임표) */}
                             <div className={`${titleColor} font-bold ${titleSizing} w-full text-left truncate leading-tight`} title={displayTitle}>
                               {displayTitle}
                             </div>
