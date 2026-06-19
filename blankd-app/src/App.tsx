@@ -9,7 +9,6 @@ import { CraftTab } from "./tabs/CraftTab";
 import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
-// 💡 [추가] 신규 생성한 RecordTab 임포트
 import { RecordTab } from "./tabs/RecordTab";
 
 const autoApplyDictHelper = (content: string, dict: any) => {
@@ -63,7 +62,6 @@ const autoApplyDictHelper = (content: string, dict: any) => {
   }
 };
 
-// 💡 [추가] 확장된 메타데이터(강화수치, 최고기록 등)를 파싱하는 헬퍼 함수
 const getExtendedStats = (memoStr: string) => {
   try {
     const p = JSON.parse(memoStr || '{}');
@@ -289,7 +287,7 @@ function MainApp() {
   const loadAllData = async () => {
     if (!safeAddress) return;
     try {
-      const [catRes, cardRes, balance, dictRes] = await Promise.all([
+      const [catRes, cardRes, serverBalance, dictRes] = await Promise.all([
         fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => { if(!r.ok) throw new Error(); return r.json(); }),
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => { if(!r.ok) throw new Error(); return r.json(); }),
         api.getGoalCoinBalance(safeAddress).catch(() => 0),
@@ -317,14 +315,31 @@ function MainApp() {
         console.error("🚨 로컬 큐 데이터 병합 오류 진단:", queueMergeError.message);
       }
 
+      // 💡 [포인트 증발 완벽 차단] 기기에 남아있는 진짜 잔액 확인
+      const localBalance = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
+      const actualBalance = Math.max(serverBalance, localBalance); // 무조건 높은 금액 우선
+
+      if (actualBalance > serverBalance && !isOffline) {
+        try {
+          const res = await fetch("https://api.blankd.top/api/update-balance", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet_address: safeAddress, balance: actualBalance })
+          });
+          if (!res.ok) throw new Error("포인트 서버 동기화 API 응답 거부됨");
+        } catch (syncErr: any) {
+          console.error("🚨 포인트 복구 동기화 오류 진단:", syncErr.message);
+        }
+      }
+
       setCategories([...(catRes.categories || [])]);
       setSavedCards(finalCards); 
-      setGoalBalance(balance);
+      setGoalBalance(actualBalance); // 💡 검증된 잔액으로 업데이트
       setGlobalDict(newDict);
 
       localStorage.setItem(`blankd_off_cat_${safeAddress}`, JSON.stringify(catRes.categories || []));
       localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(finalCards));
-      localStorage.setItem(`blankd_off_bal_${safeAddress}`, balance.toString());
+      localStorage.setItem(`blankd_off_bal_${safeAddress}`, actualBalance.toString());
       localStorage.setItem(`blankd_off_dict_${safeAddress}`, JSON.stringify(newDict));
       
       setIsOffline(false);
@@ -435,8 +450,10 @@ function MainApp() {
       if (res.ok) {
         localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
         addLog(`✅ 백그라운드 동기화 완료`);
-        const newBalance = await api.getGoalCoinBalance(safeAddress).catch(()=>goalBalance);
-        setGoalBalance(newBalance);
+        // 서버에서 잔액을 땡겨오더라도, 로컬 잔액보다 적으면 무시하도록 안전 장치 추가
+        const serverBalance = await api.getGoalCoinBalance(safeAddress).catch(()=>goalBalance);
+        const localBalance = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
+        setGoalBalance(Math.max(serverBalance, localBalance));
         setIsOffline(false);
       }
     } catch (e) { 
@@ -548,7 +565,6 @@ function MainApp() {
       
       const finalCardContent = `${finalFirstLine}\n${bodyContent.trim()}`;
       
-      // 새 카드 생성 시 확장된 스탯 포맷 적용
       const exStats = getExtendedStats(memo);
       const initialMemo = JSON.stringify(exStats);
       
@@ -636,7 +652,7 @@ function MainApp() {
 
       setBlanks(restoredBlanks); setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); setInputStatus('idle');
 
-      const stats = getExtendedStats(activeCard.memo); // 💡 확장된 메타데이터 불러오기
+      const stats = getExtendedStats(activeCard.memo); 
       const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
       setElapsed(0); setIsMemoOpen(false);
@@ -681,13 +697,11 @@ function MainApp() {
     const correctCount = blanks.length - wrongArr.length;
     const isCorrect = wrongArr.length === 0;
 
-    // 💡 [핵심] 카드 완료 시 CCG 메타데이터 업데이트 (최고기록 등)
     const exStats = getExtendedStats(activeCard.memo);
     exStats.text = statsRef.current.text;
-    exStats.filled = statsRef.current.filled + 1; // +1회독
+    exStats.filled = statsRef.current.filled + 1; 
     exStats.wrongIndices = wrongArr;
     
-    // 타임어택 최고 기록 갱신 (첫 판이거나 기존 기록보다 빠르면)
     if (exStats.bestTime === 0 || finalTime < exStats.bestTime) {
       exStats.bestTime = finalTime;
     }
@@ -993,7 +1007,6 @@ function MainApp() {
     
     return (
       <div className="flex flex-col gap-6 w-full overflow-hidden">
-        {/* 💡 [수정] 모달 상단 조항명 가로 스크롤 허용 */}
         <div className="flex justify-between items-center border-b border-white/10 pb-2 w-full gap-3 overflow-hidden">
             <div className={`${titleColor} font-bold text-[14px] leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
               {displayTitle}
@@ -1052,7 +1065,6 @@ function MainApp() {
         <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
           <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
         </div>
-        {/* 💡 [추가] 기록실(컬렉션) 탭 */}
         <div className={activeTab === 'record' ? 'block' : 'hidden'}>
           <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} />
         </div>
@@ -1265,7 +1277,6 @@ function MainApp() {
       {isLoggedIn && (
         <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="max-w-6xl mx-auto flex items-center justify-start gap-1 sm:gap-2">
-            {/* 💡 [수정] 탭 목록에 '기록실(컬렉션)' 추가 */}
             {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
             ))}
