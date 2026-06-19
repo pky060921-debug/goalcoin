@@ -911,22 +911,34 @@ function MainApp() {
   const memoizedTabs = useMemo(() => {
     return (
       <>
+        {/* 1. 진행상황 탭 (goalBalance 권한 부여) */}
         <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
           <DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} goalBalance={goalBalance} setGoalBalance={setGoalBalance} />
         </div>
+        
+        {/* 2. 만들기 탭 */}
+        <div className={activeTab === 'create' ? 'block' : 'hidden'}>
           <CraftTab categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} expandedId={expandedId} setExpandedId={setExpandedId} handleDeleteCategory={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} globalDict={globalDict} saveGlobalDict={saveGlobalDict} />
         </div>
+        
+        {/* 3. 채우기 탭 */}
         <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
           <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
         </div>
-        <div className={activeTab === 'exam' ? 'block' : 'hidden'}><ExamTab walletAddress={safeAddress} address={safeAddress} /></div>
+        
+        {/* 4. 모의고사 탭 */}
+        <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
+          <ExamTab walletAddress={safeAddress} address={safeAddress} />
+        </div>
+        
+        {/* 5. 설정 탭 */}
         <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
           <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} zkLogin={zkLogin} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} globalDict={globalDict} saveGlobalDict={saveGlobalDict} loadAllData={loadAllData} theme={theme} setTheme={setTheme}/>
         </div>
       </>
     );
-  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, zkLogin, studyMode, setStudyMode, globalDict, theme]);
-
+  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, zkLogin, studyMode, setStudyMode, globalDict, theme, goalBalance]);
+  
   const renderDictionaryUI = (isMobile: boolean) => (
     <div className={`flex flex-col w-full h-full ${isMobile ? 'bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 rounded-sm' : 'bg-[#08080a]/80 border border-white/10 p-5 rounded-sm shadow-xl backdrop-blur-sm'}`}>
       <div className="flex justify-between items-start mb-6">
