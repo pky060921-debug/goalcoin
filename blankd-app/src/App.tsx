@@ -911,8 +911,9 @@ function MainApp() {
   const memoizedTabs = useMemo(() => {
     return (
       <>
-        <div className={activeTab === 'progress' ? 'block' : 'hidden'}><DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} /></div>
-        <div className={activeTab === 'create' ? 'block' : 'hidden'}>
+        <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
+          <DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} goalBalance={goalBalance} setGoalBalance={setGoalBalance} />
+        </div>
           <CraftTab categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} expandedId={expandedId} setExpandedId={setExpandedId} handleDeleteCategory={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} globalDict={globalDict} saveGlobalDict={saveGlobalDict} />
         </div>
         <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
