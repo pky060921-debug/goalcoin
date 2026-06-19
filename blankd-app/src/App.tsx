@@ -992,10 +992,13 @@ function MainApp() {
     });
     
     return (
-      <div className="flex flex-col gap-6 w-full">
-        <div className="flex justify-between items-center border-b border-white/10 pb-2">
-            <span className={`${titleColor} font-bold text-[14px] leading-tight`}>{displayTitle}</span>
-            <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm shrink-0 ml-2">Page {displayPage + 1}</span>
+      <div className="flex flex-col gap-6 w-full overflow-hidden">
+        {/* 💡 [수정] 모달 상단 조항명 가로 스크롤 허용 */}
+        <div className="flex justify-between items-center border-b border-white/10 pb-2 w-full gap-3 overflow-hidden">
+            <div className={`${titleColor} font-bold text-[14px] leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
+              {displayTitle}
+            </div>
+            <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm shrink-0">Page {displayPage + 1}</span>
         </div>
         <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
         <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
