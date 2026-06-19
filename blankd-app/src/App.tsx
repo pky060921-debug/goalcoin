@@ -718,7 +718,7 @@ function MainApp() {
 
     const newMemo = JSON.stringify(exStats);
 
-    const earnedPoints = correctCount * 1; 
+    const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
 
     const todayStr = new Date().toISOString().split('T')[0];
