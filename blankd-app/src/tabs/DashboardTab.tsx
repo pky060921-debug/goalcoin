@@ -1,164 +1,161 @@
-import React, { useEffect, useState } from 'react';
-import { parseCardStats, formatCardText } from '../utils/constants';
+import React, { useState, useEffect } from 'react';
 
-export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpandedId, setActiveCard }: any) => {
-  const safeCards = Array.isArray(savedCards) ? savedCards : [];
-  const safeCategories = Array.isArray(categories) ? categories : [];
-  
-  let totalBlanks = 0;
-  let totalFilled = 0;
-  let totalWrong = 0;
+export const DashboardTab = ({ setActiveTab, goalBalance, setGoalBalance }: any) => {
+  const [activityLog, setActivityLog] = useState<Record<string, number>>({});
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [claimedRewards, setClaimedRewards] = useState<Record<string, boolean>>({});
 
-  const folderStats: Record<string, { total: number; filled: number; wrong: number }> = {};
-  
-  safeCards.forEach((card: any) => {
-    try {
-      const folder = card.folder_name || '기본 폴더';
-      if (!folderStats[folder]) folderStats[folder] = { total: 0, filled: 0, wrong: 0 };
+  // 💡 앱 진입 시 로컬 스토리지에서 달력 기록 및 보상 수령 내역 불러오기
+  useEffect(() => {
+    const log = JSON.parse(localStorage.getItem('blankd_activity_log') || '{}');
+    setActivityLog(log);
+    const claimed = JSON.parse(localStorage.getItem('blankd_claimed_rewards') || '{}');
+    setClaimedRewards(claimed);
+  }, [goalBalance]); // 잔액이 바뀔 때마다(카드를 풀 때마다) 최신화
 
-      const blanks = card.content.match(/\[\s*(.*?)\s*\]/g) || [];
-      const blankCount = blanks.length;
-      
-      const stats = parseCardStats(card.memo);
-      totalBlanks += blankCount;
-      totalFilled += stats.filled;
-      totalWrong += stats.wrongIndices.length;
+  const saveClaim = (key: string, points: number) => {
+    const next = { ...claimedRewards, [key]: true };
+    setClaimedRewards(next);
+    localStorage.setItem('blankd_claimed_rewards', JSON.stringify(next));
+    setGoalBalance((prev: number) => prev + points);
+    alert(`🎉 목표 달성! 보상으로 ${points}P가 지급되었습니다.`);
+  };
 
-      folderStats[folder].total += blankCount;
-      folderStats[folder].filled += stats.filled;
-      folderStats[folder].wrong += stats.wrongIndices.length;
-    } catch (err) {
-      console.error("[Dashboard 진단 오류] 카드 데이터 파싱 실패:", err, card);
-    }
-  });
+  const changeMonth = (offset: number) => {
+    const newDate = new Date(currentDate);
+    newDate.setMonth(currentDate.getMonth() + offset);
+    setCurrentDate(newDate);
+  };
 
-  const fillProgress = totalBlanks > 0 ? Math.round((totalFilled / totalBlanks) * 100) : 0;
-  const craftProgress = safeCategories.length > 0 ? Math.round((safeCards.length / safeCategories.length) * 100) : 0;
+  // 💡 통계 계산 로직 (일간, 주간, 월간)
+  const todayStr = new Date().toISOString().split('T')[0];
+  const dailyFilled = activityLog[todayStr] || 0;
 
-  const sortedFolders = Object.keys(folderStats).sort((a, b) => {
-    const matchA = a.match(/^제\s*(\d+)\s*장/);
-    const matchB = b.match(/^제\s*(\d+)\s*장/);
-    if (matchA && matchB) return parseInt(matchA[1]) - parseInt(matchB[1]);
-    if (matchA) return -1;
-    if (matchB) return 1;
-    return a.localeCompare(b, 'ko');
-  });
+  const weekStart = new Date();
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+  const weekKey = weekStart.toISOString().split('T')[0];
 
-  const recentWrongCards = safeCards.filter((c: any) => {
-    const stats = parseCardStats(c.memo);
-    return stats.wrongIndices && stats.wrongIndices.length > 0;
-  }).slice(0, 3);
-
-  const recentEnhanceCard = safeCards.length > 0 ? safeCards[safeCards.length - 1] : null;
-  const recentEnhanceTitle = recentEnhanceCard ? getStrictTitleOnly(recentEnhanceCard.content) : "";
-
-  function getStrictTitleOnly(content: string) {
-    if (!content) return "";
-    const firstLine = content.split('\n')[0] || "";
-    return firstLine.replace(/▶/g, '').trim();
+  let weeklyFilled = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart);
+    d.setDate(d.getDate() + i);
+    weeklyFilled += activityLog[d.toISOString().split('T')[0]] || 0;
   }
 
+  const d = new Date();
+  const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  let monthlyFilled = 0;
+  Object.keys(activityLog).forEach(dateStr => {
+    if (dateStr.startsWith(monthKey)) monthlyFilled += activityLog[dateStr];
+  });
+
+  // 🎯 목표 설정치 (수정 가능)
+  const GOALS = {
+    daily: { title: "일일 빈칸 채우기", target: 50, reward: 50, current: dailyFilled, key: `daily_${todayStr}` },
+    weekly: { title: "주간 빈칸 채우기", target: 300, reward: 300, current: weeklyFilled, key: `weekly_${weekKey}` },
+    monthly: { title: "월간 집중 훈련", target: 1000, reward: 1000, current: monthlyFilled, key: `monthly_${monthKey}` }
+  };
+
+  // 💡 달력 렌더링 로직
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const blankCells = Array.from({ length: firstDay });
+  const dayCells = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  const renderGoalCard = (goal: any, icon: string) => {
+    const isCompleted = goal.current >= goal.target;
+    const isClaimed = claimedRewards[goal.key];
+    const progressPercent = Math.min((goal.current / goal.target) * 100, 100);
+
+    return (
+      <div className="bg-[#0a0a0c] border border-white/10 p-5 rounded-sm flex flex-col gap-3 shadow-md relative overflow-hidden">
+        {isCompleted && !isClaimed && <div className="absolute top-0 right-0 bg-amber-500 text-black text-[9px] font-bold px-2 py-0.5 rounded-bl-sm animate-pulse">달성 완료!</div>}
+        <div className="flex items-center gap-2">
+          <span className="text-xl">{icon}</span>
+          <h3 className="text-[13px] font-bold text-white/80">{goal.title}</h3>
+        </div>
+        <div className="flex justify-between items-end mb-1">
+          <span className="text-[20px] font-mono font-bold text-teal-400">{goal.current} <span className="text-[11px] text-white/40">/ {goal.target}칸</span></span>
+        </div>
+        <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden mb-2">
+          <div className="h-full bg-teal-500 transition-all duration-500 ease-out" style={{ width: `${progressPercent}%` }}></div>
+        </div>
+        <button 
+          disabled={!isCompleted || isClaimed}
+          onClick={() => saveClaim(goal.key, goal.reward)}
+          className={`w-full py-2 text-[11px] font-bold rounded-sm transition-all ${
+            isClaimed ? 'bg-white/5 text-white/20 cursor-not-allowed border border-white/5' :
+            isCompleted ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-[0_0_10px_rgba(245,158,11,0.4)]' : 
+            'bg-teal-900/20 text-teal-500/50 border border-teal-500/20 cursor-not-allowed'
+          }`}
+        >
+          {isClaimed ? '보상 수령 완료' : isCompleted ? `${goal.reward}P 보상 받기` : `진행 중 (목표: ${goal.target}칸)`}
+        </button>
+      </div>
+    );
+  };
+
   return (
-    <div className="max-w-6xl mx-auto space-y-8 py-6 px-4 animate-in fade-in duration-300">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {/* 만들기 진척도 (제작 수 / 전체 조항 수) */}
-        <div className="bg-[#0a0a0c] border border-white/10 p-5 rounded-sm flex flex-col justify-between">
-          <div>
-            <div className="text-xs text-white/40 font-mono tracking-wider">제작 진척도</div>
-            <div className="text-2xl font-serif text-amber-400 mt-2 font-bold">
-              {safeCards.length} <span className="text-lg text-amber-400/60">/ {safeCategories.length}</span>
-            </div>
-            <div className="text-[11px] text-white/50 mt-1">전체 조항 중 제작 완료된 카드 수 ({craftProgress}%)</div>
-          </div>
-          <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden mt-4">
-            <div className="bg-amber-500 h-full transition-all duration-500" style={{ width: `${craftProgress}%` }}></div>
-          </div>
+    <div className="space-y-6 sm:space-y-8 animate-in fade-in">
+      <div className="flex justify-between items-end mb-6 border-b border-white/10 pb-4">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-serif text-current tracking-tight">학습 대시보드</h1>
+          <p className="text-xs sm:text-sm text-white/40 mt-1">목표를 달성하고 보상을 획득하여 상점 스킬을 이용하세요.</p>
         </div>
-
-        {/* 채우기 진척도 */}
-        <div className="bg-[#0a0a0c] border border-white/10 p-5 rounded-sm flex flex-col justify-between">
-          <div>
-            <div className="text-xs text-white/40 font-mono tracking-wider">학습 진척도 (빈칸 기준)</div>
-            <div className="text-2xl font-serif text-indigo-400 mt-2 font-bold">{fillProgress}%</div>
-            <div className="text-[11px] text-white/50 mt-1">전체 빈칸 개수 기준 암기 진척도 ({totalFilled} / {totalBlanks})</div>
-          </div>
-          <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden mt-4">
-            <div className="bg-indigo-500 h-full transition-all duration-500" style={{ width: `${fillProgress > 100 ? 100 : fillProgress}%` }}></div>
-          </div>
-        </div>
-
-        {/* 오답 빈칸 수 (오답 수 / 전체 빈칸 수) */}
-        <div className="bg-[#0a0a0c] border border-white/10 p-5 rounded-sm flex flex-col justify-between">
-          <div>
-            <div className="text-xs text-white/40 font-mono tracking-wider">오답 빈칸 수</div>
-            <div className="text-2xl font-serif text-red-400 mt-2 font-bold">
-              {totalWrong} <span className="text-lg text-red-400/60">/ {totalBlanks}</span>
-            </div>
-            <div className="text-[11px] text-white/50 mt-1">전체 빈칸 중 오답이 발생한 빈칸 수</div>
-          </div>
-          <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden mt-4">
-            <div className="bg-red-500 h-full transition-all duration-300" style={{ width: `${totalBlanks > 0 ? (totalWrong / totalBlanks) * 100 : 0}%` }}></div>
-          </div>
-        </div>
+        <button onClick={() => setActiveTab('enhance')} className="bg-teal-600 hover:bg-teal-500 text-white px-4 py-2 text-[11px] sm:text-xs font-bold rounded-sm transition-colors shadow-md">
+          채우기 바로가기 ▶
+        </button>
       </div>
 
-      {(recentWrongCards.length > 0 || recentEnhanceCard) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {recentWrongCards.length > 0 && (
-            <div className="border border-white/10 p-4 rounded-sm bg-[#08080a]">
-              <div className="text-xs text-red-400 font-bold mb-3 tracking-wider font-mono">⚠️ 취약 조항 리스트</div>
-              <div className="space-y-2">
-                {recentWrongCards.map((card: any) => (
-                  <button
-                    key={card.id}
-                    onClick={() => {
-                      setActiveCard(card);
-                    }}
-                    className="w-full text-left p-2.5 bg-red-950/20 border border-red-900/30 rounded-sm hover:bg-red-950/40 transition-all flex justify-between items-center group"
-                  >
-                    <span className="text-xs text-white/80 font-bold truncate max-w-[80%] group-hover:text-white">{getStrictTitleOnly(card.content)}</span>
-                    <span className="text-[10px] font-mono text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded bg-red-950/50">틀림</span>
-                  </button>
-                ))}
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        {/* 왼쪽: 활동 달력 (잔디 심기) */}
+        <div className="lg:col-span-2 bg-[#08080a]/80 border border-white/10 p-5 sm:p-6 rounded-sm shadow-xl">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-[14px] font-bold text-white/80">📅 나의 학습 기록</h2>
+            <div className="flex items-center gap-4 bg-white/5 rounded-sm px-2 py-1">
+              <button onClick={() => changeMonth(-1)} className="text-white/40 hover:text-teal-400 px-2 font-bold transition-colors">&lt;</button>
+              <span className="text-[12px] font-mono font-bold text-white/70 w-20 text-center">{year}년 {month + 1}월</span>
+              <button onClick={() => changeMonth(1)} className="text-white/40 hover:text-teal-400 px-2 font-bold transition-colors">&gt;</button>
             </div>
-          )}
+          </div>
 
-          {recentEnhanceCard && (
-            <button
-              onClick={() => {
-                setActiveTab('enhance');
-              }}
-              className="border border-white/10 p-5 rounded-sm bg-[#08080a] flex flex-col justify-center items-center hover:border-teal-500/40 transition-all text-center group cursor-pointer"
-            >
-              <span className="text-[10px] text-teal-500 mb-1 font-bold tracking-widest">▶️ 이어서 채우기</span>
-              <span className="text-xs font-bold text-teal-100 truncate w-full group-hover:text-white">{recentEnhanceTitle || "최근 학습 카드"}</span>
-            </button>
-          )}
+          <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-2">
+            {['일', '월', '화', '수', '목', '금', '토'].map(d => (
+              <div key={d} className="text-center text-[10px] sm:text-[11px] font-bold text-white/30 py-1">{d}</div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-1 sm:gap-2">
+            {blankCells.map((_, i) => <div key={`b-${i}`} className="aspect-square"></div>)}
+            {dayCells.map(day => {
+              const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              const count = activityLog[dateStr] || 0;
+              
+              // 잔디(Heatmap) 색상 결정 로직
+              let bgClass = "bg-white/5 text-white/20 border border-white/5";
+              if (count > 0 && count < 20) bgClass = "bg-teal-900/40 text-teal-400 border border-teal-500/20";
+              else if (count >= 20 && count < 50) bgClass = "bg-teal-700/60 text-teal-100 border border-teal-500/40";
+              else if (count >= 50) bgClass = "bg-teal-500 text-black border border-teal-400 shadow-[0_0_10px_rgba(20,184,166,0.3)] font-bold";
+
+              return (
+                <div key={day} className={`aspect-square rounded-sm flex flex-col items-center justify-center transition-all hover:scale-105 cursor-default ${bgClass}`} title={`${dateStr}: ${count}칸 완료`}>
+                  <span className="text-[11px] sm:text-[13px]">{day}</span>
+                  {count > 0 && <span className="text-[8px] sm:text-[9px] mt-0.5 opacity-80 font-mono tracking-tighter">{count}</span>}
+                </div>
+              );
+            })}
+          </div>
         </div>
-      )}
-      
-      <div className="text-white/50 font-bold text-sm mb-2 mt-6">폴더별 학습(채우기) 진척도</div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 pt-2 border-t border-white/5 w-full">
-        {sortedFolders.map(folder => {
-          const fs = folderStats[folder];
-          const fp = fs.total > 0 ? Math.round((fs.filled / fs.total) * 100) : 0;
-          return (
-            <div key={folder} className="bg-white/5 border border-white/5 p-2 sm:p-3 rounded-sm hover:bg-white/10 transition-colors flex flex-col gap-1.5 sm:gap-2">
-              <div className="flex justify-between items-start">
-                <span className="text-[10px] sm:text-[11px] font-bold text-amber-500/80 truncate pr-1 flex-1 leading-tight">{folder}</span>
-                <span className="text-[9px] sm:text-[10px] text-white/60 font-mono font-bold">{fp}%</span>
-              </div>
-              <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden">
-                <div className="bg-indigo-500 h-full" style={{ width: `${fp}%` }}></div>
-              </div>
-              <div className="flex justify-between items-center text-[9px] sm:text-[10px] font-mono text-white/30 pt-0.5 border-t border-white/5 mt-0.5">
-                <span>완료:{fs.filled}/{fs.total}</span>
-                {fs.wrong > 0 && <span className="text-red-400 font-bold">오답:{fs.wrong}</span>}
-              </div>
-            </div>
-          );
-        })}
+
+        {/* 오른쪽: 목표 및 보상 패널 */}
+        <div className="flex flex-col gap-4">
+          {renderGoalCard(GOALS.daily, "🎯")}
+          {renderGoalCard(GOALS.weekly, "🔥")}
+          {renderGoalCard(GOALS.monthly, "👑")}
+        </div>
       </div>
     </div>
   );
