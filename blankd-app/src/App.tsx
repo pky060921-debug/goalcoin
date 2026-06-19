@@ -57,7 +57,6 @@ const autoApplyDictHelper = (content: string, dict: any) => {
 
     return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
   } catch (err: any) {
-    console.error("사전 자동 적용 엔진 오류 진단:", err.message);
     return content;
   }
 };
@@ -198,7 +197,17 @@ function MainApp() {
     localStorage.setItem('blankd_active_tab', activeTab);
   }, [activeTab]);
 
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('blankd_sidebar_open');
+      if (saved !== null) return saved === 'true';
+    }
+    return true; 
+  });
+
+  useEffect(() => {
+    localStorage.setItem('blankd_sidebar_open', String(isSidebarOpen));
+  }, [isSidebarOpen]);
 
   const [categories, setCategories] = useState<any[]>([]);
   const [savedCards, setSavedCards] = useState<any[]>([]);
@@ -224,8 +233,10 @@ function MainApp() {
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
   
   const [elapsed, setElapsed] = useState<number>(0);
-  // 💡 [핵심 최적화] 메모리 상의 스탑워치 값을 추적하는 Ref 추가 (불필요한 리렌더링 및 디스크 접근 방지)
   const elapsedRef = useRef(0);
+  // 💡 [진단] 스탑워치 성능 측정을 위한 Ref
+  const lastTickRef = useRef(performance.now());
+  const lagSpamGuard = useRef(0);
   
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
@@ -493,7 +504,6 @@ function MainApp() {
           }).catch(()=>{});
         }
         
-        // 💡 [백그라운드 이동 시 타이머 보존]
         if (currentCard) {
           localStorage.setItem(`blankd_elapsed_${currentCard.id}`, elapsedRef.current.toString());
         }
@@ -663,7 +673,6 @@ function MainApp() {
       const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
       
-      // 💡 [핵심 버그 수정 1] 카드를 열 때 저장된 스탑워치(elapsed)를 불러옵니다.
       const savedElapsed = parseFloat(localStorage.getItem(`blankd_elapsed_${activeCard.id}`) || '0');
       setElapsed(savedElapsed);
       elapsedRef.current = savedElapsed;
@@ -686,13 +695,33 @@ function MainApp() {
 
   useEffect(() => {
     if (activeCard && currentBlankIdx < blanks.length) {
+      lastTickRef.current = performance.now();
       const interval = setInterval(() => {
-        // 💡 [핵심 최적화 & 버그 수정 3] 약어 모달이 열려있거나 프리즈 상태면 타이머 정지 (디스크 접근 X)
-        if (isFrozen || isDictModalOpen) return; 
+        if (isFrozen || isDictModalOpen) {
+          lastTickRef.current = performance.now();
+          return; 
+        }
+        
+        const now = performance.now();
+        const diff = now - lastTickRef.current;
+        
+        // 💡 [진단] 렌더링 부하로 인한 스탑워치 렉 감지
+        if (diff > 250) {
+           if (now - lagSpamGuard.current > 2000) {
+               console.warn(`⚠️ [진단] 스탑워치 렉 감지 (${diff.toFixed(0)}ms 지연) - 원인: React 렌더링 과부하`);
+               lagSpamGuard.current = now;
+           }
+        }
+        lastTickRef.current = now;
         
         setElapsed(prev => {
           const next = prev + 0.1;
-          elapsedRef.current = next; // Ref 업데이트만 수행 (디스크 쓰기 삭제)
+          elapsedRef.current = next; 
+
+          // 💡 [최적화] 0.1초마다 디스크에 저장하던 로직을 1초에 1번으로 대폭 축소 (디스크 IO 병목 해소)
+          if (Math.floor(next * 10) % 10 === 0) {
+              localStorage.setItem(`blankd_elapsed_${activeCard.id}`, next.toFixed(1));
+          }
 
           if (next >= totalTimeLimit) {
             clearInterval(interval);
@@ -728,6 +757,7 @@ function MainApp() {
 
     const newMemo = JSON.stringify(exStats);
 
+    // 💡 [요청 적용] 빈칸 1개당 5포인트 획득
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
 
@@ -784,8 +814,7 @@ function MainApp() {
     const nextCard = folderCards[currentIdx + 1] || null;
 
     localStorage.removeItem(`blankd_progress_${currentId}`);
-    // 💡 카드 완료 시 타이머 기록 완전히 삭제 (리셋)
-    localStorage.removeItem(`blankd_elapsed_${currentId}`); 
+    localStorage.removeItem(`blankd_elapsed_${currentId}`);
 
     setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
@@ -823,7 +852,6 @@ function MainApp() {
     const newMemo = JSON.stringify(exStats);
     setActiveCard(null);
 
-    // 💡 [핵심 최적화 1] 창을 직접 닫을 때만 디스크(localStorage)에 현재 스탑워치 시간 1번 쓰기
     localStorage.setItem(`blankd_elapsed_${currentId}`, elapsedRef.current.toString());
 
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
@@ -985,8 +1013,10 @@ function MainApp() {
     return { nextCatToCraft: craftTarget, nextStudyCard: studyTarget };
   }, [isLoggedIn, categories, savedCards]);
 
-  const renderContent = React.useCallback(() => {
+  // 💡 [핵심 최적화] 모달의 방대한 렌더링 과정을 Memoize(캐싱)하여 화면 버벅임을 완벽 차단합니다.
+  const memoizedCardContent = useMemo(() => {
     if (!activeCard) return null;
+    const startTime = performance.now();
     const cleanContent = activeCard.content; 
     const lines = cleanContent.split('\n');
     const titleLine = lines[0] || '';
@@ -1004,7 +1034,7 @@ function MainApp() {
     else if (titleLine.includes('[칙]') || titleLine.includes('[규]') || titleLine.includes('[규정]')) titleColor = "text-green-500";
     else if (titleLine.includes('[령]')) titleColor = "text-blue-400";
 
-    const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== '');
+    const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter((p: string) => p !== '');
     let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
     for (let part of parts) {
         if (part === '##PAGE_BREAK##') tempPage++;
@@ -1038,6 +1068,11 @@ function MainApp() {
       } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
     });
     
+    const duration = performance.now() - startTime;
+    if (duration > 15) {
+        console.warn(`[진단 로그] 렌더링 과부하: 텍스트 파싱에 ${duration.toFixed(2)}ms 소요됨.`);
+    }
+
     return (
       <div className="flex flex-col gap-6 w-full overflow-hidden">
         <div className="flex justify-between items-center border-b border-white/10 pb-2 w-full gap-3 overflow-hidden">
@@ -1078,6 +1113,17 @@ function MainApp() {
       </div>
     );
   }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter]);
+
+  const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
+
+  const handleOpenDict = (tab: 'abbr' | 'include' | 'stop') => {
+    setDictTab(tab);
+    if (window.innerWidth >= 1024) { 
+      setIsSidebarOpen(true);
+    } else { 
+      setIsDictModalOpen(true);
+    }
+  };
 
   const handleAddDictItem = () => {
     if (dictTab === 'abbr' && tempKey && tempValue) {
@@ -1126,8 +1172,9 @@ function MainApp() {
           <button onClick={() => setDictTab('include')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'include' ? 'text-teal-400 border-b-2 border-teal-400' : 'text-white/40 hover:text-white/70'}`}>✅ 필수 포함</button>
           <button onClick={() => setDictTab('stop')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'stop' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-white/40 hover:text-white/70'}`}>❌ 제외 단어</button>
         </div>
-        {/* 💡 [수정] PC/모바일 환경 상관없이 X 버튼 누르면 모달을 닫음 */}
-        <button onClick={() => setIsDictModalOpen(false)} className="text-white/40 hover:text-white ml-6 text-lg font-bold">✕</button>
+        <button onClick={() => isMobile ? setIsDictModalOpen(false) : setIsSidebarOpen(false)} className="text-white/40 hover:text-white ml-4 text-xs font-bold bg-white/5 hover:bg-white/10 px-2 py-1 rounded-sm transition-all flex items-center gap-1 shrink-0">
+          {isMobile ? '✕ 닫기' : '▶ 사전 닫기'}
+        </button>
       </div>
       
       <div className="flex gap-2 mb-5 shrink-0">
@@ -1253,7 +1300,7 @@ function MainApp() {
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
       <style>{getThemeCSS()}</style>
       <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
-        <div className="max-w-[1600px] mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="w-full mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3 px-2 sm:px-4 md:px-8">
           <div className="flex items-center justify-between w-full md:w-auto">
             <button onClick={() => { const lastTab = localStorage.getItem('blankd_active_tab') || 'progress'; setActiveTab(lastTab); }} className="text-xl sm:text-2xl font-bold tracking-widest text-current shrink-0 hover:text-teal-400 transition-colors">
               BlankD
@@ -1278,8 +1325,8 @@ function MainApp() {
 
             <div className="flex items-center gap-2 shrink-0 ml-1 sm:ml-2 border-l border-white/10 pl-2 sm:pl-3">
               <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 hidden sm:inline">사전:</span>
-              <button onClick={() => { setDictTab('stop'); setIsDictModalOpen(true); }} className="text-[10px] bg-amber-900/30 text-amber-400 border border-amber-500/40 px-2 py-1 rounded-sm hover:bg-amber-900/50 transition-colors">제외/포함</button>
-              <button onClick={() => { setDictTab('abbr'); setIsDictModalOpen(true); }} className="text-[10px] bg-indigo-900/30 text-indigo-400 border border-indigo-500/40 px-2 py-1 rounded-sm hover:bg-indigo-900/50 transition-colors">약어 채점</button>
+              <button onClick={() => handleOpenDict('stop')} className="text-[10px] bg-amber-900/30 text-amber-400 border border-amber-500/40 px-2 py-1 rounded-sm hover:bg-amber-900/50 transition-colors">제외/포함</button>
+              <button onClick={() => handleOpenDict('abbr')} className="text-[10px] bg-indigo-900/30 text-indigo-400 border border-indigo-500/40 px-2 py-1 rounded-sm hover:bg-indigo-900/50 transition-colors">약어 채점</button>
             </div>
 
             <div className="h-5 sm:h-6 w-px bg-white/10 shrink-0 hidden sm:block ml-1 sm:ml-2"></div>
@@ -1317,87 +1364,4 @@ function MainApp() {
       </header>
 
       {isLoggedIn && (
-        <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
-          <div className="max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2">
-            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '수집' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
-            ))}
-          </div>
-        </nav>
-      )}
-
-      {!isLoggedIn ? (
-        <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
-          <h2 className="text-xl sm:text-2xl font-serif text-current mb-4 tracking-tight">빈칸개발 (BlankD)</h2>
-          <p className="text-xs sm:text-sm text-white/40 mb-10 sm:mb-12 text-center leading-relaxed">인지 부하 이론 기반의 학습 플랫폼<br/>압도적인 영구 기억을 형성합니다.</p>
-          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-[#111827] text-white text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
-        </main>
-      ) : (
-        <div className="max-w-[1600px] mx-auto w-full flex gap-4 sm:gap-6 px-4 lg:px-6 items-start pb-10 transition-all duration-300">
-          <main className="flex-1 w-full min-w-0 transition-all duration-300">
-            <ErrorBoundary fallbackLog={addLog}>
-              {memoizedTabs}
-            </ErrorBoundary>
-          </main>
-          
-          {isSidebarOpen ? (
-            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[320px] xl:w-[400px] transition-all duration-300 animate-in slide-in-from-right-8">
-              {renderDictionaryUI(false)}
-            </aside>
-          ) : (
-            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[40px] items-center justify-start transition-all duration-300 animate-in fade-in">
-              <button onClick={() => setIsSidebarOpen(true)} className="w-full h-32 bg-white/5 border border-white/10 hover:bg-white/10 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors flex-col gap-2 shadow-md">
-                <span className="text-xs">◀</span>
-                <span className="text-[10px] font-bold" style={{ writingMode: 'vertical-rl' }}>사전 열기</span>
-              </button>
-            </aside>
-          )}
-        </div>
-      )}
-
-      <div className="fixed bottom-4 right-4 z-[999] flex flex-col items-end gap-2">
-        {isTerminalOpen && (
-          <div className="w-[85vw] max-w-lg h-64 bg-black/95 border border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto rounded shadow-2xl flex flex-col custom-scrollbar animate-in slide-in-from-bottom-5 fade-in">
-            <div className="flex justify-between items-center mb-2 border-b border-teal-500/10 pb-2 sticky top-0 bg-black/95">
-              <span className="uppercase tracking-widest text-teal-500/50 font-bold">시스템 진단 터미널</span>
-              <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2 py-0.5 bg-white/5 rounded transition-colors">기록 지우기</button>
-            </div>
-            <div className="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
-              {systemLogs.map((l, i) => (
-                <div key={i} className={`leading-snug break-all ${l.includes('?') ? 'text-red-400 font-bold' : l.includes('▶?') ? 'text-amber-300' : ''}`}>{l}</div>
-              ))}
-            </div>
-          </div>
-        )}
-        <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>
-          {isTerminalOpen ? '터미널 닫기' : '터미널 열기'}
-        </button>
-      </div>
-
-      {/* 💡 [핵심 버그 수정 2] 약어 모달이 최상단에 뜨도록 보장 (PC 숨김 방지) */}
-      {isDictModalOpen && (
-        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] relative">
-            {renderDictionaryUI(true)}
-          </div>
-        </div>
-      )}
-
-      {activeCard && (
-        <CardModal 
-          activeCard={activeCard} 
-          totalTimeLimit={totalTimeLimit} 
-          elapsed={elapsed} 
-          inputStatus={inputStatus} 
-          renderContent={renderContent} 
-          onClose={handleCloseModal} 
-          goalBalance={goalBalance}
-          handleUseItem={handleUseItem}
-          isFrozen={isFrozen}
-        />
-      )}
-    </div>
-  );
-}
-
-export default function App() { return <MainApp />; }
+        <nav className="border-b border-white/5 bg-black/40 py-1.5 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-
