@@ -2,12 +2,15 @@ import React, { useState, useEffect } from 'react';
 
 const getExtendedStats = (memoStr: string) => {
   try {
-    const p = JSON.parse(memoStr || '{}');
-    return {
-      text: p.text || "", filled: p.filled || 0, wrongIndices: p.wrongIndices || [],
-      upgrade: p.upgrade || 0, bestTime: p.bestTime || 0, totalCorrect: p.totalCorrect || 0, totalWrong: p.totalWrong || 0
-    };
-  } catch(e) { return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0 }; }
+    if (memoStr && memoStr.trim().startsWith('{')) {
+      const p = JSON.parse(memoStr || '{}');
+      return {
+        text: p.text || "", filled: p.filled || 0, wrongIndices: p.wrongIndices || [],
+        upgrade: p.upgrade || 0, bestTime: p.bestTime || 0, totalCorrect: p.totalCorrect || 0, totalWrong: p.totalWrong || 0
+      };
+    }
+  } catch(e) {}
+  return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0 };
 };
 
 const getGridClass = (cols: number) => {
@@ -19,7 +22,37 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAllData, safeAddress, colCount = 3 }: any) => {
+// 💡 [약어 자동 추출 엔진] 빈칸들의 첫 글자를 모아서 보여줍니다.
+const generateAcronymMemo = (content: string, abbrs: Record<string, string>) => {
+    const blanks = content.match(/\[\s*(.*?)\s*\]/g);
+    if (!blanks) return "빈칸 없음";
+
+    const circleNums = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬','⑭','⑮','⑯','⑰','⑱','⑲','⑳'];
+
+    const acronyms = blanks.map((b, i) => {
+        let text = b.replace(/\[|\]/g, '').replace(/ORIG_ID:\d+/g, '').trim();
+        if (!text) return "";
+
+        let cleanText = text.replace(/\s+/g, '');
+        let finalWord = text;
+
+        if (abbrs) {
+            for (const [short, orig] of Object.entries(abbrs)) {
+                if (orig.replace(/\s+/g, '') === cleanText) {
+                    finalWord = short;
+                    break;
+                }
+            }
+        }
+        const firstChar = finalWord.charAt(0);
+        const prefix = i < 20 ? circleNums[i] : `${i+1}.`;
+        return `${prefix}${firstChar}`;
+    });
+
+    return acronyms.filter(Boolean).join(' ');
+};
+
+export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAllData, safeAddress, colCount = 3, globalDict }: any) => {
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [expandedId, setExpandedId] = useState<string | number | null>(null);
 
@@ -57,11 +90,19 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
   };
 
   const handleEnhanceCard = async (card: any, currentStats: any) => {
-    if (currentStats.upgrade >= 10) { alert("이미 최고 레벨(MAX)에 도달한 카드입니다!"); return; }
+    // 💡 [수정] 최고 레벨을 50으로 상향하고, 학습 횟수만큼만 강화할 수 있도록 제한
+    if (currentStats.upgrade >= 50) { 
+        alert("이미 최고 레벨(MAX 50)에 도달한 카드입니다!"); 
+        return; 
+    }
+    if (currentStats.upgrade >= currentStats.filled) { 
+        alert(`카드를 더 학습(채우기)해야 강화할 수 있습니다.\n(현재 학습: ${currentStats.filled}회 / 강화: +${currentStats.upgrade})`); 
+        return; 
+    }
 
     const cost = (currentStats.upgrade + 1) * 20;
     if (goalBalance < cost) { alert(`포인트가 부족합니다! (필요 포인트: ${cost}P)`); return; }
-    if (!confirm(`[${cost}P]를 사용하여 이 카드를 강화하시겠습니까?`)) return;
+    if (!confirm(`[${cost}P]를 사용하여 이 카드를 강화하시겠습니까?\n(현재 +${currentStats.upgrade} ➔ +${currentStats.upgrade + 1})`)) return;
 
     setIsEnhancing(true); handleUpdateBalance(-cost);
     currentStats.upgrade += 1;
@@ -89,14 +130,21 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
     else if (firstLine.includes('[령]')) { prefix = "[령]"; titleColor = "text-blue-400"; }
 
     const stats = getExtendedStats(card.memo);
-    const isMax = stats.upgrade >= 10;
+    const isMax = stats.upgrade >= 50;
+    const canUpgrade = stats.upgrade < stats.filled;
     const cost = (stats.upgrade + 1) * 20;
     const isExpanded = expandedId === card.id;
 
+    // 💡 자동으로 생성된 첫 글자 약어 추출
+    const autoAcronyms = generateAcronymMemo(card.content, globalDict?.abbrs);
+
     let borderClass = "border-white/10 bg-black/40 hover:bg-white/5";
     if (isMax) borderClass = "border-yellow-500/50 bg-yellow-950/20 shadow-[0_0_10px_rgba(250,204,21,0.15)]";
-    else if (stats.upgrade >= 7) borderClass = "border-fuchsia-500/40 bg-fuchsia-950/20";
-    else if (stats.upgrade >= 4) borderClass = "border-blue-500/40 bg-blue-950/20";
+    else if (stats.upgrade >= 40) borderClass = "border-red-500/40 bg-red-950/20";
+    else if (stats.upgrade >= 30) borderClass = "border-fuchsia-500/40 bg-fuchsia-950/20";
+    else if (stats.upgrade >= 20) borderClass = "border-purple-500/40 bg-purple-950/20";
+    else if (stats.upgrade >= 10) borderClass = "border-blue-500/40 bg-blue-950/20";
+    else if (stats.upgrade >= 5) borderClass = "border-teal-500/40 bg-teal-950/20";
 
     return (
         <div key={card.id} onClick={() => setExpandedId(isExpanded ? null : card.id)} className={`flex flex-col rounded-sm border transition-all cursor-pointer p-1.5 ${borderClass}`}>
@@ -109,6 +157,11 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
                 </div>
             </div>
             
+            {/* 💡 [신규 기능] 자동 생성된 약어가 표시되는 영역입니다. */}
+            <div className="text-[10px] text-teal-300 font-bold mt-1 truncate w-full" title={autoAcronyms}>
+                💡 {autoAcronyms}
+            </div>
+
             <div className="text-[10px] text-white/40 mt-0.5 truncate w-full font-serif" title={stats.text || "메모 없음"}>
                 {stats.text || "메모 없음"}
             </div>
@@ -125,15 +178,16 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
                         <span className="text-white/40">정답/오답</span><span><span className="text-green-400">O:{stats.totalCorrect}</span> <span className="text-white/30">|</span> <span className="text-red-400">X:{stats.totalWrong}</span></span>
                     </div>
                     <button 
-                        disabled={isMax || isEnhancing}
+                        disabled={isMax || isEnhancing || !canUpgrade}
                         onClick={(e) => { e.stopPropagation(); handleEnhanceCard(card, stats); }}
                         className={`w-full py-1.5 mt-1 text-[10px] font-bold rounded-sm transition-all flex justify-center items-center gap-1 ${
                             isMax ? 'bg-yellow-600/20 text-yellow-500 border border-yellow-500/30 cursor-not-allowed' : 
+                            !canUpgrade ? 'bg-gray-800/50 text-gray-500 border border-gray-600/30 cursor-not-allowed' :
                             goalBalance >= cost ? 'bg-white/10 hover:bg-white/20 text-white border border-white/20' : 
                             'bg-red-900/20 text-red-500/50 border border-red-500/20 cursor-not-allowed'
                         }`}
                     >
-                        {isMax ? '전설 등급 달성' : `💎 강화 시도 (${cost}P)`}
+                        {isMax ? '최고 레벨(50) 달성' : !canUpgrade ? `강화 불가 (학습 ${stats.filled}회 / 필요 ${stats.upgrade + 1}회)` : `💎 강화 시도 (${cost}P)`}
                     </button>
                 </div>
             )}
@@ -146,7 +200,7 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
       <div className="flex justify-between items-end mb-4 sm:mb-6 border-b border-white/10 pb-4">
         <div>
           <h1 className="text-2xl sm:text-3xl font-serif text-current tracking-tight">카드 수집</h1>
-          <p className="text-xs sm:text-sm text-white/40 mt-1">카드를 클릭해 강화(MAX +10)하고 기록을 확인하세요.</p>
+          <p className="text-xs sm:text-sm text-white/40 mt-1">카드를 클릭해 강화(MAX 50)하고 기록을 확인하세요.</p>
         </div>
         <div className="text-amber-400 font-bold text-[11px] sm:text-xs font-mono bg-black/40 px-3 py-1.5 border border-amber-500/30 rounded-sm shrink-0">
           보유: {goalBalance} P
