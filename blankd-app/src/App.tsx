@@ -182,6 +182,10 @@ function MainApp() {
   const [savedCards, setSavedCards] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
   
+  // 💡 [철통방어 1] 모바일 화면 전환 시 추적을 위한 참조(Ref) 생성
+  const activeCardRef = useRef<any>(null);
+  useEffect(() => { activeCardRef.current = activeCard; }, [activeCard]);
+  
   const [viewMode, setViewMode] = useState('all');
   const [colCount, setColCount] = useState(3);
   const [useAiRecommend, setUseAiRecommend] = useState(true);
@@ -205,11 +209,10 @@ function MainApp() {
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
 
-  // 💡 상점 시스템 상태 관리
   const [hintLetter, setHintLetter] = useState<string | null>(null);
   const [isFrozen, setIsFrozen] = useState<boolean>(false);
 
-  // 💡 포인트 동기화 엔진
+  // 💡 [철통방어 2] 포인트 변동 시 무조건 서버 꽂아넣기 (keepalive 적용)
   const handleUpdateBalance = (changeAmount: number) => {
     setGoalBalance(prev => {
       const newBalance = prev + changeAmount;
@@ -217,7 +220,7 @@ function MainApp() {
       if (!isOffline && safeAddress) {
         fetch("https://api.blankd.top/api/update-balance", {
           method: "POST",
-          keepalive: true,
+          keepalive: true, // 🚨 브라우저 강제 종료 방어
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, balance: newBalance })
         }).catch(e => console.error("포인트 동기화 실패:", e));
@@ -390,6 +393,7 @@ function MainApp() {
     if (isLoggedIn) loadAllData();
   }, [isLoggedIn, safeAddress, enokiFlow]);
 
+  // 💡 [철통방어 3] 큐 데이터 강제 전송 시 keepalive 적용
   const flushQueue = async () => {
     if (!safeAddress || isOffline) return; 
     try {
@@ -406,7 +410,7 @@ function MainApp() {
 
       const res = await fetch("https://api.blankd.top/api/sync-batch", {
         method: "POST", 
-        keepalive: true,
+        keepalive: true, // 🚨 브라우저 강제 종료 방어
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ wallet_address: safeAddress, memos: q.memos, answers: q.answers })
       });
@@ -424,12 +428,37 @@ function MainApp() {
     }
   };
 
+  // 💡 [철통방어 4] 모바일 화면 내림/숨김 감지 시 즉시 전송
   useEffect(() => {
     if (!safeAddress) return;
     const interval = setInterval(flushQueue, 30000); 
-    const handleVisibility = () => { if(document.visibilityState === 'hidden') flushQueue(); };
+    
+    const handleVisibility = () => { 
+      if(document.visibilityState === 'hidden' || document.visibilityState === 'unloaded') {
+        // 앱이 숨겨질 때 쥐고 있던 활성 카드 상태 강제 발송
+        const currentCard = activeCardRef.current;
+        if (currentCard && statsRef.current) {
+          const wrongArr = Array.from(statsRef.current.wrongIndices);
+          const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+          fetch("https://api.blankd.top/api/save-card", {
+            method: "POST", 
+            keepalive: true, 
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet_address: safeAddress, card_id: currentCard.id, card_content: currentCard.content, answer_text: currentCard.answer_text || "", folder_name: currentCard.folder_name, memo: newMemo })
+          }).catch(()=>{});
+        }
+        flushQueue(); 
+      }
+    };
+    
     document.addEventListener('visibilitychange', handleVisibility);
-    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', handleVisibility); };
+    window.addEventListener('pagehide', handleVisibility); // iOS Safari 대응
+
+    return () => { 
+      clearInterval(interval); 
+      document.removeEventListener('visibilitychange', handleVisibility); 
+      window.removeEventListener('pagehide', handleVisibility);
+    };
   }, [safeAddress, isOffline]);
 
   const uploadLaw = async () => {
@@ -503,9 +532,7 @@ function MainApp() {
       const initialMemo = stringifyCardStats(memo, 0, []);
       
       const res = await fetch("https://api.blankd.top/api/save-card", { 
-        method: "POST", 
-        keepalive: true,
-        headers: { "Content-Type": "application/json" }, 
+        method: "POST", headers: { "Content-Type": "application/json" }, 
         body: JSON.stringify({ 
             wallet_address: safeAddress, card_id: targetCardId, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo 
         }) 
@@ -526,16 +553,16 @@ function MainApp() {
     setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
     pushToQueue('MEMO', { id, memo });
     
-    // 💡 1초도 기다리지 않고 즉시 DB로 강제 전송!
     if (!isOffline) {
       const target = savedCards.find((c:any) => c.id === id);
       if (target) {
         fetch("https://api.blankd.top/api/save-card", {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST", 
+          keepalive: true, // 🚨 철통 방어
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: id, card_content: target.content, answer_text: target.answer_text || "", folder_name: target.folder_name, memo })
         }).catch(() => {});
       }
-      // 💡 대기열(Queue)에 담긴 데이터도 기다리지 않고 즉시 비워버립니다.
       flushQueue(); 
     }
   };
@@ -633,13 +660,11 @@ function MainApp() {
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     const isCorrect = wrongArr.length === 0;
 
-    // 💡 [수정] 맞춘 빈칸 1개당 5P 지급 및 달력 통계 저장
     const correctCount = blanks.length - wrongArr.length;
     const earnedPoints = correctCount * 5; 
     
     handleUpdateBalance(earnedPoints);
 
-    // 진행상황 달력용 데이터 로컬 기록
     const todayStr = new Date().toISOString().split('T')[0];
     const logStr = localStorage.getItem('blankd_activity_log');
     const activityLog = logStr ? JSON.parse(logStr) : {};
@@ -696,7 +721,9 @@ function MainApp() {
       addLog(`🎉 학습 완료! +${earnedPoints} Point 획득`);
       try {
         await fetch("https://api.blankd.top/api/save-card", {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST", 
+          keepalive: true, // 🚨 브라우저 강제 종료 방어
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
         });
       } catch(e) {}
@@ -719,12 +746,36 @@ function MainApp() {
     if (!isOffline) {
       try {
         await fetch("https://api.blankd.top/api/save-card", {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST", 
+          keepalive: true, // 🚨 브라우저 강제 종료 방어
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
         });
       } catch(e) {}
     }
     flushQueue();
+  };
+
+  // 💡 [철통방어 5] 빈칸을 1개 채울 때마다(1타 1저장) 서버에 즉시 전송하는 함수
+  const syncProgressToServer = () => {
+    if (isOffline || !safeAddress || !activeCardRef.current) return;
+    const card = activeCardRef.current;
+    const wrongArr = Array.from(statsRef.current.wrongIndices);
+    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+
+    fetch("https://api.blankd.top/api/save-card", {
+      method: "POST",
+      keepalive: true, // 🚨 브라우저 강제 종료 방어
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        wallet_address: safeAddress,
+        card_id: card.id,
+        card_content: card.content,
+        answer_text: card.answer_text || "",
+        folder_name: card.folder_name,
+        memo: newMemo
+      })
+    }).catch(()=>{});
   };
 
   const handleSequentialInput = (overrideInput?: string | any) => {
@@ -757,11 +808,15 @@ function MainApp() {
           } else {
             localStorage.removeItem(`blankd_progress_${activeCard.id}`); statsRef.current.filled += 1; finishCard();
           }
+          syncProgressToServer(); // 💡 정답 시 1타 1저장 발동
           return currentBlanks;
         });
       }, 150);
     } else { 
-      setInputStatus('wrong'); statsRef.current.wrongIndices.add(currentBlankIdx); setTimeout(() => setInputStatus('idle'), 500);
+      setInputStatus('wrong'); 
+      statsRef.current.wrongIndices.add(currentBlankIdx); 
+      syncProgressToServer(); // 💡 오답 시 1타 1저장 발동
+      setTimeout(() => setInputStatus('idle'), 500);
     }
   };
   
@@ -777,6 +832,7 @@ function MainApp() {
         } else {
           localStorage.removeItem(`blankd_progress_${activeCard.id}`); statsRef.current.filled += 1; finishCard();
         }
+        syncProgressToServer(); // 💡 1타 1저장 발동
         return currentBlanks;
       });
     }, 800);
@@ -1203,6 +1259,7 @@ function MainApp() {
         </div>
       )}
 
+      {/* 💡 [스킬 상점 연동] 팝업창 렌더링 시 스킬 관련 상태와 함수 전달 */}
       {activeCard && (
         <CardModal 
           activeCard={activeCard} 
