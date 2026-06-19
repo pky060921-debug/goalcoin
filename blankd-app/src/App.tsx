@@ -709,8 +709,8 @@ function MainApp() {
 
     const newMemo = JSON.stringify(exStats);
 
-    // 💡 [수정] 빈칸 1개당 1포인트
-    const earnedPoints = correctCount * 1; 
+    // 💡 [수정] 빈칸 1개당 5포인트
+    const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
 
     const todayStr = new Date().toISOString().split('T')[0];
