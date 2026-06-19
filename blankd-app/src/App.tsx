@@ -182,7 +182,6 @@ function MainApp() {
   const [savedCards, setSavedCards] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
   
-  // 💡 [철통방어 1] 모바일 화면 전환 시 추적을 위한 참조(Ref) 생성
   const activeCardRef = useRef<any>(null);
   useEffect(() => { activeCardRef.current = activeCard; }, [activeCard]);
   
@@ -212,7 +211,6 @@ function MainApp() {
   const [hintLetter, setHintLetter] = useState<string | null>(null);
   const [isFrozen, setIsFrozen] = useState<boolean>(false);
 
-  // 💡 [철통방어 2] 포인트 변동 시 무조건 서버 꽂아넣기 (keepalive 적용)
   const handleUpdateBalance = (changeAmount: number) => {
     setGoalBalance(prev => {
       const newBalance = prev + changeAmount;
@@ -220,7 +218,7 @@ function MainApp() {
       if (!isOffline && safeAddress) {
         fetch("https://api.blankd.top/api/update-balance", {
           method: "POST",
-          keepalive: true, // 🚨 브라우저 강제 종료 방어
+          keepalive: true,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, balance: newBalance })
         }).catch(e => console.error("포인트 동기화 실패:", e));
@@ -393,7 +391,6 @@ function MainApp() {
     if (isLoggedIn) loadAllData();
   }, [isLoggedIn, safeAddress, enokiFlow]);
 
-  // 💡 [철통방어 3] 큐 데이터 강제 전송 시 keepalive 적용
   const flushQueue = async () => {
     if (!safeAddress || isOffline) return; 
     try {
@@ -410,7 +407,7 @@ function MainApp() {
 
       const res = await fetch("https://api.blankd.top/api/sync-batch", {
         method: "POST", 
-        keepalive: true, // 🚨 브라우저 강제 종료 방어
+        keepalive: true, 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ wallet_address: safeAddress, memos: q.memos, answers: q.answers })
       });
@@ -428,14 +425,12 @@ function MainApp() {
     }
   };
 
-  // 💡 [철통방어 4] 모바일 화면 내림/숨김 감지 시 즉시 전송
   useEffect(() => {
     if (!safeAddress) return;
     const interval = setInterval(flushQueue, 30000); 
     
     const handleVisibility = () => { 
       if(document.visibilityState === 'hidden' || document.visibilityState === 'unloaded') {
-        // 앱이 숨겨질 때 쥐고 있던 활성 카드 상태 강제 발송
         const currentCard = activeCardRef.current;
         if (currentCard && statsRef.current) {
           const wrongArr = Array.from(statsRef.current.wrongIndices);
@@ -452,7 +447,7 @@ function MainApp() {
     };
     
     document.addEventListener('visibilitychange', handleVisibility);
-    window.addEventListener('pagehide', handleVisibility); // iOS Safari 대응
+    window.addEventListener('pagehide', handleVisibility);
 
     return () => { 
       clearInterval(interval); 
@@ -558,7 +553,7 @@ function MainApp() {
       if (target) {
         fetch("https://api.blankd.top/api/save-card", {
           method: "POST", 
-          keepalive: true, // 🚨 철통 방어
+          keepalive: true, 
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: id, card_content: target.content, answer_text: target.answer_text || "", folder_name: target.folder_name, memo })
         }).catch(() => {});
@@ -722,7 +717,7 @@ function MainApp() {
       try {
         await fetch("https://api.blankd.top/api/save-card", {
           method: "POST", 
-          keepalive: true, // 🚨 브라우저 강제 종료 방어
+          keepalive: true,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
         });
@@ -747,7 +742,7 @@ function MainApp() {
       try {
         await fetch("https://api.blankd.top/api/save-card", {
           method: "POST", 
-          keepalive: true, // 🚨 브라우저 강제 종료 방어
+          keepalive: true,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
         });
@@ -756,7 +751,6 @@ function MainApp() {
     flushQueue();
   };
 
-  // 💡 [철통방어 5] 빈칸을 1개 채울 때마다(1타 1저장) 서버에 즉시 전송하는 함수
   const syncProgressToServer = () => {
     if (isOffline || !safeAddress || !activeCardRef.current) return;
     const card = activeCardRef.current;
@@ -765,7 +759,7 @@ function MainApp() {
 
     fetch("https://api.blankd.top/api/save-card", {
       method: "POST",
-      keepalive: true, // 🚨 브라우저 강제 종료 방어
+      keepalive: true, 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         wallet_address: safeAddress,
@@ -808,14 +802,14 @@ function MainApp() {
           } else {
             localStorage.removeItem(`blankd_progress_${activeCard.id}`); statsRef.current.filled += 1; finishCard();
           }
-          syncProgressToServer(); // 💡 정답 시 1타 1저장 발동
+          syncProgressToServer(); 
           return currentBlanks;
         });
       }, 150);
     } else { 
       setInputStatus('wrong'); 
       statsRef.current.wrongIndices.add(currentBlankIdx); 
-      syncProgressToServer(); // 💡 오답 시 1타 1저장 발동
+      syncProgressToServer(); 
       setTimeout(() => setInputStatus('idle'), 500);
     }
   };
@@ -832,7 +826,7 @@ function MainApp() {
         } else {
           localStorage.removeItem(`blankd_progress_${activeCard.id}`); statsRef.current.filled += 1; finishCard();
         }
-        syncProgressToServer(); // 💡 1타 1저장 발동
+        syncProgressToServer(); 
         return currentBlanks;
       });
     }, 800);
@@ -903,12 +897,18 @@ function MainApp() {
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
+    // 💡 [수정됨] 제목 앞 태그([법], [령] 등)를 감지하여 알맞은 색상 부여
     let displayTitle = titleLine
-      .replace(/\[법\]|\[령\]|\[칙\]|\[규\]|\[정관\]/g, '')
+      .replace(/\[법\]|\[령\]|\[칙\]|\[규\]|\[정관\]|\[규정\]/g, '')
       .replace(/\(\s*내용\s*\)/g, '')
       .replace(/내용/g, '')
       .trim();
     if (!displayTitle) displayTitle = "제목 없음";
+
+    let titleColor = "text-red-500";
+    if (titleLine.includes('[정관]')) titleColor = "text-yellow-500";
+    else if (titleLine.includes('[칙]') || titleLine.includes('[규]') || titleLine.includes('[규정]')) titleColor = "text-green-500";
+    else if (titleLine.includes('[령]')) titleColor = "text-blue-400";
 
     const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== '');
     let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
@@ -947,20 +947,26 @@ function MainApp() {
     return (
       <div className="flex flex-col gap-6 w-full">
         <div className="flex justify-between items-center border-b border-white/10 pb-2">
-            <span className="text-amber-400 font-bold text-[14px] leading-tight">{displayTitle}</span>
-            <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
+            <span className={`${titleColor} font-bold text-[14px] leading-tight`}>{displayTitle}</span>
+            <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm shrink-0 ml-2">Page {displayPage + 1}</span>
         </div>
         <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
         <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
           <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
             {isMemoOpen ? '닫기 ✕' : '메모 열기'}
           </button>
-          <button onClick={toggleVoiceRecognition} className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${isListening ? 'bg-red-600/50 text-white border-red-500 animate-pulse' : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'}`}>
-            {isListening ? '음성 인식 끄기 (활성화됨)' : '음성으로 입력 (계속 켜두기)'}
+          
+          {/* 💡 [신규 추가] 스마트 약어 추가 버튼 */}
+          <button onClick={() => { setDictTab('abbr'); setIsDictModalOpen(true); }} className="px-3 py-1.5 bg-indigo-900/30 text-indigo-400 border border-indigo-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-indigo-900/50 transition-all shadow-md">
+            ⚡ 약어 추가
           </button>
-            <button id="show-answer-btn" onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
-              정답 보기 (오답 처리)
-            </button>
+
+          <button onClick={toggleVoiceRecognition} className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${isListening ? 'bg-red-600/50 text-white border-red-500 animate-pulse' : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'}`}>
+            {isListening ? '음성 인식 끄기' : '음성으로 입력'}
+          </button>
+          <button id="show-answer-btn" onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
+            정답 보기 (오답 처리)
+          </button>
         </div>
         {isMemoOpen && (
           <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
@@ -1259,7 +1265,6 @@ function MainApp() {
         </div>
       )}
 
-      {/* 💡 [스킬 상점 연동] 팝업창 렌더링 시 스킬 관련 상태와 함수 전달 */}
       {activeCard && (
         <CardModal 
           activeCard={activeCard} 
