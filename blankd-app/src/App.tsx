@@ -61,7 +61,6 @@ const autoApplyDictHelper = (content: string, dict: any) => {
   }
 };
 
-// 💡 힌트용 프롭스(hintLetter) 추가
 const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict, hintLetter }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
@@ -209,6 +208,22 @@ function MainApp() {
   // 💡 상점 시스템 상태 관리
   const [hintLetter, setHintLetter] = useState<string | null>(null);
   const [isFrozen, setIsFrozen] = useState<boolean>(false);
+
+  // 💡 포인트 동기화 엔진
+  const handleUpdateBalance = (changeAmount: number) => {
+    setGoalBalance(prev => {
+      const newBalance = prev + changeAmount;
+      localStorage.setItem(`blankd_off_bal_${safeAddress}`, newBalance.toString());
+      if (!isOffline && safeAddress) {
+        fetch("https://api.blankd.top/api/update-balance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: safeAddress, balance: newBalance })
+        }).catch(e => console.error("포인트 동기화 실패:", e));
+      }
+      return newBalance;
+    });
+  };
 
   const [globalDict, setGlobalDict] = useState<{ stopwords: string[], inclusions: string[], abbrs: Record<string, string> }>({
     stopwords: [], inclusions: [], abbrs: {}
@@ -520,13 +535,12 @@ function MainApp() {
     }
   };
 
-  // 💡 아이템 상점 로직
   const handleUseItem = (itemType: 'hint' | 'freeze' | 'magic', cost: number) => {
     if (goalBalance < cost) {
       alert("포인트가 부족합니다! 카드를 끝까지 채워서 포인트를 모아보세요.");
       return;
     }
-    setGoalBalance(prev => prev - cost);
+    handleUpdateBalance(-cost);
     
     if (itemType === 'hint') {
       const currentAnswer = blanks[currentBlankIdx]?.answer;
@@ -573,7 +587,7 @@ function MainApp() {
       const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
       setElapsed(0); setIsMemoOpen(false);
-      setIsFrozen(false); setHintLetter(null); // 상점 상태 초기화
+      setIsFrozen(false); setHintLetter(null); 
 
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
@@ -588,11 +602,10 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // 💡 얼음 스킬과 연동된 새로운 타이머 로직
   useEffect(() => {
     if (activeCard && currentBlankIdx < blanks.length) {
       const interval = setInterval(() => {
-        if (isFrozen) return; // ⏳ 시간 정지 발동 중이면 게이지 안 올라감
+        if (isFrozen) return; 
         
         setElapsed(prev => {
           const next = prev + 0.1;
@@ -619,7 +632,7 @@ function MainApp() {
     const correctCount = blanks.length - wrongArr.length;
     const earnedPoints = correctCount * 5; 
     
-    setGoalBalance(prev => prev + earnedPoints);
+    handleUpdateBalance(earnedPoints);
 
     // 진행상황 달력용 데이터 로컬 기록
     const todayStr = new Date().toISOString().split('T')[0];
@@ -860,7 +873,6 @@ function MainApp() {
               );
             } else if (isCurrent) {
               contentToRender.push(
-                // 💡 첫 글자 힌트 프롭스 전달
                 <InlineBlankInput key={`blank-${currentBlankIdx}`} inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
               );
             } else {
@@ -915,34 +927,25 @@ function MainApp() {
   const memoizedTabs = useMemo(() => {
     return (
       <>
-        {/* 1. 진행상황 탭 (goalBalance 권한 부여) */}
         <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
-          <DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} goalBalance={goalBalance} setGoalBalance={setGoalBalance} />
+          <DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} />
         </div>
-        
-        {/* 2. 만들기 탭 */}
         <div className={activeTab === 'create' ? 'block' : 'hidden'}>
           <CraftTab categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} expandedId={expandedId} setExpandedId={setExpandedId} handleDeleteCategory={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} globalDict={globalDict} saveGlobalDict={saveGlobalDict} />
         </div>
-        
-        {/* 3. 채우기 탭 */}
         <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
           <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
         </div>
-        
-        {/* 4. 모의고사 탭 */}
         <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
           <ExamTab walletAddress={safeAddress} address={safeAddress} />
         </div>
-        
-        {/* 5. 설정 탭 */}
         <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
           <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} zkLogin={zkLogin} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} globalDict={globalDict} saveGlobalDict={saveGlobalDict} loadAllData={loadAllData} theme={theme} setTheme={setTheme}/>
         </div>
       </>
     );
   }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, zkLogin, studyMode, setStudyMode, globalDict, theme, goalBalance]);
-  
+
   const renderDictionaryUI = (isMobile: boolean) => (
     <div className={`flex flex-col w-full h-full ${isMobile ? 'bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 rounded-sm' : 'bg-[#08080a]/80 border border-white/10 p-5 rounded-sm shadow-xl backdrop-blur-sm'}`}>
       <div className="flex justify-between items-start mb-6">
@@ -1195,7 +1198,6 @@ function MainApp() {
         </div>
       )}
 
-      {/* 💡 [스킬 상점 연동] 팝업창 렌더링 시 스킬 관련 상태와 함수 전달 */}
       {activeCard && (
         <CardModal 
           activeCard={activeCard} 
