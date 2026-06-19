@@ -653,7 +653,6 @@ function MainApp() {
       const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
       
-      // 💡 [핵심 버그 1 수정] 스탑워치(elapsed) 초기화 방지 로직 (기존 저장값 불러오기)
       const savedElapsed = parseFloat(localStorage.getItem(`blankd_elapsed_${activeCard.id}`) || '0');
       setElapsed(savedElapsed);
 
@@ -676,12 +675,10 @@ function MainApp() {
   useEffect(() => {
     if (activeCard && currentBlankIdx < blanks.length) {
       const interval = setInterval(() => {
-        // 💡 [핵심 버그 3 수정] 약어 모달이 켜져있으면 스탑워치 일시 정지
         if (isFrozen || isDictModalOpen) return; 
         
         setElapsed(prev => {
           const next = prev + 0.1;
-          // 💡 스탑워치 값을 0.1초마다 로컬스토리지에 저장하여 창을 닫아도 복구되도록 합니다.
           localStorage.setItem(`blankd_elapsed_${activeCard.id}`, next.toString());
 
           if (next >= totalTimeLimit) {
@@ -774,7 +771,7 @@ function MainApp() {
     const nextCard = folderCards[currentIdx + 1] || null;
 
     localStorage.removeItem(`blankd_progress_${currentId}`);
-    localStorage.removeItem(`blankd_elapsed_${currentId}`); // 💡 카드 학습 완료 시 타이머 기록 초기화
+    localStorage.removeItem(`blankd_elapsed_${currentId}`);
 
     setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
@@ -810,7 +807,7 @@ function MainApp() {
     exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
     
     const newMemo = JSON.stringify(exStats);
-    setActiveCard(null); // 💡 여기서 타이머 데이터는 지우지 않습니다 (재오픈 시 보존 됨!)
+    setActiveCard(null);
 
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
@@ -881,9 +878,7 @@ function MainApp() {
               const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx;
             });
           } else {
-            localStorage.removeItem(`blankd_progress_${activeCard.id}`);
-            localStorage.removeItem(`blankd_elapsed_${activeCard.id}`); // 타이머 초기화
-            finishCard();
+            localStorage.removeItem(`blankd_progress_${activeCard.id}`); finishCard();
           }
           syncProgressToServer(); 
           return currentBlanks;
@@ -907,9 +902,7 @@ function MainApp() {
         if (currentBlankIdx + 1 < currentBlanks.length) {
           setCurrentBlankIdx(prevIdx => { const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx; });
         } else {
-          localStorage.removeItem(`blankd_progress_${activeCard.id}`);
-          localStorage.removeItem(`blankd_elapsed_${activeCard.id}`); // 타이머 초기화
-          finishCard();
+          localStorage.removeItem(`blankd_progress_${activeCard.id}`); finishCard();
         }
         syncProgressToServer(); 
         return currentBlanks;
@@ -1096,7 +1089,8 @@ function MainApp() {
           <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
         </div>
         <div className={activeTab === 'record' ? 'block' : 'hidden'}>
-          <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} colCount={colCount} />
+          {/* 💡 전역 사전(globalDict)을 전달하여 수집탭에서 약어 변환에 사용합니다. */}
+          <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} colCount={colCount} globalDict={globalDict} />
         </div>
         <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
           <ExamTab walletAddress={safeAddress} address={safeAddress} />
@@ -1187,7 +1181,6 @@ function MainApp() {
           border-color: #6b7280 !important; 
         }
 
-        /* 💡 [핵심 버그 수정 2] 화이트 테마 폰트 강제 변환 */
         .text-amber-100, .text-amber-200 { color: #b45309 !important; font-weight: 800; }
         .text-teal-100, .text-teal-200 { color: #0f766e !important; font-weight: 800; }
 
@@ -1310,7 +1303,7 @@ function MainApp() {
         <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2">
             {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '수집' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
-               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
             ))}
           </div>
         </nav>
@@ -1354,7 +1347,6 @@ function MainApp() {
         </button>
       </div>
 
-      {/* 💡 [핵심 버그 수정 2] lg:hidden을 삭제하여 PC에서도 약어 모달이 최상단에 뜨도록 수정 */}
       {isDictModalOpen && (
         <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] relative">
