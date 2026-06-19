@@ -1,46 +1,47 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { parseCardStats } from '../utils/constants';
 
-export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpandedId, setActiveCard, goalBalance, setGoalBalance }: any) => {
-  const [activityLog, setActivityLog] = useState<Record<string, number>>({});
+export const DashboardTab = ({ 
+  categories, savedCards, setActiveTab, setExpandedId, setActiveCard, 
+  goalBalance, handleUpdateBalance, 
+  activityLog, claimedRewards, setClaimedRewards, safeAddress 
+}: any) => {
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [claimedRewards, setClaimedRewards] = useState<Record<string, boolean>>({});
 
-  // 사용자가 설정한 전체 마스터 주기 (기본값 30일)
   const [targetCycle, setTargetCycle] = useState<number | string>(() => {
-    const saved = localStorage.getItem('blankd_target_cycle');
+    const saved = localStorage.getItem(`blankd_target_cycle_${safeAddress}`);
     return saved ? parseInt(saved, 10) : 30;
   });
-
-  useEffect(() => {
-    const log = JSON.parse(localStorage.getItem('blankd_activity_log') || '{}');
-    setActivityLog(log);
-    const claimed = JSON.parse(localStorage.getItem('blankd_claimed_rewards') || '{}');
-    setClaimedRewards(claimed);
-  }, [goalBalance]);
 
   const handleCycleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseInt(e.target.value, 10);
     if (!isNaN(val) && val > 0) {
         setTargetCycle(val);
-        localStorage.setItem('blankd_target_cycle', val.toString());
+        localStorage.setItem(`blankd_target_cycle_${safeAddress}`, val.toString());
     } else if (e.target.value === '') {
-        setTargetCycle(''); // 입력 중 빈칸 허용
+        setTargetCycle('');
     }
   };
 
   const handleCycleBlur = () => {
     if (targetCycle === '' || Number(targetCycle) < 1) {
         setTargetCycle(30);
-        localStorage.setItem('blankd_target_cycle', '30');
+        localStorage.setItem(`blankd_target_cycle_${safeAddress}`, '30');
     }
   };
 
   const saveClaim = (key: string, points: number) => {
     const next = { ...claimedRewards, [key]: true };
     setClaimedRewards(next);
-    localStorage.setItem('blankd_claimed_rewards', JSON.stringify(next));
-    handleUpdateBalance(points); // 💡 퀘스트 보상 획득 내역도 서버로 즉시 전송
+    localStorage.setItem(`blankd_claimed_rewards_${safeAddress}`, JSON.stringify(next));
+    handleUpdateBalance(points);
+    
+    // 서버에 퀘스트 달성 내역 즉시 동기화
+    fetch("https://api.blankd.top/api/update-balance", {
+       method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+       body: JSON.stringify({ wallet_address: safeAddress, claimed_rewards: next })
+    }).catch(()=>{});
+    
     alert(`🎉 목표 달성! 보상으로 ${points}P가 지급되었습니다.`);
   };
 
@@ -50,32 +51,21 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
     setCurrentDate(newDate);
   };
 
-  // 💡 전체 빈칸 스캔 및 통계 계산
   const stats = useMemo(() => {
-    let total = 0;
-    let wrong = 0;
-    let correct = 0;
-    let unplayed = 0;
-
+    let total = 0; let wrong = 0; let correct = 0; let unplayed = 0;
     (savedCards || []).forEach((card: any) => {
         if (!card || !card.content) return;
         const bodyOnly = card.content.split('\n').slice(1).join('\n');
-        // 본문 내 빈칸 개수 추출 (ORIG_ID 제외)
         const blanksCount = (bodyOnly.match(/\[\s*(.*?)\s*\]/g) || []).filter((b: string) => !b.includes('ORIG_ID')).length;
         total += blanksCount;
-
         try {
             const st = parseCardStats(card.memo);
             if (st.filled > 0) {
-                // 한 번이라도 학습한 경우 오답 개수 합산
                 wrong += st.wrongIndices.length;
                 correct += Math.max(0, blanksCount - st.wrongIndices.length);
-            } else {
-                unplayed += blanksCount;
-            }
+            } else { unplayed += blanksCount; }
         } catch(e) {}
     });
-
     return { total, correct, wrong, unplayed };
   }, [savedCards]);
 
@@ -101,7 +91,6 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
     if (dateStr.startsWith(monthKey)) monthlyFilled += activityLog[dateStr];
   });
 
-  // 💡 주기에 따른 동적 목표 계산
   const cycleNum = Number(targetCycle) || 30;
   const dailyTarget = stats.total > 0 ? Math.ceil(stats.total / cycleNum) : 50;
   const weeklyTarget = dailyTarget * 7;
@@ -164,7 +153,6 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
         </div>
         <p className="text-xs sm:text-sm text-white/40 mb-2">목표를 달성하고 보상을 획득하여 상점 스킬을 이용하세요.</p>
         
-        {/* 💡 한 줄 요약 및 마스터 주기 목표 설정 패널 */}
         <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-black/30 p-3 sm:p-4 rounded border border-white/5 gap-4 shadow-inner">
           <div className="flex items-center gap-3 text-[12px] sm:text-[13px] font-mono tracking-tight flex-wrap">
             <span className="text-white/60 font-bold">빈칸 현황 ➔</span>
@@ -218,7 +206,6 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
               const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
               const count = activityLog[dateStr] || 0;
               
-              // 동적 목표량(dailyTarget)에 맞춰 달력 잔디 색상이 변합니다.
               let bgClass = "bg-white/5 text-white/20 border border-white/5";
               if (count > 0 && count < dailyTarget * 0.5) bgClass = "bg-teal-900/40 text-teal-400 border border-teal-500/20";
               else if (count >= dailyTarget * 0.5 && count < dailyTarget) bgClass = "bg-teal-700/60 text-teal-100 border border-teal-500/40";
