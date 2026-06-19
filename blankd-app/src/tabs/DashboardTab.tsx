@@ -40,7 +40,7 @@ export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpanded
     const next = { ...claimedRewards, [key]: true };
     setClaimedRewards(next);
     localStorage.setItem('blankd_claimed_rewards', JSON.stringify(next));
-    setGoalBalance((prev: number) => prev + points);
+    handleUpdateBalance(points); // 💡 퀘스트 보상 획득 내역도 서버로 즉시 전송
     alert(`🎉 목표 달성! 보상으로 ${points}P가 지급되었습니다.`);
   };
 
