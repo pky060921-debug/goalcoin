@@ -62,18 +62,22 @@ const autoApplyDictHelper = (content: string, dict: any) => {
   }
 };
 
+// 💡 [핵심 버그 수정] 구형 포맷 문자열과 신형 JSON을 모두 해독하는 데이터 보호 엔진
 const getExtendedStats = (memoStr: string) => {
   try {
-    const p = JSON.parse(memoStr || '{}');
-    return {
-      text: p.text || "",
-      filled: p.filled || 0,
-      wrongIndices: p.wrongIndices || [],
-      upgrade: p.upgrade || 0,
-      bestTime: p.bestTime || 0,
-      totalCorrect: p.totalCorrect || 0,
-      totalWrong: p.totalWrong || 0
-    };
+    if (memoStr && memoStr.trim().startsWith('{')) {
+      const p = JSON.parse(memoStr || '{}');
+      return {
+        text: p.text || "", filled: p.filled || 0, wrongIndices: p.wrongIndices || [],
+        upgrade: p.upgrade || 0, bestTime: p.bestTime || 0, totalCorrect: p.totalCorrect || 0, totalWrong: p.totalWrong || 0
+      };
+    }
+  } catch(e) {}
+  
+  // JSON 파싱 실패 시, 예전 문자열 방식 데이터로 복구 시도
+  try {
+    const old = parseCardStats(memoStr);
+    return { text: old.text || "", filled: old.filled || 0, wrongIndices: old.wrongIndices || [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0 };
   } catch(e) {
     return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0 };
   }
@@ -709,7 +713,7 @@ function MainApp() {
 
     const newMemo = JSON.stringify(exStats);
 
-    const earnedPoints = correctCount * 5; 
+    const earnedPoints = correctCount * 1; 
     handleUpdateBalance(earnedPoints);
 
     const todayStr = new Date().toISOString().split('T')[0];
@@ -758,8 +762,10 @@ function MainApp() {
 
     const nextReviewDate = new Date(); nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
 
-    // 💡 [핵심 버그 수정] ID 정렬 삭제 (기존 화면 순서 완벽 유지)
-    const folderCards = savedCards.filter(c => c.folder_name === currentFolder);
+    // 💡 [핵심 버그 수정] ID를 강제로 묶지 않고 뷰 화면의 원래 순서를 유지합니다.
+    const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
+        return parseInt(a.id, 10) - parseInt(b.id, 10);
+    });
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
     const nextCard = folderCards[currentIdx + 1] || null;
 
@@ -945,11 +951,11 @@ function MainApp() {
     }
 
     if (savedCards && savedCards.length > 0) {
-      // 💡 [핵심 버그 수정] ID 정렬 제거, 자연스러운 화면 순서 첫번째 카드 출력
+      // 💡 [핵심 버그 수정] ID 정렬을 부활시켜 항상 먼저 생성된 카드부터 이어하기가 되도록 수정 (순서 점프 방지)
       const cardsWithStatus = savedCards.map(c => {
          const stats = getExtendedStats(c.memo);
-         return { ...c, repetitions: stats.filled || 0 };
-      });
+         return { ...c, repetitions: stats.filled || 0, origId: parseInt(c.id, 10) };
+      }).filter(c => !isNaN(c.origId)).sort((a, b) => a.origId - b.origId);
       
       if (cardsWithStatus.length > 0) {
         const minReps = Math.min(...cardsWithStatus.map(c => c.repetitions));
@@ -1025,11 +1031,9 @@ function MainApp() {
           <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
             {isMemoOpen ? '닫기 ✕' : '메모 열기'}
           </button>
-          
           <button onClick={() => { setDictTab('abbr'); setIsDictModalOpen(true); }} className="px-3 py-1.5 bg-indigo-900/30 text-indigo-400 border border-indigo-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-indigo-900/50 transition-all shadow-md">
             ⚡ 약어 추가
           </button>
-
           <button onClick={toggleVoiceRecognition} className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${isListening ? 'bg-red-600/50 text-white border-red-500 animate-pulse' : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'}`}>
             {isListening ? '음성 인식 끄기' : '음성으로 입력'}
           </button>
@@ -1039,7 +1043,15 @@ function MainApp() {
         </div>
         {isMemoOpen && (
           <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
-             <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { statsRef.current.text = e.target.value; handleUpdateMemoBackground(activeCard.id, stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices))); }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all" autoFocus/>
+             {/* 💡 [수정] 메모 편집 시 기존 통계 데이터 파괴 현상 방지 */}
+             <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { 
+                 statsRef.current.text = e.target.value; 
+                 const exStats = getExtendedStats(activeCard.memo);
+                 exStats.text = e.target.value;
+                 exStats.filled = statsRef.current.filled;
+                 exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+                 handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats)); 
+             }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all" autoFocus/>
           </div>
         )}
       </div>
@@ -1163,6 +1175,10 @@ function MainApp() {
         .border-white\\/5, .border-white\\/10, .border-white\\/20, .border-white\\/30 { 
           border-color: #6b7280 !important; 
         }
+
+        /* 💡 화이트 모드 버튼 가독성 패치 */
+        .text-amber-100, .text-amber-200 { color: #b45309 !important; font-weight: 800; }
+        .text-teal-100, .text-teal-200 { color: #0f766e !important; font-weight: 800; }
 
         .text-teal-300, .text-teal-400, .text-teal-500 { color: #0f766e !important; font-weight: 800 !important; }
         .bg-teal-900\\/20, .bg-teal-900\\/30, .bg-teal-900\\/40, .bg-teal-950\\/20, .bg-teal-500\\/10, .bg-teal-500\\/20 { 
