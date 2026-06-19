@@ -1479,29 +1479,54 @@ def get_ranking():
         return jsonify({"error": "랭킹 조회 실패", "details": str(e)}), 500
 
 # ==========================================
-# 💡 [신규 추가] 잔액 보존 API
+# 💡 [신규 추가/수정] 잔액 및 진행상황 달력 보존 API
 # ==========================================
 @api_bp.route('/update-balance', methods=['POST'])
 def update_balance():
     try:
         data = request.json
         wallet_address = data.get('wallet_address')
-        balance = data.get('balance', 0)
+        balance = data.get('balance')
+        activity_log = data.get('activity_log')
+        claimed_rewards = data.get('claimed_rewards')
+        
         if not wallet_address: return jsonify({"error": "No wallet"}), 400
         
         conn = get_db_connection()
         cursor = conn.cursor()
+        
+        # 신규 컬럼 자동 생성 (기존 DB 안전 보존)
         try: cursor.execute("ALTER TABLE user_settings ADD COLUMN goal_balance INTEGER DEFAULT 0")
+        except: pass
+        try: cursor.execute("ALTER TABLE user_settings ADD COLUMN activity_log TEXT DEFAULT '{}'")
+        except: pass
+        try: cursor.execute("ALTER TABLE user_settings ADD COLUMN claimed_rewards TEXT DEFAULT '{}'")
         except: pass
         
         cursor.execute("SELECT 1 FROM user_settings WHERE wallet_address = ?", (wallet_address,))
         if cursor.fetchone():
-            cursor.execute("UPDATE user_settings SET goal_balance = ? WHERE wallet_address = ?", (balance, wallet_address))
+            updates = []
+            params = []
+            if balance is not None:
+                updates.append("goal_balance = ?")
+                params.append(balance)
+            if activity_log is not None:
+                updates.append("activity_log = ?")
+                params.append(json.dumps(activity_log))
+            if claimed_rewards is not None:
+                updates.append("claimed_rewards = ?")
+                params.append(json.dumps(claimed_rewards))
+            
+            if updates:
+                params.append(wallet_address)
+                cursor.execute(f"UPDATE user_settings SET {', '.join(updates)} WHERE wallet_address = ?", params)
         else:
-            cursor.execute("INSERT INTO user_settings (wallet_address, goal_balance) VALUES (?, ?)", (wallet_address, balance))
+            cursor.execute("INSERT INTO user_settings (wallet_address, goal_balance, activity_log, claimed_rewards) VALUES (?, ?, ?, ?)", 
+                (wallet_address, balance or 0, json.dumps(activity_log or {}), json.dumps(claimed_rewards or {})))
+            
         conn.commit()
         conn.close()
-        return jsonify({"message": "잔액 업데이트 완료", "balance": balance}), 200
+        return jsonify({"message": "잔액/진행상황 업데이트 완료", "balance": balance}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1512,12 +1537,16 @@ def get_balance():
         conn = get_db_connection()
         cursor = conn.cursor()
         try:
-            cursor.execute("SELECT goal_balance FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+            cursor.execute("SELECT goal_balance, activity_log, claimed_rewards FROM user_settings WHERE wallet_address = ?", (wallet_address,))
             row = cursor.fetchone()
-            balance = row[0] if row else 0
+            balance = row[0] if row and row[0] is not None else 0
+            activity_log = json.loads(row[1]) if row and row[1] else {}
+            claimed_rewards = json.loads(row[2]) if row and row[2] else {}
         except:
             balance = 0
+            activity_log = {}
+            claimed_rewards = {}
         conn.close()
-        return jsonify({"balance": balance}), 200
+        return jsonify({"balance": balance, "activity_log": activity_log, "claimed_rewards": claimed_rewards}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
