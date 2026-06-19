@@ -673,35 +673,40 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
 
             return (
               <div className="flex flex-col gap-4">
-                {/* 현재 열려있는 수정창이 있다면 최상단에 100% 가로폭으로 띄워줍니다. */}
                 {editingCard && (
                   <div className="w-full mb-2">
                     {renderCardNode(editingCard, true)}
                   </div>
                 )}
                 
-                {/* 💡 [신규 추가] 3개의 스크롤 영역으로 완전 분리된 독립 컨테이너 */}
+                {/* 💡 [수정] 개별 스크롤을 제거하고 전체 페이지가 스크롤되도록 수정 */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-2 sm:gap-4 items-start w-full">
                   
                   {/* 1열: 법 / 정관 */}
-                  <div className="flex flex-col max-h-[70vh] overflow-y-auto custom-scrollbar pr-1 w-full bg-white/5 rounded-sm p-1.5 border border-white/5">
+                  <div className="flex flex-col w-full bg-white/5 rounded-sm p-1.5 border border-white/5 h-full">
                     <div className="text-[10px] text-white/30 font-bold mb-2 text-center tracking-widest border-b border-white/5 pb-1">법 / 정관</div>
-                    {col1Cards.filter(c => c.id !== editingId).map(c => renderCardNode(c))}
-                    {col1Cards.length === 0 && <div className="text-center text-white/20 text-[10px] py-4">카드가 없습니다.</div>}
+                    <div className="flex flex-col gap-2">
+                      {col1Cards.filter(c => c.id !== editingId).map(c => renderCardNode(c))}
+                      {col1Cards.length === 0 && <div className="text-center text-white/20 text-[10px] py-4">카드가 없습니다.</div>}
+                    </div>
                   </div>
                   
                   {/* 2열: 시행령 */}
-                  <div className="flex flex-col max-h-[70vh] overflow-y-auto custom-scrollbar pr-1 w-full bg-white/5 rounded-sm p-1.5 border border-white/5">
+                  <div className="flex flex-col w-full bg-white/5 rounded-sm p-1.5 border border-white/5 h-full">
                     <div className="text-[10px] text-white/30 font-bold mb-2 text-center tracking-widest border-b border-white/5 pb-1">시행령</div>
-                    {col2Cards.filter(c => c.id !== editingId).map(c => renderCardNode(c))}
-                    {col2Cards.length === 0 && <div className="text-center text-white/20 text-[10px] py-4">카드가 없습니다.</div>}
+                    <div className="flex flex-col gap-2">
+                      {col2Cards.filter(c => c.id !== editingId).map(c => renderCardNode(c))}
+                      {col2Cards.length === 0 && <div className="text-center text-white/20 text-[10px] py-4">카드가 없습니다.</div>}
+                    </div>
                   </div>
                   
                   {/* 3열: 시행규칙 / 규정 */}
-                  <div className="flex flex-col max-h-[70vh] overflow-y-auto custom-scrollbar pr-1 w-full bg-white/5 rounded-sm p-1.5 border border-white/5">
+                  <div className="flex flex-col w-full bg-white/5 rounded-sm p-1.5 border border-white/5 h-full">
                     <div className="text-[10px] text-white/30 font-bold mb-2 text-center tracking-widest border-b border-white/5 pb-1">시행규칙 / 규정</div>
-                    {col3Cards.filter(c => c.id !== editingId).map(c => renderCardNode(c))}
-                    {col3Cards.length === 0 && <div className="text-center text-white/20 text-[10px] py-4">카드가 없습니다.</div>}
+                    <div className="flex flex-col gap-2">
+                      {col3Cards.filter(c => c.id !== editingId).map(c => renderCardNode(c))}
+                      {col3Cards.length === 0 && <div className="text-center text-white/20 text-[10px] py-4">카드가 없습니다.</div>}
+                    </div>
                   </div>
 
                 </div>
