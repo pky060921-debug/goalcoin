@@ -224,6 +224,9 @@ function MainApp() {
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
   
   const [elapsed, setElapsed] = useState<number>(0);
+  // 💡 [핵심 최적화] 메모리 상의 스탑워치 값을 추적하는 Ref 추가 (불필요한 리렌더링 및 디스크 접근 방지)
+  const elapsedRef = useRef(0);
+  
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
@@ -489,6 +492,11 @@ function MainApp() {
             body: JSON.stringify({ wallet_address: safeAddress, card_id: currentCard.id, card_content: currentCard.content, answer_text: currentCard.answer_text || "", folder_name: currentCard.folder_name, memo: JSON.stringify(exStats) })
           }).catch(()=>{});
         }
+        
+        // 💡 [백그라운드 이동 시 타이머 보존]
+        if (currentCard) {
+          localStorage.setItem(`blankd_elapsed_${currentCard.id}`, elapsedRef.current.toString());
+        }
         flushQueue(); 
       }
     };
@@ -655,8 +663,10 @@ function MainApp() {
       const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
       
+      // 💡 [핵심 버그 수정 1] 카드를 열 때 저장된 스탑워치(elapsed)를 불러옵니다.
       const savedElapsed = parseFloat(localStorage.getItem(`blankd_elapsed_${activeCard.id}`) || '0');
       setElapsed(savedElapsed);
+      elapsedRef.current = savedElapsed;
 
       setIsMemoOpen(false);
       setIsFrozen(false); setHintLetter(null); 
@@ -677,11 +687,12 @@ function MainApp() {
   useEffect(() => {
     if (activeCard && currentBlankIdx < blanks.length) {
       const interval = setInterval(() => {
+        // 💡 [핵심 최적화 & 버그 수정 3] 약어 모달이 열려있거나 프리즈 상태면 타이머 정지 (디스크 접근 X)
         if (isFrozen || isDictModalOpen) return; 
         
         setElapsed(prev => {
           const next = prev + 0.1;
-          localStorage.setItem(`blankd_elapsed_${activeCard.id}`, next.toString());
+          elapsedRef.current = next; // Ref 업데이트만 수행 (디스크 쓰기 삭제)
 
           if (next >= totalTimeLimit) {
             clearInterval(interval);
@@ -697,7 +708,7 @@ function MainApp() {
   const finishCard = async (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
-    const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = elapsed;
+    const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = elapsedRef.current;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     
     const correctCount = Math.max(0, blanks.length - wrongArr.length);
@@ -773,7 +784,8 @@ function MainApp() {
     const nextCard = folderCards[currentIdx + 1] || null;
 
     localStorage.removeItem(`blankd_progress_${currentId}`);
-    localStorage.removeItem(`blankd_elapsed_${currentId}`);
+    // 💡 카드 완료 시 타이머 기록 완전히 삭제 (리셋)
+    localStorage.removeItem(`blankd_elapsed_${currentId}`); 
 
     setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
@@ -810,6 +822,9 @@ function MainApp() {
     
     const newMemo = JSON.stringify(exStats);
     setActiveCard(null);
+
+    // 💡 [핵심 최적화 1] 창을 직접 닫을 때만 디스크(localStorage)에 현재 스탑워치 시간 1번 쓰기
+    localStorage.setItem(`blankd_elapsed_${currentId}`, elapsedRef.current.toString());
 
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
@@ -1111,8 +1126,8 @@ function MainApp() {
           <button onClick={() => setDictTab('include')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'include' ? 'text-teal-400 border-b-2 border-teal-400' : 'text-white/40 hover:text-white/70'}`}>✅ 필수 포함</button>
           <button onClick={() => setDictTab('stop')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'stop' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-white/40 hover:text-white/70'}`}>❌ 제외 단어</button>
         </div>
-        {/* 💡 [사이드바 닫기 버튼] */}
-        <button onClick={() => isMobile ? setIsDictModalOpen(false) : setIsSidebarOpen(false)} className="text-white/40 hover:text-white ml-6 text-lg font-bold">✕</button>
+        {/* 💡 [수정] PC/모바일 환경 상관없이 X 버튼 누르면 모달을 닫음 */}
+        <button onClick={() => setIsDictModalOpen(false)} className="text-white/40 hover:text-white ml-6 text-lg font-bold">✕</button>
       </div>
       
       <div className="flex gap-2 mb-5 shrink-0">
@@ -1237,8 +1252,8 @@ function MainApp() {
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
       <style>{getThemeCSS()}</style>
-      <header className="border-b border-white/10 bg-[#08080a] py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
-        <div className="w-full mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3 px-2 sm:px-4 md:px-8">
+      <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
+        <div className="max-w-[1600px] mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex items-center justify-between w-full md:w-auto">
             <button onClick={() => { const lastTab = localStorage.getItem('blankd_active_tab') || 'progress'; setActiveTab(lastTab); }} className="text-xl sm:text-2xl font-bold tracking-widest text-current shrink-0 hover:text-teal-400 transition-colors">
               BlankD
@@ -1302,8 +1317,8 @@ function MainApp() {
       </header>
 
       {isLoggedIn && (
-        <nav className="border-b border-white/5 bg-black/40 py-1.5 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
-          <div className="w-full mx-auto flex items-center justify-start gap-1 sm:gap-2 px-2 sm:px-4 md:px-8">
+        <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
+          <div className="max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2">
             {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '수집' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
             ))}
@@ -1318,7 +1333,7 @@ function MainApp() {
           <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-[#111827] text-white text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
         </main>
       ) : (
-        <div className="w-full max-w-none mx-auto flex gap-4 sm:gap-6 px-2 sm:px-4 lg:px-8 items-start pb-10 transition-all duration-300">
+        <div className="max-w-[1600px] mx-auto w-full flex gap-4 sm:gap-6 px-4 lg:px-6 items-start pb-10 transition-all duration-300">
           <main className="flex-1 w-full min-w-0 transition-all duration-300">
             <ErrorBoundary fallbackLog={addLog}>
               {memoizedTabs}
@@ -1359,6 +1374,7 @@ function MainApp() {
         </button>
       </div>
 
+      {/* 💡 [핵심 버그 수정 2] 약어 모달이 최상단에 뜨도록 보장 (PC 숨김 방지) */}
       {isDictModalOpen && (
         <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] relative">
