@@ -611,12 +611,18 @@ function MainApp() {
     const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     const isCorrect = wrongArr.length === 0;
 
-    // 💡 [게임 보상 지급 로직] 완료 시 코인 획득
-    let earnedPoints = 10; // 기본 클리어 보상
-    if (isCorrect) earnedPoints += 5; // 퍼펙트 클리어 추가 보상
-    if (elapsed < totalTimeLimit * 0.5) earnedPoints += 5; // 타임어택 추가 보상
+    // 💡 [수정] 맞춘 빈칸 1개당 5P 지급 및 달력 통계 저장
+    const correctCount = blanks.length - wrongArr.length;
+    const earnedPoints = correctCount * 5; 
     
     setGoalBalance(prev => prev + earnedPoints);
+
+    // 진행상황 달력용 데이터 로컬 기록
+    const todayStr = new Date().toISOString().split('T')[0];
+    const logStr = localStorage.getItem('blankd_activity_log');
+    const activityLog = logStr ? JSON.parse(logStr) : {};
+    activityLog[todayStr] = (activityLog[todayStr] || 0) + correctCount;
+    localStorage.setItem('blankd_activity_log', JSON.stringify(activityLog));
 
     let daysInterval = customDays;
     if (daysInterval === undefined) {
