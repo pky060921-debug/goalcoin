@@ -460,10 +460,6 @@ function MainApp() {
       if (res.ok) {
         localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
         addLog(`✅ 백그라운드 동기화 완료`);
-        const serverBalance = await fetch(`https://api.blankd.top/api/get-balance?wallet_address=${safeAddress}&t=${Date.now()}`).then(r=>r.json()).then(d=>d.balance||0).catch(()=>goalBalance);
-        const localBalance = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
-        setGoalBalance(Math.max(serverBalance, localBalance));
-        setIsOffline(false);
       }
     } catch (e) { 
       setIsOffline(true);
@@ -595,7 +591,9 @@ function MainApp() {
       const target = savedCards.find((c:any) => c.id === id);
       if (target) {
         fetch("https://api.blankd.top/api/save-card", {
-          method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+          method: "POST", 
+          keepalive: true, 
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: id, card_content: target.content, answer_text: target.answer_text || "", folder_name: target.folder_name, memo })
         }).catch(() => {});
       }
@@ -711,7 +709,8 @@ function MainApp() {
 
     const newMemo = JSON.stringify(exStats);
 
-    const earnedPoints = correctCount * 5; 
+    // 💡 [수정] 빈칸 1개당 1포인트
+    const earnedPoints = correctCount * 1; 
     handleUpdateBalance(earnedPoints);
 
     const todayStr = new Date().toISOString().split('T')[0];
@@ -779,7 +778,9 @@ function MainApp() {
       addLog(`🎉 학습 완료! 기록 갱신 됨. +${earnedPoints} Point 획득`);
       try {
         await fetch("https://api.blankd.top/api/save-card", {
-          method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+          method: "POST", 
+          keepalive: true, 
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
         });
       } catch(e) {}
@@ -806,7 +807,9 @@ function MainApp() {
     if (!isOffline) {
       try {
         await fetch("https://api.blankd.top/api/save-card", {
-          method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+          method: "POST", 
+          keepalive: true, 
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
         });
       } catch(e) {}
@@ -825,9 +828,16 @@ function MainApp() {
     const newMemo = JSON.stringify(exStats);
 
     fetch("https://api.blankd.top/api/save-card", {
-      method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+      method: "POST",
+      keepalive: true, 
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: card.answer_text || "", folder_name: card.folder_name, memo: newMemo
+        wallet_address: safeAddress,
+        card_id: card.id,
+        card_content: card.content,
+        answer_text: card.answer_text || "",
+        folder_name: card.folder_name,
+        memo: newMemo
       })
     }).catch(()=>{});
   };
@@ -867,7 +877,9 @@ function MainApp() {
         });
       }, 150);
     } else { 
-      setInputStatus('wrong'); statsRef.current.wrongIndices.add(currentBlankIdx); syncProgressToServer(); 
+      setInputStatus('wrong'); 
+      statsRef.current.wrongIndices.add(currentBlankIdx); 
+      syncProgressToServer(); 
       setTimeout(() => setInputStatus('idle'), 500);
     }
   };
@@ -1059,9 +1071,8 @@ function MainApp() {
         <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
           <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
         </div>
-        {/* 💡 [수집 탭] 이름 변경 연동 완료 */}
         <div className={activeTab === 'record' ? 'block' : 'hidden'}>
-          <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} />
+          <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} colCount={colCount} />
         </div>
         <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
           <ExamTab walletAddress={safeAddress} address={safeAddress} />
