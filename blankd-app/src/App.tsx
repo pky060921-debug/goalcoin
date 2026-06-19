@@ -287,10 +287,10 @@ function MainApp() {
   const loadAllData = async () => {
     if (!safeAddress) return;
     try {
-      const [catRes, cardRes, serverBalance, dictRes] = await Promise.all([
+     const [catRes, cardRes, balance, dictRes] = await Promise.all([
         fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => { if(!r.ok) throw new Error(); return r.json(); }),
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => { if(!r.ok) throw new Error(); return r.json(); }),
-        api.getGoalCoinBalance(safeAddress).catch(() => 0),
+        api.getGoalCoinBalance(safeAddress).catch(() => 0), // ❌ 이 부분이 문제입니다.
         api.getGlobalDict(safeAddress).catch(() => ({ stopwords: [], inclusions: [], abbrs: {} }))
       ]);
 
