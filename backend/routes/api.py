@@ -1520,3 +1520,47 @@ def get_ranking():
         import traceback
         traceback.print_exc()
         return jsonify({"error": "랭킹 조회 실패", "details": str(e)}), 500
+
+# ==========================================
+# 💡 [신규] 포인트(Goal Balance) 영구 저장 및 조회 API
+# ==========================================
+@api_bp.route('/update-balance', methods=['POST'])
+def update_balance():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        balance = data.get('balance', 0)
+        if not wallet_address: return jsonify({"error": "No wallet"}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try: cursor.execute("ALTER TABLE user_settings ADD COLUMN goal_balance INTEGER DEFAULT 0")
+        except: pass
+        
+        cursor.execute("SELECT 1 FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+        if cursor.fetchone():
+            cursor.execute("UPDATE user_settings SET goal_balance = ? WHERE wallet_address = ?", (balance, wallet_address))
+        else:
+            cursor.execute("INSERT INTO user_settings (wallet_address, goal_balance) VALUES (?, ?)", (wallet_address, balance))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "잔액 업데이트 완료", "balance": balance}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/get-balance', methods=['GET'])
+def get_balance():
+    try:
+        wallet_address = request.args.get('wallet_address')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT goal_balance FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+            row = cursor.fetchone()
+            balance = row[0] if row else 0
+        except:
+            balance = 0
+        conn.close()
+        return jsonify({"balance": balance}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
