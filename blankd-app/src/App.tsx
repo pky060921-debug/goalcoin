@@ -222,7 +222,6 @@ function MainApp() {
   const [elapsed, setElapsed] = useState<number>(0);
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
-  // 💡 [진행상황 DB화] 메인 앱에서 상태 관리
   const [goalBalance, setGoalBalance] = useState<number>(0);
   const [activityLog, setActivityLog] = useState<Record<string, number>>({});
   const [claimedRewards, setClaimedRewards] = useState<Record<string, boolean>>({});
@@ -315,7 +314,6 @@ function MainApp() {
         }
       } catch (queueMergeError: any) {}
 
-      // 💡 [진행상황 서버 연동 병합] 서버와 로컬 중 더 높은 값을 채택
       const serverBalance = userData.balance || 0;
       const serverActivityLog = userData.activity_log || {};
       const serverClaimedRewards = userData.claimed_rewards || {};
@@ -332,7 +330,6 @@ function MainApp() {
       });
       const mergedClaims = { ...serverClaimedRewards, ...localClaimedRewards };
 
-      // 서버에 누락된 부분이 있다면 강제 업데이트
       if (actualBalance > serverBalance || JSON.stringify(mergedActivity) !== JSON.stringify(serverActivityLog) || !isOffline) {
         try {
           fetch("https://api.blankd.top/api/update-balance", {
@@ -463,6 +460,10 @@ function MainApp() {
       if (res.ok) {
         localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
         addLog(`✅ 백그라운드 동기화 완료`);
+        const serverBalance = await fetch(`https://api.blankd.top/api/get-balance?wallet_address=${safeAddress}&t=${Date.now()}`).then(r=>r.json()).then(d=>d.balance||0).catch(()=>goalBalance);
+        const localBalance = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
+        setGoalBalance(Math.max(serverBalance, localBalance));
+        setIsOffline(false);
       }
     } catch (e) { 
       setIsOffline(true);
@@ -472,7 +473,6 @@ function MainApp() {
   useEffect(() => {
     if (!safeAddress) return;
     const interval = setInterval(flushQueue, 30000); 
-    
     const handleVisibility = () => { 
       if(document.visibilityState === 'hidden' || document.visibilityState === 'unloaded') {
         const currentCard = activeCardRef.current;
@@ -492,15 +492,9 @@ function MainApp() {
         flushQueue(); 
       }
     };
-    
     document.addEventListener('visibilitychange', handleVisibility);
     window.addEventListener('pagehide', handleVisibility);
-
-    return () => { 
-      clearInterval(interval); 
-      document.removeEventListener('visibilitychange', handleVisibility); 
-      window.removeEventListener('pagehide', handleVisibility);
-    };
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', handleVisibility); window.removeEventListener('pagehide', handleVisibility); };
   }, [safeAddress, isOffline]);
 
   const uploadLaw = async () => {
@@ -601,9 +595,7 @@ function MainApp() {
       const target = savedCards.find((c:any) => c.id === id);
       if (target) {
         fetch("https://api.blankd.top/api/save-card", {
-          method: "POST", 
-          keepalive: true, 
-          headers: { "Content-Type": "application/json" },
+          method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: id, card_content: target.content, answer_text: target.answer_text || "", folder_name: target.folder_name, memo })
         }).catch(() => {});
       }
@@ -722,7 +714,6 @@ function MainApp() {
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
 
-    // 💡 [진행상황 서버 연동 로직] 달력 기록을 즉각 갱신하고 서버에 보냅니다.
     const todayStr = new Date().toISOString().split('T')[0];
     setActivityLog(prev => {
       const next = { ...prev };
@@ -788,9 +779,7 @@ function MainApp() {
       addLog(`🎉 학습 완료! 기록 갱신 됨. +${earnedPoints} Point 획득`);
       try {
         await fetch("https://api.blankd.top/api/save-card", {
-          method: "POST", 
-          keepalive: true, 
-          headers: { "Content-Type": "application/json" },
+          method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
         });
       } catch(e) {}
@@ -817,9 +806,7 @@ function MainApp() {
     if (!isOffline) {
       try {
         await fetch("https://api.blankd.top/api/save-card", {
-          method: "POST", 
-          keepalive: true, 
-          headers: { "Content-Type": "application/json" },
+          method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
         });
       } catch(e) {}
@@ -838,16 +825,9 @@ function MainApp() {
     const newMemo = JSON.stringify(exStats);
 
     fetch("https://api.blankd.top/api/save-card", {
-      method: "POST",
-      keepalive: true, 
-      headers: { "Content-Type": "application/json" },
+      method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        wallet_address: safeAddress,
-        card_id: card.id,
-        card_content: card.content,
-        answer_text: card.answer_text || "",
-        folder_name: card.folder_name,
-        memo: newMemo
+        wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: card.answer_text || "", folder_name: card.folder_name, memo: newMemo
       })
     }).catch(()=>{});
   };
@@ -887,9 +867,7 @@ function MainApp() {
         });
       }, 150);
     } else { 
-      setInputStatus('wrong'); 
-      statsRef.current.wrongIndices.add(currentBlankIdx); 
-      syncProgressToServer(); 
+      setInputStatus('wrong'); statsRef.current.wrongIndices.add(currentBlankIdx); syncProgressToServer(); 
       setTimeout(() => setInputStatus('idle'), 500);
     }
   };
@@ -1036,11 +1014,9 @@ function MainApp() {
           <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
             {isMemoOpen ? '닫기 ✕' : '메모 열기'}
           </button>
-          
           <button onClick={() => { setDictTab('abbr'); setIsDictModalOpen(true); }} className="px-3 py-1.5 bg-indigo-900/30 text-indigo-400 border border-indigo-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-indigo-900/50 transition-all shadow-md">
             ⚡ 약어 추가
           </button>
-
           <button onClick={toggleVoiceRecognition} className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${isListening ? 'bg-red-600/50 text-white border-red-500 animate-pulse' : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'}`}>
             {isListening ? '음성 인식 끄기' : '음성으로 입력'}
           </button>
@@ -1074,22 +1050,16 @@ function MainApp() {
   const memoizedTabs = useMemo(() => {
     return (
       <>
-        {/* 💡 DashboardTab에 activityLog와 claimedRewards 상태 권한을 주입합니다. */}
         <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
-          <DashboardTab 
-            categories={categories} savedCards={savedCards} 
-            setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} 
-            goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} 
-            activityLog={activityLog} claimedRewards={claimedRewards} 
-            setClaimedRewards={setClaimedRewards} safeAddress={safeAddress} 
-          />
+          <DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} activityLog={activityLog} claimedRewards={claimedRewards} setClaimedRewards={setClaimedRewards} safeAddress={safeAddress} />
         </div>
         <div className={activeTab === 'create' ? 'block' : 'hidden'}>
-          <CraftTab categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} expandedId={expandedId} setExpandedId={setExpandedId} handleDeleteCategory={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} globalDict={globalDict} saveGlobalDict={saveGlobalDict} setCategories={setCategories} />
+          <CraftTab categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} expandedId={expandedId} setExpandedId={setExpandedId} handleDeleteCategory={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} globalDict={globalDict} saveGlobalDict={saveGlobalDict} />
         </div>
         <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
           <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
         </div>
+        {/* 💡 [수집 탭] 이름 변경 연동 완료 */}
         <div className={activeTab === 'record' ? 'block' : 'hidden'}>
           <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} />
         </div>
@@ -1233,8 +1203,6 @@ function MainApp() {
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
       <style>{getThemeCSS()}</style>
-      
-      {/* 💡 [헤더 폭 확장] max-w-6xl -> max-w-[1600px] 로 늘려서 메인 콘텐츠와 일치시켰습니다. */}
       <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
         <div className="max-w-[1600px] mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div className="flex items-center justify-between w-full md:w-auto">
@@ -1288,9 +1256,7 @@ function MainApp() {
                   try {
                     addLog("🔄 로그아웃 전 데이터 안전 동기화 중...");
                     await flushQueue();
-                  } catch(e: any) {
-                    console.error("로그아웃 동기화 예외 진단:", e.message);
-                  }
+                  } catch(e: any) {}
                   await enokiFlow.logout(); 
                   localStorage.clear(); 
                   window.location.reload(); 
@@ -1304,7 +1270,7 @@ function MainApp() {
       {isLoggedIn && (
         <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2">
-            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
+            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '수집' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
             ))}
           </div>
