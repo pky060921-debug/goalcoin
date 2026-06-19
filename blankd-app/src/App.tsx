@@ -198,7 +198,6 @@ function MainApp() {
     localStorage.setItem('blankd_active_tab', activeTab);
   }, [activeTab]);
 
-  // 💡 [신규] 사이드바 토글 상태
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   const [categories, setCategories] = useState<any[]>([]);
@@ -1092,7 +1091,6 @@ function MainApp() {
           <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
         </div>
         <div className={activeTab === 'record' ? 'block' : 'hidden'}>
-          {/* 💡 [수집 탭] 이름 변경 및 사전 연동 */}
           <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} colCount={colCount} globalDict={globalDict} />
         </div>
         <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
@@ -1239,8 +1237,8 @@ function MainApp() {
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
       <style>{getThemeCSS()}</style>
-      <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
-        <div className="max-w-[1600px] mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
+      <header className="border-b border-white/10 bg-[#08080a] py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
+        <div className="w-full mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3 px-2 sm:px-4 md:px-8">
           <div className="flex items-center justify-between w-full md:w-auto">
             <button onClick={() => { const lastTab = localStorage.getItem('blankd_active_tab') || 'progress'; setActiveTab(lastTab); }} className="text-xl sm:text-2xl font-bold tracking-widest text-current shrink-0 hover:text-teal-400 transition-colors">
               BlankD
@@ -1304,8 +1302,8 @@ function MainApp() {
       </header>
 
       {isLoggedIn && (
-        <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
-          <div className="max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2">
+        <nav className="border-b border-white/5 bg-black/40 py-1.5 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
+          <div className="w-full mx-auto flex items-center justify-start gap-1 sm:gap-2 px-2 sm:px-4 md:px-8">
             {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '수집' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
             ))}
@@ -1320,14 +1318,13 @@ function MainApp() {
           <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-[#111827] text-white text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
         </main>
       ) : (
-        <div className="max-w-[1600px] mx-auto w-full flex gap-4 sm:gap-6 px-4 lg:px-6 items-start pb-10 transition-all duration-300">
+        <div className="w-full max-w-none mx-auto flex gap-4 sm:gap-6 px-2 sm:px-4 lg:px-8 items-start pb-10 transition-all duration-300">
           <main className="flex-1 w-full min-w-0 transition-all duration-300">
             <ErrorBoundary fallbackLog={addLog}>
               {memoizedTabs}
             </ErrorBoundary>
           </main>
           
-          {/* 💡 [사이드바 접기/펴기 로직 적용] */}
           {isSidebarOpen ? (
             <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[320px] xl:w-[400px] transition-all duration-300 animate-in slide-in-from-right-8">
               {renderDictionaryUI(false)}
