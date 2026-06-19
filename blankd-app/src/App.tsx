@@ -217,6 +217,7 @@ function MainApp() {
       if (!isOffline && safeAddress) {
         fetch("https://api.blankd.top/api/update-balance", {
           method: "POST",
+          keepalive: true,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, balance: newBalance })
         }).catch(e => console.error("포인트 동기화 실패:", e));
@@ -404,7 +405,9 @@ function MainApp() {
       }
 
       const res = await fetch("https://api.blankd.top/api/sync-batch", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", 
+        keepalive: true,
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ wallet_address: safeAddress, memos: q.memos, answers: q.answers })
       });
 
@@ -500,7 +503,9 @@ function MainApp() {
       const initialMemo = stringifyCardStats(memo, 0, []);
       
       const res = await fetch("https://api.blankd.top/api/save-card", { 
-        method: "POST", headers: { "Content-Type": "application/json" }, 
+        method: "POST", 
+        keepalive: true,
+        headers: { "Content-Type": "application/json" }, 
         body: JSON.stringify({ 
             wallet_address: safeAddress, card_id: targetCardId, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo 
         }) 
