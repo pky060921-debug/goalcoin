@@ -958,20 +958,143 @@ def upload_pdf():
     threading.Thread(target=process_file).start()
     return jsonify({"message": f"{folder_name} 분석 시작", "task_id": task_id})
     
+# ==========================================
+# 💡 1. /get-categories 교체 (DB 정렬 컬럼 충돌 방어)
+# ==========================================
 @api_bp.route('/get-categories')
 def get_categories():
     try:
         wallet_address = request.args.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
-        # 💡 [정렬 기준 수정] sort_order를 최우선 기준으로 정렬합니다.
-        cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ? ORDER BY sort_order ASC, id ASC", (wallet_address,))
+        try:
+            cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ? ORDER BY sort_order ASC, id ASC", (wallet_address,))
+        except sqlite3.OperationalError: # 컬럼이 없어도 에러가 나지 않도록 방어
+            cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ? ORDER BY id ASC", (wallet_address,))
         cats = [{"id": r[0], "title": r[1], "content": r[2], "folder_name": r[3]} for r in cursor.fetchall()]
         conn.close()
         return jsonify({"categories": cats})
     except Exception as e:
+        import traceback; traceback.print_exc()
         return jsonify({"error": "조회 실패"}), 500
 
+# ==========================================
+# 💡 2. /my-cards 교체 (JSON 파싱 에러 완벽 방어)
+# ==========================================
+@api_bp.route('/my-cards')
+def get_my_cards():
+    try:
+        wallet_address = request.args.get('wallet_address')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo FROM cards WHERE wallet_address = ? ORDER BY sort_order ASC, id ASC", (wallet_address,))
+        except sqlite3.OperationalError:
+            cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo FROM cards WHERE wallet_address = ? ORDER BY id ASC", (wallet_address,))
+        # options_json이 비어있을 때 터지는 버그(r[3] or "[]") 수정
+        cards = [{"id": r[0], "content": r[1], "answer": r[2], "options": json.loads(r[3] or "[]"), "level": r[4], "next_review_time": r[5], "status": r[6], "best_time": r[7], "folder_name": r[8], "memo": r[9] or ""} for r in cursor.fetchall()]
+        conn.close()
+        return jsonify({"cards": cards})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": "조회 실패"}), 500
+
+# ==========================================
+# 💡 3. /sync-batch 교체 (루프 강제 종료 버그 수복)
+# ==========================================
+@api_bp.route('/sync-batch', methods=['POST'])
+def sync_batch():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        memos = data.get('memos', [])
+        answers = data.get('answers', [])
+        
+        if not wallet_address: return jsonify({"error": "인증 정보 없음"}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        for m in memos:
+            cursor.execute("UPDATE cards SET memo = ? WHERE id = ? AND wallet_address = ?", (m.get('memo', ''), m.get('id'), wallet_address))
+
+        reward_coins = 0 
+
+        for a in answers:
+            card_id = a.get('card_id')
+            is_correct = a.get('is_correct')
+            clear_time = float(a.get('clear_time', 999.0))
+
+            cursor.execute("SELECT level, best_time FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
+            row = cursor.fetchone()
+        
+            if row:
+                current_lv, best_time = row[0], row[1]
+                if is_correct:
+                    new_lv = min(int(current_lv) + 1, 50)
+                    try: best_time_float = float(best_time) if best_time is not None else float('inf')
+                    except: best_time_float = float('inf')
+                    new_best = clear_time if best_time_float == float('inf') else min(best_time_float, clear_time)
+                    cursor.execute("UPDATE cards SET level = ?, next_review_time = ?, status = 'OWNED', best_time = ? WHERE id = ?", (new_lv, get_next_review_time(new_lv), new_best, card_id))
+                    reward_coins += 10 
+                else:
+                    cursor.execute("UPDATE cards SET level = 0, next_review_time = ?, status = 'AT_RISK' WHERE id = ?", (get_next_review_time(0), card_id))
+
+        conn.commit()
+        conn.close() # <-- 루프 밖으로 안전하게 이동됨
+
+        if reward_coins > 0:
+            threading.Thread(target=mint_goal_coin_to_user, args=(wallet_address, reward_coins)).start()
+
+        return jsonify({"message": f"동기화 완료"}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({"error": "배치 동기화 실패"}), 500
+
+# ==========================================
+# 💡 4. [신규 추가] api.py 파일 맨 밑에 그대로 추가해 주세요.
+# ==========================================
+@api_bp.route('/update-balance', methods=['POST'])
+def update_balance():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        balance = data.get('balance', 0)
+        if not wallet_address: return jsonify({"error": "No wallet"}), 400
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try: cursor.execute("ALTER TABLE user_settings ADD COLUMN goal_balance INTEGER DEFAULT 0")
+        except: pass
+        
+        cursor.execute("SELECT 1 FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+        if cursor.fetchone():
+            cursor.execute("UPDATE user_settings SET goal_balance = ? WHERE wallet_address = ?", (balance, wallet_address))
+        else:
+            cursor.execute("INSERT INTO user_settings (wallet_address, goal_balance) VALUES (?, ?)", (wallet_address, balance))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "잔액 업데이트 완료", "balance": balance}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/get-balance', methods=['GET'])
+def get_balance():
+    try:
+        wallet_address = request.args.get('wallet_address')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT goal_balance FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+            row = cursor.fetchone()
+            balance = row[0] if row else 0
+        except:
+            balance = 0
+        conn.close()
+        return jsonify({"balance": balance}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+        
 @api_bp.route('/split-category', methods=['POST'])
 def split_category():
     try:
