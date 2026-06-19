@@ -13,8 +13,7 @@ export const DashboardTab = ({
     return saved ? parseInt(saved, 10) : 30;
   });
 
-  // 💡 월 1회 변경 제한 로직
-  const currentMonthStr = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
+  const currentMonthStr = new Date().toISOString().slice(0, 7); 
   const [lastModifiedMonth, setLastModifiedMonth] = useState(() => {
     return localStorage.getItem(`blankd_cycle_modified_month_${safeAddress}`) || '';
   });
