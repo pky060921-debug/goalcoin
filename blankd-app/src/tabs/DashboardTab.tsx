@@ -1,17 +1,40 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { parseCardStats } from '../utils/constants';
 
-export const DashboardTab = ({ setActiveTab, goalBalance, setGoalBalance }: any) => {
+export const DashboardTab = ({ categories, savedCards, setActiveTab, setExpandedId, setActiveCard, goalBalance, setGoalBalance }: any) => {
   const [activityLog, setActivityLog] = useState<Record<string, number>>({});
   const [currentDate, setCurrentDate] = useState(new Date());
   const [claimedRewards, setClaimedRewards] = useState<Record<string, boolean>>({});
 
-  // 💡 앱 진입 시 로컬 스토리지에서 달력 기록 및 보상 수령 내역 불러오기
+  // 사용자가 설정한 전체 마스터 주기 (기본값 30일)
+  const [targetCycle, setTargetCycle] = useState<number | string>(() => {
+    const saved = localStorage.getItem('blankd_target_cycle');
+    return saved ? parseInt(saved, 10) : 30;
+  });
+
   useEffect(() => {
     const log = JSON.parse(localStorage.getItem('blankd_activity_log') || '{}');
     setActivityLog(log);
     const claimed = JSON.parse(localStorage.getItem('blankd_claimed_rewards') || '{}');
     setClaimedRewards(claimed);
-  }, [goalBalance]); // 잔액이 바뀔 때마다(카드를 풀 때마다) 최신화
+  }, [goalBalance]);
+
+  const handleCycleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = parseInt(e.target.value, 10);
+    if (!isNaN(val) && val > 0) {
+        setTargetCycle(val);
+        localStorage.setItem('blankd_target_cycle', val.toString());
+    } else if (e.target.value === '') {
+        setTargetCycle(''); // 입력 중 빈칸 허용
+    }
+  };
+
+  const handleCycleBlur = () => {
+    if (targetCycle === '' || Number(targetCycle) < 1) {
+        setTargetCycle(30);
+        localStorage.setItem('blankd_target_cycle', '30');
+    }
+  };
 
   const saveClaim = (key: string, points: number) => {
     const next = { ...claimedRewards, [key]: true };
@@ -27,7 +50,35 @@ export const DashboardTab = ({ setActiveTab, goalBalance, setGoalBalance }: any)
     setCurrentDate(newDate);
   };
 
-  // 💡 통계 계산 로직 (일간, 주간, 월간)
+  // 💡 전체 빈칸 스캔 및 통계 계산
+  const stats = useMemo(() => {
+    let total = 0;
+    let wrong = 0;
+    let correct = 0;
+    let unplayed = 0;
+
+    (savedCards || []).forEach((card: any) => {
+        if (!card || !card.content) return;
+        const bodyOnly = card.content.split('\n').slice(1).join('\n');
+        // 본문 내 빈칸 개수 추출 (ORIG_ID 제외)
+        const blanksCount = (bodyOnly.match(/\[\s*(.*?)\s*\]/g) || []).filter((b: string) => !b.includes('ORIG_ID')).length;
+        total += blanksCount;
+
+        try {
+            const st = parseCardStats(card.memo);
+            if (st.filled > 0) {
+                // 한 번이라도 학습한 경우 오답 개수 합산
+                wrong += st.wrongIndices.length;
+                correct += Math.max(0, blanksCount - st.wrongIndices.length);
+            } else {
+                unplayed += blanksCount;
+            }
+        } catch(e) {}
+    });
+
+    return { total, correct, wrong, unplayed };
+  }, [savedCards]);
+
   const todayStr = new Date().toISOString().split('T')[0];
   const dailyFilled = activityLog[todayStr] || 0;
 
@@ -50,14 +101,18 @@ export const DashboardTab = ({ setActiveTab, goalBalance, setGoalBalance }: any)
     if (dateStr.startsWith(monthKey)) monthlyFilled += activityLog[dateStr];
   });
 
-  // 🎯 목표 설정치 (수정 가능)
+  // 💡 주기에 따른 동적 목표 계산
+  const cycleNum = Number(targetCycle) || 30;
+  const dailyTarget = stats.total > 0 ? Math.ceil(stats.total / cycleNum) : 50;
+  const weeklyTarget = dailyTarget * 7;
+  const monthlyTarget = dailyTarget * 30;
+
   const GOALS = {
-    daily: { title: "일일 빈칸 채우기", target: 50, reward: 50, current: dailyFilled, key: `daily_${todayStr}` },
-    weekly: { title: "주간 빈칸 채우기", target: 300, reward: 300, current: weeklyFilled, key: `weekly_${weekKey}` },
-    monthly: { title: "월간 집중 훈련", target: 1000, reward: 1000, current: monthlyFilled, key: `monthly_${monthKey}` }
+    daily: { title: "일일 빈칸 채우기", target: dailyTarget, reward: dailyTarget, current: dailyFilled, key: `daily_${todayStr}` },
+    weekly: { title: "주간 빈칸 채우기", target: weeklyTarget, reward: weeklyTarget, current: weeklyFilled, key: `weekly_${weekKey}` },
+    monthly: { title: "월간 집중 훈련", target: monthlyTarget, reward: monthlyTarget, current: monthlyFilled, key: `monthly_${monthKey}` }
   };
 
-  // 💡 달력 렌더링 로직
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
@@ -100,18 +155,47 @@ export const DashboardTab = ({ setActiveTab, goalBalance, setGoalBalance }: any)
 
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in">
-      <div className="flex justify-between items-end mb-6 border-b border-white/10 pb-4">
-        <div>
+      <div className="flex flex-col mb-6 border-b border-white/10 pb-4 gap-4">
+        <div className="flex justify-between items-center w-full">
           <h1 className="text-2xl sm:text-3xl font-serif text-current tracking-tight">학습 대시보드</h1>
-          <p className="text-xs sm:text-sm text-white/40 mt-1">목표를 달성하고 보상을 획득하여 상점 스킬을 이용하세요.</p>
+          <button onClick={() => setActiveTab('enhance')} className="bg-teal-600 hover:bg-teal-500 text-white px-4 py-2 text-[11px] sm:text-xs font-bold rounded-sm transition-colors shadow-md shrink-0">
+            채우기 바로가기 ▶
+          </button>
         </div>
-        <button onClick={() => setActiveTab('enhance')} className="bg-teal-600 hover:bg-teal-500 text-white px-4 py-2 text-[11px] sm:text-xs font-bold rounded-sm transition-colors shadow-md">
-          채우기 바로가기 ▶
-        </button>
+        <p className="text-xs sm:text-sm text-white/40 mb-2">목표를 달성하고 보상을 획득하여 상점 스킬을 이용하세요.</p>
+        
+        {/* 💡 한 줄 요약 및 마스터 주기 목표 설정 패널 */}
+        <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center bg-black/30 p-3 sm:p-4 rounded border border-white/5 gap-4 shadow-inner">
+          <div className="flex items-center gap-3 text-[12px] sm:text-[13px] font-mono tracking-tight flex-wrap">
+            <span className="text-white/60 font-bold">빈칸 현황 ➔</span>
+            <span className="font-bold text-white">전체 {stats.total}개</span>
+            <span className="text-white/20">|</span>
+            <span className="font-bold text-teal-400">정답 {stats.correct}개</span>
+            <span className="text-white/20">|</span>
+            <span className="font-bold text-red-400">오답 {stats.wrong}개</span>
+            <span className="text-white/20">|</span>
+            <span className="text-white/40">미학습 {stats.unplayed}개</span>
+          </div>
+          
+          <div className="flex items-center gap-2 bg-white/5 px-3 py-2 rounded-sm border border-white/10 shrink-0 w-full xl:w-auto">
+            <span className="text-[11px] sm:text-xs text-white/50 font-bold">전체 빈칸을</span>
+            <input 
+              type="number" 
+              value={targetCycle} 
+              onChange={handleCycleChange}
+              onBlur={handleCycleBlur}
+              className="w-14 bg-black/50 border border-white/20 rounded p-1 text-center text-[12px] text-amber-400 font-bold outline-none focus:border-amber-500 transition-colors"
+              min="1"
+              max="365"
+            />
+            <span className="text-[11px] sm:text-xs text-white/50 font-bold whitespace-nowrap">
+              일 주기로 마스터 <span className="text-amber-400 ml-1">(일일 목표: {dailyTarget}칸)</span>
+            </span>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-        {/* 왼쪽: 활동 달력 (잔디 심기) */}
         <div className="lg:col-span-2 bg-[#08080a]/80 border border-white/10 p-5 sm:p-6 rounded-sm shadow-xl">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-[14px] font-bold text-white/80">📅 나의 학습 기록</h2>
@@ -134,14 +218,14 @@ export const DashboardTab = ({ setActiveTab, goalBalance, setGoalBalance }: any)
               const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
               const count = activityLog[dateStr] || 0;
               
-              // 잔디(Heatmap) 색상 결정 로직
+              // 동적 목표량(dailyTarget)에 맞춰 달력 잔디 색상이 변합니다.
               let bgClass = "bg-white/5 text-white/20 border border-white/5";
-              if (count > 0 && count < 20) bgClass = "bg-teal-900/40 text-teal-400 border border-teal-500/20";
-              else if (count >= 20 && count < 50) bgClass = "bg-teal-700/60 text-teal-100 border border-teal-500/40";
-              else if (count >= 50) bgClass = "bg-teal-500 text-black border border-teal-400 shadow-[0_0_10px_rgba(20,184,166,0.3)] font-bold";
+              if (count > 0 && count < dailyTarget * 0.5) bgClass = "bg-teal-900/40 text-teal-400 border border-teal-500/20";
+              else if (count >= dailyTarget * 0.5 && count < dailyTarget) bgClass = "bg-teal-700/60 text-teal-100 border border-teal-500/40";
+              else if (count >= dailyTarget) bgClass = "bg-teal-500 text-black border border-teal-400 shadow-[0_0_10px_rgba(20,184,166,0.3)] font-bold";
 
               return (
-                <div key={day} className={`aspect-square rounded-sm flex flex-col items-center justify-center transition-all hover:scale-105 cursor-default ${bgClass}`} title={`${dateStr}: ${count}칸 완료`}>
+                <div key={day} className={`aspect-square rounded-sm flex flex-col items-center justify-center transition-all hover:scale-105 cursor-default ${bgClass}`} title={`${dateStr}: ${count}칸 완료 (목표 ${dailyTarget}칸)`}>
                   <span className="text-[11px] sm:text-[13px]">{day}</span>
                   {count > 0 && <span className="text-[8px] sm:text-[9px] mt-0.5 opacity-80 font-mono tracking-tighter">{count}</span>}
                 </div>
@@ -150,7 +234,6 @@ export const DashboardTab = ({ setActiveTab, goalBalance, setGoalBalance }: any)
           </div>
         </div>
 
-        {/* 오른쪽: 목표 및 보상 패널 */}
         <div className="flex flex-col gap-4">
           {renderGoalCard(GOALS.daily, "🎯")}
           {renderGoalCard(GOALS.weekly, "🔥")}
