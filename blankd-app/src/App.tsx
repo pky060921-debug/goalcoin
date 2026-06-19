@@ -198,6 +198,9 @@ function MainApp() {
     localStorage.setItem('blankd_active_tab', activeTab);
   }, [activeTab]);
 
+  // 💡 [신규] 사이드바 토글 상태
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
   const [categories, setCategories] = useState<any[]>([]);
   const [savedCards, setSavedCards] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
@@ -715,7 +718,7 @@ function MainApp() {
 
     const newMemo = JSON.stringify(exStats);
 
-    const earnedPoints = correctCount * 5; 
+    const earnedPoints = correctCount * 1; 
     handleUpdateBalance(earnedPoints);
 
     const todayStr = new Date().toISOString().split('T')[0];
@@ -1089,7 +1092,7 @@ function MainApp() {
           <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
         </div>
         <div className={activeTab === 'record' ? 'block' : 'hidden'}>
-          {/* 💡 전역 사전(globalDict)을 전달하여 수집탭에서 약어 변환에 사용합니다. */}
+          {/* 💡 [수집 탭] 이름 변경 및 사전 연동 */}
           <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} colCount={colCount} globalDict={globalDict} />
         </div>
         <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
@@ -1110,7 +1113,8 @@ function MainApp() {
           <button onClick={() => setDictTab('include')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'include' ? 'text-teal-400 border-b-2 border-teal-400' : 'text-white/40 hover:text-white/70'}`}>✅ 필수 포함</button>
           <button onClick={() => setDictTab('stop')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'stop' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-white/40 hover:text-white/70'}`}>❌ 제외 단어</button>
         </div>
-        {isMobile && <button onClick={() => setIsDictModalOpen(false)} className="text-white/40 hover:text-white ml-6 text-lg font-bold">✕</button>}
+        {/* 💡 [사이드바 닫기 버튼] */}
+        <button onClick={() => isMobile ? setIsDictModalOpen(false) : setIsSidebarOpen(false)} className="text-white/40 hover:text-white ml-6 text-lg font-bold">✕</button>
       </div>
       
       <div className="flex gap-2 mb-5 shrink-0">
@@ -1316,15 +1320,26 @@ function MainApp() {
           <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-[#111827] text-white text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
         </main>
       ) : (
-        <div className="max-w-[1600px] mx-auto w-full flex gap-4 sm:gap-6 px-4 lg:px-6 items-start pb-10">
-          <main className="flex-1 w-full min-w-0">
+        <div className="max-w-[1600px] mx-auto w-full flex gap-4 sm:gap-6 px-4 lg:px-6 items-start pb-10 transition-all duration-300">
+          <main className="flex-1 w-full min-w-0 transition-all duration-300">
             <ErrorBoundary fallbackLog={addLog}>
               {memoizedTabs}
             </ErrorBoundary>
           </main>
-          <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[416px] xl:w-[468px]" style={{ width: '416px', maxWidth: '35vw' }}>
-            {renderDictionaryUI(false)}
-          </aside>
+          
+          {/* 💡 [사이드바 접기/펴기 로직 적용] */}
+          {isSidebarOpen ? (
+            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[320px] xl:w-[400px] transition-all duration-300 animate-in slide-in-from-right-8">
+              {renderDictionaryUI(false)}
+            </aside>
+          ) : (
+            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[40px] items-center justify-start transition-all duration-300 animate-in fade-in">
+              <button onClick={() => setIsSidebarOpen(true)} className="w-full h-32 bg-white/5 border border-white/10 hover:bg-white/10 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors flex-col gap-2 shadow-md">
+                <span className="text-xs">◀</span>
+                <span className="text-[10px] font-bold" style={{ writingMode: 'vertical-rl' }}>사전 열기</span>
+              </button>
+            </aside>
+          )}
         </div>
       )}
 
