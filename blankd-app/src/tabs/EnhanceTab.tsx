@@ -530,8 +530,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-2 sm:pl-3">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
           
-          {/* 💡 [핵심 수정] 폴더 내부의 카드 리스트 영역에만 세로 스크롤 적용 (max-h-[600px] overflow-y-auto) */}
-          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-1.5 sm:gap-2 items-start w-full max-h-[600px] 2xl:max-h-[800px] overflow-y-auto custom-scrollbar pr-2 pb-2`}>
+          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-1.5 sm:gap-2 items-start w-full`}>
             {localCards.filter((c:any) => c && c.content && c.folder_name === folder).map((card: any, idx: number, folderCards: any[]) => {
                 try {
                   const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
@@ -650,12 +649,11 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           </div>
                         </div>
                       ) : (
-                        // 💡 [수정] 모바일 세로 스크롤 간섭 방지를 위해 div 태그 적용
                         <div {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm border flex flex-col justify-center gap-0.5 cursor-pointer text-left ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
                           
                           <div className="flex w-full overflow-hidden mb-1">
-                            {/* 💡 텍스트 가로 스크롤 원복 (말줄임표) */}
-                            <div className={`${titleColor} font-bold ${titleSizing} w-full text-left truncate leading-tight`} title={displayTitle}>
+                            {/* 💡 [핵심 수정] 조항명(제목)만 가로로 부드럽게 스크롤되도록 변경 (truncate 제거) */}
+                            <div className={`${titleColor} font-bold ${titleSizing} w-full text-left overflow-x-auto whitespace-nowrap custom-scrollbar pb-0.5`} title={displayTitle}>
                               {displayTitle}
                             </div>
                           </div>
@@ -663,7 +661,7 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                           {movingId === card.id ? (
                             <div className="flex items-center justify-between w-full pt-1 animate-in fade-in">
                               <span className="text-blue-300 text-[10px] font-bold flex items-center">
-                                방향키(↑, ↓)로 이동 후 Enter 입력
+                                방향키(↑, ↓)로 이동 후 Enter
                               </span>
                               <button onClick={(e) => { e.stopPropagation(); setMovingId(null); if(loadAllData) loadAllData(); }} className="px-2 py-0.5 bg-blue-500 text-white text-[9px] font-bold rounded-sm shadow-md hover:bg-blue-400 transition-colors">
                                 완료
@@ -678,8 +676,8 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
                                   <span className={`text-[7px] sm:text-[8px] px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center ${hasWrong ? 'text-white bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
                                 </div>
                                 <div className="flex items-center gap-0.5 opacity-80 hover:opacity-100 transition-opacity">
-                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all flex items-center justify-center leading-none h-4" title="이동">↕️</button>
-                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folderCards, idx, folder); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all flex items-center justify-center leading-none h-4" title="추가">+</button>
+                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
+                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folderCards, idx, folder); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
                                   <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); setEditContent(card.content); setActiveTool(window.innerWidth < 768 ? 'smart' : 'editor'); setShowJeonggwanSelector(false); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
                                   <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-0.5 px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[8px] hover:bg-red-500/10 hover:text-red-500 transition-all flex items-center justify-center leading-none h-4" title="삭제">✕</button>
                                 </div>
