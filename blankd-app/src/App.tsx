@@ -505,6 +505,8 @@ function MainApp() {
   const handleUpdateMemoBackground = async (id: number, memo: string) => {
     setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
     pushToQueue('MEMO', { id, memo });
+    
+    // 💡 1초도 기다리지 않고 즉시 DB로 강제 전송!
     if (!isOffline) {
       const target = savedCards.find((c:any) => c.id === id);
       if (target) {
@@ -513,6 +515,8 @@ function MainApp() {
           body: JSON.stringify({ wallet_address: safeAddress, card_id: id, card_content: target.content, answer_text: target.answer_text || "", folder_name: target.folder_name, memo })
         }).catch(() => {});
       }
+      // 💡 대기열(Queue)에 담긴 데이터도 기다리지 않고 즉시 비워버립니다.
+      flushQueue(); 
     }
   };
 
