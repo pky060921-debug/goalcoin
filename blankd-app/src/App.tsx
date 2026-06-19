@@ -9,7 +9,6 @@ import { CraftTab } from "./tabs/CraftTab";
 import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
-import { RecordTab } from "./tabs/RecordTab";
 
 const autoApplyDictHelper = (content: string, dict: any) => {
   try {
@@ -59,23 +58,6 @@ const autoApplyDictHelper = (content: string, dict: any) => {
   } catch (err: any) {
     console.error("사전 자동 적용 엔진 오류 진단:", err.message);
     return content;
-  }
-};
-
-const getExtendedStats = (memoStr: string) => {
-  try {
-    const p = JSON.parse(memoStr || '{}');
-    return {
-      text: p.text || "",
-      filled: p.filled || 0,
-      wrongIndices: p.wrongIndices || [],
-      upgrade: p.upgrade || 0,
-      bestTime: p.bestTime || 0,
-      totalCorrect: p.totalCorrect || 0,
-      totalWrong: p.totalWrong || 0
-    };
-  } catch(e) {
-    return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0 };
   }
 };
 
@@ -200,9 +182,6 @@ function MainApp() {
   const [savedCards, setSavedCards] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
   
-  const activeCardRef = useRef<any>(null);
-  useEffect(() => { activeCardRef.current = activeCard; }, [activeCard]);
-  
   const [viewMode, setViewMode] = useState('all');
   const [colCount, setColCount] = useState(3);
   const [useAiRecommend, setUseAiRecommend] = useState(true);
@@ -228,22 +207,6 @@ function MainApp() {
 
   const [hintLetter, setHintLetter] = useState<string | null>(null);
   const [isFrozen, setIsFrozen] = useState<boolean>(false);
-
-  const handleUpdateBalance = (changeAmount: number) => {
-    setGoalBalance(prev => {
-      const newBalance = prev + changeAmount;
-      localStorage.setItem(`blankd_off_bal_${safeAddress}`, newBalance.toString());
-      if (!isOffline && safeAddress) {
-        fetch("https://api.blankd.top/api/update-balance", {
-          method: "POST",
-          keepalive: true,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet_address: safeAddress, balance: newBalance })
-        }).catch(e => console.error("포인트 동기화 실패:", e));
-      }
-      return newBalance;
-    });
-  };
 
   const [globalDict, setGlobalDict] = useState<{ stopwords: string[], inclusions: string[], abbrs: Record<string, string> }>({
     stopwords: [], inclusions: [], abbrs: {}
@@ -284,13 +247,14 @@ function MainApp() {
     }
   };
 
+  // 💡 [수정] 오프라인 버그 방어 및 DB 포인트 연동 엔진
   const loadAllData = async () => {
     if (!safeAddress) return;
     try {
-     const [catRes, cardRes, balance, dictRes] = await Promise.all([
+      const [catRes, cardRes, serverBalance, dictRes] = await Promise.all([
         fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => { if(!r.ok) throw new Error(); return r.json(); }),
         fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => { if(!r.ok) throw new Error(); return r.json(); }),
-        api.getGoalCoinBalance(safeAddress).catch(() => 0), // ❌ 이 부분이 문제입니다.
+        fetch(`https://api.blankd.top/api/get-balance?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()).then(d => d.balance || 0).catch(() => 0),
         api.getGlobalDict(safeAddress).catch(() => ({ stopwords: [], inclusions: [], abbrs: {} }))
       ]);
 
@@ -315,26 +279,24 @@ function MainApp() {
         console.error("🚨 로컬 큐 데이터 병합 오류 진단:", queueMergeError.message);
       }
 
-      // 💡 [포인트 증발 완벽 차단] 기기에 남아있는 진짜 잔액 확인
+      // 기기에 남아있는 잔액과 서버의 잔액 중 높은 값을 채택하여 강제 복구
       const localBalance = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
-      const actualBalance = Math.max(serverBalance, localBalance); // 무조건 높은 금액 우선
+      const actualBalance = Math.max(serverBalance, localBalance);
 
       if (actualBalance > serverBalance && !isOffline) {
         try {
-          const res = await fetch("https://api.blankd.top/api/update-balance", {
+          fetch("https://api.blankd.top/api/update-balance", {
             method: "POST",
+            keepalive: true,
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ wallet_address: safeAddress, balance: actualBalance })
-          });
-          if (!res.ok) throw new Error("포인트 서버 동기화 API 응답 거부됨");
-        } catch (syncErr: any) {
-          console.error("🚨 포인트 복구 동기화 오류 진단:", syncErr.message);
-        }
+          }).catch(()=>{});
+        } catch (e) {}
       }
 
       setCategories([...(catRes.categories || [])]);
       setSavedCards(finalCards); 
-      setGoalBalance(actualBalance); // 💡 검증된 잔액으로 업데이트
+      setGoalBalance(actualBalance);
       setGlobalDict(newDict);
 
       localStorage.setItem(`blankd_off_cat_${safeAddress}`, JSON.stringify(catRes.categories || []));
@@ -360,6 +322,22 @@ function MainApp() {
          addLog(`🚨 캐시 로드 복구 실패 진단: ${cacheError.message}`);
       }
     }
+  };
+
+  const handleUpdateBalance = (changeAmount: number) => {
+    setGoalBalance(prev => {
+      const newBalance = prev + changeAmount;
+      localStorage.setItem(`blankd_off_bal_${safeAddress}`, newBalance.toString());
+      if (!isOffline && safeAddress) {
+        fetch("https://api.blankd.top/api/update-balance", {
+          method: "POST",
+          keepalive: true,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: safeAddress, balance: newBalance })
+        }).catch(e => console.error("포인트 동기화 실패:", e));
+      }
+      return newBalance;
+    });
   };
 
   const saveGlobalDict = async (newDict: any) => {
@@ -441,17 +419,15 @@ function MainApp() {
       }
 
       const res = await fetch("https://api.blankd.top/api/sync-batch", {
-        method: "POST", 
-        keepalive: true, 
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ wallet_address: safeAddress, memos: q.memos, answers: q.answers })
       });
 
       if (res.ok) {
         localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
         addLog(`✅ 백그라운드 동기화 완료`);
-        // 서버에서 잔액을 땡겨오더라도, 로컬 잔액보다 적으면 무시하도록 안전 장치 추가
-        const serverBalance = await api.getGoalCoinBalance(safeAddress).catch(()=>goalBalance);
+        // 💡 [수정] 백그라운드 동기화 후 잔액도 DB 방식(get-balance)으로 업데이트
+        const serverBalance = await fetch(`https://api.blankd.top/api/get-balance?wallet_address=${safeAddress}&t=${Date.now()}`).then(r=>r.json()).then(d=>d.balance||0).catch(()=>goalBalance);
         const localBalance = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
         setGoalBalance(Math.max(serverBalance, localBalance));
         setIsOffline(false);
@@ -465,35 +441,9 @@ function MainApp() {
   useEffect(() => {
     if (!safeAddress) return;
     const interval = setInterval(flushQueue, 30000); 
-    
-    const handleVisibility = () => { 
-      if(document.visibilityState === 'hidden' || document.visibilityState === 'unloaded') {
-        const currentCard = activeCardRef.current;
-        if (currentCard && statsRef.current) {
-          const exStats = getExtendedStats(currentCard.memo);
-          exStats.text = statsRef.current.text;
-          exStats.filled = statsRef.current.filled;
-          exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
-          
-          fetch("https://api.blankd.top/api/save-card", {
-            method: "POST", 
-            keepalive: true, 
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ wallet_address: safeAddress, card_id: currentCard.id, card_content: currentCard.content, answer_text: currentCard.answer_text || "", folder_name: currentCard.folder_name, memo: JSON.stringify(exStats) })
-          }).catch(()=>{});
-        }
-        flushQueue(); 
-      }
-    };
-    
+    const handleVisibility = () => { if(document.visibilityState === 'hidden') flushQueue(); };
     document.addEventListener('visibilitychange', handleVisibility);
-    window.addEventListener('pagehide', handleVisibility);
-
-    return () => { 
-      clearInterval(interval); 
-      document.removeEventListener('visibilitychange', handleVisibility); 
-      window.removeEventListener('pagehide', handleVisibility);
-    };
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', handleVisibility); };
   }, [safeAddress, isOffline]);
 
   const uploadLaw = async () => {
@@ -564,9 +514,7 @@ function MainApp() {
       const finalFirstLine = `${detectedPrefix} ${cleanFirstLine}`;
       
       const finalCardContent = `${finalFirstLine}\n${bodyContent.trim()}`;
-      
-      const exStats = getExtendedStats(memo);
-      const initialMemo = JSON.stringify(exStats);
+      const initialMemo = stringifyCardStats(memo, 0, []);
       
       const res = await fetch("https://api.blankd.top/api/save-card", { 
         method: "POST", headers: { "Content-Type": "application/json" }, 
@@ -594,9 +542,7 @@ function MainApp() {
       const target = savedCards.find((c:any) => c.id === id);
       if (target) {
         fetch("https://api.blankd.top/api/save-card", {
-          method: "POST", 
-          keepalive: true, 
-          headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: id, card_content: target.content, answer_text: target.answer_text || "", folder_name: target.folder_name, memo })
         }).catch(() => {});
       }
@@ -652,7 +598,7 @@ function MainApp() {
 
       setBlanks(restoredBlanks); setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); setInputStatus('idle');
 
-      const stats = getExtendedStats(activeCard.memo); 
+      const stats = parseCardStats(activeCard.memo);
       const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
       setElapsed(0); setIsMemoOpen(false);
@@ -694,22 +640,12 @@ function MainApp() {
     isClosingRef.current = true;
     const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = elapsed;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
+    
     const correctCount = blanks.length - wrongArr.length;
     const isCorrect = wrongArr.length === 0;
 
-    const exStats = getExtendedStats(activeCard.memo);
-    exStats.text = statsRef.current.text;
-    exStats.filled = statsRef.current.filled + 1; 
-    exStats.wrongIndices = wrongArr;
-    
-    if (exStats.bestTime === 0 || finalTime < exStats.bestTime) {
-      exStats.bestTime = finalTime;
-    }
-    
-    exStats.totalCorrect += correctCount;
-    exStats.totalWrong += wrongArr.length;
-
-    const newMemo = JSON.stringify(exStats);
+    // 💡 옛날 방식 저장(회독수 등) 복구 유지
+    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled + 1, wrongArr);
 
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
@@ -733,7 +669,7 @@ function MainApp() {
       if (easiness < 1.3) easiness = 1.3;
       localStorage.setItem(`blankd_factor_${currentId}`, easiness.toString());
 
-      const currentRepetitions = exStats.filled;
+      const currentRepetitions = statsRef.current.filled || 1;
       if (quality < 3) { daysInterval = 1; } 
       else {
         if (currentRepetitions === 1) daysInterval = 1;
@@ -767,12 +703,10 @@ function MainApp() {
     if (isOffline) {
       addLog(`💾 오프라인 기록 (ID:${currentId}) | +${earnedPoints} Point 획득`);
     } else {
-      addLog(`🎉 학습 완료! 기록 갱신 됨. +${earnedPoints} Point 획득`);
+      addLog(`🎉 학습 완료! +${earnedPoints} Point 획득`);
       try {
         await fetch("https://api.blankd.top/api/save-card", {
-          method: "POST", 
-          keepalive: true, 
-          headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
         });
       } catch(e) {}
@@ -786,12 +720,8 @@ function MainApp() {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
     const currentId = activeCard.id;
-    const exStats = getExtendedStats(activeCard.memo);
-    exStats.text = statsRef.current.text;
-    exStats.filled = statsRef.current.filled;
-    exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
-    
-    const newMemo = JSON.stringify(exStats);
+    const wrongArr = Array.from(statsRef.current.wrongIndices);
+    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
     setActiveCard(null);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
@@ -799,39 +729,12 @@ function MainApp() {
     if (!isOffline) {
       try {
         await fetch("https://api.blankd.top/api/save-card", {
-          method: "POST", 
-          keepalive: true, 
-          headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
         });
       } catch(e) {}
     }
     flushQueue();
-  };
-
-  const syncProgressToServer = () => {
-    if (isOffline || !safeAddress || !activeCardRef.current) return;
-    const card = activeCardRef.current;
-    
-    const exStats = getExtendedStats(card.memo);
-    exStats.text = statsRef.current.text;
-    exStats.filled = statsRef.current.filled;
-    exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
-    const newMemo = JSON.stringify(exStats);
-
-    fetch("https://api.blankd.top/api/save-card", {
-      method: "POST",
-      keepalive: true, 
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        wallet_address: safeAddress,
-        card_id: card.id,
-        card_content: card.content,
-        answer_text: card.answer_text || "",
-        folder_name: card.folder_name,
-        memo: newMemo
-      })
-    }).catch(()=>{});
   };
 
   const handleSequentialInput = (overrideInput?: string | any) => {
@@ -862,17 +765,13 @@ function MainApp() {
               const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx;
             });
           } else {
-            localStorage.removeItem(`blankd_progress_${activeCard.id}`); finishCard();
+            localStorage.removeItem(`blankd_progress_${activeCard.id}`); statsRef.current.filled += 1; finishCard();
           }
-          syncProgressToServer(); 
           return currentBlanks;
         });
       }, 150);
     } else { 
-      setInputStatus('wrong'); 
-      statsRef.current.wrongIndices.add(currentBlankIdx); 
-      syncProgressToServer(); 
-      setTimeout(() => setInputStatus('idle'), 500);
+      setInputStatus('wrong'); statsRef.current.wrongIndices.add(currentBlankIdx); setTimeout(() => setInputStatus('idle'), 500);
     }
   };
   
@@ -886,9 +785,8 @@ function MainApp() {
         if (currentBlankIdx + 1 < currentBlanks.length) {
           setCurrentBlankIdx(prevIdx => { const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx; });
         } else {
-          localStorage.removeItem(`blankd_progress_${activeCard.id}`); finishCard();
+          localStorage.removeItem(`blankd_progress_${activeCard.id}`); statsRef.current.filled += 1; finishCard();
         }
-        syncProgressToServer(); 
         return currentBlanks;
       });
     }, 800);
@@ -960,16 +858,11 @@ function MainApp() {
     const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
     let displayTitle = titleLine
-      .replace(/\[법\]|\[령\]|\[칙\]|\[규\]|\[정관\]|\[규정\]/g, '')
+      .replace(/\[법\]|\[령\]|\[칙\]|\[규\]|\[정관\]/g, '')
       .replace(/\(\s*내용\s*\)/g, '')
       .replace(/내용/g, '')
       .trim();
     if (!displayTitle) displayTitle = "제목 없음";
-
-    let titleColor = "text-red-500";
-    if (titleLine.includes('[정관]')) titleColor = "text-yellow-500";
-    else if (titleLine.includes('[칙]') || titleLine.includes('[규]') || titleLine.includes('[규정]')) titleColor = "text-green-500";
-    else if (titleLine.includes('[령]')) titleColor = "text-blue-400";
 
     const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== '');
     let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
@@ -1006,29 +899,22 @@ function MainApp() {
     });
     
     return (
-      <div className="flex flex-col gap-6 w-full overflow-hidden">
-        <div className="flex justify-between items-center border-b border-white/10 pb-2 w-full gap-3 overflow-hidden">
-            <div className={`${titleColor} font-bold text-[14px] leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
-              {displayTitle}
-            </div>
-            <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm shrink-0">Page {displayPage + 1}</span>
+      <div className="flex flex-col gap-6 w-full">
+        <div className="flex justify-between items-center border-b border-white/10 pb-2">
+            <span className="text-amber-400 font-bold text-[14px] leading-tight">{displayTitle}</span>
+            <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
         </div>
         <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
         <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
           <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
             {isMemoOpen ? '닫기 ✕' : '메모 열기'}
           </button>
-          
-          <button onClick={() => { setDictTab('abbr'); setIsDictModalOpen(true); }} className="px-3 py-1.5 bg-indigo-900/30 text-indigo-400 border border-indigo-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-indigo-900/50 transition-all shadow-md">
-            ⚡ 약어 추가
-          </button>
-
           <button onClick={toggleVoiceRecognition} className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${isListening ? 'bg-red-600/50 text-white border-red-500 animate-pulse' : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'}`}>
-            {isListening ? '음성 인식 끄기' : '음성으로 입력'}
+            {isListening ? '음성 인식 끄기 (활성화됨)' : '음성으로 입력 (계속 켜두기)'}
           </button>
-          <button id="show-answer-btn" onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
-            정답 보기 (오답 처리)
-          </button>
+            <button id="show-answer-btn" onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
+              정답 보기 (오답 처리)
+            </button>
         </div>
         {isMemoOpen && (
           <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
@@ -1064,9 +950,6 @@ function MainApp() {
         </div>
         <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
           <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
-        </div>
-        <div className={activeTab === 'record' ? 'block' : 'hidden'}>
-          <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} />
         </div>
         <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
           <ExamTab walletAddress={safeAddress} address={safeAddress} />
@@ -1277,7 +1160,7 @@ function MainApp() {
       {isLoggedIn && (
         <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="max-w-6xl mx-auto flex items-center justify-start gap-1 sm:gap-2">
-            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
+            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
             ))}
           </div>
