@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify, send_file
+from flask_cors import CORS  # 💡 [추가] CORS 라이브러리 불러오기
 import sqlite3
 import threading
 import uuid
@@ -28,6 +29,7 @@ except ImportError:
     logging.error("PyMuPDF(fitz) 라이브러리가 설치되지 않았습니다.")
 
 api_bp = Blueprint('api', __name__)
+CORS(api_bp)  # 💡 [추가] 이 API 블루프린트로 들어오는 모든 외부 도메인 요청을 허용합니다!
 
 # ==========================================
 # 💡 GOAL 코인 발행 (Sui Blockchain 연동)
