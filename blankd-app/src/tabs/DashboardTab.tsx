@@ -13,20 +13,45 @@ export const DashboardTab = ({
     return saved ? parseInt(saved, 10) : 30;
   });
 
+  // 💡 월 1회 변경 제한 로직
+  const currentMonthStr = new Date().toISOString().slice(0, 7); // 'YYYY-MM'
+  const [lastModifiedMonth, setLastModifiedMonth] = useState(() => {
+    return localStorage.getItem(`blankd_cycle_modified_month_${safeAddress}`) || '';
+  });
+
+  const canEditCycle = lastModifiedMonth !== currentMonthStr;
+
   const handleCycleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canEditCycle) return;
     const val = parseInt(e.target.value, 10);
     if (!isNaN(val) && val > 0) {
         setTargetCycle(val);
-        localStorage.setItem(`blankd_target_cycle_${safeAddress}`, val.toString());
     } else if (e.target.value === '') {
         setTargetCycle('');
     }
   };
 
   const handleCycleBlur = () => {
+    if (!canEditCycle) return;
+    
+    const currentSaved = localStorage.getItem(`blankd_target_cycle_${safeAddress}`) || '30';
+    let finalVal = targetCycle;
+    
     if (targetCycle === '' || Number(targetCycle) < 1) {
-        setTargetCycle(30);
-        localStorage.setItem(`blankd_target_cycle_${safeAddress}`, '30');
+        finalVal = 30;
+    }
+
+    if (currentSaved !== finalVal.toString()) {
+        if (window.confirm(`마스터 주기를 ${finalVal}일로 변경하시겠습니까?\n(주의: 마스터 주기는 한 달에 한 번만 변경 가능합니다)`)) {
+            setTargetCycle(finalVal);
+            localStorage.setItem(`blankd_target_cycle_${safeAddress}`, finalVal.toString());
+            setLastModifiedMonth(currentMonthStr);
+            localStorage.setItem(`blankd_cycle_modified_month_${safeAddress}`, currentMonthStr);
+        } else {
+            setTargetCycle(parseInt(currentSaved, 10)); 
+        }
+    } else {
+        setTargetCycle(finalVal); 
     }
   };
 
@@ -36,7 +61,6 @@ export const DashboardTab = ({
     localStorage.setItem(`blankd_claimed_rewards_${safeAddress}`, JSON.stringify(next));
     handleUpdateBalance(points);
     
-    // 서버에 퀘스트 달성 내역 즉시 동기화
     fetch("https://api.blankd.top/api/update-balance", {
        method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
        body: JSON.stringify({ wallet_address: safeAddress, claimed_rewards: next })
@@ -172,13 +196,16 @@ export const DashboardTab = ({
               value={targetCycle} 
               onChange={handleCycleChange}
               onBlur={handleCycleBlur}
-              className="w-14 bg-black/50 border border-white/20 rounded p-1 text-center text-[12px] text-amber-400 font-bold outline-none focus:border-amber-500 transition-colors"
+              disabled={!canEditCycle}
+              className={`w-14 bg-black/50 border border-white/20 rounded p-1 text-center text-[12px] font-bold outline-none transition-colors ${!canEditCycle ? 'text-white/30 cursor-not-allowed opacity-60' : 'text-amber-400 focus:border-amber-500'}`}
               min="1"
               max="365"
+              title={!canEditCycle ? "마스터 주기는 한 달에 한 번만 변경 가능합니다." : "마스터 주기 설정"}
             />
             <span className="text-[11px] sm:text-xs text-white/50 font-bold whitespace-nowrap">
               일 주기로 마스터 <span className="text-amber-400 ml-1">(일일 목표: {dailyTarget}칸)</span>
             </span>
+            {!canEditCycle && <span className="text-[9px] text-red-400 font-bold ml-1 tracking-tighter">(이번 달 변경완료)</span>}
           </div>
         </div>
       </div>
