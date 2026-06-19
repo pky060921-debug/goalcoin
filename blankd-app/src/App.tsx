@@ -9,6 +9,8 @@ import { CraftTab } from "./tabs/CraftTab";
 import { EnhanceTab } from "./tabs/EnhanceTab";
 import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
+// 💡 [추가] 신규 생성한 RecordTab 임포트
+import { RecordTab } from "./tabs/RecordTab";
 
 const autoApplyDictHelper = (content: string, dict: any) => {
   try {
@@ -58,6 +60,24 @@ const autoApplyDictHelper = (content: string, dict: any) => {
   } catch (err: any) {
     console.error("사전 자동 적용 엔진 오류 진단:", err.message);
     return content;
+  }
+};
+
+// 💡 [추가] 확장된 메타데이터(강화수치, 최고기록 등)를 파싱하는 헬퍼 함수
+const getExtendedStats = (memoStr: string) => {
+  try {
+    const p = JSON.parse(memoStr || '{}');
+    return {
+      text: p.text || "",
+      filled: p.filled || 0,
+      wrongIndices: p.wrongIndices || [],
+      upgrade: p.upgrade || 0,
+      bestTime: p.bestTime || 0,
+      totalCorrect: p.totalCorrect || 0,
+      totalWrong: p.totalWrong || 0
+    };
+  } catch(e) {
+    return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0 };
   }
 };
 
@@ -433,13 +453,16 @@ function MainApp() {
       if(document.visibilityState === 'hidden' || document.visibilityState === 'unloaded') {
         const currentCard = activeCardRef.current;
         if (currentCard && statsRef.current) {
-          const wrongArr = Array.from(statsRef.current.wrongIndices);
-          const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+          const exStats = getExtendedStats(currentCard.memo);
+          exStats.text = statsRef.current.text;
+          exStats.filled = statsRef.current.filled;
+          exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+          
           fetch("https://api.blankd.top/api/save-card", {
             method: "POST", 
             keepalive: true, 
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ wallet_address: safeAddress, card_id: currentCard.id, card_content: currentCard.content, answer_text: currentCard.answer_text || "", folder_name: currentCard.folder_name, memo: newMemo })
+            body: JSON.stringify({ wallet_address: safeAddress, card_id: currentCard.id, card_content: currentCard.content, answer_text: currentCard.answer_text || "", folder_name: currentCard.folder_name, memo: JSON.stringify(exStats) })
           }).catch(()=>{});
         }
         flushQueue(); 
@@ -524,7 +547,10 @@ function MainApp() {
       const finalFirstLine = `${detectedPrefix} ${cleanFirstLine}`;
       
       const finalCardContent = `${finalFirstLine}\n${bodyContent.trim()}`;
-      const initialMemo = stringifyCardStats(memo, 0, []);
+      
+      // 새 카드 생성 시 확장된 스탯 포맷 적용
+      const exStats = getExtendedStats(memo);
+      const initialMemo = JSON.stringify(exStats);
       
       const res = await fetch("https://api.blankd.top/api/save-card", { 
         method: "POST", headers: { "Content-Type": "application/json" }, 
@@ -610,7 +636,7 @@ function MainApp() {
 
       setBlanks(restoredBlanks); setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); setInputStatus('idle');
 
-      const stats = parseCardStats(activeCard.memo);
+      const stats = getExtendedStats(activeCard.memo); // 💡 확장된 메타데이터 불러오기
       const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
       setElapsed(0); setIsMemoOpen(false);
@@ -652,12 +678,26 @@ function MainApp() {
     isClosingRef.current = true;
     const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = elapsed;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
-    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+    const correctCount = blanks.length - wrongArr.length;
     const isCorrect = wrongArr.length === 0;
 
-    const correctCount = blanks.length - wrongArr.length;
-    const earnedPoints = correctCount * 5; 
+    // 💡 [핵심] 카드 완료 시 CCG 메타데이터 업데이트 (최고기록 등)
+    const exStats = getExtendedStats(activeCard.memo);
+    exStats.text = statsRef.current.text;
+    exStats.filled = statsRef.current.filled + 1; // +1회독
+    exStats.wrongIndices = wrongArr;
     
+    // 타임어택 최고 기록 갱신 (첫 판이거나 기존 기록보다 빠르면)
+    if (exStats.bestTime === 0 || finalTime < exStats.bestTime) {
+      exStats.bestTime = finalTime;
+    }
+    
+    exStats.totalCorrect += correctCount;
+    exStats.totalWrong += wrongArr.length;
+
+    const newMemo = JSON.stringify(exStats);
+
+    const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
 
     const todayStr = new Date().toISOString().split('T')[0];
@@ -679,7 +719,7 @@ function MainApp() {
       if (easiness < 1.3) easiness = 1.3;
       localStorage.setItem(`blankd_factor_${currentId}`, easiness.toString());
 
-      const currentRepetitions = statsRef.current.filled || 1;
+      const currentRepetitions = exStats.filled;
       if (quality < 3) { daysInterval = 1; } 
       else {
         if (currentRepetitions === 1) daysInterval = 1;
@@ -713,11 +753,11 @@ function MainApp() {
     if (isOffline) {
       addLog(`💾 오프라인 기록 (ID:${currentId}) | +${earnedPoints} Point 획득`);
     } else {
-      addLog(`🎉 학습 완료! +${earnedPoints} Point 획득`);
+      addLog(`🎉 학습 완료! 기록 갱신 됨. +${earnedPoints} Point 획득`);
       try {
         await fetch("https://api.blankd.top/api/save-card", {
           method: "POST", 
-          keepalive: true,
+          keepalive: true, 
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
         });
@@ -732,8 +772,12 @@ function MainApp() {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
     const currentId = activeCard.id;
-    const wrongArr = Array.from(statsRef.current.wrongIndices);
-    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+    const exStats = getExtendedStats(activeCard.memo);
+    exStats.text = statsRef.current.text;
+    exStats.filled = statsRef.current.filled;
+    exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+    
+    const newMemo = JSON.stringify(exStats);
     setActiveCard(null);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
@@ -742,7 +786,7 @@ function MainApp() {
       try {
         await fetch("https://api.blankd.top/api/save-card", {
           method: "POST", 
-          keepalive: true,
+          keepalive: true, 
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
         });
@@ -754,8 +798,12 @@ function MainApp() {
   const syncProgressToServer = () => {
     if (isOffline || !safeAddress || !activeCardRef.current) return;
     const card = activeCardRef.current;
-    const wrongArr = Array.from(statsRef.current.wrongIndices);
-    const newMemo = stringifyCardStats(statsRef.current.text, statsRef.current.filled, wrongArr);
+    
+    const exStats = getExtendedStats(card.memo);
+    exStats.text = statsRef.current.text;
+    exStats.filled = statsRef.current.filled;
+    exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+    const newMemo = JSON.stringify(exStats);
 
     fetch("https://api.blankd.top/api/save-card", {
       method: "POST",
@@ -800,7 +848,7 @@ function MainApp() {
               const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx;
             });
           } else {
-            localStorage.removeItem(`blankd_progress_${activeCard.id}`); statsRef.current.filled += 1; finishCard();
+            localStorage.removeItem(`blankd_progress_${activeCard.id}`); finishCard();
           }
           syncProgressToServer(); 
           return currentBlanks;
@@ -824,7 +872,7 @@ function MainApp() {
         if (currentBlankIdx + 1 < currentBlanks.length) {
           setCurrentBlankIdx(prevIdx => { const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx; });
         } else {
-          localStorage.removeItem(`blankd_progress_${activeCard.id}`); statsRef.current.filled += 1; finishCard();
+          localStorage.removeItem(`blankd_progress_${activeCard.id}`); finishCard();
         }
         syncProgressToServer(); 
         return currentBlanks;
@@ -897,7 +945,6 @@ function MainApp() {
     const titleLine = lines[0] || '';
     const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
 
-    // 💡 [수정됨] 제목 앞 태그([법], [령] 등)를 감지하여 알맞은 색상 부여
     let displayTitle = titleLine
       .replace(/\[법\]|\[령\]|\[칙\]|\[규\]|\[정관\]|\[규정\]/g, '')
       .replace(/\(\s*내용\s*\)/g, '')
@@ -956,7 +1003,6 @@ function MainApp() {
             {isMemoOpen ? '닫기 ✕' : '메모 열기'}
           </button>
           
-          {/* 💡 [신규 추가] 스마트 약어 추가 버튼 */}
           <button onClick={() => { setDictTab('abbr'); setIsDictModalOpen(true); }} className="px-3 py-1.5 bg-indigo-900/30 text-indigo-400 border border-indigo-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-indigo-900/50 transition-all shadow-md">
             ⚡ 약어 추가
           </button>
@@ -1002,6 +1048,10 @@ function MainApp() {
         </div>
         <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
           <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
+        </div>
+        {/* 💡 [추가] 기록실(컬렉션) 탭 */}
+        <div className={activeTab === 'record' ? 'block' : 'hidden'}>
+          <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} />
         </div>
         <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
           <ExamTab walletAddress={safeAddress} address={safeAddress} />
@@ -1212,7 +1262,8 @@ function MainApp() {
       {isLoggedIn && (
         <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="max-w-6xl mx-auto flex items-center justify-start gap-1 sm:gap-2">
-            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
+            {/* 💡 [수정] 탭 목록에 '기록실(컬렉션)' 추가 */}
+            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
             ))}
           </div>
