@@ -709,7 +709,6 @@ function MainApp() {
 
     const newMemo = JSON.stringify(exStats);
 
-    // 💡 [수정] 빈칸 1개당 5포인트
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
 
@@ -759,9 +758,8 @@ function MainApp() {
 
     const nextReviewDate = new Date(); nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
 
-    const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
-        return parseInt(a.id, 10) - parseInt(b.id, 10);
-    });
+    // 💡 [핵심 버그 수정] ID 정렬 삭제 (기존 화면 순서 완벽 유지)
+    const folderCards = savedCards.filter(c => c.folder_name === currentFolder);
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
     const nextCard = folderCards[currentIdx + 1] || null;
 
@@ -947,10 +945,11 @@ function MainApp() {
     }
 
     if (savedCards && savedCards.length > 0) {
+      // 💡 [핵심 버그 수정] ID 정렬 제거, 자연스러운 화면 순서 첫번째 카드 출력
       const cardsWithStatus = savedCards.map(c => {
-         const stats = parseCardStats(c.memo);
-         return { ...c, repetitions: stats.filled || 0, origId: parseInt(c.id, 10) };
-      }).filter(c => !isNaN(c.origId)).sort((a, b) => a.origId - b.origId);
+         const stats = getExtendedStats(c.memo);
+         return { ...c, repetitions: stats.filled || 0 };
+      });
       
       if (cardsWithStatus.length > 0) {
         const minReps = Math.min(...cardsWithStatus.map(c => c.repetitions));
@@ -1026,9 +1025,11 @@ function MainApp() {
           <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
             {isMemoOpen ? '닫기 ✕' : '메모 열기'}
           </button>
+          
           <button onClick={() => { setDictTab('abbr'); setIsDictModalOpen(true); }} className="px-3 py-1.5 bg-indigo-900/30 text-indigo-400 border border-indigo-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-indigo-900/50 transition-all shadow-md">
             ⚡ 약어 추가
           </button>
+
           <button onClick={toggleVoiceRecognition} className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${isListening ? 'bg-red-600/50 text-white border-red-500 animate-pulse' : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'}`}>
             {isListening ? '음성 인식 끄기' : '음성으로 입력'}
           </button>
