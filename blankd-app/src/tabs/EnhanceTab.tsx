@@ -2,16 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { formatCardText, parseCardStats, SPLIT_REGEX } from '../utils/constants';
 import { api } from '../services/api';
 
-// 💡 [수정됨] 3번 요청: 원래의 3단 그리드 구조로 원복했습니다.
-const getGridClass = (cols: number) => {
-  if(cols === 1) return "md:grid-cols-1";
-  if(cols === 2) return "md:grid-cols-2";
-  if(cols === 3) return "md:grid-cols-3";
-  if(cols === 4) return "md:grid-cols-4";
-  if(cols === 5) return "md:grid-cols-5";
-  return "md:grid-cols-3";
-};
-
 export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setActiveTab, setExpandedId, loadAllData, safeAddress, globalDict }: any) => {
   
   const [editingId, setEditingId] = useState<number | string | null>(null);
@@ -324,19 +314,17 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
     }
   };
 
-  const handleAddAdjacent = (folder: string, index: number) => {
-    // 💡 [수정됨] 2번 요청: 사용자에게 선택할 수 있는 창을 띄웁니다.
+  const handleAddAdjacent = (folderCards: any[], index: number, folder: string) => {
     const choice = window.prompt("추가할 카드의 분류를 선택하세요.\n1: [령]\n2: [칙]\n3: [정관]\n4: [규정]\n(숫자나 이름을 입력하세요)", "1");
-    if (choice === null) return; // 취소 버튼을 누르면 종료
+    if (choice === null) return; 
 
     let prefix = "법";
     if (choice === "1" || choice === "령") prefix = "령";
     else if (choice === "2" || choice === "칙") prefix = "칙";
     else if (choice === "3" || choice === "정관") prefix = "정관";
     else if (choice === "4" || choice === "규정") prefix = "규정";
-    else prefix = choice.replace(/[\[\]]/g, '').trim() || "법"; // 예외적인 경우 입력한 텍스트 그대로 사용
+    else prefix = choice.replace(/[\[\]]/g, '').trim() || "법"; 
 
-    const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
     const origCard = folderCards[index];
     const tempId = `temp_${Date.now()}`;
     
@@ -532,174 +520,194 @@ export const EnhanceTab = ({ savedCards, colCount, viewMode, setActiveCard, setA
       {enhanceFolders.map((folder: string) => openFolders[folder] && (
         <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-2 sm:pl-3">
           <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
-          <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-1.5 sm:gap-2 items-start`}>
-            {localCards.filter((c:any) => c && c.content && c.folder_name === folder).map((card: any, idx: number, folderCards: any[]) => {
-                try {
-                  const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
-                  
-                  const lines = cleanContent.split('\n');
-                  const firstLine = lines[0] || "";
-                  
-                  let displayTitle = firstLine
-                    .replace(/\[(법|령|칙|규|정관|규정)\]/g, '')
-                    .replace(/\(\s*내용\s*\)/g, '')
-                    .replace(/내용/g, '')
-                    .trim();
-                  if (!displayTitle) displayTitle = "제목 없음";
+          
+          {(() => {
+            const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
+            
+            // 💡 [레이아웃 분리] 법/령/칙 규칙에 따라 3개의 배열로 카드를 분리합니다.
+            const col1Cards = folderCards.filter(c => { const f = c.content.split('\n')[0]||""; return f.includes('[정관]') || (!f.includes('[령]') && !f.includes('[칙]') && !f.includes('[규]') && !f.includes('[규정]')); });
+            const col2Cards = folderCards.filter(c => { const f = c.content.split('\n')[0]||""; return f.includes('[령]'); });
+            const col3Cards = folderCards.filter(c => { const f = c.content.split('\n')[0]||""; return f.includes('[칙]') || f.includes('[규]') || f.includes('[규정]'); });
 
-                  // 💡 [수정됨] 3번 요청: 이전과 동일하게 첫 번째 줄의 태그를 찾아 1열, 2열, 3열 위치 및 색상을 지정합니다.
-                  let colClass = "md:col-start-1 md:col-span-1"; 
-                  let titleColor = "text-red-500";
-                  
-                  if (firstLine.includes('[정관]')) {
-                    colClass = "md:col-start-1 md:col-span-1";
-                    titleColor = "text-yellow-500";
-                  } else if (firstLine.includes('[칙]') || firstLine.includes('[규]') || firstLine.includes('[규정]')) { 
-                    colClass = "md:col-start-3 md:col-span-1";
-                    titleColor = "text-green-500";
-                  } else if (firstLine.includes('[령]')) { 
-                    colClass = "md:col-start-2 md:col-span-1";
-                    titleColor = "text-blue-400";
-                  } else {
-                    colClass = "md:col-start-1 md:col-span-1";
-                    titleColor = "text-red-500";
-                  }
+            const editingCard = folderCards.find(c => c.id === editingId);
 
-                  const bodyOnlyForStats = lines.slice(1).join('\n');
-                  const totalBlanks = (bodyOnlyForStats.match(/\[\s*(.*?)\s*\]/g) || []).length;
-                  const stats = parseCardStats(card.memo);
-                  const hasWrong = stats.wrongIndices.length > 0;
+            const renderCardNode = (card: any, isFullWidth: boolean = false) => {
+              const idx = folderCards.findIndex(c => c.id === card.id);
+              try {
+                const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
+                const lines = cleanContent.split('\n');
+                const firstLine = lines[0] || "";
+                
+                let displayTitle = firstLine
+                  .replace(/\[(법|령|칙|규|정관|규정)\]/g, '')
+                  .replace(/\(\s*내용\s*\)/g, '')
+                  .replace(/내용/g, '')
+                  .trim();
+                if (!displayTitle) displayTitle = "제목 없음";
 
-                  if (editingId === card.id) colClass = "col-span-full";
+                let titleColor = "text-red-500";
+                if (firstLine.includes('[정관]')) titleColor = "text-yellow-500";
+                else if (firstLine.includes('[칙]') || firstLine.includes('[규]') || firstLine.includes('[규정]')) titleColor = "text-green-500";
+                else if (firstLine.includes('[령]')) titleColor = "text-blue-400";
+                else titleColor = "text-red-500";
 
-                  const titleLen = displayTitle.length;
-                  const titleSizing = titleLen > 25 ? 'text-[10px] sm:text-[11px] tracking-[calc(-0.06em)]' : 
-                                      titleLen > 15 ? 'text-[11px] sm:text-[12px] tracking-tighter' : 
-                                      'text-[12px] sm:text-[13px] tracking-tight';
+                const bodyOnlyForStats = lines.slice(1).join('\n');
+                const totalBlanks = (bodyOnlyForStats.match(/\[\s*(.*?)\s*\]/g) || []).length;
+                const stats = parseCardStats(card.memo);
+                const hasWrong = stats.wrongIndices.length > 0;
 
-                  return (
-                    <div key={card.id} id={`enhance-card-${card.id}`} className={`relative transition-all w-full ${colClass}`}>
-                      {editingId === card.id ? (
-                        <div className="relative flex flex-col p-4 rounded-sm border border-amber-500/50 bg-[#0a0a0c] transition-all duration-300 w-full shadow-[0_0_15px_rgba(245,158,11,0.15)]">
+                const titleLen = displayTitle.length;
+                const titleSizing = titleLen > 25 ? 'text-[10px] sm:text-[11px] tracking-[calc(-0.06em)]' : 
+                                    titleLen > 15 ? 'text-[11px] sm:text-[12px] tracking-tighter' : 
+                                    'text-[12px] sm:text-[13px] tracking-tight';
+
+                return (
+                  <div key={card.id} id={`enhance-card-${card.id}`} className="relative transition-all w-full mb-2">
+                    {editingId === card.id ? (
+                      <div className="relative flex flex-col p-4 rounded-sm border border-amber-500/50 bg-[#0a0a0c] transition-all duration-300 w-full shadow-[0_0_15px_rgba(245,158,11,0.15)]">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-3">
+                          <span className="text-[12px] text-amber-500 font-bold flex items-center gap-2">빈칸 직접 수정 모드</span>
                           
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 gap-3">
-                            <span className="text-[12px] text-amber-500 font-bold flex items-center gap-2">빈칸 직접 수정 모드</span>
-                            
-                            <div className="flex flex-col sm:flex-row items-center gap-2 bg-black/50 p-1.5 rounded-sm border border-white/10">
-                              <div className="flex gap-1 items-center">
-                                <button onClick={(e) => {
-                                  e.preventDefault();
-                                  let stripped = editContent.replace(/\[|\]/g, ''); 
-                                  setEditContent(autoApplyDict(stripped)); 
-                                }} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-blue-900/30 text-blue-400 border border-blue-500/30 hover:bg-blue-500/20 transition-all shadow-sm">
-                                  🪄 사전 기준 전면 재적용
-                                </button>
-                                <div className="w-px h-3 bg-white/10 mx-0.5"></div>
-                                
-                                <button onClick={handleWordDelete} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-red-900/30 text-red-400 border border-red-500/30 hover:bg-red-500/20 transition-all shadow-sm">
-                                  🗑️ 단어삭제
-                                </button>
-                                <div className="w-px h-3 bg-white/10 mx-0.5"></div>
-
-                                <button onClick={handleFindAndReplace} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-indigo-900/30 text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/20 transition-all shadow-sm">
-                                  🔄 찾아바꾸기
-                                </button>
-                                <div className="w-px h-3 bg-white/10 mx-0.5"></div>
-
-                                <button onClick={() => setActiveTool(activeTool === 'editor' ? null : 'editor')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'editor' ? 'bg-amber-500/80 text-white' : 'bg-white/5 text-white/50'}`}>직접 타이핑</button>
-                                <button onClick={() => setActiveTool(activeTool === 'smart' ? null : 'smart')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'smart' ? 'bg-teal-500/80 text-white' : 'bg-white/5 text-white/50'}`}>스마트 클릭</button>
-                                <button onClick={() => setShowJeonggwanSelector(!showJeonggwanSelector)} className={`px-2 py-1 rounded-sm text-[10px] font-bold transition-all ${showJeonggwanSelector ? 'bg-yellow-500 text-black' : 'bg-yellow-900/30 text-yellow-500 border border-yellow-500/30 hover:bg-yellow-500/20'}`}>📜 정관 불러오기</button>
-                              </div>
-                              {activeTool === 'smart' && (
-                                <span className="text-[9px] text-teal-300/80 ml-1 hidden sm:inline-block">좌클릭:토글 / 우클릭:합치기 / Shift+클릭:분리</span>
-                              )}
+                          <div className="flex flex-col sm:flex-row items-center gap-2 bg-black/50 p-1.5 rounded-sm border border-white/10 overflow-x-auto custom-scrollbar">
+                            <div className="flex gap-1 items-center whitespace-nowrap">
+                              <button onClick={(e) => { e.preventDefault(); let stripped = editContent.replace(/\[|\]/g, ''); setEditContent(autoApplyDict(stripped)); }} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-blue-900/30 text-blue-400 border border-blue-500/30 hover:bg-blue-500/20 transition-all shadow-sm">
+                                🪄 사전 기준 전면 재적용
+                              </button>
+                              <div className="w-px h-3 bg-white/10 mx-0.5"></div>
+                              <button onClick={handleWordDelete} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-red-900/30 text-red-400 border border-red-500/30 hover:bg-red-500/20 transition-all shadow-sm">
+                                🗑️ 단어삭제
+                              </button>
+                              <div className="w-px h-3 bg-white/10 mx-0.5"></div>
+                              <button onClick={handleFindAndReplace} className="px-2 py-1 rounded-sm text-[10px] font-bold bg-indigo-900/30 text-indigo-400 border border-indigo-500/30 hover:bg-indigo-500/20 transition-all shadow-sm">
+                                🔄 찾아바꾸기
+                              </button>
+                              <div className="w-px h-3 bg-white/10 mx-0.5"></div>
+                              <button onClick={() => setActiveTool(activeTool === 'editor' ? null : 'editor')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'editor' ? 'bg-amber-500/80 text-white' : 'bg-white/5 text-white/50'}`}>직접 타이핑</button>
+                              <button onClick={() => setActiveTool(activeTool === 'smart' ? null : 'smart')} className={`px-2 py-1 rounded-sm text-[10px] font-bold ${activeTool === 'smart' ? 'bg-teal-500/80 text-white' : 'bg-white/5 text-white/50'}`}>스마트 클릭</button>
+                              <button onClick={() => setShowJeonggwanSelector(!showJeonggwanSelector)} className={`px-2 py-1 rounded-sm text-[10px] font-bold transition-all ${showJeonggwanSelector ? 'bg-yellow-500 text-black' : 'bg-yellow-900/30 text-yellow-500 border border-yellow-500/30 hover:bg-yellow-500/20'}`}>📜 정관 불러오기</button>
                             </div>
-                          </div>
-
-                          {showJeonggwanSelector && (
-                            <div className="mb-3 p-2 bg-yellow-950/20 border border-yellow-500/30 rounded-sm animate-in fade-in flex items-center gap-2 shadow-inner">
-                              <select
-                                className="flex-1 bg-black/80 text-yellow-400 text-[11px] p-2 outline-none border border-yellow-500/50 rounded-sm custom-scrollbar cursor-pointer focus:ring-1 focus:ring-yellow-500"
-                                onChange={(e) => {
-                                  if (!e.target.value) return;
-                                  const targetCard = localCards.find(c => String(c.id) === String(e.target.value));
-                                  if (targetCard) {
-                                    const lines = targetCard.content.split('\n');
-                                    let firstLine = lines[0].replace(/\[(법|령|칙|규|정관|규정)\]/g, '').trim();
-                                    lines[0] = `[정관] ${firstLine}`; 
-                                    setEditContent(lines.join('\n'));
-                                    setShowJeonggwanSelector(false); 
-                                  }
-                                }}
-                                defaultValue=""
-                              >
-                                <option value="" disabled>⬇️ 정관 폴더에서 가져올 조항을 선택하세요</option>
-                                {localCards.filter(c => c.folder_name === '정관').map(c => (
-                                  <option key={c.id} value={c.id}>
-                                    {c.content.split('\n')[0].replace(/\[.*?\]/g, '').trim() || "제목 없음"}
-                                  </option>
-                                ))}
-                              </select>
-                              <button onClick={() => setShowJeonggwanSelector(false)} className="px-3 py-1.5 bg-white/5 text-white/50 text-[10px] rounded-sm hover:bg-white/10 hover:text-white transition-colors">✕ 닫기</button>
-                            </div>
-                          )}
-                          
-                          {activeTool === 'editor' ? (
-                            <textarea value={editContent} onChange={(e) => { setEditContent(e.target.value); }} className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] p-4 rounded border border-white/10 outline-none resize-none custom-scrollbar" placeholder="직접 입력하거나 [ ] 기호로 감싸세요. (아예 띄어쓰기가 없는 문장에 빈 공간을 넣을 땐 여기서 입력하세요.)" />
-                          ) : renderInteractiveText()}
-                          
-                          {errorMsg && <div className="text-red-400 text-[10px] mt-3 font-bold">{errorMsg}</div>}
-                          
-                          <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-white/10">
-                            <button onClick={(e) => { e.stopPropagation(); setEditingId(null); setShowJeonggwanSelector(false); if(card.isTemp) { setLocalCards(prev=>prev.filter(c=>c.id!==card.id)); } }} className="px-4 py-1.5 bg-white/5 text-white/60 hover:text-white hover:bg-white/10 rounded-sm text-[11px] font-bold transition-all">취소</button>
-                            <button onClick={(e) => { e.stopPropagation(); handleSaveEdit(card); }} className="px-5 py-1.5 bg-amber-600 text-white hover:bg-amber-500 rounded-sm text-[11px] font-bold transition-all">{isSaving ? '저장 중...' : '내용 저장'}</button>
                           </div>
                         </div>
-                      ) : (
-                        <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm border flex flex-col justify-center gap-0.5 ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
-                          
-                          <div className="flex w-full overflow-hidden mb-1">
-                            <div className={`${titleColor} font-bold ${titleSizing} w-full text-left truncate leading-tight`} title={displayTitle}>
-                              {displayTitle}
-                            </div>
+
+                        {showJeonggwanSelector && (
+                          <div className="mb-3 p-2 bg-yellow-950/20 border border-yellow-500/30 rounded-sm animate-in fade-in flex items-center gap-2 shadow-inner">
+                            <select
+                              className="flex-1 bg-black/80 text-yellow-400 text-[11px] p-2 outline-none border border-yellow-500/50 rounded-sm custom-scrollbar cursor-pointer focus:ring-1 focus:ring-yellow-500"
+                              onChange={(e) => {
+                                if (!e.target.value) return;
+                                const targetCard = localCards.find(c => String(c.id) === String(e.target.value));
+                                if (targetCard) {
+                                  const lines = targetCard.content.split('\n');
+                                  let firstLine = lines[0].replace(/\[(법|령|칙|규|정관|규정)\]/g, '').trim();
+                                  lines[0] = `[정관] ${firstLine}`; 
+                                  setEditContent(lines.join('\n'));
+                                  setShowJeonggwanSelector(false); 
+                                }
+                              }}
+                              defaultValue=""
+                            >
+                              <option value="" disabled>⬇️ 정관 폴더에서 가져올 조항을 선택하세요</option>
+                              {localCards.filter(c => c.folder_name === '정관').map(c => (
+                                <option key={c.id} value={c.id}>
+                                  {c.content.split('\n')[0].replace(/\[.*?\]/g, '').trim() || "제목 없음"}
+                                </option>
+                              ))}
+                            </select>
+                            <button onClick={() => setShowJeonggwanSelector(false)} className="px-3 py-1.5 bg-white/5 text-white/50 text-[10px] rounded-sm hover:bg-white/10 hover:text-white transition-colors">✕ 닫기</button>
                           </div>
-                          
-                          {movingId === card.id ? (
-                            <div className="flex items-center justify-between w-full pt-1 animate-in fade-in">
-                              <span className="text-blue-300 text-[10px] font-bold flex items-center">
-                                방향키(↑, ↓)로 이동 후 Enter 입력
-                              </span>
-                              <button 
-                                onClick={(e) => { e.stopPropagation(); setMovingId(null); if(loadAllData) loadAllData(); }} 
-                                className="px-2 py-0.5 bg-blue-500 text-white text-[9px] font-bold rounded-sm shadow-md hover:bg-blue-400 transition-colors"
-                              >
-                                완료
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex flex-col w-full pt-1 border-t border-white/5">
-                              <div className="flex flex-row justify-between items-center w-full">
-                                <div className="flex flex-nowrap gap-0.5">
-                                  <span className="text-[7px] sm:text-[8px] text-indigo-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">빈칸:{totalBlanks}</span>
-                                  <span className="text-[7px] sm:text-[8px] text-teal-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">반복:{stats.filled}</span>
-                                  <span className={`text-[7px] sm:text-[8px] px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center ${hasWrong ? 'text-white bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
-                                </div>
-                                <div className="flex items-center gap-0.5 opacity-80 hover:opacity-100 transition-opacity">
-                                  <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
-                                  <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folder, idx); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
-                                  <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); setEditContent(card.content); setActiveTool(window.innerWidth < 768 ? 'smart' : 'editor'); setShowJeonggwanSelector(false); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
-                                  <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-0.5 px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[8px] hover:bg-red-500/10 hover:text-red-500 transition-all flex items-center justify-center leading-none h-4" title="삭제">✕</button>
-                                </div>
+                        )}
+                        
+                        {activeTool === 'editor' ? (
+                          <textarea value={editContent} onChange={(e) => { setEditContent(e.target.value); }} className="w-full min-h-[160px] max-h-[400px] bg-black/60 text-amber-50 text-[12px] p-4 rounded border border-white/10 outline-none resize-none custom-scrollbar" placeholder="직접 입력하거나 [ ] 기호로 감싸세요. (아예 띄어쓰기가 없는 문장에 빈 공간을 넣을 땐 여기서 입력하세요.)" />
+                        ) : renderInteractiveText()}
+                        
+                        {errorMsg && <div className="text-red-400 text-[10px] mt-3 font-bold">{errorMsg}</div>}
+                        
+                        <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-white/10">
+                          <button onClick={(e) => { e.stopPropagation(); setEditingId(null); setShowJeonggwanSelector(false); if(card.isTemp) { setLocalCards(prev=>prev.filter(c=>c.id!==card.id)); } }} className="px-4 py-1.5 bg-white/5 text-white/60 hover:text-white hover:bg-white/10 rounded-sm text-[11px] font-bold transition-all">취소</button>
+                          <button onClick={(e) => { e.stopPropagation(); handleSaveEdit(card); }} className="px-5 py-1.5 bg-amber-600 text-white hover:bg-amber-500 rounded-sm text-[11px] font-bold transition-all">{isSaving ? '저장 중...' : '내용 저장'}</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button {...createLongPressHandlers(() => (card.id))} onClick={(e) => { e.stopPropagation(); if (typeof setActiveCard === 'function') setActiveCard(card); }} className={`w-full p-1.5 sm:p-2 rounded-sm border flex flex-col justify-center gap-0.5 ${movingId === card.id ? "border-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.3)] bg-blue-900/30 ring-2 ring-blue-500/50" : hasWrong ? "border-red-500/40 bg-red-900/20" : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"} shadow-sm transition-all duration-200`}>
+                        <div className="flex w-full overflow-hidden mb-1">
+                          <div className={`${titleColor} font-bold ${titleSizing} w-full text-left truncate leading-tight`} title={displayTitle}>
+                            {displayTitle}
+                          </div>
+                        </div>
+                        
+                        {movingId === card.id ? (
+                          <div className="flex items-center justify-between w-full pt-1 animate-in fade-in">
+                            <span className="text-blue-300 text-[10px] font-bold flex items-center">
+                              방향키(↑, ↓)로 이동 후 Enter 입력
+                            </span>
+                            <button onClick={(e) => { e.stopPropagation(); setMovingId(null); if(loadAllData) loadAllData(); }} className="px-2 py-0.5 bg-blue-500 text-white text-[9px] font-bold rounded-sm shadow-md hover:bg-blue-400 transition-colors">
+                              완료
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col w-full pt-1 border-t border-white/5">
+                            <div className="flex flex-row justify-between items-center w-full">
+                              <div className="flex flex-nowrap gap-0.5">
+                                <span className="text-[7px] sm:text-[8px] text-indigo-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">빈칸:{totalBlanks}</span>
+                                <span className="text-[7px] sm:text-[8px] text-teal-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">반복:{stats.filled}</span>
+                                <span className={`text-[7px] sm:text-[8px] px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center ${hasWrong ? 'text-white bg-red-600 font-bold animate-pulse shadow-sm' : 'text-white/30 bg-black/20'}`}>틀림:{stats.wrongIndices.length}</span>
+                              </div>
+                              <div className="flex items-center gap-0.5 opacity-80 hover:opacity-100 transition-opacity">
+                                <button onClick={(e) => { e.stopPropagation(); setMovingId(card.id); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-blue-500/10 hover:text-blue-500 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="이동">↕️</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleAddAdjacent(folderCards, idx, folder); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[10px] font-bold hover:bg-green-500/10 hover:text-green-600 transition-all cursor-pointer flex items-center justify-center leading-none h-4" title="추가">+</button>
+                                <button onClick={(e) => { e.stopPropagation(); setEditingId(card.id); setEditContent(card.content); setActiveTool(window.innerWidth < 768 ? 'smart' : 'editor'); setShowJeonggwanSelector(false); }} className="px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[9px] hover:bg-amber-500/10 hover:text-amber-600 transition-all flex items-center justify-center leading-none h-4" title="수정">✏️</button>
+                                <button onClick={async (e) => { e.stopPropagation(); if (confirm(`'${displayTitle}' 카드를 정말 삭제하시겠습니까?`)) { try { const res = await fetch("https://api.blankd.top/api/delete-card", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id: card.id, card_id: card.id }) }); if (!res.ok) throw new Error(); if (loadAllData) await loadAllData(); } catch (err) { alert("카드 삭제에 실패했습니다."); } } }} className="ml-0.5 px-1.5 py-0.5 bg-white/5 text-white/50 rounded-sm font-mono text-[8px] hover:bg-red-500/10 hover:text-red-500 transition-all flex items-center justify-center leading-none h-4" title="삭제">✕</button>
                               </div>
                             </div>
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  );
-                } catch (renderError: any) { return <div key={card.id || Math.random()} className="text-red-500 text-xs p-2 border border-red-500/50 bg-red-900/20">카드 렌더링 오류 진단: {renderError.message}</div>; }
-            })}
-          </div>
+                          </div>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                );
+              } catch (renderError: any) {
+                return <div key={card.id || Math.random()} className="text-red-500 text-xs p-2 border border-red-500/50 bg-red-900/20">카드 렌더링 오류 진단: {renderError.message}</div>;
+              }
+            };
+
+            return (
+              <div className="flex flex-col gap-4">
+                {/* 현재 열려있는 수정창이 있다면 최상단에 100% 가로폭으로 띄워줍니다. */}
+                {editingCard && (
+                  <div className="w-full mb-2">
+                    {renderCardNode(editingCard, true)}
+                  </div>
+                )}
+                
+                {/* 💡 [신규 추가] 3개의 스크롤 영역으로 완전 분리된 독립 컨테이너 */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2 sm:gap-4 items-start w-full">
+                  
+                  {/* 1열: 법 / 정관 */}
+                  <div className="flex flex-col max-h-[70vh] overflow-y-auto custom-scrollbar pr-1 w-full bg-white/5 rounded-sm p-1.5 border border-white/5">
+                    <div className="text-[10px] text-white/30 font-bold mb-2 text-center tracking-widest border-b border-white/5 pb-1">법 / 정관</div>
+                    {col1Cards.filter(c => c.id !== editingId).map(c => renderCardNode(c))}
+                    {col1Cards.length === 0 && <div className="text-center text-white/20 text-[10px] py-4">카드가 없습니다.</div>}
+                  </div>
+                  
+                  {/* 2열: 시행령 */}
+                  <div className="flex flex-col max-h-[70vh] overflow-y-auto custom-scrollbar pr-1 w-full bg-white/5 rounded-sm p-1.5 border border-white/5">
+                    <div className="text-[10px] text-white/30 font-bold mb-2 text-center tracking-widest border-b border-white/5 pb-1">시행령</div>
+                    {col2Cards.filter(c => c.id !== editingId).map(c => renderCardNode(c))}
+                    {col2Cards.length === 0 && <div className="text-center text-white/20 text-[10px] py-4">카드가 없습니다.</div>}
+                  </div>
+                  
+                  {/* 3열: 시행규칙 / 규정 */}
+                  <div className="flex flex-col max-h-[70vh] overflow-y-auto custom-scrollbar pr-1 w-full bg-white/5 rounded-sm p-1.5 border border-white/5">
+                    <div className="text-[10px] text-white/30 font-bold mb-2 text-center tracking-widest border-b border-white/5 pb-1">시행규칙 / 규정</div>
+                    {col3Cards.filter(c => c.id !== editingId).map(c => renderCardNode(c))}
+                    {col3Cards.length === 0 && <div className="text-center text-white/20 text-[10px] py-4">카드가 없습니다.</div>}
+                  </div>
+
+                </div>
+              </div>
+            );
+          })()}
         </div>
       ))}
     </div>
