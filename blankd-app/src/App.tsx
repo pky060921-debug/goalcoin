@@ -57,7 +57,6 @@ const autoApplyDictHelper = (content: string, dict: any) => {
 
     return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
   } catch (err: any) {
-    console.error("사전 자동 적용 엔진 오류 진단:", err.message);
     return content;
   }
 };
@@ -98,7 +97,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
   }, [inputStatus]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // 💡 [진단 기능] 타이핑 이벤트가 병목을 일으키는지 시간 측정
+    // 💡 [진단] 키보드 입력 지연 시간 측정
     const startMeasure = performance.now();
     
     const newVal = e.target.value;
@@ -241,9 +240,14 @@ function MainApp() {
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
   
-  // 💡 [핵심 최적화] 무거운 useState 렌더링 굴레를 끊고 Ref 메모리로 스탑워치 구동
+  // 💡 [핵심] 렌더링 폭주를 유발하는 setElapsed 상태를 완전히 삭제하고, 최초 진입용 상태만 남김
+  const [initialTimeSync, setInitialTimeSync] = useState<number>(0);
   const elapsedRef = useRef(0);
+  
+  // 💡 [진단] 스탑워치 성능 측정을 위한 Ref
   const lastTickRef = useRef(performance.now());
+  const lagSpamGuard = useRef(0);
+  
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
@@ -680,6 +684,9 @@ function MainApp() {
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
       
       const savedElapsed = parseFloat(localStorage.getItem(`blankd_elapsed_${activeCard.id}`) || '0');
+      
+      // 💡 [초고속 엔진] 상태 대신 변수로만 시간 추적 (렌더링 폭주 차단)
+      setInitialTimeSync(savedElapsed);
       elapsedRef.current = savedElapsed;
 
       setIsMemoOpen(false);
@@ -698,10 +705,10 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // 💡 [초고속 진단 엔진] 0.1초 렌더링 폭주 버그를 수정하고 DOM만 직접 업데이트합니다.
   useEffect(() => {
     if (activeCard && currentBlankIdx < blanks.length) {
       lastTickRef.current = performance.now();
+      
       const interval = setInterval(() => {
         if (isFrozen || isDictModalOpen) {
           lastTickRef.current = performance.now();
@@ -711,17 +718,20 @@ function MainApp() {
         const now = performance.now();
         const diff = now - lastTickRef.current;
         
-        // 💡 [진단 기능] 화면이나 타이머에 병목이 발생하면 알려줍니다.
+        // 💡 [진단 기능] 화면이나 타이머에 병목이 발생하면 콘솔창(F12)에 경고를 띄웁니다.
         if (diff > 250) {
-           console.warn(`⚠️ [진단] 스탑워치 렉 감지 (${diff.toFixed(0)}ms 지연) - 브라우저 과부하`);
+           if (now - lagSpamGuard.current > 2000) {
+               console.warn(`⚠️ [진단] 스탑워치 렉 감지 (${diff.toFixed(0)}ms 지연) - 원인: 브라우저 과부하`);
+               lagSpamGuard.current = now;
+           }
         }
         lastTickRef.current = now;
         
-        const prev = elapsedRef.current;
-        const next = prev + 0.1;
-        elapsedRef.current = next;
+        // 💡 [핵심 최적화 1] React 상태 업데이트(setElapsed)를 완전히 지워버림! (화면 렉 원인 제거)
+        const next = elapsedRef.current + 0.1;
+        elapsedRef.current = next; 
 
-        // 💡 React 상태(useState) 업데이트를 우회하고 HTML을 직접 조작하여 성능을 극한으로 끌어올립니다.
+        // 💡 [핵심 최적화 2] DOM 요소만 직접 찾아서 숫자만 바꿈 (렌더링 0%)
         const elapsedEl = document.getElementById('elapsed-time-display');
         const leftEl = document.getElementById('time-left-display');
         const progressEl = document.getElementById('progress-bar-fill');
@@ -741,8 +751,8 @@ function MainApp() {
            }
         }
 
-        // 💡 [최적화] 소수점 저장으로 인한 하드디스크 과부하 방지: 딱 1초가 넘을 때마다 1번씩만 저장
-        if (Math.floor(prev) !== Math.floor(next)) {
+        // 💡 [핵심 최적화 3] 하드디스크 과부하 방지: 딱 1초가 넘을 때마다 1번씩만 백그라운드 저장
+        if (Math.floor(next * 10) % 10 === 0) {
             localStorage.setItem(`blankd_elapsed_${activeCard.id}`, next.toFixed(1));
         }
 
@@ -778,7 +788,7 @@ function MainApp() {
 
     const newMemo = JSON.stringify(exStats);
 
-    // 💡 [수정] 다시 빈칸 1개당 5포인트로 적용
+    // 💡 [요청] 정답 빈칸 1개당 다시 5포인트로 원복
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
 
@@ -873,6 +883,7 @@ function MainApp() {
     const newMemo = JSON.stringify(exStats);
     setActiveCard(null);
 
+    // 💡 [핵심] 창을 닫을 때 한 번만 디스크에 시간 보존 기록
     localStorage.setItem(`blankd_elapsed_${currentId}`, elapsedRef.current.toString());
 
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
@@ -1315,6 +1326,186 @@ function MainApp() {
   }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
+
+  const handleOpenDict = (tab: 'abbr' | 'include' | 'stop') => {
+    setDictTab(tab);
+    if (window.innerWidth >= 1024) { 
+      setIsSidebarOpen(true);
+    } else { 
+      setIsDictModalOpen(true);
+    }
+  };
+
+  const handleAddDictItem = () => {
+    if (dictTab === 'abbr' && tempKey && tempValue) {
+      const k = tempKey.trim(); const v = tempValue.trim();
+      const orig = k.length >= v.length ? k : v; const short = k.length < v.length ? k : v;
+      saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [short]: orig } });
+      setTempKey(""); setTempValue("");
+    } else if (dictTab !== 'abbr' && tempKey) {
+      const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
+      const targetArray = dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions;
+      saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words])) });
+      setTempKey("");
+    }
+  };
+
+  const memoizedTabs = useMemo(() => {
+    return (
+      <>
+        <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
+          <DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} activityLog={activityLog} claimedRewards={claimedRewards} setClaimedRewards={setClaimedRewards} safeAddress={safeAddress} />
+        </div>
+        <div className={activeTab === 'create' ? 'block' : 'hidden'}>
+          <CraftTab categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} expandedId={expandedId} setExpandedId={setExpandedId} handleDeleteCategory={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} globalDict={globalDict} saveGlobalDict={saveGlobalDict} />
+        </div>
+        <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
+          <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
+        </div>
+        <div className={activeTab === 'record' ? 'block' : 'hidden'}>
+          <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} colCount={colCount} globalDict={globalDict} />
+        </div>
+        <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
+          <ExamTab walletAddress={safeAddress} address={safeAddress} />
+        </div>
+        <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
+          <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} zkLogin={zkLogin} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} globalDict={globalDict} saveGlobalDict={saveGlobalDict} loadAllData={loadAllData} theme={theme} setTheme={setTheme}/>
+        </div>
+      </>
+    );
+  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, zkLogin, studyMode, setStudyMode, globalDict, theme, goalBalance, activityLog, claimedRewards]);
+
+  const renderDictionaryUI = (isMobile: boolean) => (
+    <div className={`flex flex-col w-full h-full ${isMobile ? 'bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 rounded-sm' : 'bg-[#08080a]/80 border border-white/10 p-5 rounded-sm shadow-xl backdrop-blur-sm'}`}>
+      <div className="flex justify-between items-start mb-6">
+        <div className="flex gap-4 border-b border-white/10 w-full pt-1">
+          <button onClick={() => setDictTab('abbr')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'abbr' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-white/40 hover:text-white/70'}`}>⚡ 스마트 약어</button>
+          <button onClick={() => setDictTab('include')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'include' ? 'text-teal-400 border-b-2 border-teal-400' : 'text-white/40 hover:text-white/70'}`}>✅ 필수 포함</button>
+          <button onClick={() => setDictTab('stop')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'stop' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-white/40 hover:text-white/70'}`}>❌ 제외 단어</button>
+        </div>
+        <button onClick={() => isMobile ? setIsDictModalOpen(false) : setIsSidebarOpen(false)} className="text-white/40 hover:text-white ml-4 text-xs font-bold bg-white/5 hover:bg-white/10 px-2 py-1 rounded-sm transition-all flex items-center gap-1 shrink-0">
+          {isMobile ? '✕ 닫기' : '▶ 사전 닫기'}
+        </button>
+      </div>
+      
+      <div className="flex gap-2 mb-5 shrink-0">
+        <input type="text" value={tempKey} onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder={dictTab === 'abbr' ? "원래 정답 (예: 행정안전부장관)" : "단어 입력 (쉼표 구분)"} className="flex-1 bg-black/50 border border-white/30 transition-colors w-full min-w-0" />
+        {dictTab === 'abbr' && (
+          <input type="text" value={tempValue} onChange={(e) => setTempValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder="약어 (예: 행안부장관)" className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full min-w-0" />
+        )}
+        <button onClick={handleAddDictItem} className="px-3 sm:px-4 bg-white/5 text-white/80 border border-white/10 text-xs font-bold rounded-sm hover:bg-white/10 transition-colors shrink-0">등록</button>
+      </div>
+      
+      <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 min-h-[160px]">
+        {dictTab === 'abbr' && Object.entries(globalDict.abbrs || {})
+          .sort((a, b) => a[1].localeCompare(b[1], 'ko'))
+          .map(([k, v]) => {
+            const strK = k as string; const strV = v as string;
+            const orig = strK.length >= strV.length ? strK : strV; const short = strK.length < strV.length ? strK : strV;
+            return (
+              <div key={k} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="opacity-60">{orig}</span> <span className="text-white/30 text-[10px]">→</span> <span className="text-indigo-400 font-bold px-2 py-0.5 bg-indigo-900/20 rounded-sm border border-indigo-500/20">{short}</span> 
+                </div>
+                <button onClick={() => { const nw = {...globalDict.abbrs}; delete nw[k]; saveGlobalDict({...globalDict, abbrs: nw}); }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors shrink-0">✕</button>
+              </div>
+            )
+        })}
+        {dictTab !== 'abbr' && (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions)
+          .sort((a, b) => a.localeCompare(b, 'ko'))
+          .map((word: string) => (
+            <div key={word} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
+              <span className={`px-2 py-0.5 rounded-sm border ${dictTab === 'stop' ? 'text-amber-400 bg-amber-900/10 border-amber-500/20' : 'text-teal-400 bg-teal-900/10 border-teal-500/20'}`}>{word}</span>
+              <button onClick={() => {
+                const targetArray = (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions).filter((w: string) => w !== word);
+                saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: targetArray });
+              }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors">✕</button>
+            </div>
+        ))}
+        {((dictTab === 'abbr' && Object.keys(globalDict.abbrs || {}).length === 0) || (dictTab === 'stop' && (globalDict.stopwords || []).length === 0) || (dictTab === 'include' && (globalDict.inclusions || []).length === 0)) && (
+          <div className="text-center py-8 text-white/20 text-[11px] sm:text-xs">등록된 단어가 없습니다.</div>
+        )}
+      </div>
+    </div>
+  );
+
+  const getThemeCSS = () => {
+    if (theme === 'white') {
+      return `
+        body { background-color: #f3f4f6; color: #111827; }
+        .text-white { color: #111827 !important; }
+        .text-white\\/20, .text-white\\/30 { color: #6b7280 !important; font-weight: 600; }
+        .text-white\\/40, .text-white\\/50 { color: #4b5563 !important; font-weight: 600; }
+        .text-white\\/60, .text-white\\/70 { color: #374151 !important; font-weight: 700; }
+        .text-white\\/80 { color: #1f2937 !important; font-weight: 700; }
+        .text-\\[\\#d1d1d1\\] { color: #111827 !important; font-weight: 700; }
+        
+        .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #9ca3af !important; }
+        .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(255, 255, 255, 0.95) !important; backdrop-filter: blur(8px); }
+        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border-color: #d1d5db !important; }
+        .bg-\\[\\#0d0d0f\\] { background-color: #f3f4f6 !important; }
+        
+        .bg-black\\/30, .bg-black\\/40, .bg-black\\/50, .bg-black\\/60 { 
+          background-color: #f9fafb !important; color: #111827 !important; border-color: #9ca3af !important; 
+        }
+        .bg-white\\/5, .bg-white\\/10 { 
+          background-color: #f3f4f6 !important; border-color: #9ca3af !important; color: #111827 !important; 
+        }
+        
+        .border-white\\/5, .border-white\\/10, .border-white\\/20, .border-white\\/30 { 
+          border-color: #6b7280 !important; 
+        }
+
+        .text-amber-100, .text-amber-200 { color: #b45309 !important; font-weight: 800; }
+        .text-teal-100, .text-teal-200 { color: #0f766e !important; font-weight: 800; }
+
+        .text-teal-300, .text-teal-400, .text-teal-500 { color: #0f766e !important; font-weight: 800 !important; }
+        .bg-teal-900\\/20, .bg-teal-900\\/30, .bg-teal-900\\/40, .bg-teal-950\\/20, .bg-teal-500\\/10, .bg-teal-500\\/20 { 
+          background-color: #ccfbf1 !important; border-color: #0d9488 !important; 
+        }
+        .border-teal-500\\/30, .border-teal-500\\/40, .border-teal-500\\/50 { border-color: #0d9488 !important; }
+
+        .text-amber-300, .text-amber-400, .text-amber-500 { color: #b45309 !important; font-weight: 800 !important; }
+        .bg-amber-900\\/20, .bg-amber-900\\/30, .bg-amber-900\\/40, .bg-amber-950\\/20, .bg-amber-500\\/10, .bg-amber-500\\/20 { 
+          background-color: #fef3c7 !important; border-color: #d97706 !important; 
+        }
+        .border-amber-500\\/30, .border-amber-500\\/40, .border-amber-500\\/50, .border-amber-900\\/30 { border-color: #d97706 !important; }
+
+        .text-indigo-300, .text-indigo-400, .text-indigo-500 { color: #4338ca !important; font-weight: 800 !important; }
+        .bg-indigo-900\\/20, .bg-indigo-900\\/30, .bg-indigo-900\\/40 { 
+          background-color: #e0e7ff !important; border-color: #6366f1 !important; 
+        }
+        .border-indigo-500\\/30, .border-indigo-500\\/40, .border-indigo-500\\/50 { border-color: #6366f1 !important; }
+
+        .text-blue-300, .text-blue-400, .text-blue-500 { color: #1d4ed8 !important; font-weight: 800 !important; }
+        .bg-blue-900\\/20, .bg-blue-900\\/30, .bg-blue-900\\/40, .bg-blue-500\\/10, .bg-blue-500\\/20 { 
+          background-color: #dbeafe !important; border-color: #3b82f6 !important; 
+        }
+        .border-blue-500\\/30, .border-blue-500\\/40, .border-blue-500\\/50, .border-blue-500 { border-color: #3b82f6 !important; }
+
+        .text-red-300, .text-red-400, .text-red-500 { color: #b91c1c !important; font-weight: 800 !important; }
+        .bg-red-900\\/20, .bg-red-900\\/30, .bg-red-900\\/40, .bg-red-950\\/20, .bg-red-500\\/10, .bg-red-500\\/20 { 
+          background-color: #fee2e2 !important; border-color: #ef4444 !important; 
+        }
+        .border-red-500\\/30, .border-red-500\\/40, .border-red-500\\/50, .border-red-900\\/30 { border-color: #ef4444 !important; }
+
+        .text-green-300, .text-green-400, .text-green-500 { color: #15803d !important; font-weight: 800 !important; }
+        .bg-green-900\\/20, .bg-green-900\\/30, .bg-green-900\\/40, .bg-green-500\\/10, .bg-green-500\\/20 { 
+          background-color: #dcfce7 !important; border-color: #10b981 !important; 
+        }
+        .border-green-500\\/30, .border-green-500\\/40, .border-green-500\\/50 { border-color: #10b981 !important; }
+      `;
+    } else if (theme === 'green') {
+      return `
+        body { background-color: #163322; }
+        .bg-\\[\\#08080a\\] { background-color: #0f2418 !important; }
+        .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(15, 36, 24, 0.9) !important; }
+        .bg-\\[\\#0a0a0c\\] { background-color: #122b1c !important; }
+        .bg-\\[\\#0d0d0f\\] { background-color: #163322 !important; }
+      `;
+    }
+    return `body { background-color: #0d0d0f; }`; 
+  };
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
