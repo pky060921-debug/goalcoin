@@ -22,36 +22,7 @@ const getGridClass = (cols: number) => {
   return "md:grid-cols-3";
 };
 
-const generateAcronymMemo = (content: string, abbrs: Record<string, string>) => {
-    const blanks = content.match(/\[\s*(.*?)\s*\]/g);
-    if (!blanks) return "빈칸 없음";
-
-    const circleNums = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬','⑭','⑮','⑯','⑰','⑱','⑲','⑳'];
-
-    const acronyms = blanks.map((b, i) => {
-        let text = b.replace(/\[|\]/g, '').replace(/ORIG_ID:\d+/g, '').trim();
-        if (!text) return "";
-
-        let cleanText = text.replace(/\s+/g, '');
-        let finalWord = text;
-
-        if (abbrs) {
-            for (const [short, orig] of Object.entries(abbrs)) {
-                if (orig.replace(/\s+/g, '') === cleanText) {
-                    finalWord = short;
-                    break;
-                }
-            }
-        }
-        const firstChar = finalWord.charAt(0);
-        const prefix = i < 20 ? circleNums[i] : `${i+1}.`;
-        return `${prefix}${firstChar}`;
-    });
-
-    return acronyms.filter(Boolean).join(' ');
-};
-
-export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAllData, safeAddress, colCount = 3, globalDict }: any) => {
+export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAllData, safeAddress, colCount = 3 }: any) => {
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [expandedId, setExpandedId] = useState<string | number | null>(null);
 
@@ -135,99 +106,37 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
         ))}
       </div>
       
-      {/* 💡 채우기 탭과 동일하게 위아래 스크롤 부여 */}
       <div className="overflow-y-auto max-h-[60vh] custom-scrollbar pr-2 pb-10">
         {enhanceFolders.map((folder: string) => {
           if (!openFolders[folder]) return null;
 
           const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
+          
+          const col1Cards = folderCards.filter(c => { const f = c.content.split('\n')[0]||""; return f.includes('[정관]') || (!f.includes('[령]') && !f.includes('[칙]') && !f.includes('[규]') && !f.includes('[규정]')); });
+          const col2Cards = folderCards.filter(c => { const f = c.content.split('\n')[0]||""; return f.includes('[령]'); });
+          const col3Cards = folderCards.filter(c => { const f = c.content.split('\n')[0]||""; return f.includes('[칙]') || f.includes('[규]') || f.includes('[규정]'); });
 
           return (
             <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-2 sm:pl-3">
               <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
               
-              {/* 💡 [핵심] 채우기 탭과 완전히 동일한 3단 그리드 시스템 적용 */}
               <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-1.5 sm:gap-2 items-start w-full`}>
-                {folderCards.map((card: any) => {
-                    const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
-                    const lines = cleanContent.split('\n');
-                    const firstLine = lines[0] || "";
-                    
-                    let displayTitle = firstLine.replace(/\[(법|령|칙|규|정관|규정)\]/g, '').replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
-                    if (!displayTitle) displayTitle = "제목 없음";
+                
+                <div className="flex flex-col gap-1.5 w-full bg-white/5 rounded-sm p-1.5 border border-white/5 h-auto">
+                  <div className="text-[10px] text-white/30 font-bold mb-0.5 text-center tracking-widest border-b border-white/5 pb-1">법 / 정관</div>
+                  {col1Cards.map(c => renderTightCard(c))}
+                </div>
+                
+                <div className="flex flex-col gap-1.5 w-full bg-white/5 rounded-sm p-1.5 border border-white/5 h-auto">
+                  <div className="text-[10px] text-white/30 font-bold mb-0.5 text-center tracking-widest border-b border-white/5 pb-1">시행령</div>
+                  {col2Cards.map(c => renderTightCard(c))}
+                </div>
+                
+                <div className="flex flex-col gap-1.5 w-full bg-white/5 rounded-sm p-1.5 border border-white/5 h-auto">
+                  <div className="text-[10px] text-white/30 font-bold mb-0.5 text-center tracking-widest border-b border-white/5 pb-1">시행규칙 / 규정</div>
+                  {col3Cards.map(c => renderTightCard(c))}
+                </div>
 
-                    let prefix = "[법]"; let titleColor = "text-red-500"; let colClass = "md:col-start-1 md:col-span-1";
-                    if (firstLine.includes('[정관]')) { prefix = "[정관]"; titleColor = "text-yellow-500"; colClass = "md:col-start-1 md:col-span-1"; }
-                    else if (firstLine.includes('[칙]') || firstLine.includes('[규]') || firstLine.includes('[규정]')) { prefix = "[칙]"; titleColor = "text-green-500"; colClass = "md:col-start-3 md:col-span-1"; }
-                    else if (firstLine.includes('[령]')) { prefix = "[령]"; titleColor = "text-blue-400"; colClass = "md:col-start-2 md:col-span-1"; }
-
-                    const stats = getExtendedStats(card.memo);
-                    const isMax = stats.upgrade >= 50;
-                    const canUpgrade = stats.upgrade < stats.filled;
-                    const cost = (stats.upgrade + 1) * 20;
-                    const isExpanded = expandedId === card.id;
-
-                    const autoAcronyms = generateAcronymMemo(card.content, globalDict?.abbrs);
-
-                    let borderClass = "border-white/10 bg-black/40 hover:bg-white/5";
-                    if (isMax) borderClass = "border-yellow-500/50 bg-yellow-950/20 shadow-[0_0_10px_rgba(250,204,21,0.15)]";
-                    else if (stats.upgrade >= 40) borderClass = "border-red-500/40 bg-red-950/20";
-                    else if (stats.upgrade >= 30) borderClass = "border-fuchsia-500/40 bg-fuchsia-950/20";
-                    else if (stats.upgrade >= 20) borderClass = "border-purple-500/40 bg-purple-950/20";
-                    else if (stats.upgrade >= 10) borderClass = "border-blue-500/40 bg-blue-950/20";
-                    else if (stats.upgrade >= 5) borderClass = "border-teal-500/40 bg-teal-950/20";
-
-                    return (
-                        <div key={card.id} className={`relative transition-all w-full ${isExpanded ? 'col-span-full' : colClass}`}>
-                            <div onClick={() => setExpandedId(isExpanded ? null : card.id)} className={`flex flex-col rounded-sm border transition-all cursor-pointer p-1.5 ${borderClass}`}>
-                                <div className="flex justify-between items-center gap-2">
-                                    <div className={`${titleColor} font-bold text-[11px] truncate w-full`} title={`${prefix} ${displayTitle}`}>
-                                        <span className="opacity-80">{prefix}</span> {displayTitle}
-                                    </div>
-                                    <div className={`text-[9px] font-mono font-bold whitespace-nowrap shrink-0 ${isMax ? 'text-yellow-500 animate-pulse' : 'text-white/50'}`}>
-                                        {isMax ? '★MAX' : `+${stats.upgrade}`}
-                                    </div>
-                                </div>
-                                
-                                {/* 💡 약어 자동 추출 라인 */}
-                                <div className="text-[10px] text-teal-300 font-bold mt-1 truncate w-full" title={autoAcronyms}>
-                                    💡 {autoAcronyms}
-                                </div>
-
-                                <div className="text-[10px] text-white/40 mt-0.5 truncate w-full font-serif" title={stats.text || "메모 없음"}>
-                                    {stats.text || "메모 없음"}
-                                </div>
-
-                                {/* 💡 확장 패널 */}
-                                {isExpanded && (
-                                    <div className="mt-2 pt-2 border-t border-white/10 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1">
-                                        <div className="flex justify-between items-center text-[9px] font-mono bg-black/40 p-1 rounded border border-white/5">
-                                            <span className="text-white/40">최고기록</span><span className="text-teal-400 font-bold">{stats.bestTime > 0 ? `${stats.bestTime.toFixed(1)}초` : '-'}</span>
-                                        </div>
-                                        <div className="flex justify-between items-center text-[9px] font-mono bg-black/40 p-1 rounded border border-white/5">
-                                            <span className="text-white/40">누적반복</span><span className="text-indigo-400 font-bold">{stats.filled}회</span>
-                                        </div>
-                                        <div className="flex justify-between items-center text-[9px] font-mono bg-black/40 p-1 rounded border border-white/5">
-                                            <span className="text-white/40">정답/오답</span><span><span className="text-green-400">O:{stats.totalCorrect}</span> <span className="text-white/30">|</span> <span className="text-red-400">X:{stats.totalWrong}</span></span>
-                                        </div>
-                                        <button 
-                                            disabled={isMax || isEnhancing || !canUpgrade}
-                                            onClick={(e) => { e.stopPropagation(); handleEnhanceCard(card, stats); }}
-                                            className={`w-full py-1.5 mt-1 text-[10px] font-bold rounded-sm transition-all flex justify-center items-center gap-1 ${
-                                                isMax ? 'bg-yellow-600/20 text-yellow-500 border border-yellow-500/30 cursor-not-allowed' : 
-                                                !canUpgrade ? 'bg-gray-800/50 text-gray-500 border border-gray-600/30 cursor-not-allowed' :
-                                                goalBalance >= cost ? 'bg-white/10 hover:bg-white/20 text-white border border-white/20' : 
-                                                'bg-red-900/20 text-red-500/50 border border-red-500/20 cursor-not-allowed'
-                                            }`}
-                                        >
-                                            {isMax ? '최고 레벨(50) 달성' : !canUpgrade ? `강화 불가 (학습 ${stats.filled}회 / 필요 ${stats.upgrade + 1}회)` : `💎 강화 시도 (${cost}P)`}
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    );
-                })}
               </div>
             </div>
           );
@@ -235,4 +144,74 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
       </div>
     </div>
   );
+
+  function renderTightCard(card: any) {
+    const lines = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '').split('\n');
+    const firstLine = lines[0] || "";
+    
+    let displayTitle = firstLine.replace(/\[(법|령|칙|규|정관|규정)\]/g, '').replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
+    if (!displayTitle) displayTitle = "제목 없음";
+
+    let prefix = "[법]"; let titleColor = "text-red-500";
+    if (firstLine.includes('[정관]')) { prefix = "[정관]"; titleColor = "text-yellow-500"; }
+    else if (firstLine.includes('[칙]') || firstLine.includes('[규]') || firstLine.includes('[규정]')) { prefix = "[칙]"; titleColor = "text-green-500"; }
+    else if (firstLine.includes('[령]')) { prefix = "[령]"; titleColor = "text-blue-400"; }
+
+    const stats = getExtendedStats(card.memo);
+    const isMax = stats.upgrade >= 50;
+    const canUpgrade = stats.upgrade < stats.filled;
+    const cost = (stats.upgrade + 1) * 20;
+    const isExpanded = expandedId === card.id;
+
+    let borderClass = "border-white/10 bg-black/40 hover:bg-white/5";
+    if (isMax) borderClass = "border-yellow-500/50 bg-yellow-950/20 shadow-[0_0_10px_rgba(250,204,21,0.15)]";
+    else if (stats.upgrade >= 40) borderClass = "border-red-500/40 bg-red-950/20";
+    else if (stats.upgrade >= 30) borderClass = "border-fuchsia-500/40 bg-fuchsia-950/20";
+    else if (stats.upgrade >= 20) borderClass = "border-purple-500/40 bg-purple-950/20";
+    else if (stats.upgrade >= 10) borderClass = "border-blue-500/40 bg-blue-950/20";
+    else if (stats.upgrade >= 5) borderClass = "border-teal-500/40 bg-teal-950/20";
+
+    return (
+        <div key={card.id} onClick={() => setExpandedId(isExpanded ? null : card.id)} className={`relative flex flex-col rounded-sm border transition-all cursor-pointer p-1.5 w-full ${borderClass}`}>
+            <div className="flex justify-between items-center gap-2">
+                <div className={`${titleColor} font-bold text-[11px] truncate w-full`} title={`${prefix} ${displayTitle}`}>
+                    <span className="opacity-80">{prefix}</span> {displayTitle}
+                </div>
+                <div className={`text-[9px] font-mono font-bold whitespace-nowrap shrink-0 ${isMax ? 'text-yellow-500 animate-pulse' : 'text-white/50'}`}>
+                    {isMax ? '★MAX' : `+${stats.upgrade}`}
+                </div>
+            </div>
+
+            <div className="text-[10px] text-white/40 mt-0.5 truncate w-full font-serif" title={stats.text || "메모 없음"}>
+                {stats.text || "메모 없음"}
+            </div>
+
+            {isExpanded && (
+                <div className="mt-2 pt-2 border-t border-white/10 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1">
+                    <div className="flex justify-between items-center text-[9px] font-mono bg-black/40 p-1 rounded border border-white/5">
+                        <span className="text-white/40">최고기록</span><span className="text-teal-400 font-bold">{stats.bestTime > 0 ? `${stats.bestTime.toFixed(1)}초` : '-'}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-[9px] font-mono bg-black/40 p-1 rounded border border-white/5">
+                        <span className="text-white/40">누적반복</span><span className="text-indigo-400 font-bold">{stats.filled}회</span>
+                    </div>
+                    <div className="flex justify-between items-center text-[9px] font-mono bg-black/40 p-1 rounded border border-white/5">
+                        <span className="text-white/40">정답/오답</span><span><span className="text-green-400">O:{stats.totalCorrect}</span> <span className="text-white/30">|</span> <span className="text-red-400">X:{stats.totalWrong}</span></span>
+                    </div>
+                    <button 
+                        disabled={isMax || isEnhancing || !canUpgrade}
+                        onClick={(e) => { e.stopPropagation(); handleEnhanceCard(card, stats); }}
+                        className={`w-full py-1.5 mt-1 text-[10px] font-bold rounded-sm transition-all flex justify-center items-center gap-1 ${
+                            isMax ? 'bg-yellow-600/20 text-yellow-500 border border-yellow-500/30 cursor-not-allowed' : 
+                            !canUpgrade ? 'bg-gray-800/50 text-gray-500 border border-gray-600/30 cursor-not-allowed' :
+                            goalBalance >= cost ? 'bg-white/10 hover:bg-white/20 text-white border border-white/20' : 
+                            'bg-red-900/20 text-red-500/50 border border-red-500/20 cursor-not-allowed'
+                        }`}
+                    >
+                        {isMax ? '최고 레벨(50) 달성' : !canUpgrade ? `강화 불가 (학습 ${stats.filled}회 / 필요 ${stats.upgrade + 1}회)` : `💎 강화 시도 (${cost}P)`}
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+  }
 };
