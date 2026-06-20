@@ -57,6 +57,7 @@ const autoApplyDictHelper = (content: string, dict: any) => {
 
     return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
   } catch (err: any) {
+    console.error("사전 자동 적용 엔진 오류 진단:", err.message);
     return content;
   }
 };
@@ -97,6 +98,9 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
   }, [inputStatus]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // 💡 [진단 기능] 타이핑 이벤트가 병목을 일으키는지 시간 측정
+    const startMeasure = performance.now();
+    
     const newVal = e.target.value;
     setVal(newVal);
 
@@ -114,6 +118,11 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
       });
     }
     if (isMatch) onSubmit(newVal);
+    
+    const endMeasure = performance.now();
+    if (endMeasure - startMeasure > 15) {
+      console.warn(`⚠️ [성능 진단] 타이핑 분석 지연 발생: ${(endMeasure - startMeasure).toFixed(2)}ms 소요됨.`);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -232,12 +241,9 @@ function MainApp() {
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
   
-  const [elapsed, setElapsed] = useState<number>(0);
+  // 💡 [핵심 최적화] 무거운 useState 렌더링 굴레를 끊고 Ref 메모리로 스탑워치 구동
   const elapsedRef = useRef(0);
-  // 💡 [진단] 스탑워치 성능 측정을 위한 Ref
   const lastTickRef = useRef(performance.now());
-  const lagSpamGuard = useRef(0);
-  
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
@@ -674,7 +680,6 @@ function MainApp() {
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
       
       const savedElapsed = parseFloat(localStorage.getItem(`blankd_elapsed_${activeCard.id}`) || '0');
-      setElapsed(savedElapsed);
       elapsedRef.current = savedElapsed;
 
       setIsMemoOpen(false);
@@ -693,6 +698,7 @@ function MainApp() {
     }
   }, [activeCard]);
 
+  // 💡 [초고속 진단 엔진] 0.1초 렌더링 폭주 버그를 수정하고 DOM만 직접 업데이트합니다.
   useEffect(() => {
     if (activeCard && currentBlankIdx < blanks.length) {
       lastTickRef.current = performance.now();
@@ -705,30 +711,45 @@ function MainApp() {
         const now = performance.now();
         const diff = now - lastTickRef.current;
         
-        // 💡 [진단] 렌더링 부하로 인한 스탑워치 렉 감지
+        // 💡 [진단 기능] 화면이나 타이머에 병목이 발생하면 알려줍니다.
         if (diff > 250) {
-           if (now - lagSpamGuard.current > 2000) {
-               console.warn(`⚠️ [진단] 스탑워치 렉 감지 (${diff.toFixed(0)}ms 지연) - 원인: React 렌더링 과부하`);
-               lagSpamGuard.current = now;
-           }
+           console.warn(`⚠️ [진단] 스탑워치 렉 감지 (${diff.toFixed(0)}ms 지연) - 브라우저 과부하`);
         }
         lastTickRef.current = now;
         
-        setElapsed(prev => {
-          const next = prev + 0.1;
-          elapsedRef.current = next; 
+        const prev = elapsedRef.current;
+        const next = prev + 0.1;
+        elapsedRef.current = next;
 
-          // 💡 [최적화] 0.1초마다 디스크에 저장하던 로직을 1초에 1번으로 대폭 축소 (디스크 IO 병목 해소)
-          if (Math.floor(next * 10) % 10 === 0) {
-              localStorage.setItem(`blankd_elapsed_${activeCard.id}`, next.toFixed(1));
-          }
+        // 💡 React 상태(useState) 업데이트를 우회하고 HTML을 직접 조작하여 성능을 극한으로 끌어올립니다.
+        const elapsedEl = document.getElementById('elapsed-time-display');
+        const leftEl = document.getElementById('time-left-display');
+        const progressEl = document.getElementById('progress-bar-fill');
 
-          if (next >= totalTimeLimit) {
-            clearInterval(interval);
-            setTimeout(() => { alert("집중 시간 초과! 현재 기록을 저장합니다."); finishCard(); }, 10);
-          }
-          return next;
-        });
+        if (elapsedEl) elapsedEl.innerText = `진행: ${next.toFixed(1)}초`;
+        if (leftEl) {
+           const left = Math.max(0, totalTimeLimit - next);
+           leftEl.innerText = `남은시간: ${left.toFixed(1)}초`;
+           if (left < 5) leftEl.className = 'text-red-400 font-bold';
+           else leftEl.className = 'text-teal-400';
+        }
+        if (progressEl) {
+           const pct = totalTimeLimit > 0 ? Math.min((next / totalTimeLimit) * 100, 100) : 0;
+           progressEl.style.width = `${pct}%`;
+           if (pct > 80 && !isFrozen) {
+              progressEl.className = 'h-full transition-all duration-100 ease-linear bg-red-500';
+           }
+        }
+
+        // 💡 [최적화] 소수점 저장으로 인한 하드디스크 과부하 방지: 딱 1초가 넘을 때마다 1번씩만 저장
+        if (Math.floor(prev) !== Math.floor(next)) {
+            localStorage.setItem(`blankd_elapsed_${activeCard.id}`, next.toFixed(1));
+        }
+
+        if (next >= totalTimeLimit) {
+          clearInterval(interval);
+          setTimeout(() => { alert("집중 시간 초과! 현재 기록을 저장합니다."); finishCard(); }, 10);
+        }
       }, 100);
       return () => clearInterval(interval);
     }
@@ -757,7 +778,7 @@ function MainApp() {
 
     const newMemo = JSON.stringify(exStats);
 
-    // 💡 [요청 적용] 빈칸 1개당 5포인트 획득
+    // 💡 [수정] 다시 빈칸 1개당 5포인트로 적용
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
 
@@ -1013,109 +1034,6 @@ function MainApp() {
     return { nextCatToCraft: craftTarget, nextStudyCard: studyTarget };
   }, [isLoggedIn, categories, savedCards]);
 
-  // 💡 [핵심 최적화] 모달의 방대한 렌더링 과정을 Memoize(캐싱)하여 화면 버벅임을 완벽 차단합니다.
-  const memoizedCardContent = useMemo(() => {
-    if (!activeCard) return null;
-    const startTime = performance.now();
-    const cleanContent = activeCard.content; 
-    const lines = cleanContent.split('\n');
-    const titleLine = lines[0] || '';
-    const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
-
-    let displayTitle = titleLine
-      .replace(/\[법\]|\[령\]|\[칙\]|\[규\]|\[정관\]|\[규정\]/g, '')
-      .replace(/\(\s*내용\s*\)/g, '')
-      .replace(/내용/g, '')
-      .trim();
-    if (!displayTitle) displayTitle = "제목 없음";
-
-    let titleColor = "text-red-500";
-    if (titleLine.includes('[정관]')) titleColor = "text-yellow-500";
-    else if (titleLine.includes('[칙]') || titleLine.includes('[규]') || titleLine.includes('[규정]')) titleColor = "text-green-500";
-    else if (titleLine.includes('[령]')) titleColor = "text-blue-400";
-
-    const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter((p: string) => p !== '');
-    let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
-    for (let part of parts) {
-        if (part === '##PAGE_BREAK##') tempPage++;
-        else if (part.startsWith('[') && part.endsWith(']')) {
-            if (tempGlobalBlank === currentBlankIdx) { displayPage = tempPage; break; }
-            tempGlobalBlank++;
-        }
-    }
-
-    let renderPage = 0; let bIdx = 0; const contentToRender: any[] = [];
-    parts.forEach((part: string, i: number) => {
-      if (part === '##PAGE_BREAK##') { renderPage++; return; }
-      if (renderPage === displayPage) {
-          if (part.startsWith('[') && part.endsWith(']')) {
-            const isCorrect = blanks[bIdx]?.correct; 
-            const isCurrent = bIdx === currentBlankIdx; 
-            const isWrong = statsRef.current.wrongIndices.has(bIdx); 
-            if (isCorrect) {
-              contentToRender.push(
-                <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
-              );
-            } else if (isCurrent) {
-              contentToRender.push(
-                <InlineBlankInput key={`blank-${currentBlankIdx}`} inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
-              );
-            } else {
-              contentToRender.push(<span key={i} className="inline-block min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
-            }
-            bIdx++;
-          } else { contentToRender.push(<span key={i}>{part}</span>); }
-      } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
-    });
-    
-    const duration = performance.now() - startTime;
-    if (duration > 15) {
-        console.warn(`[진단 로그] 렌더링 과부하: 텍스트 파싱에 ${duration.toFixed(2)}ms 소요됨.`);
-    }
-
-    return (
-      <div className="flex flex-col gap-6 w-full overflow-hidden">
-        <div className="flex justify-between items-center border-b border-white/10 pb-2 w-full gap-3 overflow-hidden">
-            <div className={`${titleColor} font-bold text-[14px] leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
-              {displayTitle}
-            </div>
-            <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm shrink-0">Page {displayPage + 1}</span>
-        </div>
-        <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
-        <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
-          <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
-            {isMemoOpen ? '닫기 ✕' : '메모 열기'}
-          </button>
-          
-          <button onClick={() => { setDictTab('abbr'); setIsDictModalOpen(true); }} className="px-3 py-1.5 bg-indigo-900/30 text-indigo-400 border border-indigo-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-indigo-900/50 transition-all shadow-md">
-            ⚡ 약어 추가
-          </button>
-
-          <button onClick={toggleVoiceRecognition} className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${isListening ? 'bg-red-600/50 text-white border-red-500 animate-pulse' : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'}`}>
-            {isListening ? '음성 인식 끄기' : '음성으로 입력'}
-          </button>
-          <button id="show-answer-btn" onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
-            정답 보기 (오답 처리)
-          </button>
-        </div>
-        {isMemoOpen && (
-          <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
-             <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { 
-                 statsRef.current.text = e.target.value; 
-                 const exStats = getExtendedStats(activeCard.memo);
-                 exStats.text = e.target.value;
-                 exStats.filled = statsRef.current.filled;
-                 exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
-                 handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats)); 
-             }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all" autoFocus/>
-          </div>
-        )}
-      </div>
-    );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter]);
-
-  const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
-
   const handleOpenDict = (tab: 'abbr' | 'include' | 'stop') => {
     setDictTab(tab);
     if (window.innerWidth >= 1024) { 
@@ -1296,7 +1214,109 @@ function MainApp() {
     return `body { background-color: #0d0d0f; }`; 
   };
 
+  const memoizedCardContent = useMemo(() => {
+    if (!activeCard) return null;
+    const startTime = performance.now();
+    const cleanContent = activeCard.content; 
+    const lines = cleanContent.split('\n');
+    const titleLine = lines[0] || '';
+    const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
+
+    let displayTitle = titleLine
+      .replace(/\[법\]|\[령\]|\[칙\]|\[규\]|\[정관\]|\[규정\]/g, '')
+      .replace(/\(\s*내용\s*\)/g, '')
+      .replace(/내용/g, '')
+      .trim();
+    if (!displayTitle) displayTitle = "제목 없음";
+
+    let titleColor = "text-red-500";
+    if (titleLine.includes('[정관]')) titleColor = "text-yellow-500";
+    else if (titleLine.includes('[칙]') || titleLine.includes('[규]') || titleLine.includes('[규정]')) titleColor = "text-green-500";
+    else if (titleLine.includes('[령]')) titleColor = "text-blue-400";
+
+    const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter((p: string) => p !== '');
+    let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
+    for (let part of parts) {
+        if (part === '##PAGE_BREAK##') tempPage++;
+        else if (part.startsWith('[') && part.endsWith(']')) {
+            if (tempGlobalBlank === currentBlankIdx) { displayPage = tempPage; break; }
+            tempGlobalBlank++;
+        }
+    }
+
+    let renderPage = 0; let bIdx = 0; const contentToRender: any[] = [];
+    parts.forEach((part: string, i: number) => {
+      if (part === '##PAGE_BREAK##') { renderPage++; return; }
+      if (renderPage === displayPage) {
+          if (part.startsWith('[') && part.endsWith(']')) {
+            const isCorrect = blanks[bIdx]?.correct; 
+            const isCurrent = bIdx === currentBlankIdx; 
+            const isWrong = statsRef.current.wrongIndices.has(bIdx); 
+            if (isCorrect) {
+              contentToRender.push(
+                <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
+              );
+            } else if (isCurrent) {
+              contentToRender.push(
+                <InlineBlankInput key={`blank-${currentBlankIdx}`} inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
+              );
+            } else {
+              contentToRender.push(<span key={i} className="inline-block min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
+            }
+            bIdx++;
+          } else { contentToRender.push(<span key={i}>{part}</span>); }
+      } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
+    });
+    
+    const duration = performance.now() - startTime;
+    if (duration > 15) {
+        console.warn(`[진단 로그] 렌더링 과부하: 텍스트 파싱에 ${duration.toFixed(2)}ms 소요됨.`);
+    }
+
     return (
+      <div className="flex flex-col gap-6 w-full overflow-hidden">
+        <div className="flex justify-between items-center border-b border-white/10 pb-2 w-full gap-3 overflow-hidden">
+            <div className={`${titleColor} font-bold text-[14px] leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
+              {displayTitle}
+            </div>
+            <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm shrink-0">Page {displayPage + 1}</span>
+        </div>
+        <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
+        <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
+          <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
+            {isMemoOpen ? '닫기 ✕' : '메모 열기'}
+          </button>
+          
+          <button onClick={() => { setDictTab('abbr'); setIsDictModalOpen(true); }} className="px-3 py-1.5 bg-indigo-900/30 text-indigo-400 border border-indigo-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-indigo-900/50 transition-all shadow-md">
+            ⚡ 약어 추가
+          </button>
+
+          <button onClick={toggleVoiceRecognition} className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${isListening ? 'bg-red-600/50 text-white border-red-500 animate-pulse' : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'}`}>
+            {isListening ? '음성 인식 끄기' : '음성으로 입력'}
+          </button>
+          <button id="show-answer-btn" onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
+            정답 보기 (오답 처리)
+          </button>
+        </div>
+        {isMemoOpen && (
+          <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
+             <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { 
+                 statsRef.current.text = e.target.value; 
+                 const exStats = getExtendedStats(activeCard.memo);
+                 exStats.text = e.target.value;
+                 exStats.filled = statsRef.current.filled;
+                 exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+                 handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats)); 
+             }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all" autoFocus/>
+          </div>
+        )}
+      </div>
+    );
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter]);
+
+  const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
+
+  return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
       <style>{getThemeCSS()}</style>
       <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
@@ -1363,7 +1383,6 @@ function MainApp() {
         </div>
       </header>
 
-      {/* 💡 이 아래부터 잘렸던 부분입니다! 완벽 복구 완료 */}
       {isLoggedIn && (
         <nav className="border-b border-white/5 bg-black/40 py-1.5 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="w-full mx-auto flex items-center justify-start gap-1 sm:gap-2 px-2 sm:px-4 md:px-8">
@@ -1434,7 +1453,7 @@ function MainApp() {
         <CardModal 
           activeCard={activeCard} 
           totalTimeLimit={totalTimeLimit} 
-          elapsed={elapsed} 
+          elapsed={elapsedRef.current} 
           inputStatus={inputStatus} 
           renderContent={renderContent} 
           onClose={handleCloseModal} 
