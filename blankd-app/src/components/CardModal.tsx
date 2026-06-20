@@ -43,7 +43,6 @@ export const CardModal = ({
       <div className="bg-[#0a0a0c] border border-white/10 rounded-sm shadow-2xl w-[95vw] max-w-6xl max-h-[85vh] flex flex-col relative overflow-hidden">
         
         <div className="absolute top-0 left-0 h-1 bg-white/10 w-full z-10">
-          {/* 💡 직접 조작을 위해 id="progress-bar-fill" 부여 */}
           <div id="progress-bar-fill" className={`h-full transition-all duration-100 ease-linear ${isFrozen ? 'bg-blue-400 shadow-[0_0_10px_#60a5fa]' : progressPercent > 80 ? 'bg-red-500' : 'bg-teal-500'}`} style={{ width: `${progressPercent}%` }} />
         </div>
         
@@ -52,7 +51,6 @@ export const CardModal = ({
               <span className="text-white/40 text-xs font-bold hidden sm:inline">학습 진행 중</span>
               <div className="flex items-center gap-1.5 bg-black/60 border border-white/10 px-2.5 py-1 rounded font-mono text-[11px] sm:text-xs text-amber-400 shadow-inner">
                 <span className="animate-pulse">⏱️</span>
-                {/* 💡 직접 조작을 위해 id 부여 */}
                 <span id="elapsed-time-display" className="text-white">진행: {elapsed.toFixed(1)}초</span>
                 <span className="text-white/30">|</span>
                 <span id="time-left-display" className={`${timeLeft < 5 ? 'text-red-400 font-bold' : 'text-teal-400'}`}>남은시간: {timeLeft.toFixed(1)}초</span>
