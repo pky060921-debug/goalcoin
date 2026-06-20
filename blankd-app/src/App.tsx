@@ -57,23 +57,24 @@ const autoApplyDictHelper = (content: string, dict: any) => {
 
     return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
   } catch (err: any) {
-    console.error("사전 자동 적용 엔진 오류 진단:", err.message);
     return content;
   }
 };
 
 const getExtendedStats = (memoStr: string) => {
   try {
-    const p = JSON.parse(memoStr || '{}');
-    return {
-      text: p.text || "",
-      filled: p.filled || 0,
-      wrongIndices: p.wrongIndices || [],
-      upgrade: p.upgrade || 0,
-      bestTime: p.bestTime || 0,
-      totalCorrect: p.totalCorrect || 0,
-      totalWrong: p.totalWrong || 0
-    };
+    if (memoStr && memoStr.trim().startsWith('{')) {
+      const p = JSON.parse(memoStr || '{}');
+      return {
+        text: p.text || "", filled: p.filled || 0, wrongIndices: p.wrongIndices || [],
+        upgrade: p.upgrade || 0, bestTime: p.bestTime || 0, totalCorrect: p.totalCorrect || 0, totalWrong: p.totalWrong || 0
+      };
+    }
+  } catch(e) {}
+  
+  try {
+    const old = parseCardStats(memoStr);
+    return { text: old.text || "", filled: old.filled || 0, wrongIndices: old.wrongIndices || [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0 };
   } catch(e) {
     return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0 };
   }
@@ -196,6 +197,18 @@ function MainApp() {
     localStorage.setItem('blankd_active_tab', activeTab);
   }, [activeTab]);
 
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('blankd_sidebar_open');
+      if (saved !== null) return saved === 'true';
+    }
+    return true; 
+  });
+
+  useEffect(() => {
+    localStorage.setItem('blankd_sidebar_open', String(isSidebarOpen));
+  }, [isSidebarOpen]);
+
   const [categories, setCategories] = useState<any[]>([]);
   const [savedCards, setSavedCards] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
@@ -219,7 +232,12 @@ function MainApp() {
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
   
-  const [elapsed, setElapsed] = useState<number>(0);
+  // 💡 [초고속 타이머 엔진] 무거운 상태(state) 대신 Ref와 DOM으로 처리
+  const [initialTimeSync, setInitialTimeSync] = useState<number>(0);
+  const elapsedRef = useRef(0);
+  const lastTickRef = useRef(performance.now());
+  const lagSpamGuard = useRef(0);
+  
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
@@ -485,6 +503,10 @@ function MainApp() {
             body: JSON.stringify({ wallet_address: safeAddress, card_id: currentCard.id, card_content: currentCard.content, answer_text: currentCard.answer_text || "", folder_name: currentCard.folder_name, memo: JSON.stringify(exStats) })
           }).catch(()=>{});
         }
+        
+        if (currentCard) {
+          localStorage.setItem(`blankd_elapsed_${currentCard.id}`, elapsedRef.current.toString());
+        }
         flushQueue(); 
       }
     };
@@ -591,9 +613,7 @@ function MainApp() {
       const target = savedCards.find((c:any) => c.id === id);
       if (target) {
         fetch("https://api.blankd.top/api/save-card", {
-          method: "POST", 
-          keepalive: true, 
-          headers: { "Content-Type": "application/json" },
+          method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: id, card_content: target.content, answer_text: target.answer_text || "", folder_name: target.folder_name, memo })
         }).catch(() => {});
       }
@@ -652,7 +672,13 @@ function MainApp() {
       const stats = getExtendedStats(activeCard.memo); 
       const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
-      setElapsed(0); setIsMemoOpen(false);
+      
+      const savedElapsed = parseFloat(localStorage.getItem(`blankd_elapsed_${activeCard.id}`) || '0');
+      
+      setInitialTimeSync(savedElapsed);
+      elapsedRef.current = savedElapsed;
+
+      setIsMemoOpen(false);
       setIsFrozen(false); setHintLetter(null); 
 
       let cleanText = stats.text;
@@ -668,28 +694,68 @@ function MainApp() {
     }
   }, [activeCard]);
 
+  // 💡 [초고속 렌더링 엔진] 0.1초마다 HTML(DOM)을 직접 업데이트하여 React 과부하를 100% 방지
   useEffect(() => {
     if (activeCard && currentBlankIdx < blanks.length) {
+      lastTickRef.current = performance.now();
       const interval = setInterval(() => {
-        if (isFrozen) return; 
+        if (isFrozen || isDictModalOpen) {
+          lastTickRef.current = performance.now();
+          return; 
+        }
         
-        setElapsed(prev => {
-          const next = prev + 0.1;
-          if (next >= totalTimeLimit) {
-            clearInterval(interval);
-            setTimeout(() => { alert("집중 시간 초과! 현재 기록을 저장합니다."); finishCard(); }, 10);
-          }
-          return next;
-        });
+        const now = performance.now();
+        const diff = now - lastTickRef.current;
+        
+        if (diff > 250) {
+           if (now - lagSpamGuard.current > 2000) {
+               console.warn(`⚠️ [진단] 스탑워치 렉 감지 (${diff.toFixed(0)}ms 지연) - 원인: 브라우저 과부하`);
+               lagSpamGuard.current = now;
+           }
+        }
+        lastTickRef.current = now;
+        
+        const prev = elapsedRef.current;
+        const next = prev + 0.1;
+        elapsedRef.current = next;
+
+        const elapsedEl = document.getElementById('elapsed-time-display');
+        const leftEl = document.getElementById('time-left-display');
+        const progressEl = document.getElementById('progress-bar-fill');
+
+        if (elapsedEl) elapsedEl.innerText = `진행: ${next.toFixed(1)}초`;
+        if (leftEl) {
+           const left = Math.max(0, totalTimeLimit - next);
+           leftEl.innerText = `남은시간: ${left.toFixed(1)}초`;
+           if (left < 5) leftEl.className = 'text-red-400 font-bold';
+           else leftEl.className = 'text-teal-400';
+        }
+        if (progressEl) {
+           const pct = totalTimeLimit > 0 ? Math.min((next / totalTimeLimit) * 100, 100) : 0;
+           progressEl.style.width = `${pct}%`;
+           if (pct > 80 && !isFrozen) {
+              progressEl.className = 'h-full transition-all duration-100 ease-linear bg-red-500';
+           }
+        }
+
+        // 1초에 한 번만 디스크 저장하여 병목 해소
+        if (Math.floor(next * 10) % 10 === 0) {
+            localStorage.setItem(`blankd_elapsed_${activeCard.id}`, next.toFixed(1));
+        }
+
+        if (next >= totalTimeLimit) {
+          clearInterval(interval);
+          setTimeout(() => { alert("집중 시간 초과! 현재 기록을 저장합니다."); finishCard(); }, 10);
+        }
       }, 100);
       return () => clearInterval(interval);
     }
-  }, [activeCard, currentBlankIdx, blanks.length, totalTimeLimit, isFrozen]);
+  }, [activeCard, currentBlankIdx, blanks.length, totalTimeLimit, isFrozen, isDictModalOpen]);
 
   const finishCard = async (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
-    const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = elapsed;
+    const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = elapsedRef.current;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     
     const correctCount = Math.max(0, blanks.length - wrongArr.length);
@@ -709,6 +775,7 @@ function MainApp() {
 
     const newMemo = JSON.stringify(exStats);
 
+    // 💡 [요청] 정답 1개당 5P 획득
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
 
@@ -758,12 +825,14 @@ function MainApp() {
 
     const nextReviewDate = new Date(); nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
 
-    // 💡 [핵심 버그 수정] ID 정렬 삭제 (기존 화면 순서 완벽 유지)
+    // 💡 [핵심 버그 수정] ID 정렬 삭제 (화면상 보이는 순서 완벽 유지)
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder);
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
     const nextCard = folderCards[currentIdx + 1] || null;
 
     localStorage.removeItem(`blankd_progress_${currentId}`);
+    localStorage.removeItem(`blankd_elapsed_${currentId}`);
+
     setActiveCard(nextCard);
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     
@@ -799,6 +868,9 @@ function MainApp() {
     
     const newMemo = JSON.stringify(exStats);
     setActiveCard(null);
+
+    localStorage.setItem(`blankd_elapsed_${currentId}`, elapsedRef.current.toString());
+
     setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
     
@@ -923,7 +995,7 @@ function MainApp() {
     recognitionRef.current = recognition; recognition.start();
   };
 
-  const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => parseCardStats(card.memo || "").filled || 0)) : 0;
+  const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => getExtendedStats(card.memo || "").filled || 0)) : 0;
   const passProbability = Math.min(minFilledCount * 2, 100);
 
   const { nextCatToCraft, nextStudyCard } = useMemo(() => {
@@ -945,7 +1017,6 @@ function MainApp() {
     }
 
     if (savedCards && savedCards.length > 0) {
-      // 💡 [핵심 버그 수정] ID 정렬 제거, 자연스러운 화면 순서 첫번째 카드 출력
       const cardsWithStatus = savedCards.map(c => {
          const stats = getExtendedStats(c.memo);
          return { ...c, repetitions: stats.filled || 0 };
@@ -959,92 +1030,14 @@ function MainApp() {
     return { nextCatToCraft: craftTarget, nextStudyCard: studyTarget };
   }, [isLoggedIn, categories, savedCards]);
 
-  const renderContent = React.useCallback(() => {
-    if (!activeCard) return null;
-    const cleanContent = activeCard.content; 
-    const lines = cleanContent.split('\n');
-    const titleLine = lines[0] || '';
-    const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
-
-    let displayTitle = titleLine
-      .replace(/\[법\]|\[령\]|\[칙\]|\[규\]|\[정관\]|\[규정\]/g, '')
-      .replace(/\(\s*내용\s*\)/g, '')
-      .replace(/내용/g, '')
-      .trim();
-    if (!displayTitle) displayTitle = "제목 없음";
-
-    let titleColor = "text-red-500";
-    if (titleLine.includes('[정관]')) titleColor = "text-yellow-500";
-    else if (titleLine.includes('[칙]') || titleLine.includes('[규]') || titleLine.includes('[규정]')) titleColor = "text-green-500";
-    else if (titleLine.includes('[령]')) titleColor = "text-blue-400";
-
-    const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter(p => p !== '');
-    let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
-    for (let part of parts) {
-        if (part === '##PAGE_BREAK##') tempPage++;
-        else if (part.startsWith('[') && part.endsWith(']')) {
-            if (tempGlobalBlank === currentBlankIdx) { displayPage = tempPage; break; }
-            tempGlobalBlank++;
-        }
+  const handleOpenDict = (tab: 'abbr' | 'include' | 'stop') => {
+    setDictTab(tab);
+    if (window.innerWidth >= 1024) { 
+      setIsSidebarOpen(true);
+    } else { 
+      setIsDictModalOpen(true);
     }
-
-    let renderPage = 0; let bIdx = 0; const contentToRender: any[] = [];
-    parts.forEach((part: string, i: number) => {
-      if (part === '##PAGE_BREAK##') { renderPage++; return; }
-      if (renderPage === displayPage) {
-          if (part.startsWith('[') && part.endsWith(']')) {
-            const isCorrect = blanks[bIdx]?.correct; 
-            const isCurrent = bIdx === currentBlankIdx; 
-            const isWrong = statsRef.current.wrongIndices.has(bIdx); 
-            if (isCorrect) {
-              contentToRender.push(
-                <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
-              );
-            } else if (isCurrent) {
-              contentToRender.push(
-                <InlineBlankInput key={`blank-${currentBlankIdx}`} inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
-              );
-            } else {
-              contentToRender.push(<span key={i} className="inline-block min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
-            }
-            bIdx++;
-          } else { contentToRender.push(<span key={i}>{part}</span>); }
-      } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
-    });
-    
-    return (
-      <div className="flex flex-col gap-6 w-full overflow-hidden">
-        <div className="flex justify-between items-center border-b border-white/10 pb-2 w-full gap-3 overflow-hidden">
-            <div className={`${titleColor} font-bold text-[14px] leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
-              {displayTitle}
-            </div>
-            <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm shrink-0">Page {displayPage + 1}</span>
-        </div>
-        <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
-        <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
-          <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
-            {isMemoOpen ? '닫기 ✕' : '메모 열기'}
-          </button>
-          
-          <button onClick={() => { setDictTab('abbr'); setIsDictModalOpen(true); }} className="px-3 py-1.5 bg-indigo-900/30 text-indigo-400 border border-indigo-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-indigo-900/50 transition-all shadow-md">
-            ⚡ 약어 추가
-          </button>
-
-          <button onClick={toggleVoiceRecognition} className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${isListening ? 'bg-red-600/50 text-white border-red-500 animate-pulse' : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'}`}>
-            {isListening ? '음성 인식 끄기' : '음성으로 입력'}
-          </button>
-          <button id="show-answer-btn" onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
-            정답 보기 (오답 처리)
-          </button>
-        </div>
-        {isMemoOpen && (
-          <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
-             <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { statsRef.current.text = e.target.value; handleUpdateMemoBackground(activeCard.id, stringifyCardStats(statsRef.current.text, statsRef.current.filled, Array.from(statsRef.current.wrongIndices))); }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all" autoFocus/>
-          </div>
-        )}
-      </div>
-    );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter]);
+  };
 
   const handleAddDictItem = () => {
     if (dictTab === 'abbr' && tempKey && tempValue) {
@@ -1073,7 +1066,7 @@ function MainApp() {
           <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
         </div>
         <div className={activeTab === 'record' ? 'block' : 'hidden'}>
-          <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} colCount={colCount} />
+          <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} colCount={colCount} globalDict={globalDict} />
         </div>
         <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
           <ExamTab walletAddress={safeAddress} address={safeAddress} />
@@ -1093,7 +1086,9 @@ function MainApp() {
           <button onClick={() => setDictTab('include')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'include' ? 'text-teal-400 border-b-2 border-teal-400' : 'text-white/40 hover:text-white/70'}`}>✅ 필수 포함</button>
           <button onClick={() => setDictTab('stop')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'stop' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-white/40 hover:text-white/70'}`}>❌ 제외 단어</button>
         </div>
-        {isMobile && <button onClick={() => setIsDictModalOpen(false)} className="text-white/40 hover:text-white ml-6 text-lg font-bold">✕</button>}
+        <button onClick={() => isMobile ? setIsDictModalOpen(false) : setIsSidebarOpen(false)} className="text-white/40 hover:text-white ml-4 text-xs font-bold bg-white/5 hover:bg-white/10 px-2 py-1 rounded-sm transition-all flex items-center gap-1 shrink-0">
+          {isMobile ? '✕ 닫기' : '▶ 사전 닫기'}
+        </button>
       </div>
       
       <div className="flex gap-2 mb-5 shrink-0">
@@ -1164,6 +1159,9 @@ function MainApp() {
           border-color: #6b7280 !important; 
         }
 
+        .text-amber-100, .text-amber-200 { color: #b45309 !important; font-weight: 800; }
+        .text-teal-100, .text-teal-200 { color: #0f766e !important; font-weight: 800; }
+
         .text-teal-300, .text-teal-400, .text-teal-500 { color: #0f766e !important; font-weight: 800 !important; }
         .bg-teal-900\\/20, .bg-teal-900\\/30, .bg-teal-900\\/40, .bg-teal-950\\/20, .bg-teal-500\\/10, .bg-teal-500\\/20 { 
           background-color: #ccfbf1 !important; border-color: #0d9488 !important; 
@@ -1212,11 +1210,215 @@ function MainApp() {
     return `body { background-color: #0d0d0f; }`; 
   };
 
+  const memoizedCardContent = useMemo(() => {
+    if (!activeCard) return null;
+    const startTime = performance.now();
+    const cleanContent = activeCard.content; 
+    const lines = cleanContent.split('\n');
+    const titleLine = lines[0] || '';
+    const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
+
+    let displayTitle = titleLine
+      .replace(/\[법\]|\[령\]|\[칙\]|\[규\]|\[정관\]|\[규정\]/g, '')
+      .replace(/\(\s*내용\s*\)/g, '')
+      .replace(/내용/g, '')
+      .trim();
+    if (!displayTitle) displayTitle = "제목 없음";
+
+    let titleColor = "text-red-500";
+    if (titleLine.includes('[정관]')) titleColor = "text-yellow-500";
+    else if (titleLine.includes('[칙]') || titleLine.includes('[규]') || titleLine.includes('[규정]')) titleColor = "text-green-500";
+    else if (titleLine.includes('[령]')) titleColor = "text-blue-400";
+
+    const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter((p: string) => p !== '');
+    let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
+    for (let part of parts) {
+        if (part === '##PAGE_BREAK##') tempPage++;
+        else if (part.startsWith('[') && part.endsWith(']')) {
+            if (tempGlobalBlank === currentBlankIdx) { displayPage = tempPage; break; }
+            tempGlobalBlank++;
+        }
+    }
+
+    let renderPage = 0; let bIdx = 0; const contentToRender: any[] = [];
+    parts.forEach((part: string, i: number) => {
+      if (part === '##PAGE_BREAK##') { renderPage++; return; }
+      if (renderPage === displayPage) {
+          if (part.startsWith('[') && part.endsWith(']')) {
+            const isCorrect = blanks[bIdx]?.correct; 
+            const isCurrent = bIdx === currentBlankIdx; 
+            const isWrong = statsRef.current.wrongIndices.has(bIdx); 
+            if (isCorrect) {
+              contentToRender.push(
+                <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
+              );
+            } else if (isCurrent) {
+              contentToRender.push(
+                <InlineBlankInput key={`blank-${currentBlankIdx}`} inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
+              );
+            } else {
+              contentToRender.push(<span key={i} className="inline-block min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
+            }
+            bIdx++;
+          } else { contentToRender.push(<span key={i}>{part}</span>); }
+      } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
+    });
+    
+    const duration = performance.now() - startTime;
+    if (duration > 15) {
+        console.warn(`[진단 로그] 렌더링 과부하: 텍스트 파싱에 ${duration.toFixed(2)}ms 소요됨.`);
+    }
+
+    return (
+      <div className="flex flex-col gap-6 w-full overflow-hidden">
+        <div className="flex justify-between items-center border-b border-white/10 pb-2 w-full gap-3 overflow-hidden">
+            <div className={`${titleColor} font-bold text-[14px] leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
+              {displayTitle}
+            </div>
+            <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm shrink-0">Page {displayPage + 1}</span>
+        </div>
+        <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
+        <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
+          <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
+            {isMemoOpen ? '닫기 ✕' : '메모 열기'}
+          </button>
+          
+          <button onClick={() => { setDictTab('abbr'); setIsDictModalOpen(true); }} className="px-3 py-1.5 bg-indigo-900/30 text-indigo-400 border border-indigo-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-indigo-900/50 transition-all shadow-md">
+            ⚡ 약어 추가
+          </button>
+
+          <button onClick={toggleVoiceRecognition} className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${isListening ? 'bg-red-600/50 text-white border-red-500 animate-pulse' : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'}`}>
+            {isListening ? '음성 인식 끄기' : '음성으로 입력'}
+          </button>
+          <button id="show-answer-btn" onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
+            정답 보기 (오답 처리)
+          </button>
+        </div>
+        {isMemoOpen && (
+          <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
+             <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { 
+                 statsRef.current.text = e.target.value; 
+                 const exStats = getExtendedStats(activeCard.memo);
+                 exStats.text = e.target.value;
+                 exStats.filled = statsRef.current.filled;
+                 exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+                 handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats)); 
+             }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all" autoFocus/>
+          </div>
+        )}
+      </div>
+    );
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter]);
+
+  const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
+
+  const handleOpenDict = (tab: 'abbr' | 'include' | 'stop') => {
+    setDictTab(tab);
+    if (window.innerWidth >= 1024) { 
+      setIsSidebarOpen(true);
+    } else { 
+      setIsDictModalOpen(true);
+    }
+  };
+
+  const handleAddDictItem = () => {
+    if (dictTab === 'abbr' && tempKey && tempValue) {
+      const k = tempKey.trim(); const v = tempValue.trim();
+      const orig = k.length >= v.length ? k : v; const short = k.length < v.length ? k : v;
+      saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [short]: orig } });
+      setTempKey(""); setTempValue("");
+    } else if (dictTab !== 'abbr' && tempKey) {
+      const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
+      const targetArray = dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions;
+      saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words])) });
+      setTempKey("");
+    }
+  };
+
+  const memoizedTabs = useMemo(() => {
+    return (
+      <>
+        <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
+          <DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} activityLog={activityLog} claimedRewards={claimedRewards} setClaimedRewards={setClaimedRewards} safeAddress={safeAddress} />
+        </div>
+        <div className={activeTab === 'create' ? 'block' : 'hidden'}>
+          <CraftTab categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} expandedId={expandedId} setExpandedId={setExpandedId} handleDeleteCategory={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} globalDict={globalDict} saveGlobalDict={saveGlobalDict} />
+        </div>
+        <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
+          <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
+        </div>
+        <div className={activeTab === 'record' ? 'block' : 'hidden'}>
+          <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} colCount={colCount} globalDict={globalDict} />
+        </div>
+        <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
+          <ExamTab walletAddress={safeAddress} address={safeAddress} />
+        </div>
+        <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
+          <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} zkLogin={zkLogin} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} globalDict={globalDict} saveGlobalDict={saveGlobalDict} loadAllData={loadAllData} theme={theme} setTheme={setTheme}/>
+        </div>
+      </>
+    );
+  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, zkLogin, studyMode, setStudyMode, globalDict, theme, goalBalance, activityLog, claimedRewards]);
+
+  const renderDictionaryUI = (isMobile: boolean) => (
+    <div className={`flex flex-col w-full h-full ${isMobile ? 'bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 rounded-sm' : 'bg-[#08080a]/80 border border-white/10 p-5 rounded-sm shadow-xl backdrop-blur-sm'}`}>
+      <div className="flex justify-between items-start mb-6">
+        <div className="flex gap-4 border-b border-white/10 w-full pt-1">
+          <button onClick={() => setDictTab('abbr')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'abbr' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-white/40 hover:text-white/70'}`}>⚡ 스마트 약어</button>
+          <button onClick={() => setDictTab('include')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'include' ? 'text-teal-400 border-b-2 border-teal-400' : 'text-white/40 hover:text-white/70'}`}>✅ 필수 포함</button>
+          <button onClick={() => setDictTab('stop')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'stop' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-white/40 hover:text-white/70'}`}>❌ 제외 단어</button>
+        </div>
+        <button onClick={() => isMobile ? setIsDictModalOpen(false) : setIsSidebarOpen(false)} className="text-white/40 hover:text-white ml-4 text-xs font-bold bg-white/5 hover:bg-white/10 px-2 py-1 rounded-sm transition-all flex items-center gap-1 shrink-0">
+          {isMobile ? '✕ 닫기' : '▶ 사전 닫기'}
+        </button>
+      </div>
+      
+      <div className="flex gap-2 mb-5 shrink-0">
+        <input type="text" value={tempKey} onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder={dictTab === 'abbr' ? "원래 정답 (예: 행정안전부장관)" : "단어 입력 (쉼표 구분)"} className="flex-1 bg-black/50 border border-white/30 transition-colors w-full min-w-0" />
+        {dictTab === 'abbr' && (
+          <input type="text" value={tempValue} onChange={(e) => setTempValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder="약어 (예: 행안부장관)" className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full min-w-0" />
+        )}
+        <button onClick={handleAddDictItem} className="px-3 sm:px-4 bg-white/5 text-white/80 border border-white/10 text-xs font-bold rounded-sm hover:bg-white/10 transition-colors shrink-0">등록</button>
+      </div>
+      
+      <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 min-h-[160px]">
+        {dictTab === 'abbr' && Object.entries(globalDict.abbrs || {})
+          .sort((a, b) => a[1].localeCompare(b[1], 'ko'))
+          .map(([k, v]) => {
+            const strK = k as string; const strV = v as string;
+            const orig = strK.length >= strV.length ? strK : strV; const short = strK.length < strV.length ? strK : strV;
+            return (
+              <div key={k} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="opacity-60">{orig}</span> <span className="text-white/30 text-[10px]">→</span> <span className="text-indigo-400 font-bold px-2 py-0.5 bg-indigo-900/20 rounded-sm border border-indigo-500/20">{short}</span> 
+                </div>
+                <button onClick={() => { const nw = {...globalDict.abbrs}; delete nw[k]; saveGlobalDict({...globalDict, abbrs: nw}); }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors shrink-0">✕</button>
+              </div>
+            )
+        })}
+        {dictTab !== 'abbr' && (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions)
+          .sort((a, b) => a.localeCompare(b, 'ko'))
+          .map((word: string) => (
+            <div key={word} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
+              <span className={`px-2 py-0.5 rounded-sm border ${dictTab === 'stop' ? 'text-amber-400 bg-amber-900/10 border-amber-500/20' : 'text-teal-400 bg-teal-900/10 border-teal-500/20'}`}>{word}</span>
+              <button onClick={() => {
+                const targetArray = (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions).filter((w: string) => w !== word);
+                saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: targetArray });
+              }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors">✕</button>
+            </div>
+        ))}
+        {((dictTab === 'abbr' && Object.keys(globalDict.abbrs || {}).length === 0) || (dictTab === 'stop' && (globalDict.stopwords || []).length === 0) || (dictTab === 'include' && (globalDict.inclusions || []).length === 0)) && (
+          <div className="text-center py-8 text-white/20 text-[11px] sm:text-xs">등록된 단어가 없습니다.</div>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
       <style>{getThemeCSS()}</style>
       <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
-        <div className="max-w-[1600px] mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="w-full mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3 px-2 sm:px-4 md:px-8">
           <div className="flex items-center justify-between w-full md:w-auto">
             <button onClick={() => { const lastTab = localStorage.getItem('blankd_active_tab') || 'progress'; setActiveTab(lastTab); }} className="text-xl sm:text-2xl font-bold tracking-widest text-current shrink-0 hover:text-teal-400 transition-colors">
               BlankD
@@ -1241,8 +1443,8 @@ function MainApp() {
 
             <div className="flex items-center gap-2 shrink-0 ml-1 sm:ml-2 border-l border-white/10 pl-2 sm:pl-3">
               <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 hidden sm:inline">사전:</span>
-              <button onClick={() => { setDictTab('stop'); setIsDictModalOpen(true); }} className="text-[10px] bg-amber-900/30 text-amber-400 border border-amber-500/40 px-2 py-1 rounded-sm hover:bg-amber-900/50 transition-colors">제외/포함</button>
-              <button onClick={() => { setDictTab('abbr'); setIsDictModalOpen(true); }} className="text-[10px] bg-indigo-900/30 text-indigo-400 border border-indigo-500/40 px-2 py-1 rounded-sm hover:bg-indigo-900/50 transition-colors">약어 채점</button>
+              <button onClick={() => handleOpenDict('stop')} className="text-[10px] bg-amber-900/30 text-amber-400 border border-amber-500/40 px-2 py-1 rounded-sm hover:bg-amber-900/50 transition-colors">제외/포함</button>
+              <button onClick={() => handleOpenDict('abbr')} className="text-[10px] bg-indigo-900/30 text-indigo-400 border border-indigo-500/40 px-2 py-1 rounded-sm hover:bg-indigo-900/50 transition-colors">약어 채점</button>
             </div>
 
             <div className="h-5 sm:h-6 w-px bg-white/10 shrink-0 hidden sm:block ml-1 sm:ml-2"></div>
@@ -1280,8 +1482,8 @@ function MainApp() {
       </header>
 
       {isLoggedIn && (
-        <nav className="border-b border-white/5 bg-black/40 py-1.5 px-4 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
-          <div className="max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2">
+        <nav className="border-b border-white/5 bg-black/40 py-1.5 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
+          <div className="w-full mx-auto flex items-center justify-start gap-1 sm:gap-2 px-2 sm:px-4 md:px-8">
             {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '수집' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
             ))}
@@ -1296,15 +1498,25 @@ function MainApp() {
           <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-[#111827] text-white text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
         </main>
       ) : (
-        <div className="max-w-[1600px] mx-auto w-full flex gap-4 sm:gap-6 px-4 lg:px-6 items-start pb-10">
-          <main className="flex-1 w-full min-w-0">
+        <div className="w-full max-w-none mx-auto flex gap-4 sm:gap-6 px-2 sm:px-4 lg:px-8 items-start pb-10 transition-all duration-300">
+          <main className="flex-1 w-full min-w-0 transition-all duration-300">
             <ErrorBoundary fallbackLog={addLog}>
               {memoizedTabs}
             </ErrorBoundary>
           </main>
-          <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[416px] xl:w-[468px]" style={{ width: '416px', maxWidth: '35vw' }}>
-            {renderDictionaryUI(false)}
-          </aside>
+          
+          {isSidebarOpen ? (
+            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[320px] xl:w-[400px] transition-all duration-300 animate-in slide-in-from-right-8">
+              {renderDictionaryUI(false)}
+            </aside>
+          ) : (
+            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[40px] items-center justify-start transition-all duration-300 animate-in fade-in">
+              <button onClick={() => setIsSidebarOpen(true)} className="w-full h-32 bg-white/5 border border-white/10 hover:bg-white/10 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors flex-col gap-2 shadow-md">
+                <span className="text-xs">◀</span>
+                <span className="text-[10px] font-bold" style={{ writingMode: 'vertical-rl' }}>사전 열기</span>
+              </button>
+            </aside>
+          )}
         </div>
       )}
 
@@ -1329,7 +1541,7 @@ function MainApp() {
 
       {isDictModalOpen && (
         <div className="lg:hidden fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh]">
+          <div className="w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] relative">
             {renderDictionaryUI(true)}
           </div>
         </div>
@@ -1339,7 +1551,7 @@ function MainApp() {
         <CardModal 
           activeCard={activeCard} 
           totalTimeLimit={totalTimeLimit} 
-          elapsed={elapsed} 
+          elapsed={elapsedRef.current} 
           inputStatus={inputStatus} 
           renderContent={renderContent} 
           onClose={handleCloseModal} 
