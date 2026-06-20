@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { parseCardStats } from '../utils/constants';
 
-// 💡 [핵심 버그 수정] 구형 데이터 형식에서도 0으로 리셋되지 않게 보호하는 만능 파서
 const safeParseStats = (memoStr: string) => {
     try {
         if (memoStr && memoStr.trim().startsWith('{')) {
@@ -93,7 +92,6 @@ export const DashboardTab = ({
         const blanksCount = (bodyOnly.match(/\[\s*(.*?)\s*\]/g) || []).filter((b: string) => !b.includes('ORIG_ID')).length;
         total += blanksCount;
         try {
-            // 💡 [수정] 안전 파서(safeParseStats) 사용
             const st = safeParseStats(card.memo);
             if (st.filled > 0) {
                 wrong += st.wrongIndices.length;
@@ -178,7 +176,7 @@ export const DashboardTab = ({
   };
 
   return (
-    <div className="space-y-6 sm:space-y-8 animate-in fade-in">
+    <div className="space-y-6 sm:space-y-8 animate-in fade-in w-full">
       <div className="flex flex-col mb-6 border-b border-white/10 pb-4 gap-4">
         <div className="flex justify-between items-center w-full">
           <h1 className="text-2xl sm:text-3xl font-serif text-current tracking-tight">학습 대시보드</h1>
