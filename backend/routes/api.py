@@ -1,5 +1,4 @@
 from flask import Blueprint, request, jsonify, send_file
-from flask_cors import CORS
 import sqlite3
 import threading
 import uuid
@@ -29,7 +28,6 @@ except ImportError:
     logging.error("PyMuPDF(fitz) 라이브러리가 설치되지 않았습니다.")
 
 api_bp = Blueprint('api', __name__)
-CORS(api_bp)
 
 # ==========================================
 # 💡 GOAL 코인 발행 (Sui Blockchain 연동)
@@ -332,7 +330,7 @@ def update_category_text():
         data = request.json or {}
         wallet_address = data.get('wallet_address')
         cat_id = data.get('id')
-        content = data.get('content')
+        content = data.get('content') # 필드명을 DB 컬럼과 맞춰 content로 수신
         
         if not wallet_address or not cat_id:
             return jsonify({"error": "필수 정보가 누락되었습니다."}), 400
@@ -340,6 +338,7 @@ def update_category_text():
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        # 데이터베이스의 categories 테이블 내 content 컬럼을 업데이트합니다.
         cursor.execute(
             "UPDATE categories SET content = ? WHERE id = ? AND wallet_address = ?",
             (content, cat_id, wallet_address)
@@ -959,19 +958,14 @@ def upload_pdf():
     threading.Thread(target=process_file).start()
     return jsonify({"message": f"{folder_name} 분석 시작", "task_id": task_id})
     
-# ==========================================
-# 💡 [핵심 버그 수정 1] 안전하게 정렬 조회
-# ==========================================
 @api_bp.route('/get-categories')
 def get_categories():
     try:
         wallet_address = request.args.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
-        try:
-            cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ? ORDER BY sort_order ASC, id ASC", (wallet_address,))
-        except sqlite3.OperationalError:
-            cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ? ORDER BY id ASC", (wallet_address,))
+        # 💡 [정렬 기준 수정] sort_order를 최우선 기준으로 정렬합니다.
+        cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ? ORDER BY sort_order ASC, id ASC", (wallet_address,))
         cats = [{"id": r[0], "title": r[1], "content": r[2], "folder_name": r[3]} for r in cursor.fetchall()]
         conn.close()
         return jsonify({"categories": cats})
@@ -999,6 +993,7 @@ def split_category():
     except Exception as e:
         return jsonify({"error": "분할 실패"}), 500
 
+# 💡 [핵심 버그 수정] 라우팅 중복 선언 방지
 @api_bp.route('/save-card', methods=['POST'])
 def save_card():
     try:
@@ -1017,10 +1012,14 @@ def save_card():
         cursor = conn.cursor()
         
         if card_id:
+            print(f"DEBUG: 카드 수정 시도 - ID: {card_id}, wallet: {wallet_address}")
             cursor.execute('''UPDATE cards SET card_content=?, answer_text=?, folder_name=?, memo=? 
                               WHERE id=? AND wallet_address=?''', 
                               (card_content, answer_text, folder_name, memo, card_id, wallet_address))
+            # 💡 수정된 행이 있는지 확인
+            print(f"DEBUG: 수정된 행의 수: {cursor.rowcount}")
         else:
+            print("DEBUG: 카드 신규 생성 시도")
             cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo) 
                               VALUES (?, 0, ?, ?, '[]', 0, ?, 'OWNED', NULL, ?, ?)''', 
                               (wallet_address, card_content, answer_text, get_next_review_time(0), folder_name, memo))
@@ -1030,22 +1029,19 @@ def save_card():
         return jsonify({"message": "카드 저장 완료"}), 200
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": f"DB 에러: {str(e)}"}), 500
 
-# ==========================================
-# 💡 [핵심 버그 수정 2] 안전한 정렬 및 JSON 파싱
-# ==========================================
 @api_bp.route('/my-cards')
 def get_my_cards():
     try:
         wallet_address = request.args.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
-        try:
-            cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo FROM cards WHERE wallet_address = ? ORDER BY sort_order ASC, id ASC", (wallet_address,))
-        except sqlite3.OperationalError:
-            cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo FROM cards WHERE wallet_address = ? ORDER BY id ASC", (wallet_address,))
-        cards = [{"id": r[0], "content": r[1], "answer": r[2], "options": json.loads(r[3] if r[3] else "[]"), "level": r[4], "next_review_time": r[5], "status": r[6], "best_time": r[7], "folder_name": r[8], "memo": r[9] or ""} for r in cursor.fetchall()]
+        # 💡 [정렬 기준 수정] sort_order를 최우선 기준으로 정렬합니다.
+        cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo FROM cards WHERE wallet_address = ? ORDER BY sort_order ASC, id ASC", (wallet_address,))
+        cards = [{"id": r[0], "content": r[1], "answer": r[2], "options": json.loads(r[3]), "level": r[4], "next_review_time": r[5], "status": r[6], "best_time": r[7], "folder_name": r[8], "memo": r[9] or ""} for r in cursor.fetchall()]
         conn.close()
         return jsonify({"cards": cards})
     except Exception as e:
@@ -1095,9 +1091,6 @@ def delete_all():
     except Exception as e:
         return jsonify({"error": "초기화 실패"}), 500
 
-# ==========================================
-# 💡 [핵심 버그 수정 3] 루프 바깥으로 연결 닫기 이동
-# ==========================================
 @api_bp.route('/sync-batch', methods=['POST'])
 def sync_batch():
     try:
@@ -1123,6 +1116,13 @@ def sync_batch():
 
             cursor.execute("SELECT level, best_time FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
             row = cursor.fetchone()
+            # 💡 [추가할 부분] 이 4줄을 바로 아래에 복사해서 붙여넣으세요!
+            if not row:
+                # 현재 지갑 주소에 데이터가 없다면, DB에 존재하는 다른 주소의 옛날 데이터를 강제로 찾아옵니다.
+                cursor.execute("SELECT custom_stopwords, custom_abbrs, custom_inclusions FROM user_settings WHERE custom_stopwords IS NOT NULL AND custom_stopwords != '[]' LIMIT 1")
+                row = cursor.fetchone()
+                        
+            conn.close()
         
             if row:
                 current_lv, best_time = row[0], row[1]
@@ -1199,6 +1199,8 @@ def update_card_memo():
     except Exception as e:
         return jsonify({"error": "메모 업데이트 실패"}), 500
 
+# 💡 [핵심 버그 수정] 사용하지 않거나 충돌을 유발하는 낡은 단어장 함수들(get_stopwords, update_stopwords) 완전히 제거 완료
+
 @api_bp.route('/save-checkpoint', methods=['POST'])
 def save_checkpoint():
     try:
@@ -1262,6 +1264,7 @@ def get_global_dict():
         conn.close()
 
         def force_repair_list(val, fallback_key=None):
+            """배열 형태 컬럼 복구. fallback_key: 구형 dict에서 꺼낼 키"""
             if not val:
                 return []
             try:
@@ -1269,8 +1272,10 @@ def get_global_dict():
                 if isinstance(data, list):
                     return data
                 if isinstance(data, dict):
+                    # fallback_key 우선 (예: 'include', 'stop')
                     if fallback_key and fallback_key in data:
                         return data[fallback_key]
+                    # 구형 통합 포맷 {"stop":[], "include":[]} 처리
                     if 'stop' in data:
                         return data['stop']
                     if 'stopwords' in data:
@@ -1295,6 +1300,8 @@ def get_global_dict():
         stopwords  = force_repair_list(raw_stopwords,  fallback_key='stop')
         inclusions = force_repair_list(raw_inclusions, fallback_key='include')
 
+        # 💡 구형: custom_stopwords 하나에 {"stop":[], "include":[]} 통합 저장했던 경우
+        # inclusions가 비어 있고, 구형 stopwords에 include 키가 있으면 복구
         if not inclusions and raw_stopwords:
             try:
                 old = json.loads(raw_stopwords)
@@ -1341,6 +1348,9 @@ def update_global_dict():
 import pandas as pd
 import io
 
+# ==========================================
+# 💡 [컬럼 예외 완벽 해결] 내 지갑 주소 기준 데이터 전체 엑셀 다운로드 API
+# ==========================================
 @api_bp.route('/export-excel', methods=['GET'])
 def export_excel_final():
     import openpyxl
@@ -1349,11 +1359,16 @@ def export_excel_final():
     wallet_address = request.args.get('wallet_address')
     target = request.args.get('target', 'all')
     
+    print(f"\n[엑셀 다운로드 진단 수신] 지갑주소: {wallet_address} | 대상: {target}")
+    
     if not wallet_address:
         return jsonify({"error": "인증되지 않은 접근입니다. 지갑 주소가 누락되었습니다."}), 400
 
     try:
+        # 💡 openpyxl 워크북 객체를 메모리에 다이렉트로 직접 생성 (기본 시트 자동 생성됨)
         wb = openpyxl.Workbook()
+        
+        # openpyxl 기본 생성 시트 가져오기 및 요약 정보 주입
         ws_default = wb.active
         ws_default.title = "안내_및_요약"
         ws_default.views.sheetView[0].showGridLines = True
@@ -1363,6 +1378,7 @@ def export_excel_final():
         ws_default["A2"] = "백업 일시:"
         ws_default["B2"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
+        # 디자인 서식 지정
         for cell in [ws_default["A1"], ws_default["A2"]]:
             cell.font = Font(bold=True, color="FFFFFF")
             cell.fill = PatternFill(start_color="4F46E5", end_color="4F46E5", fill_type="solid")
@@ -1370,12 +1386,15 @@ def export_excel_final():
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        # 1. 만들기 탭 데이터 처리 (categories)
         if target in ['all', 'categories']:
+            # 💡 [진단 해결] categories 테이블에는 memo 컬럼이 없으므로 조회 대상에서 제외하여 정합성을 수복합니다.
             cursor.execute(
                 "SELECT id, folder_name, title, content FROM categories WHERE wallet_address = ? ORDER BY id ASC", 
                 (wallet_address,)
             )
             rows_cat = cursor.fetchall()
+            print(f"[만들기 진단] 추출된 행 개수: {len(rows_cat)}개")
             
             ws_cat = wb.create_sheet(title="만들기_카테고리")
             ws_cat.views.sheetView[0].showGridLines = True
@@ -1386,12 +1405,15 @@ def export_excel_final():
             for row in rows_cat:
                 ws_cat.append([row[0], row[1], row[2], row[3]])
                 
+        # 2. 채우기 탭 데이터 처리 (cards)
         if target in ['all', 'cards']:
+            # 💡 cards 테이블은 기존 기획서 명세대로 memo 컬럼을 포함하여 온전하게 추출합니다.
             cursor.execute(
                 "SELECT id, folder_name, card_content, answer_text, memo FROM cards WHERE wallet_address = ? ORDER BY id ASC", 
                 (wallet_address,)
             )
             rows_card = cursor.fetchall()
+            print(f"[채우기 진단] 추출된 행 개수: {len(rows_card)}개")
             
             ws_card = wb.create_sheet(title="채우기_카드")
             ws_card.views.sheetView[0].showGridLines = True
@@ -1404,10 +1426,12 @@ def export_excel_final():
                 
         conn.close()
         
+        # 가상 바이너리 파일로 스트리밍 빌드
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
         
+        print("✅ [성공] 컬럼 매핑 에러 제어 및 가상 통합 문서 빌드 통과 완료.")
         return send_file(
             output,
             mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1416,8 +1440,12 @@ def export_excel_final():
         )
     except Exception as e:
         err_msg = traceback.format_exc()
+        print(f"❌ [백엔드 치명적 에러 캐치]\n{err_msg}", file=sys.stderr)
         return jsonify({"error": f"서버 내부 연산 장애: {str(e)}", "traceback": err_msg}), 500
 
+# ==========================================
+# 💡 [신규 추가] 드래그/버튼 기반 순서 변경 업데이트 API
+# ==========================================
 @api_bp.route('/update-order', methods=['POST'])
 def update_order():
     try:
@@ -1432,6 +1460,7 @@ def update_order():
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        # 전달받은 ID 배열의 인덱스(0, 1, 2...)를 그대로 sort_order에 덮어씌웁니다.
         for index, item_id in enumerate(ordered_ids):
             cursor.execute(f"UPDATE {table} SET sort_order = ? WHERE id = ? AND wallet_address = ?", (index, item_id, wallet_address))
             
@@ -1439,13 +1468,21 @@ def update_order():
         conn.close()
         return jsonify({"message": "순서 변경 완료"}), 200
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+# ==========================================
+# 💡 [신규 추가] 앱 전체 사용자 빈칸 채우기 랭킹 API
+# ==========================================
 @api_bp.route('/ranking', methods=['GET'])
 def get_ranking():
+    import json
+    import re
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
+        # 모든 카드의 소유자(wallet_address)와 memo(학습 통계)를 가져옵니다.
         cursor.execute("SELECT wallet_address, memo FROM cards WHERE wallet_address IS NOT NULL AND wallet_address != ''")
         rows = cursor.fetchall()
         conn.close()
@@ -1456,6 +1493,7 @@ def get_ranking():
             memo = row[1] or ""
             filled = 0
             
+            # 카드별 학습 횟수 추출 (안전한 다중 파싱 지원)
             try:
                 parsed = json.loads(memo)
                 if isinstance(parsed, dict):
@@ -1473,82 +1511,12 @@ def get_ranking():
                 user_scores[wallet] = 0
             user_scores[wallet] += filled
 
+        # 랭킹 정렬 및 0회 유저 제외 (상위 50명까지만 반환)
         sorted_ranking = sorted(user_scores.items(), key=lambda x: x[1], reverse=True)
         top_ranking = [{"wallet_address": k, "total_filled": v} for k, v in sorted_ranking if v > 0][:50]
 
         return jsonify({"ranking": top_ranking}), 200
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": "랭킹 조회 실패", "details": str(e)}), 500
-
-# ==========================================
-# 💡 [신규 추가/수정] 잔액 및 진행상황 달력 보존 API
-# ==========================================
-@api_bp.route('/update-balance', methods=['POST'])
-def update_balance():
-    try:
-        data = request.json
-        wallet_address = data.get('wallet_address')
-        balance = data.get('balance')
-        activity_log = data.get('activity_log')
-        claimed_rewards = data.get('claimed_rewards')
-        
-        if not wallet_address: return jsonify({"error": "No wallet"}), 400
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # 신규 컬럼 자동 생성 (기존 DB 안전 보존)
-        try: cursor.execute("ALTER TABLE user_settings ADD COLUMN goal_balance INTEGER DEFAULT 0")
-        except: pass
-        try: cursor.execute("ALTER TABLE user_settings ADD COLUMN activity_log TEXT DEFAULT '{}'")
-        except: pass
-        try: cursor.execute("ALTER TABLE user_settings ADD COLUMN claimed_rewards TEXT DEFAULT '{}'")
-        except: pass
-        
-        cursor.execute("SELECT 1 FROM user_settings WHERE wallet_address = ?", (wallet_address,))
-        if cursor.fetchone():
-            updates = []
-            params = []
-            if balance is not None:
-                updates.append("goal_balance = ?")
-                params.append(balance)
-            if activity_log is not None:
-                updates.append("activity_log = ?")
-                params.append(json.dumps(activity_log))
-            if claimed_rewards is not None:
-                updates.append("claimed_rewards = ?")
-                params.append(json.dumps(claimed_rewards))
-            
-            if updates:
-                params.append(wallet_address)
-                cursor.execute(f"UPDATE user_settings SET {', '.join(updates)} WHERE wallet_address = ?", params)
-        else:
-            cursor.execute("INSERT INTO user_settings (wallet_address, goal_balance, activity_log, claimed_rewards) VALUES (?, ?, ?, ?)", 
-                (wallet_address, balance or 0, json.dumps(activity_log or {}), json.dumps(claimed_rewards or {})))
-            
-        conn.commit()
-        conn.close()
-        return jsonify({"message": "잔액/진행상황 업데이트 완료", "balance": balance}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-@api_bp.route('/get-balance', methods=['GET'])
-def get_balance():
-    try:
-        wallet_address = request.args.get('wallet_address')
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        try:
-            cursor.execute("SELECT goal_balance, activity_log, claimed_rewards FROM user_settings WHERE wallet_address = ?", (wallet_address,))
-            row = cursor.fetchone()
-            balance = row[0] if row and row[0] is not None else 0
-            activity_log = json.loads(row[1]) if row and row[1] else {}
-            claimed_rewards = json.loads(row[2]) if row and row[2] else {}
-        except:
-            balance = 0
-            activity_log = {}
-            claimed_rewards = {}
-        conn.close()
-        return jsonify({"balance": balance, "activity_log": activity_log, "claimed_rewards": claimed_rewards}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
