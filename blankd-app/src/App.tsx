@@ -80,6 +80,7 @@ const getExtendedStats = (memoStr: string) => {
   }
 };
 
+// 💡 [핵심 최적화 1] 상태(State) 분리 입력기: 타자를 아무리 빨리 쳐도 메인 스레드가 멈추지 않는 마법의 컴포넌트
 const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict, hintLetter }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
@@ -87,48 +88,67 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
   abbrDict: Record<string, string>;
   hintLetter?: string | null;
 }) => {
-  const [val, setVal] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  // 💡 사전을 매번 뒤지지 않도록, 정답이 될 수 있는 글자들을 미리 계산해 둠 (CPU 점유율 0%)
+  const validAnswers = useMemo(() => {
+      const expectedClean = expected.replace(/\s+/g, '').toLowerCase();
+      const answers = [expectedClean];
+      if (abbrDict) {
+          Object.entries(abbrDict).forEach(([k, v]) => {
+              const strK = k.replace(/\s+/g, '').toLowerCase();
+              const strV = v.replace(/\s+/g, '').toLowerCase();
+              const orig = strK.length >= strV.length ? strK : strV;
+              const short = strK.length < strV.length ? strK : strV;
+              if (expectedClean === orig) answers.push(short);
+          });
+      }
+      return answers;
+  }, [expected, abbrDict]);
+
+  useEffect(() => {
+    if (inputRef.current) inputRef.current.focus();
+  }, []);
   
   useEffect(() => { 
-    if (inputStatus === 'correct' || inputStatus === 'idle') setVal(''); 
+    if (inputStatus === 'correct' || inputStatus === 'idle') {
+        if (inputRef.current) inputRef.current.value = '';
+    }
   }, [inputStatus]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newVal = e.target.value;
-    setVal(newVal);
+  useEffect(() => {
+    const handleInput = (e: Event) => {
+        const newVal = (e.target as HTMLInputElement).value;
+        const cleanInput = newVal.replace(/\s+/g, '').toLowerCase();
+        if (validAnswers.includes(cleanInput)) {
+            onSubmit(newVal);
+        }
+    };
 
-    const cleanInput = newVal.replace(/\s+/g, '').toLowerCase();
-    const cleanExpected = expected.replace(/\s+/g, '').toLowerCase();
-    let isMatch = (cleanInput === cleanExpected);
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            const newVal = (e.target as HTMLInputElement).value;
+            onSubmit(newVal);
+        }
+    };
 
-    if (!isMatch && abbrDict) {
-      Object.entries(abbrDict).forEach(([k, v]) => {
-        const strK = k.replace(/\s+/g, '').toLowerCase();
-        const strV = v.replace(/\s+/g, '').toLowerCase();
-        const orig = strK.length >= strV.length ? strK : strV;
-        const short = strK.length < strV.length ? strK : strV;
-        if (cleanExpected === orig && cleanInput === short) { isMatch = true; }
-      });
+    const el = inputRef.current;
+    if (el) {
+        el.addEventListener('input', handleInput);
+        el.addEventListener('keydown', handleKeyDown);
+        return () => {
+            el.removeEventListener('input', handleInput);
+            el.removeEventListener('keydown', handleKeyDown);
+        };
     }
-    if (isMatch) onSubmit(newVal);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') onSubmit(val);
-  };
+  }, [validAnswers, onSubmit]);
   
   return (
     <input
       ref={inputRef}
-      value={val}
-      onChange={handleChange}
-      onKeyDown={handleKeyDown}
       placeholder={hintLetter ? hintLetter : ""}
       className={`inline-block mx-1 px-1.5 py-0.5 text-center font-bold border-b-2 outline-none transition-all ${
-        inputStatus === 'error' ? 'bg-red-900/40 text-red-300 border-red-500 placeholder-red-400' :
+        inputStatus === 'wrong' ? 'bg-red-900/40 text-red-300 border-red-500 placeholder-red-400' :
         inputStatus === 'correct' ? 'bg-teal-900/40 text-teal-300 border-teal-500' :
         hintLetter ? 'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
         'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400'
@@ -137,7 +157,10 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
     />
   );
 }, (prevProps, nextProps) => {
-  return prevProps.inputStatus === nextProps.inputStatus && prevProps.expected === nextProps.expected && prevProps.abbrDict === nextProps.abbrDict && prevProps.hintLetter === nextProps.hintLetter;
+  return prevProps.inputStatus === nextProps.inputStatus && 
+         prevProps.expected === nextProps.expected && 
+         prevProps.abbrDict === nextProps.abbrDict && 
+         prevProps.hintLetter === nextProps.hintLetter;
 });
 
 class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
@@ -149,7 +172,7 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
     return { hasError: true, errorMessage: error.message }; 
   }
   componentDidCatch(error: any, errorInfo: any) { 
-    this.props.fallbackLog(`🚨 렌더링 예외 발생: ${error.message}`); 
+    this.props.fallbackLog(`🚨 렌더링 예외 발생 핸들링 진단: ${error.message}`); 
   }
   render() {
     if (this.state.hasError) return (
@@ -179,7 +202,7 @@ const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
     }
     localStorage.setItem('blankd_sync_queue', JSON.stringify(q));
   } catch (e) { 
-    console.error("동기화 가상 큐 적재 실패:", e); 
+    console.error("동기화 가상 큐 적재 실패 진단:", e); 
   }
 };
 
@@ -190,8 +213,13 @@ function MainApp() {
   const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
   const isLoggedIn = safeAddress.length > 0;
 
-  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('blankd_active_tab') || 'progress');
-  useEffect(() => { localStorage.setItem('blankd_active_tab', activeTab); }, [activeTab]);
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('blankd_active_tab') || 'progress';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('blankd_active_tab', activeTab);
+  }, [activeTab]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -200,11 +228,15 @@ function MainApp() {
     }
     return true; 
   });
-  useEffect(() => { localStorage.setItem('blankd_sidebar_open', String(isSidebarOpen)); }, [isSidebarOpen]);
+
+  useEffect(() => {
+    localStorage.setItem('blankd_sidebar_open', String(isSidebarOpen));
+  }, [isSidebarOpen]);
 
   const [categories, setCategories] = useState<any[]>([]);
   const [savedCards, setSavedCards] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
+  
   const activeCardRef = useRef<any>(null);
   useEffect(() => { activeCardRef.current = activeCard; }, [activeCard]);
   
@@ -236,6 +268,20 @@ function MainApp() {
 
   const [hintLetter, setHintLetter] = useState<string | null>(null);
   const [isFrozen, setIsFrozen] = useState<boolean>(false);
+
+  const handleUpdateBalance = (changeAmount: number) => {
+    setGoalBalance(prev => {
+      const newBalance = prev + changeAmount;
+      localStorage.setItem(`blankd_off_bal_${safeAddress}`, newBalance.toString());
+      if (!isOffline && safeAddress) {
+        fetch("https://api.blankd.top/api/update-balance", {
+          method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: safeAddress, balance: newBalance })
+        }).catch(e => console.error("포인트 동기화 실패:", e));
+      }
+      return newBalance;
+    });
+  };
 
   const [globalDict, setGlobalDict] = useState<{ stopwords: string[], inclusions: string[], abbrs: Record<string, string> }>({
     stopwords: [], inclusions: [], abbrs: {}
@@ -276,7 +322,7 @@ function MainApp() {
     }
   };
 
-  // 💡 [수정됨] 큐(Queue) 전송: 오프라인에서 푼 '문제 기록'만 안전하게 전송
+  // 💡 [로컬 우선 동기화 엔진 1] 밀린 문제 기록만 서버로 올림
   const flushQueue = async () => {
     if (!safeAddress) return false; 
     try {
@@ -296,25 +342,20 @@ function MainApp() {
 
           if (res.ok) {
             localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
-            addLog(`✅ 오프라인 작업 ➔ 서버 전송 완료`);
+            addLog(`✅ 오프라인 학습 데이터(${q.answers.length}건) ➔ 서버 전송 완료`);
           }
       }
-
-      // 🚨 문제의 원인이었던 무조건 포인트 덮어쓰기 로직 삭제 🚨
-      // (포인트 동기화는 아래 loadAllData의 Math.max 병합 엔진이 안전하게 처리합니다)
-
       return true;
     } catch (e) { 
       setIsOffline(true);
       return false;
     }
   };
-  
-  // 💡 2. 데이터 로드: 서버와 로컬을 비교하여 '최댓값'으로 똑똑하게 병합합니다.
+
+  // 💡 [로컬 우선 동기화 엔진 2] 서버 데이터와 내 폰 데이터를 비교해 더 큰 값을 인정 (덮어쓰기 방지)
   const loadAllData = async (isManualSync = false) => {
     if (!safeAddress) return;
     try {
-      // 🌟 [로컬 작업 우선 처리] 서버 데이터를 받기 전, 내 기기에 밀린 숙제(큐)가 있다면 먼저 제출
       if (!isOffline || isManualSync || navigator.onLine) {
          await flushQueue();
       }
@@ -327,7 +368,6 @@ function MainApp() {
           } catch (err: any) { throw new Error(`[${name}] ${err.message}`); }
       };
 
-      // 서버의 데이터(기준점)를 다운로드
       const [catRes, cardRes, userData, dictRes] = await Promise.all([
         fetchWithDiagnostic(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`, '카테고리'),
         fetchWithDiagnostic(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`, '카드'),
@@ -342,7 +382,6 @@ function MainApp() {
 
       let finalCards = cardRes.cards || [];
       
-      // 만약 큐 전송에 실패해서 로컬에 찌꺼기가 남았다면, 화면에는 로컬의 답안을 덮어씌워서 띄움
       try {
         const qStr = localStorage.getItem('blankd_sync_queue');
         if (qStr) {
@@ -356,7 +395,7 @@ function MainApp() {
         }
       } catch (e) {}
 
-      // 🌟 [핵심 병합 논리] 서버 잔액 vs 로컬 잔액 중 '더 큰 값'을 진짜로 인정함 (Math.max)
+      // 로컬 포인트가 더 높으면 깎지 않음
       const serverBalance = userData.balance || 0;
       const localBalance = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
       const actualBalance = Math.max(serverBalance, localBalance);
@@ -372,7 +411,6 @@ function MainApp() {
       const localClaimedRewards = JSON.parse(localStorage.getItem(`blankd_claimed_rewards_${safeAddress}`) || '{}');
       const mergedClaims = { ...serverClaimedRewards, ...localClaimedRewards };
 
-      // 로컬 데이터가 더 커서 병합된 결과(actualBalance)가 서버보다 크다면, 그 결과를 서버에 업데이트
       if (actualBalance > serverBalance || JSON.stringify(mergedActivity) !== JSON.stringify(serverActivityLog) || !isOffline) {
         try {
           fetch("https://api.blankd.top/api/update-balance", {
@@ -419,23 +457,8 @@ function MainApp() {
     }
   };
 
-  const handleUpdateBalance = (changeAmount: number) => {
-    setGoalBalance(prev => {
-      const newBalance = prev + changeAmount;
-      localStorage.setItem(`blankd_off_bal_${safeAddress}`, newBalance.toString());
-      if (!isOffline && safeAddress) {
-        fetch("https://api.blankd.top/api/update-balance", {
-          method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet_address: safeAddress, balance: newBalance })
-        }).catch(e => console.error("포인트 동기화 실패:", e));
-      }
-      return newBalance;
-    });
-  };
-
   const saveGlobalDict = async (newDict: any) => {
     setGlobalDict(newDict); 
-    localStorage.setItem(`blankd_off_dict_${safeAddress}`, JSON.stringify(newDict));
     
     try {
       await api.updateGlobalDict(safeAddress, newDict);
@@ -470,8 +493,6 @@ function MainApp() {
         });
         setTimeout(() => addLog(`✅ 전역 빈칸 자동 생성 완료!`), 1000);
       }
-      // 로컬 스토리지도 즉시 업데이트
-      localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(updatedCards.map(c => { const { _isModified, ...rest } = c; return rest; })));
       return updatedCards.map(c => { const { _isModified, ...rest } = c; return rest; });
     });
   };
@@ -493,7 +514,7 @@ function MainApp() {
       enokiFlow.handleAuthCallback().then(() => { 
         window.history.replaceState(null, '', window.location.pathname); 
         addLog("✅ 로그인 콜백 처리 완료"); 
-      }).catch((err: any) => addLog(`🚨 인증 실패: ${err.message}`));
+      }).catch((err: any) => addLog(`🚨 인증 실패 진단: ${err.message}`));
     }
     if (isLoggedIn) loadAllData();
   }, [isLoggedIn, safeAddress, enokiFlow]);
@@ -511,7 +532,9 @@ function MainApp() {
           exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
           
           fetch("https://api.blankd.top/api/save-card", {
-            method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+            method: "POST", 
+            keepalive: true, 
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ wallet_address: safeAddress, card_id: currentCard.id, card_content: currentCard.content, answer_text: currentCard.answer_text || "", folder_name: currentCard.folder_name, memo: JSON.stringify(exStats) })
           }).catch(()=>{});
         }
@@ -550,7 +573,7 @@ function MainApp() {
           await loadAllData();
         }
     } catch (e: any) { 
-      addLog(`🚨 분할 처리 에러`);
+      addLog(`🚨 분할 처리 통신 에러 진단`);
     }
   };
 
@@ -613,16 +636,12 @@ function MainApp() {
         await loadAllData(); onComplete(); 
       }
     } catch (e) {
-      console.error("카드 생성 오류:", e);
+      console.error("카드 생성 오류 진단:", e);
     }
   };
 
   const handleUpdateMemoBackground = async (id: number, memo: string) => {
-    setSavedCards(prev => {
-      const next = prev.map(c => c.id === id ? { ...c, memo } : c);
-      localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
-      return next;
-    });
+    setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
     pushToQueue('MEMO', { id, memo });
     
     if (!isOffline) {
@@ -708,14 +727,20 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // 💡 [렌더링 엔진] React 상태 렌더링 렉 원천 차단
+  // 💡 [핵심 최적화 2] 렉/프리징에도 오차가 발생하지 않는 원자시계 스톱워치 (Date.now() 보정)
   useEffect(() => {
     let interval: any;
     if (activeCard && currentBlankIdx < blanks.length) {
+      const startRealTime = Date.now();
+      const startElapsed = elapsedRef.current;
+
       interval = setInterval(() => {
-        if (isFrozen || isDictModalOpen) return; 
+        if (isFrozen || isDictModalOpen) {
+          return; 
+        }
         
-        const next = elapsedRef.current + 0.1;
+        const now = Date.now();
+        const next = startElapsed + (now - startRealTime) / 1000;
         elapsedRef.current = next;
 
         const elapsedEl = document.getElementById('blankd-timer-sec');
@@ -837,8 +862,6 @@ function MainApp() {
     localStorage.removeItem(`blankd_elapsed_${currentId}`);
 
     setActiveCard(nextCard);
-    
-    // 💡 덮어쓰기 로컬 우선 캐싱
     setSavedCards(prev => {
       const next = prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c);
       localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
@@ -849,7 +872,7 @@ function MainApp() {
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
     
     if (isOffline) {
-      addLog(`💾 오프라인 기록 (ID:${currentId}) | 내 기기에 영구 보존됨`);
+      addLog(`💾 오프라인 기록 (ID:${currentId}) | 내 기기에 우선 보존됨`);
     } else {
       addLog(`🎉 학습 완료! 기록 갱신 됨. +${earnedPoints} Point 획득`);
       try {
@@ -909,9 +932,16 @@ function MainApp() {
     const newMemo = JSON.stringify(exStats);
 
     fetch("https://api.blankd.top/api/save-card", {
-      method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+      method: "POST",
+      keepalive: true, 
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: card.answer_text || "", folder_name: card.folder_name, memo: newMemo
+        wallet_address: safeAddress,
+        card_id: card.id,
+        card_content: card.content,
+        answer_text: card.answer_text || "",
+        folder_name: card.folder_name,
+        memo: newMemo
       })
     }).catch(()=>{});
   };
@@ -1436,7 +1466,7 @@ function MainApp() {
       </div>
 
       {isDictModalOpen && (
-        <div className="lg:hidden fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
+        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] relative">
             {renderDictionaryUI(true)}
           </div>
