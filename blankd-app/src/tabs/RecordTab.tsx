@@ -50,7 +50,6 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
     });
   };
 
-  // 💡 메모를 입력하고 바깥을 클릭하면 자동으로 서버에 저장
   const handleMemoBlur = async (card: any, newText: string) => {
     let stats = getExtendedStats(card.memo);
     stats.text = newText;
@@ -99,12 +98,10 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
         body: JSON.stringify({ wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: card.answer_text || "", folder_name: card.folder_name, memo: newMemo })
       });
       await loadAllData(true); 
-      // 현재 열려있는 모달의 정보도 업데이트
       setExpandedCard({ ...card, memo: newMemo });
     } catch (e) {} finally { setIsEnhancing(false); }
   };
 
-  // 💡 TCG 카드 렌더링 함수 (수집형 카드 디자인)
   const renderTCGCard = (card: any) => {
     const lines = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '').split('\n');
     const firstLine = lines[0] || "";
@@ -120,7 +117,6 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
     const stats = getExtendedStats(card.memo);
     const isMax = stats.upgrade >= 50;
 
-    // 등급별 TCG 테두리 및 빛 효과
     let rarityBorder = "border-gray-600/50";
     let rarityBg = "bg-gradient-to-b from-gray-800 to-[#0a0a0c]";
     let rarityGlow = "";
@@ -217,10 +213,9 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
 
           const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
           
-          // 💡 [배열 복구] 채우기 탭과 완전히 동일한 법령칙 분리 배열 로직 유지[cite: 6]
-          const col1Cards = folderCards.filter(c => { const f = c.content.split('\n')[0]||""; return f.includes('[정관]') || (!f.includes('[령]') && !f.includes('[칙]') && !f.includes('[규]') && !f.includes('[규정]')); });[cite: 6]
-          const col2Cards = folderCards.filter(c => { const f = c.content.split('\n')[0]||""; return f.includes('[령]'); });[cite: 6]
-          const col3Cards = folderCards.filter(c => { const f = c.content.split('\n')[0]||""; return f.includes('[칙]') || f.includes('[규]') || f.includes('[규정]'); });[cite: 6]
+          const col1Cards = folderCards.filter(c => { const f = c.content.split('\n')[0]||""; return f.includes('[정관]') || (!f.includes('[령]') && !f.includes('[칙]') && !f.includes('[규]') && !f.includes('[규정]')); });
+          const col2Cards = folderCards.filter(c => { const f = c.content.split('\n')[0]||""; return f.includes('[령]'); });
+          const col3Cards = folderCards.filter(c => { const f = c.content.split('\n')[0]||""; return f.includes('[칙]') || f.includes('[규]') || f.includes('[규정]'); });
 
           return (
             <div key={folder} className="mb-10 sm:mb-12 border-l-2 border-white/10 pl-2 sm:pl-4">
@@ -249,7 +244,6 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
         })}
       </div>
 
-      {/* 💡 [거대 카드 뷰 모달] 카드를 클릭했을 때 좁은 영역이 아닌 화면 전체를 덮는 웅장한 디테일 뷰 */}
       {expandedCard && (() => {
         const stats = getExtendedStats(expandedCard.memo);
         const cost = (stats.upgrade + 1) * 20;
