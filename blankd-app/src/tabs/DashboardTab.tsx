@@ -14,9 +14,26 @@ const safeParseStats = (memoStr: string) => {
 export const DashboardTab = ({ 
   categories, savedCards, setActiveTab, setExpandedId, setActiveCard, 
   goalBalance, handleUpdateBalance, 
-  activityLog, claimedRewards, setClaimedRewards, safeAddress 
+  activityLog, claimedRewards, setClaimedRewards, safeAddress,
+  loadAllData, isOffline
 }: any) => {
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  const handleManualSync = async () => {
+    if (isSyncing) return;
+    setIsSyncing(true);
+    try {
+      if (typeof loadAllData === 'function') {
+        await loadAllData();
+        alert('동기화 완료! 서버와 로컬 데이터를 병합했습니다.');
+      }
+    } catch (e) {
+      alert('동기화 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const [targetCycle, setTargetCycle] = useState<number | string>(() => {
     const saved = localStorage.getItem(`blankd_target_cycle_${safeAddress}`);
@@ -178,11 +195,25 @@ export const DashboardTab = ({
   return (
     <div className="space-y-6 sm:space-y-8 animate-in fade-in w-full">
       <div className="flex flex-col mb-6 border-b border-white/10 pb-4 gap-4">
-        <div className="flex justify-between items-center w-full">
+        <div className="flex justify-between items-center w-full gap-2">
           <h1 className="text-2xl sm:text-3xl font-serif text-current tracking-tight">학습 대시보드</h1>
-          <button onClick={() => setActiveTab('enhance')} className="bg-teal-600 hover:bg-teal-500 text-white px-4 py-2 text-[11px] sm:text-xs font-bold rounded-sm transition-colors shadow-md shrink-0">
-            채우기 바로가기 ▶
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleManualSync}
+              disabled={isSyncing}
+              title="서버와 로컬 데이터를 다시 병합합니다. 누락된 진행상황이 보이면 눌러주세요."
+              className={`flex items-center gap-1 px-3 py-2 text-[11px] sm:text-xs font-bold rounded-sm transition-colors shadow-md border ${
+                isSyncing ? 'bg-white/5 text-white/30 border-white/10 cursor-not-allowed' :
+                isOffline ? 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20' :
+                'bg-white/5 text-white/60 border-white/10 hover:bg-white/10'
+              }`}
+            >
+              {isSyncing ? '동기화 중...' : isOffline ? '⚠ 오프라인 (눌러서 동기화)' : '🔄 동기화'}
+            </button>
+            <button onClick={() => setActiveTab('enhance')} className="bg-teal-600 hover:bg-teal-500 text-white px-4 py-2 text-[11px] sm:text-xs font-bold rounded-sm transition-colors shadow-md shrink-0">
+              채우기 바로가기 ▶
+            </button>
+          </div>
         </div>
         <p className="text-xs sm:text-sm text-white/40 mb-2">목표를 달성하고 보상을 획득하여 상점 스킬을 이용하세요.</p>
         
