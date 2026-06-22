@@ -276,7 +276,7 @@ function MainApp() {
     }
   };
 
-  // 💡 [핵심 엔진 1] 큐(Queue) 강제 전송: 로컬 작업을 서버에 우선 반영
+  // 💡 1. 큐(Queue) 전송: 오프라인에서 '추가로 푼 기록'이 있을 때만 서버로 전송합니다.
   const flushQueue = async () => {
     if (!safeAddress) return false; 
     try {
@@ -286,6 +286,7 @@ function MainApp() {
       q.memos = q.memos.filter((m:any) => m.id && !String(m.id).startsWith('temp_') && !isNaN(parseInt(m.id)));
       q.answers = q.answers.filter((a:any) => a.card_id && !String(a.card_id).startsWith('temp_') && !isNaN(parseInt(a.card_id)));
 
+      // 추가된 내용(큐)이 존재할 때만 서버로 푸시!
       if (q.memos.length > 0 || q.answers.length > 0) {
           const res = await fetch("https://api.blankd.top/api/sync-batch", {
             method: "POST", 
@@ -296,24 +297,9 @@ function MainApp() {
 
           if (res.ok) {
             localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
-            addLog(`✅ 오프라인 작업 ➔ 서버 전송 완료`);
+            addLog(`✅ 오프라인 작업(${q.answers.length}건) ➔ 서버 전송 완료`);
           }
       }
-
-      const localBalance = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
-      const localActivityLog = JSON.parse(localStorage.getItem(`blankd_activity_log_${safeAddress}`) || '{}');
-      const localClaimedRewards = JSON.parse(localStorage.getItem(`blankd_claimed_rewards_${safeAddress}`) || '{}');
-      
-      await fetch("https://api.blankd.top/api/update-balance", {
-        method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          wallet_address: safeAddress, 
-          balance: localBalance, 
-          activity_log: localActivityLog, 
-          claimed_rewards: localClaimedRewards 
-        })
-      }).catch(() => {});
-
       return true;
     } catch (e) { 
       setIsOffline(true);
@@ -321,11 +307,11 @@ function MainApp() {
     }
   };
 
-  // 💡 [핵심 엔진 2] 로컬 우선 동기화 (Local-First Sync)
+  // 💡 2. 데이터 로드: 서버와 로컬을 비교하여 '최댓값'으로 똑똑하게 병합합니다.
   const loadAllData = async (isManualSync = false) => {
     if (!safeAddress) return;
     try {
-      // 🌟 서버 데이터를 받기 전에 내 스마트폰/PC의 작업을 먼저 밀어넣음!
+      // 🌟 [로컬 작업 우선 처리] 서버 데이터를 받기 전, 내 기기에 밀린 숙제(큐)가 있다면 먼저 제출
       if (!isOffline || isManualSync || navigator.onLine) {
          await flushQueue();
       }
@@ -338,6 +324,7 @@ function MainApp() {
           } catch (err: any) { throw new Error(`[${name}] ${err.message}`); }
       };
 
+      // 서버의 데이터(기준점)를 다운로드
       const [catRes, cardRes, userData, dictRes] = await Promise.all([
         fetchWithDiagnostic(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`, '카테고리'),
         fetchWithDiagnostic(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`, '카드'),
@@ -352,7 +339,7 @@ function MainApp() {
 
       let finalCards = cardRes.cards || [];
       
-      // 만약 전송 실패로 로컬 큐에 남은 작업이 있다면, 서버 데이터 위에 로컬 데이터를 덮어씌움
+      // 만약 큐 전송에 실패해서 로컬에 찌꺼기가 남았다면, 화면에는 로컬의 답안을 덮어씌워서 띄움
       try {
         const qStr = localStorage.getItem('blankd_sync_queue');
         if (qStr) {
@@ -366,7 +353,7 @@ function MainApp() {
         }
       } catch (e) {}
 
-      // 잔액과 기록도 로컬을 기준으로 덮어씀 (로컬 최우선)
+      // 🌟 [핵심 병합 논리] 서버 잔액 vs 로컬 잔액 중 '더 큰 값'을 진짜로 인정함 (Math.max)
       const serverBalance = userData.balance || 0;
       const localBalance = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
       const actualBalance = Math.max(serverBalance, localBalance);
@@ -381,6 +368,16 @@ function MainApp() {
       const serverClaimedRewards = userData.claimed_rewards || {};
       const localClaimedRewards = JSON.parse(localStorage.getItem(`blankd_claimed_rewards_${safeAddress}`) || '{}');
       const mergedClaims = { ...serverClaimedRewards, ...localClaimedRewards };
+
+      // 로컬 데이터가 더 커서 병합된 결과(actualBalance)가 서버보다 크다면, 그 결과를 서버에 업데이트
+      if (actualBalance > serverBalance || JSON.stringify(mergedActivity) !== JSON.stringify(serverActivityLog) || !isOffline) {
+        try {
+          fetch("https://api.blankd.top/api/update-balance", {
+            method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet_address: safeAddress, balance: actualBalance, activity_log: mergedActivity, claimed_rewards: mergedClaims })
+          }).catch(()=>{});
+        } catch (e) {}
+      }
 
       setCategories([...(catRes.categories || [])]);
       setSavedCards(finalCards); 
@@ -397,7 +394,7 @@ function MainApp() {
       localStorage.setItem(`blankd_off_dict_${safeAddress}`, JSON.stringify(newDict));
       
       setIsOffline(false);
-      if (isManualSync) addLog(`✅ 서버 동기화 완료: 내 기기 데이터 우선 반영됨`);
+      if (isManualSync) addLog(`✅ 동기화 완료: 서버와 로컬 데이터 병합 성공`);
     } catch (e: any) {
       setIsOffline(true);
       addLog(`⚠️ 서버 접속 불가: 오프라인 캐시를 불러옵니다.`);
