@@ -1520,3 +1520,79 @@ def get_ranking():
         import traceback
         traceback.print_exc()
         return jsonify({"error": "랭킹 조회 실패", "details": str(e)}), 500
+
+@api_bp.route('/update-balance', methods=['POST', 'OPTIONS'])
+def update_balance():
+    if request.method == 'OPTIONS': return jsonify({}), 200
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        if not wallet_address: return jsonify({"error": "No wallet"}), 400
+        
+        conn = get_db_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # 💡 [안전장치] user_settings 테이블에 컬럼이 없을 경우를 대비한 자동 생성
+        try: cursor.execute("ALTER TABLE user_settings ADD COLUMN goal_balance INTEGER DEFAULT 0")
+        except: pass
+        try: cursor.execute("ALTER TABLE user_settings ADD COLUMN activity_log TEXT DEFAULT '{}'")
+        except: pass
+        try: cursor.execute("ALTER TABLE user_settings ADD COLUMN claimed_rewards TEXT DEFAULT '{}'")
+        except: pass
+        
+        cursor.execute("SELECT goal_balance, activity_log, claimed_rewards FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+        row = cursor.fetchone()
+        
+        if row:
+            db_bal = row['goal_balance'] if row['goal_balance'] is not None else 0
+            incoming_bal = data.get('balance')
+            
+            updates, params = [], []
+            
+            # 💡 [핵심 방어 로직] 들어온 포인트가 기존 서버 포인트보다 "클 때만" 덮어쓰기 허용
+            if incoming_bal is not None and incoming_bal > db_bal:
+                updates.append("goal_balance = ?")
+                params.append(incoming_bal)
+                
+            if data.get('activity_log') is not None: 
+                updates.append("activity_log = ?")
+                params.append(json.dumps(data.get('activity_log')))
+                
+            if data.get('claimed_rewards') is not None: 
+                updates.append("claimed_rewards = ?")
+                params.append(json.dumps(data.get('claimed_rewards')))
+                
+            if updates:
+                params.append(wallet_address)
+                cursor.execute(f"UPDATE user_settings SET {', '.join(updates)} WHERE wallet_address = ?", params)
+        else:
+            cursor.execute("INSERT INTO user_settings (wallet_address, goal_balance, activity_log, claimed_rewards) VALUES (?, ?, ?, ?)", 
+                (wallet_address, data.get('balance') or 0, json.dumps(data.get('activity_log') or {}), json.dumps(data.get('claimed_rewards') or {})))
+            
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "완료"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/get-balance', methods=['GET', 'OPTIONS'])
+def get_balance():
+    if request.method == 'OPTIONS': return jsonify({}), 200
+    try:
+        wallet_address = request.args.get('wallet_address')
+        conn = get_db_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT goal_balance, activity_log, claimed_rewards FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+            row = cursor.fetchone()
+            balance = row['goal_balance'] if row and row['goal_balance'] is not None else 0
+            activity_log = json.loads(row['activity_log']) if row and row['activity_log'] else {}
+            claimed_rewards = json.loads(row['claimed_rewards']) if row and row['claimed_rewards'] else {}
+        except:
+            balance, activity_log, claimed_rewards = 0, {}, {}
+        conn.close()
+        return jsonify({"balance": balance, "activity_log": activity_log, "claimed_rewards": claimed_rewards}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
