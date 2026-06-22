@@ -20,13 +20,16 @@ export const DashboardTab = ({
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // 💡 [수정] DashboardTab.tsx 내부의 handleManualSync 함수를 찾아 교체하세요.
+
   const handleManualSync = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
     try {
       if (typeof loadAllData === 'function') {
-        await loadAllData();
-        alert('동기화 완료! 서버와 로컬 데이터를 병합했습니다.');
+        // 💡 true 옵션을 주어 서버 접속 전 무조건 기기(로컬)의 큐를 밀어넣습니다.
+        await loadAllData(true);
+        alert('✅ 동기화 완료! 현재 기기(스마트폰/PC)의 작업 내역이 서버에 우선 반영되었습니다.');
       }
     } catch (e) {
       alert('동기화 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
