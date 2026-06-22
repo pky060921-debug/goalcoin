@@ -276,7 +276,7 @@ function MainApp() {
     }
   };
 
-  // 💡 1. 큐(Queue) 전송: 오프라인에서 '추가로 푼 기록'이 있을 때만 서버로 전송합니다.
+  // 💡 [수정됨] 큐(Queue) 전송: 오프라인에서 푼 '문제 기록'만 안전하게 전송
   const flushQueue = async () => {
     if (!safeAddress) return false; 
     try {
@@ -286,7 +286,6 @@ function MainApp() {
       q.memos = q.memos.filter((m:any) => m.id && !String(m.id).startsWith('temp_') && !isNaN(parseInt(m.id)));
       q.answers = q.answers.filter((a:any) => a.card_id && !String(a.card_id).startsWith('temp_') && !isNaN(parseInt(a.card_id)));
 
-      // 추가된 내용(큐)이 존재할 때만 서버로 푸시!
       if (q.memos.length > 0 || q.answers.length > 0) {
           const res = await fetch("https://api.blankd.top/api/sync-batch", {
             method: "POST", 
@@ -297,16 +296,20 @@ function MainApp() {
 
           if (res.ok) {
             localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
-            addLog(`✅ 오프라인 작업(${q.answers.length}건) ➔ 서버 전송 완료`);
+            addLog(`✅ 오프라인 작업 ➔ 서버 전송 완료`);
           }
       }
+
+      // 🚨 문제의 원인이었던 무조건 포인트 덮어쓰기 로직 삭제 🚨
+      // (포인트 동기화는 아래 loadAllData의 Math.max 병합 엔진이 안전하게 처리합니다)
+
       return true;
     } catch (e) { 
       setIsOffline(true);
       return false;
     }
   };
-
+  
   // 💡 2. 데이터 로드: 서버와 로컬을 비교하여 '최댓값'으로 똑똑하게 병합합니다.
   const loadAllData = async (isManualSync = false) => {
     if (!safeAddress) return;
