@@ -15,7 +15,7 @@ const getExtendedStats = (memoStr: string) => {
 
 export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAllData, safeAddress }: any) => {
   const [isEnhancing, setIsEnhancing] = useState(false);
-  const [expandedCard, setExpandedCard] = useState<any | null>(null);
+  const [expandedId, setExpandedId] = useState<string | number | null>(null);
 
   const [localCards, setLocalCards] = useState<any[]>([]);
   const enhanceFolders = Array.from(new Set(localCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
@@ -98,12 +98,11 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
         body: JSON.stringify({ wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: card.answer_text || "", folder_name: card.folder_name, memo: newMemo })
       });
       await loadAllData(true); 
-      setExpandedCard({ ...card, memo: newMemo });
     } catch (e) {} finally { setIsEnhancing(false); }
   };
 
-  // 💡 [수정] 조항명만 깔끔하게 보여주는 리스트형 카드 렌더링
-  const renderListCard = (card: any) => {
+  // 💡 인라인 아코디언형 TCG 카드 렌더링
+  const renderExpandableTCGCard = (card: any) => {
     const lines = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '').split('\n');
     const firstLine = lines[0] || "";
     
@@ -115,21 +114,115 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
     else if (firstLine.includes('[칙]') || firstLine.includes('[규]') || firstLine.includes('[규정]')) { prefix = "[칙]"; titleColor = "text-green-400"; borderColor = "border-green-500/30"; }
     else if (firstLine.includes('[령]')) { prefix = "[령]"; titleColor = "text-blue-400"; borderColor = "border-blue-500/30"; }
 
+    const stats = getExtendedStats(card.memo);
+    const isExpanded = expandedId === card.id;
+    const isMax = stats.upgrade >= 50;
+    const canUpgrade = stats.upgrade < stats.filled;
+    const cost = (stats.upgrade + 1) * 20;
+
+    let rarityBorder = "border-gray-600/50";
+    let rarityBg = "bg-gradient-to-b from-gray-800 to-[#0a0a0c]";
+    let rarityGlow = "";
+
+    if (isMax) { 
+        rarityBorder = "border-yellow-400"; rarityBg = "bg-gradient-to-b from-yellow-900/50 to-black"; 
+        rarityGlow = "shadow-[0_0_15px_rgba(250,204,21,0.5)]"; 
+    }
+    else if (stats.upgrade >= 30) { 
+        rarityBorder = "border-purple-500"; rarityBg = "bg-gradient-to-b from-purple-900/50 to-black"; 
+        rarityGlow = "shadow-[0_0_10px_rgba(168,85,247,0.3)]"; 
+    }
+    else if (stats.upgrade >= 15) { 
+        rarityBorder = "border-blue-500"; rarityBg = "bg-gradient-to-b from-blue-900/50 to-black"; 
+        rarityGlow = "shadow-[0_0_10px_rgba(59,130,246,0.2)]"; 
+    }
+    else if (stats.upgrade >= 5) { 
+        rarityBorder = "border-green-500"; rarityBg = "bg-gradient-to-b from-green-900/50 to-black"; 
+    }
+
+    const accuracy = stats.totalCorrect + stats.totalWrong > 0 
+        ? Math.round((stats.totalCorrect / (stats.totalCorrect + stats.totalWrong)) * 100) 
+        : 0;
+
     return (
-        <div 
-            key={card.id} 
-            onClick={() => setExpandedCard(card)}
-            className={`cursor-pointer bg-black/40 border ${borderColor} hover:bg-white/5 p-3 sm:p-4 rounded transition-all hover:-translate-y-0.5 shadow-sm hover:shadow-md flex items-center justify-between group`}
-        >
-            <div className="flex items-center gap-2 sm:gap-3 overflow-hidden">
-                <span className={`text-xs sm:text-sm font-black ${titleColor} shrink-0`}>{prefix}</span>
-                <span className="text-sm sm:text-base font-bold text-white/90 truncate group-hover:text-white transition-colors">
-                    {displayTitle}
-                </span>
+        <div key={card.id} className={`flex flex-col border ${borderColor} rounded-md bg-black/40 hover:bg-white/5 transition-all w-full overflow-hidden`}>
+            
+            {/* 💡 심플한 목록 뷰 (클릭 시 펼쳐짐) */}
+            <div 
+                onClick={() => setExpandedId(isExpanded ? null : card.id)}
+                className="cursor-pointer p-3 sm:p-4 flex items-center justify-between group"
+            >
+                <div className="flex items-center gap-2 sm:gap-3 overflow-hidden">
+                    <span className={`text-xs sm:text-sm font-black ${titleColor} shrink-0`}>{prefix}</span>
+                    <span className="text-sm sm:text-base font-bold text-white/90 truncate group-hover:text-white transition-colors">
+                        {displayTitle}
+                    </span>
+                </div>
+                <div className="shrink-0 flex items-center gap-3">
+                    <span className={`text-[10px] font-bold ${isMax ? 'text-yellow-400' : 'text-white/40'}`}>Lv.{stats.upgrade}</span>
+                    <span className={`text-white/20 text-xs transition-transform duration-300 ${isExpanded ? 'rotate-180 text-teal-400' : ''}`}>▼</span>
+                </div>
             </div>
-            <div className="shrink-0 text-white/20 text-xs pl-2 group-hover:text-teal-400 transition-colors">
-                상세보기 ▶
-            </div>
+
+            {/* 💡 밑으로 펼쳐지는 TCG 카드 영역 */}
+            {isExpanded && (
+                <div className="p-4 border-t border-white/10 flex justify-center bg-black/60 animate-in fade-in slide-in-from-top-2">
+                    
+                    <div className={`w-full max-w-sm relative rounded-xl border-[3px] ${rarityBorder} ${rarityBg} ${rarityGlow} p-3 sm:p-4 flex flex-col gap-4 shadow-2xl`}>
+                        
+                        {/* TCG 상단: 카드 제목 */}
+                        <div className="flex justify-between items-center pb-2 border-b border-white/10">
+                            <span className={`text-sm sm:text-base font-black ${titleColor} tracking-tight`}>{prefix} {displayTitle}</span>
+                            <span className={`text-xs font-bold ${isMax ? 'text-yellow-400 animate-pulse' : 'text-white/70'}`}>
+                                {isMax ? '★MAX' : `Lv.${stats.upgrade}`}
+                            </span>
+                        </div>
+
+                        {/* TCG 중앙: 이미지 부분 (메모 입력창) */}
+                        <div className="flex flex-col h-40 sm:h-48 bg-black/80 rounded-lg border border-white/10 p-3 shadow-inner relative group">
+                            <div className="absolute top-2 left-3 text-[9px] font-bold text-amber-400/50 tracking-widest flex items-center gap-1">
+                                <span>📝</span> MEMO
+                            </div>
+                            <textarea
+                                defaultValue={stats.text}
+                                onBlur={(e) => handleMemoBlur(card, e.target.value)}
+                                placeholder="이 곳에 암기 팁, 두음, 판례 등을 기록하세요. (바깥쪽 클릭 시 자동 저장)"
+                                className="w-full h-full bg-transparent text-amber-100/90 text-xs sm:text-sm outline-none resize-none custom-scrollbar mt-4 pt-1 leading-relaxed"
+                            />
+                        </div>
+
+                        {/* TCG 하단: 전적 기록 */}
+                        <div className="grid grid-cols-3 gap-2 text-center bg-black/60 rounded-lg py-2 border border-white/10">
+                            <div>
+                                <span className="block text-[9px] text-white/30 mb-0.5 tracking-widest">학습 횟수</span>
+                                <span className="text-[13px] font-mono font-bold text-indigo-400">{stats.filled}</span>
+                            </div>
+                            <div>
+                                <span className="block text-[9px] text-white/30 mb-0.5 tracking-widest">최고 속도</span>
+                                <span className="text-[13px] font-mono font-bold text-teal-400">{stats.bestTime > 0 ? `${stats.bestTime.toFixed(1)}s` : '-'}</span>
+                            </div>
+                            <div>
+                                <span className="block text-[9px] text-white/30 mb-0.5 tracking-widest">정답률</span>
+                                <span className="text-[13px] font-mono font-bold text-green-400">{accuracy}%</span>
+                            </div>
+                        </div>
+
+                        {/* TCG 액션: 강화 버튼 */}
+                        <button 
+                            disabled={isMax || isEnhancing || !canUpgrade}
+                            onClick={(e) => { e.stopPropagation(); handleEnhanceCard(card, stats); }}
+                            className={`w-full py-2.5 text-xs font-bold rounded-lg transition-all shadow-md mt-1 ${
+                                isMax ? 'bg-yellow-600/20 text-yellow-500 border border-yellow-500/30 cursor-not-allowed' : 
+                                !canUpgrade ? 'bg-gray-800/50 text-gray-500 border border-gray-600/30 cursor-not-allowed' :
+                                goalBalance >= cost ? 'bg-white/10 hover:bg-white/20 text-white border border-white/20' : 
+                                'bg-red-900/20 text-red-500/50 border border-red-500/20 cursor-not-allowed'
+                            }`}
+                        >
+                            {isMax ? '최고 레벨 (MAX)' : !canUpgrade ? `학습 부족 (현재 ${stats.filled}회 / 필요 ${stats.upgrade + 1}회)` : `💎 ${cost}P 사용해 카드 강화`}
+                        </button>
+                    </div>
+                </div>
+            )}
         </div>
     );
   };
@@ -138,8 +231,8 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
     <div className="space-y-6 sm:space-y-8 animate-in fade-in w-full pb-10">
       <div className="flex justify-between items-end mb-4 sm:mb-6 border-b border-white/10 pb-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-serif text-current tracking-tight">카드 수집 및 메모</h1>
-          <p className="text-xs sm:text-sm text-white/40 mt-1">조항명을 클릭해 원문을 확인하고 학습 메모를 작성하세요.</p>
+          <h1 className="text-2xl sm:text-3xl font-serif text-current tracking-tight">카드 수집 (TCG)</h1>
+          <p className="text-xs sm:text-sm text-white/40 mt-1">리스트를 클릭해 카드를 펼치고 기록과 메모를 확인하세요.</p>
         </div>
         <div className="text-amber-400 font-bold text-[11px] sm:text-xs font-mono bg-black/40 px-3 py-1.5 border border-amber-500/30 rounded-sm shrink-0">
           보유: {goalBalance} P
@@ -172,17 +265,17 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
                 
                 <div className="flex flex-col gap-2.5 w-full">
                   <div className="text-xs text-red-400/70 font-bold mb-1 text-center tracking-widest border-b border-white/5 pb-2">법 / 정관</div>
-                  {col1Cards.map(c => renderListCard(c))}
+                  {col1Cards.map(c => renderExpandableTCGCard(c))}
                 </div>
                 
                 <div className="flex flex-col gap-2.5 w-full">
                   <div className="text-xs text-blue-400/70 font-bold mb-1 text-center tracking-widest border-b border-white/5 pb-2">시행령</div>
-                  {col2Cards.map(c => renderListCard(c))}
+                  {col2Cards.map(c => renderExpandableTCGCard(c))}
                 </div>
                 
                 <div className="flex flex-col gap-2.5 w-full">
                   <div className="text-xs text-green-400/70 font-bold mb-1 text-center tracking-widest border-b border-white/5 pb-2">시행규칙 / 규정</div>
-                  {col3Cards.map(c => renderListCard(c))}
+                  {col3Cards.map(c => renderExpandableTCGCard(c))}
                 </div>
 
               </div>
@@ -190,90 +283,6 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
           );
         })}
       </div>
-
-      {/* 💡 [수정] 모달 레이아웃 비율 변경 (목적/원문은 작게, 메모는 넓게) */}
-      {expandedCard && (() => {
-        const stats = getExtendedStats(expandedCard.memo);
-        const cost = (stats.upgrade + 1) * 20;
-        const isMax = stats.upgrade >= 50;
-        const canUpgrade = stats.upgrade < stats.filled;
-
-        return (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4 sm:p-8 animate-in fade-in" onClick={() => setExpandedCard(null)}>
-            <div 
-                className="bg-[#0a0a0c] border border-teal-500/30 shadow-[0_0_50px_rgba(20,184,166,0.1)] flex flex-col md:flex-row w-full max-w-5xl h-[85vh] rounded-2xl overflow-hidden relative" 
-                onClick={e => e.stopPropagation()}
-            >
-                <button onClick={() => setExpandedCard(null)} className="absolute top-4 right-4 w-10 h-10 bg-black/50 text-white rounded-full flex items-center justify-center hover:bg-white/20 z-50 transition-colors">✕</button>
-
-                {/* 왼쪽 사이드바 (카드 정보 및 강화 버튼) */}
-                <div className="w-full md:w-[35%] bg-gradient-to-br from-[#1a1a24] to-black border-r border-white/10 p-6 sm:p-8 flex flex-col items-center justify-center relative overflow-hidden shrink-0">
-                    <div className="absolute top-6 left-6 text-xl font-black text-white/20 tracking-widest">Lv.{stats.upgrade}</div>
-                    
-                    <div className="text-center w-full z-10">
-                        <div className="inline-block px-4 py-1.5 bg-white/5 border border-white/10 rounded-full text-xs text-teal-400 font-bold tracking-widest mb-6">
-                            {expandedCard.folder_name}
-                        </div>
-                        <h2 className="text-2xl sm:text-3xl font-bold text-white break-keep leading-snug mb-8">
-                            {expandedCard.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim() || "제목 없음"}
-                        </h2>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 w-full z-10 mb-8">
-                        <div className="bg-black/40 border border-white/10 p-3 rounded-lg text-center">
-                            <span className="block text-[10px] text-white/40 mb-1">누적 학습</span>
-                            <span className="text-lg font-bold text-indigo-400 font-mono">{stats.filled}회</span>
-                        </div>
-                        <div className="bg-black/40 border border-white/10 p-3 rounded-lg text-center">
-                            <span className="block text-[10px] text-white/40 mb-1">최고 기록</span>
-                            <span className="text-lg font-bold text-teal-400 font-mono">{stats.bestTime > 0 ? `${stats.bestTime.toFixed(1)}s` : '-'}</span>
-                        </div>
-                    </div>
-
-                    <button 
-                        disabled={isMax || isEnhancing || !canUpgrade}
-                        onClick={() => handleEnhanceCard(expandedCard, stats)}
-                        className={`w-full py-4 text-sm font-bold rounded-xl transition-all shadow-lg z-10 ${
-                            isMax ? 'bg-yellow-600/20 text-yellow-500 border border-yellow-500/30 cursor-not-allowed' : 
-                            !canUpgrade ? 'bg-gray-800/50 text-gray-500 border border-gray-600/30 cursor-not-allowed' :
-                            goalBalance >= cost ? 'bg-gradient-to-r from-teal-600 to-indigo-600 hover:from-teal-500 hover:to-indigo-500 text-white border border-transparent hover:scale-[1.02]' : 
-                            'bg-red-900/20 text-red-500/50 border border-red-500/20 cursor-not-allowed'
-                        }`}
-                    >
-                        {isMax ? '마스터 달성 완료 (MAX)' : !canUpgrade ? `강화 불가 (학습 ${stats.filled}회 / 필요 ${stats.upgrade + 1}회)` : `💎 ${cost}P로 카드 강화하기`}
-                    </button>
-                </div>
-
-                {/* 오른쪽 패널 (원문 및 메모) */}
-                <div className="w-full md:w-[65%] flex flex-col h-full bg-[#0d0d12]">
-                    
-                    {/* 💡 [수정] 목적/원문 영역은 작게 (최대 높이 35% 제한) */}
-                    <div className="p-5 sm:p-6 border-b border-white/10 overflow-y-auto max-h-[35%] min-h-[25%] custom-scrollbar shadow-inner bg-black/20 shrink-0">
-                        <h3 className="text-xs font-bold text-white/40 mb-3 flex items-center gap-2"><span className="text-base">📖</span> 조항 원문</h3>
-                        <p className="text-[14px] sm:text-[15px] text-white/70 whitespace-pre-wrap font-serif leading-relaxed break-keep">
-                            {expandedCard.content.replace(/##PAGE_BREAK##/g, '\n\n')}
-                        </p>
-                    </div>
-
-                    {/* 💡 [수정] 메모 영역은 남은 공간을 모두 차지하도록 크게 (flex-1) */}
-                    <div className="p-5 sm:p-6 flex-1 flex flex-col">
-                        <h3 className="text-xs font-bold text-amber-400 mb-3 flex justify-between items-end">
-                            <span className="flex items-center gap-2"><span className="text-base">📝</span> 나만의 학습 메모</span>
-                            <span className="text-white/30 text-[10px] font-normal tracking-widest bg-white/5 px-2 py-1 rounded hidden sm:block">입력창 바깥 클릭 시 자동 저장됨</span>
-                        </h3>
-                        <textarea
-                            defaultValue={stats.text}
-                            onBlur={(e) => handleMemoBlur(expandedCard, e.target.value)}
-                            placeholder="이 조항의 암기 팁, 두음, 판례 등 학습에 필요한 메모를 자유롭게 작성하세요..."
-                            className="flex-1 w-full bg-amber-950/10 border border-amber-500/30 rounded-xl p-5 text-amber-100/90 text-[15px] outline-none focus:border-amber-500 focus:bg-amber-950/20 focus:shadow-[0_0_20px_rgba(245,158,11,0.1)] transition-all resize-none custom-scrollbar leading-relaxed"
-                        />
-                    </div>
-                </div>
-            </div>
-          </div>
-        );
-      })()}
-
     </div>
   );
 };
