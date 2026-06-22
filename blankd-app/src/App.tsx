@@ -57,7 +57,6 @@ const autoApplyDictHelper = (content: string, dict: any) => {
 
     return titleLine + (lines.length > 1 ? '\n' : '') + currentText;
   } catch (err: any) {
-    console.error("사전 자동 적용 엔진 오류 진단:", err.message);
     return content;
   }
 };
@@ -150,7 +149,7 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
     return { hasError: true, errorMessage: error.message }; 
   }
   componentDidCatch(error: any, errorInfo: any) { 
-    this.props.fallbackLog(`🚨 렌더링 예외 발생 핸들링 진단: ${error.message}`); 
+    this.props.fallbackLog(`🚨 렌더링 예외 발생: ${error.message}`); 
   }
   render() {
     if (this.state.hasError) return (
@@ -163,6 +162,7 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
   }
 }
 
+// 💡 오프라인 가상 큐 (기기에 임시 저장)
 const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
   try {
     const targetId = payload.id || payload.card_id;
@@ -179,7 +179,7 @@ const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
     }
     localStorage.setItem('blankd_sync_queue', JSON.stringify(q));
   } catch (e) { 
-    console.error("동기화 가상 큐 적재 실패 진단:", e); 
+    console.error("동기화 가상 큐 적재 실패:", e); 
   }
 };
 
@@ -190,13 +190,8 @@ function MainApp() {
   const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
   const isLoggedIn = safeAddress.length > 0;
 
-  const [activeTab, setActiveTab] = useState(() => {
-    return localStorage.getItem('blankd_active_tab') || 'progress';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('blankd_active_tab', activeTab);
-  }, [activeTab]);
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('blankd_active_tab') || 'progress');
+  useEffect(() => { localStorage.setItem('blankd_active_tab', activeTab); }, [activeTab]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -205,15 +200,11 @@ function MainApp() {
     }
     return true; 
   });
-
-  useEffect(() => {
-    localStorage.setItem('blankd_sidebar_open', String(isSidebarOpen));
-  }, [isSidebarOpen]);
+  useEffect(() => { localStorage.setItem('blankd_sidebar_open', String(isSidebarOpen)); }, [isSidebarOpen]);
 
   const [categories, setCategories] = useState<any[]>([]);
   const [savedCards, setSavedCards] = useState<any[]>([]);
   const [activeCard, setActiveCard] = useState<any>(null);
-  
   const activeCardRef = useRef<any>(null);
   useEffect(() => { activeCardRef.current = activeCard; }, [activeCard]);
   
@@ -233,10 +224,7 @@ function MainApp() {
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
   
-  // 💡 [핵심 버그 수정 1] state 사용을 완전히 지우고 useRef로만 구동
-  const [elapsedInitial, setElapsedInitial] = useState<number>(0);
   const elapsedRef = useRef(0);
-  
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
@@ -248,20 +236,6 @@ function MainApp() {
 
   const [hintLetter, setHintLetter] = useState<string | null>(null);
   const [isFrozen, setIsFrozen] = useState<boolean>(false);
-
-  const handleUpdateBalance = (changeAmount: number) => {
-    setGoalBalance(prev => {
-      const newBalance = prev + changeAmount;
-      localStorage.setItem(`blankd_off_bal_${safeAddress}`, newBalance.toString());
-      if (!isOffline && safeAddress) {
-        fetch("https://api.blankd.top/api/update-balance", {
-          method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet_address: safeAddress, balance: newBalance })
-        }).catch(e => console.error("포인트 동기화 실패:", e));
-      }
-      return newBalance;
-    });
-  };
 
   const [globalDict, setGlobalDict] = useState<{ stopwords: string[], inclusions: string[], abbrs: Record<string, string> }>({
     stopwords: [], inclusions: [], abbrs: {}
@@ -276,7 +250,7 @@ function MainApp() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
   useEffect(() => {
-    const handleOnline = () => { setIsOffline(false); loadAllData(); };
+    const handleOnline = () => setIsOffline(false);
     const handleOffline = () => setIsOffline(true);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -302,12 +276,71 @@ function MainApp() {
     }
   };
 
-  const loadAllData = async () => {
+  // 💡 [핵심 엔진 1] 큐(Queue) 강제 전송: 로컬 작업을 서버에 우선 반영
+  const flushQueue = async () => {
+    if (!safeAddress) return false; 
+    try {
+      const qStr = localStorage.getItem('blankd_sync_queue');
+      let q = qStr ? JSON.parse(qStr) : { memos: [], answers: [] };
+      
+      q.memos = q.memos.filter((m:any) => m.id && !String(m.id).startsWith('temp_') && !isNaN(parseInt(m.id)));
+      q.answers = q.answers.filter((a:any) => a.card_id && !String(a.card_id).startsWith('temp_') && !isNaN(parseInt(a.card_id)));
+
+      if (q.memos.length > 0 || q.answers.length > 0) {
+          const res = await fetch("https://api.blankd.top/api/sync-batch", {
+            method: "POST", 
+            keepalive: true, 
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet_address: safeAddress, memos: q.memos, answers: q.answers })
+          });
+
+          if (res.ok) {
+            localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
+            addLog(`✅ 오프라인 작업 ➔ 서버 전송 완료`);
+          }
+      }
+
+      const localBalance = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
+      const localActivityLog = JSON.parse(localStorage.getItem(`blankd_activity_log_${safeAddress}`) || '{}');
+      const localClaimedRewards = JSON.parse(localStorage.getItem(`blankd_claimed_rewards_${safeAddress}`) || '{}');
+      
+      await fetch("https://api.blankd.top/api/update-balance", {
+        method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          wallet_address: safeAddress, 
+          balance: localBalance, 
+          activity_log: localActivityLog, 
+          claimed_rewards: localClaimedRewards 
+        })
+      }).catch(() => {});
+
+      return true;
+    } catch (e) { 
+      setIsOffline(true);
+      return false;
+    }
+  };
+
+  // 💡 [핵심 엔진 2] 로컬 우선 동기화 (Local-First Sync)
+  const loadAllData = async (isManualSync = false) => {
     if (!safeAddress) return;
     try {
+      // 🌟 서버 데이터를 받기 전에 내 스마트폰/PC의 작업을 먼저 밀어넣음!
+      if (!isOffline || isManualSync || navigator.onLine) {
+         await flushQueue();
+      }
+
+      const fetchWithDiagnostic = async (url: string, name: string) => {
+          try {
+              const res = await fetch(url);
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+              return await res.json();
+          } catch (err: any) { throw new Error(`[${name}] ${err.message}`); }
+      };
+
       const [catRes, cardRes, userData, dictRes] = await Promise.all([
-        fetch(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => { if(!r.ok) throw new Error(); return r.json(); }),
-        fetch(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => { if(!r.ok) throw new Error(); return r.json(); }),
+        fetchWithDiagnostic(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`, '카테고리'),
+        fetchWithDiagnostic(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`, '카드'),
         fetch(`https://api.blankd.top/api/get-balance?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()).catch(() => ({ balance: 0, activity_log: {}, claimed_rewards: {} })),
         api.getGlobalDict(safeAddress).catch(() => ({ stopwords: [], inclusions: [], abbrs: {} }))
       ]);
@@ -318,6 +351,8 @@ function MainApp() {
       const newDict = { stopwords: serverStopwords, inclusions: serverInclusions, abbrs: finalAbbrs };
 
       let finalCards = cardRes.cards || [];
+      
+      // 만약 전송 실패로 로컬 큐에 남은 작업이 있다면, 서버 데이터 위에 로컬 데이터를 덮어씌움
       try {
         const qStr = localStorage.getItem('blankd_sync_queue');
         if (qStr) {
@@ -329,32 +364,23 @@ function MainApp() {
             });
           }
         }
-      } catch (queueMergeError: any) {}
+      } catch (e) {}
 
+      // 잔액과 기록도 로컬을 기준으로 덮어씀 (로컬 최우선)
       const serverBalance = userData.balance || 0;
-      const serverActivityLog = userData.activity_log || {};
-      const serverClaimedRewards = userData.claimed_rewards || {};
-
       const localBalance = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
       const actualBalance = Math.max(serverBalance, localBalance);
       
+      const serverActivityLog = userData.activity_log || {};
       const localActivityLog = JSON.parse(localStorage.getItem(`blankd_activity_log_${safeAddress}`) || '{}');
-      const localClaimedRewards = JSON.parse(localStorage.getItem(`blankd_claimed_rewards_${safeAddress}`) || '{}');
-
       const mergedActivity = { ...serverActivityLog };
       Object.keys(localActivityLog).forEach(k => {
          mergedActivity[k] = Math.max(mergedActivity[k] || 0, localActivityLog[k] || 0);
       });
-      const mergedClaims = { ...serverClaimedRewards, ...localClaimedRewards };
 
-      if (actualBalance > serverBalance || JSON.stringify(mergedActivity) !== JSON.stringify(serverActivityLog) || !isOffline) {
-        try {
-          fetch("https://api.blankd.top/api/update-balance", {
-            method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ wallet_address: safeAddress, balance: actualBalance, activity_log: mergedActivity, claimed_rewards: mergedClaims })
-          }).catch(()=>{});
-        } catch (e) {}
-      }
+      const serverClaimedRewards = userData.claimed_rewards || {};
+      const localClaimedRewards = JSON.parse(localStorage.getItem(`blankd_claimed_rewards_${safeAddress}`) || '{}');
+      const mergedClaims = { ...serverClaimedRewards, ...localClaimedRewards };
 
       setCategories([...(catRes.categories || [])]);
       setSavedCards(finalCards); 
@@ -371,8 +397,10 @@ function MainApp() {
       localStorage.setItem(`blankd_off_dict_${safeAddress}`, JSON.stringify(newDict));
       
       setIsOffline(false);
+      if (isManualSync) addLog(`✅ 서버 동기화 완료: 내 기기 데이터 우선 반영됨`);
     } catch (e: any) {
       setIsOffline(true);
+      addLog(`⚠️ 서버 접속 불가: 오프라인 캐시를 불러옵니다.`);
       try {
         const offCat = JSON.parse(localStorage.getItem(`blankd_off_cat_${safeAddress}`) || '[]');
         const offCard = JSON.parse(localStorage.getItem(`blankd_off_card_${safeAddress}`) || '[]');
@@ -391,8 +419,23 @@ function MainApp() {
     }
   };
 
+  const handleUpdateBalance = (changeAmount: number) => {
+    setGoalBalance(prev => {
+      const newBalance = prev + changeAmount;
+      localStorage.setItem(`blankd_off_bal_${safeAddress}`, newBalance.toString());
+      if (!isOffline && safeAddress) {
+        fetch("https://api.blankd.top/api/update-balance", {
+          method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: safeAddress, balance: newBalance })
+        }).catch(e => console.error("포인트 동기화 실패:", e));
+      }
+      return newBalance;
+    });
+  };
+
   const saveGlobalDict = async (newDict: any) => {
     setGlobalDict(newDict); 
+    localStorage.setItem(`blankd_off_dict_${safeAddress}`, JSON.stringify(newDict));
     
     try {
       await api.updateGlobalDict(safeAddress, newDict);
@@ -427,6 +470,8 @@ function MainApp() {
         });
         setTimeout(() => addLog(`✅ 전역 빈칸 자동 생성 완료!`), 1000);
       }
+      // 로컬 스토리지도 즉시 업데이트
+      localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(updatedCards.map(c => { const { _isModified, ...rest } = c; return rest; })));
       return updatedCards.map(c => { const { _isModified, ...rest } = c; return rest; });
     });
   };
@@ -448,40 +493,10 @@ function MainApp() {
       enokiFlow.handleAuthCallback().then(() => { 
         window.history.replaceState(null, '', window.location.pathname); 
         addLog("✅ 로그인 콜백 처리 완료"); 
-      }).catch((err: any) => addLog(`🚨 인증 실패 진단: ${err.message}`));
+      }).catch((err: any) => addLog(`🚨 인증 실패: ${err.message}`));
     }
     if (isLoggedIn) loadAllData();
   }, [isLoggedIn, safeAddress, enokiFlow]);
-
-  const flushQueue = async () => {
-    if (!safeAddress || isOffline) return; 
-    try {
-      const qStr = localStorage.getItem('blankd_sync_queue');
-      if (!qStr) return;
-      let q = JSON.parse(qStr);
-      
-      q.memos = q.memos.filter((m:any) => m.id && !String(m.id).startsWith('temp_') && !isNaN(parseInt(m.id)));
-      q.answers = q.answers.filter((a:any) => a.card_id && !String(a.card_id).startsWith('temp_') && !isNaN(parseInt(a.card_id)));
-
-      if (q.memos.length === 0 && q.answers.length === 0) {
-          localStorage.removeItem('blankd_sync_queue'); return;
-      }
-
-      const res = await fetch("https://api.blankd.top/api/sync-batch", {
-        method: "POST", 
-        keepalive: true, 
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: safeAddress, memos: q.memos, answers: q.answers })
-      });
-
-      if (res.ok) {
-        localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
-        addLog(`✅ 백그라운드 동기화 완료`);
-      }
-    } catch (e) { 
-      setIsOffline(true);
-    }
-  };
 
   useEffect(() => {
     if (!safeAddress) return;
@@ -496,9 +511,7 @@ function MainApp() {
           exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
           
           fetch("https://api.blankd.top/api/save-card", {
-            method: "POST", 
-            keepalive: true, 
-            headers: { "Content-Type": "application/json" },
+            method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ wallet_address: safeAddress, card_id: currentCard.id, card_content: currentCard.content, answer_text: currentCard.answer_text || "", folder_name: currentCard.folder_name, memo: JSON.stringify(exStats) })
           }).catch(()=>{});
         }
@@ -537,7 +550,7 @@ function MainApp() {
           await loadAllData();
         }
     } catch (e: any) { 
-      addLog(`🚨 분할 처리 통신 에러 진단`);
+      addLog(`🚨 분할 처리 에러`);
     }
   };
 
@@ -600,12 +613,16 @@ function MainApp() {
         await loadAllData(); onComplete(); 
       }
     } catch (e) {
-      console.error("카드 생성 오류 진단:", e);
+      console.error("카드 생성 오류:", e);
     }
   };
 
   const handleUpdateMemoBackground = async (id: number, memo: string) => {
-    setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
+    setSavedCards(prev => {
+      const next = prev.map(c => c.id === id ? { ...c, memo } : c);
+      localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
+      return next;
+    });
     pushToQueue('MEMO', { id, memo });
     
     if (!isOffline) {
@@ -673,8 +690,6 @@ function MainApp() {
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
       
       const savedElapsed = parseFloat(localStorage.getItem(`blankd_elapsed_${activeCard.id}`) || '0');
-      
-      setElapsedInitial(savedElapsed);
       elapsedRef.current = savedElapsed;
 
       setIsMemoOpen(false);
@@ -693,35 +708,29 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // 💡 [핵심 버그 수정 2] HTML 텍스트 직접 조작으로 초고속 타이머 구현 (화면 렉 제로)
+  // 💡 [렌더링 엔진] React 상태 렌더링 렉 원천 차단
   useEffect(() => {
     let interval: any;
     if (activeCard && currentBlankIdx < blanks.length) {
-      let lastTime = performance.now();
-      
       interval = setInterval(() => {
-        if (isFrozen || isDictModalOpen) {
-          lastTime = performance.now();
-          return; 
-        }
-        
-        const now = performance.now();
-        const diff = now - lastTime;
-        lastTime = now;
+        if (isFrozen || isDictModalOpen) return; 
         
         const next = elapsedRef.current + 0.1;
         elapsedRef.current = next;
 
-        const elapsedEl = document.getElementById('elapsed-time-display');
-        const leftEl = document.getElementById('time-left-display');
-        const progressEl = document.getElementById('progress-bar-fill');
+        const elapsedEl = document.getElementById('blankd-timer-sec');
+        const leftEl = document.getElementById('blankd-timer-left');
+        const progressEl = document.getElementById('blankd-timer-fill');
+        const leftContainer = document.getElementById('blankd-timer-left-container');
 
-        if (elapsedEl) elapsedEl.innerText = `진행: ${next.toFixed(1)}초`;
+        if (elapsedEl) elapsedEl.innerText = next.toFixed(1);
         if (leftEl) {
            const left = Math.max(0, totalTimeLimit - next);
-           leftEl.innerText = `남은시간: ${left.toFixed(1)}초`;
-           if (left < 5) leftEl.className = 'text-red-400 font-bold';
-           else leftEl.className = 'text-teal-400';
+           leftEl.innerText = left.toFixed(1);
+           if (leftContainer) {
+               if (left < 5) leftContainer.className = 'text-red-400 font-bold';
+               else leftContainer.className = 'text-teal-400';
+           }
         }
         if (progressEl) {
            const pct = totalTimeLimit > 0 ? Math.min((next / totalTimeLimit) * 100, 100) : 0;
@@ -731,7 +740,6 @@ function MainApp() {
            }
         }
 
-        // 디스크 과부하 방지: 1초가 넘을 때마다 딱 1번만 저장 (렉 원천 차단)
         if (Math.floor(next * 10) % 10 === 0) {
             localStorage.setItem(`blankd_elapsed_${activeCard.id}`, next.toFixed(1));
         }
@@ -829,13 +837,19 @@ function MainApp() {
     localStorage.removeItem(`blankd_elapsed_${currentId}`);
 
     setActiveCard(nextCard);
-    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
+    
+    // 💡 덮어쓰기 로컬 우선 캐싱
+    setSavedCards(prev => {
+      const next = prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c);
+      localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
+      return next;
+    });
     
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
     
     if (isOffline) {
-      addLog(`💾 오프라인 기록 (ID:${currentId}) | +${earnedPoints} Point 획득`);
+      addLog(`💾 오프라인 기록 (ID:${currentId}) | 내 기기에 영구 보존됨`);
     } else {
       addLog(`🎉 학습 완료! 기록 갱신 됨. +${earnedPoints} Point 획득`);
       try {
@@ -866,15 +880,17 @@ function MainApp() {
 
     localStorage.setItem(`blankd_elapsed_${currentId}`, elapsedRef.current.toFixed(1));
 
-    setSavedCards(prev => prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c));
+    setSavedCards(prev => {
+      const next = prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c);
+      localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
+      return next;
+    });
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
     
     if (!isOffline) {
       try {
         await fetch("https://api.blankd.top/api/save-card", {
-          method: "POST", 
-          keepalive: true, 
-          headers: { "Content-Type": "application/json" },
+          method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
         });
       } catch(e) {}
@@ -893,16 +909,9 @@ function MainApp() {
     const newMemo = JSON.stringify(exStats);
 
     fetch("https://api.blankd.top/api/save-card", {
-      method: "POST",
-      keepalive: true, 
-      headers: { "Content-Type": "application/json" },
+      method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        wallet_address: safeAddress,
-        card_id: card.id,
-        card_content: card.content,
-        answer_text: card.answer_text || "",
-        folder_name: card.folder_name,
-        memo: newMemo
+        wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: card.answer_text || "", folder_name: card.folder_name, memo: newMemo
       })
     }).catch(()=>{});
   };
@@ -1025,87 +1034,8 @@ function MainApp() {
     return { nextCatToCraft: craftTarget, nextStudyCard: studyTarget };
   }, [isLoggedIn, categories, savedCards]);
 
-  const getThemeCSS = () => {
-    if (theme === 'white') {
-      return `
-        body { background-color: #f3f4f6; color: #111827; }
-        .text-white { color: #111827 !important; }
-        .text-white\\/20, .text-white\\/30 { color: #6b7280 !important; font-weight: 600; }
-        .text-white\\/40, .text-white\\/50 { color: #4b5563 !important; font-weight: 600; }
-        .text-white\\/60, .text-white\\/70 { color: #374151 !important; font-weight: 700; }
-        .text-white\\/80 { color: #1f2937 !important; font-weight: 700; }
-        .text-\\[\\#d1d1d1\\] { color: #111827 !important; font-weight: 700; }
-        
-        .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #9ca3af !important; }
-        .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(255, 255, 255, 0.95) !important; backdrop-filter: blur(8px); }
-        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border-color: #d1d5db !important; }
-        .bg-\\[\\#0d0d0f\\] { background-color: #f3f4f6 !important; }
-        
-        .bg-black\\/30, .bg-black\\/40, .bg-black\\/50, .bg-black\\/60 { 
-          background-color: #f9fafb !important; color: #111827 !important; border-color: #9ca3af !important; 
-        }
-        .bg-white\\/5, .bg-white\\/10 { 
-          background-color: #f3f4f6 !important; border-color: #9ca3af !important; color: #111827 !important; 
-        }
-        
-        .border-white\\/5, .border-white\\/10, .border-white\\/20, .border-white\\/30 { 
-          border-color: #6b7280 !important; 
-        }
-
-        .text-amber-100, .text-amber-200 { color: #b45309 !important; font-weight: 800; }
-        .text-teal-100, .text-teal-200 { color: #0f766e !important; font-weight: 800; }
-
-        .text-teal-300, .text-teal-400, .text-teal-500 { color: #0f766e !important; font-weight: 800 !important; }
-        .bg-teal-900\\/20, .bg-teal-900\\/30, .bg-teal-900\\/40, .bg-teal-950\\/20, .bg-teal-500\\/10, .bg-teal-500\\/20 { 
-          background-color: #ccfbf1 !important; border-color: #0d9488 !important; 
-        }
-        .border-teal-500\\/30, .border-teal-500\\/40, .border-teal-500\\/50 { border-color: #0d9488 !important; }
-
-        .text-amber-300, .text-amber-400, .text-amber-500 { color: #b45309 !important; font-weight: 800 !important; }
-        .bg-amber-900\\/20, .bg-amber-900\\/30, .bg-amber-900\\/40, .bg-amber-950\\/20, .bg-amber-500\\/10, .bg-amber-500\\/20 { 
-          background-color: #fef3c7 !important; border-color: #d97706 !important; 
-        }
-        .border-amber-500\\/30, .border-amber-500\\/40, .border-amber-500\\/50, .border-amber-900\\/30 { border-color: #d97706 !important; }
-
-        .text-indigo-300, .text-indigo-400, .text-indigo-500 { color: #4338ca !important; font-weight: 800 !important; }
-        .bg-indigo-900\\/20, .bg-indigo-900\\/30, .bg-indigo-900\\/40 { 
-          background-color: #e0e7ff !important; border-color: #6366f1 !important; 
-        }
-        .border-indigo-500\\/30, .border-indigo-500\\/40, .border-indigo-500\\/50 { border-color: #6366f1 !important; }
-
-        .text-blue-300, .text-blue-400, .text-blue-500 { color: #1d4ed8 !important; font-weight: 800 !important; }
-        .bg-blue-900\\/20, .bg-blue-900\\/30, .bg-blue-900\\/40, .bg-blue-500\\/10, .bg-blue-500\\/20 { 
-          background-color: #dbeafe !important; border-color: #3b82f6 !important; 
-        }
-        .border-blue-500\\/30, .border-blue-500\\/40, .border-blue-500\\/50, .border-blue-500 { border-color: #3b82f6 !important; }
-
-        .text-red-300, .text-red-400, .text-red-500 { color: #b91c1c !important; font-weight: 800 !important; }
-        .bg-red-900\\/20, .bg-red-900\\/30, .bg-red-900\\/40, .bg-red-950\\/20, .bg-red-500\\/10, .bg-red-500\\/20 { 
-          background-color: #fee2e2 !important; border-color: #ef4444 !important; 
-        }
-        .border-red-500\\/30, .border-red-500\\/40, .border-red-500\\/50, .border-red-900\\/30 { border-color: #ef4444 !important; }
-
-        .text-green-300, .text-green-400, .text-green-500 { color: #15803d !important; font-weight: 800 !important; }
-        .bg-green-900\\/20, .bg-green-900\\/30, .bg-green-900\\/40, .bg-green-500\\/10, .bg-green-500\\/20 { 
-          background-color: #dcfce7 !important; border-color: #10b981 !important; 
-        }
-        .border-green-500\\/30, .border-green-500\\/40, .border-green-500\\/50 { border-color: #10b981 !important; }
-      `;
-    } else if (theme === 'green') {
-      return `
-        body { background-color: #163322; }
-        .bg-\\[\\#08080a\\] { background-color: #0f2418 !important; }
-        .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(15, 36, 24, 0.9) !important; }
-        .bg-\\[\\#0a0a0c\\] { background-color: #122b1c !important; }
-        .bg-\\[\\#0d0d0f\\] { background-color: #163322 !important; }
-      `;
-    }
-    return `body { background-color: #0d0d0f; }`; 
-  };
-
   const memoizedCardContent = useMemo(() => {
     if (!activeCard) return null;
-    const startTime = performance.now();
     const cleanContent = activeCard.content; 
     const lines = cleanContent.split('\n');
     const titleLine = lines[0] || '';
@@ -1157,11 +1087,6 @@ function MainApp() {
       } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
     });
     
-    const duration = performance.now() - startTime;
-    if (duration > 15) {
-        console.warn(`[진단 로그] 렌더링 과부하: 텍스트 파싱에 ${duration.toFixed(2)}ms 소요됨.`);
-    }
-
     return (
       <div className="flex flex-col gap-6 w-full overflow-hidden">
         <div className="flex justify-between items-center border-b border-white/10 pb-2 w-full gap-3 overflow-hidden">
@@ -1241,7 +1166,7 @@ function MainApp() {
           <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
         </div>
         <div className={activeTab === 'record' ? 'block' : 'hidden'}>
-          <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} colCount={colCount} globalDict={globalDict} />
+          <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} colCount={colCount} />
         </div>
         <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
           <ExamTab walletAddress={safeAddress} address={safeAddress} />
@@ -1251,7 +1176,7 @@ function MainApp() {
         </div>
       </>
     );
-  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, zkLogin, studyMode, setStudyMode, globalDict, theme, goalBalance, activityLog, claimedRewards]);
+  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, zkLogin, studyMode, setStudyMode, globalDict, theme, goalBalance, activityLog, claimedRewards, isOffline]);
 
   const renderDictionaryUI = (isMobile: boolean) => (
     <div className={`flex flex-col w-full h-full ${isMobile ? 'bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 rounded-sm' : 'bg-[#08080a]/80 border border-white/10 p-5 rounded-sm shadow-xl backdrop-blur-sm'}`}>
@@ -1306,6 +1231,84 @@ function MainApp() {
       </div>
     </div>
   );
+
+  const getThemeCSS = () => {
+    if (theme === 'white') {
+      return `
+        body { background-color: #f3f4f6; color: #111827; }
+        .text-white { color: #111827 !important; }
+        .text-white\\/20, .text-white\\/30 { color: #6b7280 !important; font-weight: 600; }
+        .text-white\\/40, .text-white\\/50 { color: #4b5563 !important; font-weight: 600; }
+        .text-white\\/60, .text-white\\/70 { color: #374151 !important; font-weight: 700; }
+        .text-white\\/80 { color: #1f2937 !important; font-weight: 700; }
+        .text-\\[\\#d1d1d1\\] { color: #111827 !important; font-weight: 700; }
+        
+        .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #9ca3af !important; }
+        .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(255, 255, 255, 0.95) !important; backdrop-filter: blur(8px); }
+        .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border-color: #d1d5db !important; }
+        .bg-\\[\\#0d0d0f\\] { background-color: #f3f4f6 !important; }
+        
+        .bg-black\\/30, .bg-black\\/40, .bg-black\\/50, .bg-black\\/60 { 
+          background-color: #f9fafb !important; color: #111827 !important; border-color: #9ca3af !important; 
+        }
+        .bg-white\\/5, .bg-white\\/10 { 
+          background-color: #f3f4f6 !important; border-color: #9ca3af !important; color: #111827 !important; 
+        }
+        
+        .border-white\\/5, .border-white\\/10, .border-white\\/20, .border-white\\/30 { 
+          border-color: #6b7280 !important; 
+        }
+
+        .text-amber-100, .text-amber-200 { color: #b45309 !important; font-weight: 800; }
+        .text-teal-100, .text-teal-200 { color: #0f766e !important; font-weight: 800; }
+
+        .text-teal-300, .text-teal-400, .text-teal-500 { color: #0f766e !important; font-weight: 800 !important; }
+        .bg-teal-900\\/20, .bg-teal-900\\/30, .bg-teal-900\\/40, .bg-teal-950\\/20, .bg-teal-500\\/10, .bg-teal-500\\/20 { 
+          background-color: #ccfbf1 !important; border-color: #0d9488 !important; 
+        }
+        .border-teal-500\\/30, .border-teal-500\\/40, .border-teal-500\\/50 { border-color: #0d9488 !important; }
+
+        .text-amber-300, .text-amber-400, .text-amber-500 { color: #b45309 !important; font-weight: 800 !important; }
+        .bg-amber-900\\/20, .bg-amber-900\\/30, .bg-amber-900\\/40, .bg-amber-950\\/20, .bg-amber-500\\/10, .bg-amber-500\\/20 { 
+          background-color: #fef3c7 !important; border-color: #d97706 !important; 
+        }
+        .border-amber-500\\/30, .border-amber-500\\/40, .border-amber-500\\/50, .border-amber-900\\/30 { border-color: #d97706 !important; }
+
+        .text-indigo-300, .text-indigo-400, .text-indigo-500 { color: #4338ca !important; font-weight: 800 !important; }
+        .bg-indigo-900\\/20, .bg-indigo-900\\/30, .bg-indigo-900\\/40 { 
+          background-color: #e0e7ff !important; border-color: #6366f1 !important; 
+        }
+        .border-indigo-500\\/30, .border-indigo-500\\/40, .border-indigo-500\\/50 { border-color: #6366f1 !important; }
+
+        .text-blue-300, .text-blue-400, .text-blue-500 { color: #1d4ed8 !important; font-weight: 800 !important; }
+        .bg-blue-900\\/20, .bg-blue-900\\/30, .bg-blue-900\\/40, .bg-blue-500\\/10, .bg-blue-500\\/20 { 
+          background-color: #dbeafe !important; border-color: #3b82f6 !important; 
+        }
+        .border-blue-500\\/30, .border-blue-500\\/40, .border-blue-500\\/50, .border-blue-500 { border-color: #3b82f6 !important; }
+
+        .text-red-300, .text-red-400, .text-red-500 { color: #b91c1c !important; font-weight: 800 !important; }
+        .bg-red-900\\/20, .bg-red-900\\/30, .bg-red-900\\/40, .bg-red-950\\/20, .bg-red-500\\/10, .bg-red-500\\/20 { 
+          background-color: #fee2e2 !important; border-color: #ef4444 !important; 
+        }
+        .border-red-500\\/30, .border-red-500\\/40, .border-red-500\\/50, .border-red-900\\/30 { border-color: #ef4444 !important; }
+
+        .text-green-300, .text-green-400, .text-green-500 { color: #15803d !important; font-weight: 800 !important; }
+        .bg-green-900\\/20, .bg-green-900\\/30, .bg-green-900\\/40, .bg-green-500\\/10, .bg-green-500\\/20 { 
+          background-color: #dcfce7 !important; border-color: #10b981 !important; 
+        }
+        .border-green-500\\/30, .border-green-500\\/40, .border-green-500\\/50 { border-color: #10b981 !important; }
+      `;
+    } else if (theme === 'green') {
+      return `
+        body { background-color: #163322; }
+        .bg-\\[\\#08080a\\] { background-color: #0f2418 !important; }
+        .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(15, 36, 24, 0.9) !important; }
+        .bg-\\[\\#0a0a0c\\] { background-color: #122b1c !important; }
+        .bg-\\[\\#0d0d0f\\] { background-color: #163322 !important; }
+      `;
+    }
+    return `body { background-color: #0d0d0f; }`; 
+  };
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
@@ -1433,7 +1436,7 @@ function MainApp() {
       </div>
 
       {isDictModalOpen && (
-        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
+        <div className="lg:hidden fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] relative">
             {renderDictionaryUI(true)}
           </div>
