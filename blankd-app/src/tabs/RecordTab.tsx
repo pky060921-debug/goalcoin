@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 
 const getExtendedStats = (memoStr: string) => {
   try {
@@ -26,37 +26,30 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [expandedId, setExpandedId] = useState<string | number | null>(null);
 
-  const [localCards, setLocalCards] = useState<any[]>([]);
-  const enhanceFolders = Array.from(new Set(localCards.map((c:any) => c.folder_name))).filter(f => f && f !== '기본 폴더').sort() as string[];
-  
-  const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
+  // 💡 메모 입력 후 바깥을 클릭(onBlur)하면 즉시 서버에 저장하는 함수
+  const handleMemoBlur = async (card: any, newText: string) => {
+    let stats = getExtendedStats(card.memo);
+    stats.text = newText;
+    const newMemo = JSON.stringify(stats);
 
-  useEffect(() => { setLocalCards(Array.isArray(savedCards) ? savedCards : []); }, [savedCards]);
-
-  useEffect(() => {
-    if (!safeAddress) return;
     try {
-      const saved = localStorage.getItem(`blankd_enhance_folders_${safeAddress}`);
-      if (saved) setOpenFolders(JSON.parse(saved));
-    } catch(e) {}
-  }, [safeAddress]);
-
-  useEffect(() => {
-    if (!safeAddress) return;
-    setOpenFolders(prev => {
-      const next = { ...prev }; let changed = false;
-      enhanceFolders.forEach(f => { if (next[f] === undefined) { next[f] = true; changed = true; } });
-      if (changed) localStorage.setItem(`blankd_enhance_folders_${safeAddress}`, JSON.stringify(next)); 
-      return next;
-    });
-  }, [localCards, enhanceFolders, safeAddress]);
-
-  const handleToggleFolder = (f: string) => {
-    setOpenFolders(prev => { 
-      const next = { ...prev, [f]: !prev[f] }; 
-      localStorage.setItem(`blankd_enhance_folders_${safeAddress}`, JSON.stringify(next)); 
-      return next; 
-    });
+      await fetch("https://api.blankd.top/api/save-card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          wallet_address: safeAddress,
+          card_id: card.id,
+          card_content: card.content,
+          answer_text: card.answer_text || "",
+          folder_name: card.folder_name,
+          memo: newMemo
+        })
+      });
+      // 저장 후 데이터 동기화
+      if(typeof loadAllData === 'function') loadAllData(true);
+    } catch(e) {
+      console.error("메모 저장 실패:", e);
+    }
   };
 
   const handleEnhanceCard = async (card: any, currentStats: any) => {
@@ -82,136 +75,153 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: card.answer_text || "", folder_name: card.folder_name, memo: newMemo })
       });
-      await loadAllData(); 
+      if(typeof loadAllData === 'function') await loadAllData(true); 
     } catch (e) {} finally { setIsEnhancing(false); }
   };
 
   return (
-    <div className="space-y-6 sm:space-y-8 animate-in fade-in w-full">
+    <div className="space-y-6 sm:space-y-8 animate-in fade-in w-full pb-10">
       <div className="flex justify-between items-end mb-4 sm:mb-6 border-b border-white/10 pb-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-serif text-current tracking-tight">카드 수집</h1>
-          <p className="text-xs sm:text-sm text-white/40 mt-1">카드를 클릭해 강화(MAX 50)하고 기록을 확인하세요.</p>
+          <h1 className="text-2xl sm:text-3xl font-serif text-current tracking-tight">카드 수집 및 메모</h1>
+          <p className="text-xs sm:text-sm text-white/40 mt-1">카드를 펼쳐 원문을 읽고, 나만의 학습 메모를 자유롭게 작성하세요.</p>
         </div>
         <div className="text-amber-400 font-bold text-[11px] sm:text-xs font-mono bg-black/40 px-3 py-1.5 border border-amber-500/30 rounded-sm shrink-0">
           보유: {goalBalance} P
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-4">
-        {enhanceFolders.map((f: string) => (
-          <button key={f} onClick={() => handleToggleFolder(f)} className={`px-3 py-1.5 sm:py-2 text-[10px] sm:text-[12px] font-bold border rounded-sm transition-all ${openFolders[f] ? 'bg-teal-600 border-teal-500 text-white shadow-sm' : 'bg-teal-900/40 text-teal-300 border-teal-500/30'}`}>
-            📁 {f}
-          </button>
-        ))}
-      </div>
-      
-      <div className="overflow-y-auto max-h-[60vh] custom-scrollbar pr-2 pb-10">
-        {enhanceFolders.map((folder: string) => {
-          if (!openFolders[folder]) return null;
-
-          const folderCards = localCards.filter((c:any) => c && c.content && c.folder_name === folder);
+      {/* 💡 채우기 탭과 100% 동일한 순서 배열을 위해 savedCards를 직접 매핑합니다. */}
+      <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-4 items-start w-full`}>
+        {savedCards.map((card: any) => {
+          const lines = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '').split('\n');
+          const firstLine = lines[0] || "";
           
-          const col1Cards = folderCards.filter(c => { const f = c.content.split('\n')[0]||""; return f.includes('[정관]') || (!f.includes('[령]') && !f.includes('[칙]') && !f.includes('[규]') && !f.includes('[규정]')); });
-          const col2Cards = folderCards.filter(c => { const f = c.content.split('\n')[0]||""; return f.includes('[령]'); });
-          const col3Cards = folderCards.filter(c => { const f = c.content.split('\n')[0]||""; return f.includes('[칙]') || f.includes('[규]') || f.includes('[규정]'); });
+          let displayTitle = firstLine.replace(/\[(법|령|칙|규|정관|규정)\]/g, '').replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
+          if (!displayTitle) displayTitle = "제목 없음";
+
+          let prefix = "[법]"; let titleColor = "text-red-500";
+          if (firstLine.includes('[정관]')) { prefix = "[정관]"; titleColor = "text-yellow-500"; }
+          else if (firstLine.includes('[칙]') || firstLine.includes('[규]') || firstLine.includes('[규정]')) { prefix = "[칙]"; titleColor = "text-green-500"; }
+          else if (firstLine.includes('[령]')) { prefix = "[령]"; titleColor = "text-blue-400"; }
+
+          const stats = getExtendedStats(card.memo);
+          const isMax = stats.upgrade >= 50;
+          const canUpgrade = stats.upgrade < stats.filled;
+          const cost = (stats.upgrade + 1) * 20;
+          const isExpanded = expandedId === card.id;
+
+          const previewContent = lines.length > 1 ? lines.slice(1).join(' ') : card.content;
+          const previewText = previewContent.replace(/\[.*?\]/g, '___').substring(0, 80);
+
+          let borderClass = "border-white/10 hover:border-teal-500/30";
+          if (isMax) borderClass = "border-yellow-500/50 shadow-[0_0_10px_rgba(250,204,21,0.15)]";
 
           return (
-            <div key={folder} className="mb-6 sm:mb-8 border-l border-white/5 pl-2 sm:pl-3">
-              <div className="text-xs sm:text-sm text-white/50 mb-2 sm:mb-3 border-b border-white/10 pb-1.5 sm:pb-2 font-bold">{folder}</div>
-              
-              <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-1.5 sm:gap-2 items-start w-full`}>
-                
-                <div className="flex flex-col gap-1.5 w-full bg-white/5 rounded-sm p-1.5 border border-white/5 h-auto">
-                  <div className="text-[10px] text-white/30 font-bold mb-0.5 text-center tracking-widest border-b border-white/5 pb-1">법 / 정관</div>
-                  {col1Cards.map(c => renderTightCard(c))}
+            <div 
+              key={card.id} 
+              // 💡 카드가 펼쳐지면 'col-span-full'이 발동하여 화면 전체 가로길이를 꽉 채웁니다.
+              className={`bg-[#0a0a0c] border rounded-sm transition-all duration-300 flex flex-col ${
+                isExpanded 
+                  ? 'col-span-full shadow-2xl scale-[1.01] z-10 border-teal-500/50 bg-[#0d0d12]' 
+                  : borderClass
+              }`}
+            >
+              <div 
+                onClick={() => setExpandedId(isExpanded ? null : card.id)}
+                className="p-4 cursor-pointer flex justify-between items-center border-b border-white/5 bg-white/5 hover:bg-white/10 transition-colors"
+              >
+                <div className="flex flex-col gap-1.5 overflow-hidden pr-4 w-full">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-white/50 font-mono tracking-widest bg-black/40 border border-white/10 px-2 py-0.5 rounded-sm shrink-0">
+                      {card.folder_name || '기본 폴더'}
+                    </span>
+                    <div className={`text-[9px] font-mono font-bold whitespace-nowrap shrink-0 ${isMax ? 'text-yellow-500 animate-pulse' : 'text-white/50'}`}>
+                      {isMax ? '★MAX' : `+${stats.upgrade} 강화`}
+                    </div>
+                  </div>
+                  <span className={`font-bold truncate transition-colors ${isExpanded ? 'text-lg text-teal-300' : `text-sm ${titleColor}`}`}>
+                    <span className="opacity-80 text-xs mr-1">{prefix}</span>{displayTitle}
+                  </span>
                 </div>
-                
-                <div className="flex flex-col gap-1.5 w-full bg-white/5 rounded-sm p-1.5 border border-white/5 h-auto">
-                  <div className="text-[10px] text-white/30 font-bold mb-0.5 text-center tracking-widest border-b border-white/5 pb-1">시행령</div>
-                  {col2Cards.map(c => renderTightCard(c))}
+                <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-full bg-black/40 border border-white/10">
+                  <span className={`text-white/50 text-xs transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}>▼</span>
                 </div>
-                
-                <div className="flex flex-col gap-1.5 w-full bg-white/5 rounded-sm p-1.5 border border-white/5 h-auto">
-                  <div className="text-[10px] text-white/30 font-bold mb-0.5 text-center tracking-widest border-b border-white/5 pb-1">시행규칙 / 규정</div>
-                  {col3Cards.map(c => renderTightCard(c))}
-                </div>
-
               </div>
+
+              {isExpanded ? (
+                <div className="p-5 sm:p-8 flex flex-col gap-6 bg-black/40 animate-in fade-in duration-200">
+                  
+                  <div className="flex flex-col gap-2.5">
+                    <label className="text-xs font-bold text-white/40 tracking-widest flex justify-between">
+                      <span>📖 원문 내용</span>
+                    </label>
+                    <div className="text-[15px] leading-relaxed text-white/80 whitespace-pre-wrap font-serif bg-black/40 p-5 sm:p-6 rounded border border-white/10 max-h-[400px] overflow-y-auto custom-scrollbar break-keep shadow-inner">
+                      {card.content.replace(/##PAGE_BREAK##/g, '\n\n')}
+                    </div>
+                  </div>
+                  
+                  {/* 💡 넓고 거대한 메모 입력 영역 */}
+                  <div className="flex flex-col gap-2.5 mt-2">
+                    <div className="flex justify-between items-end">
+                      <label className="text-xs font-bold text-amber-400 tracking-widest flex items-center gap-1.5">
+                        <span>📝</span> 학습 메모 (인사이트)
+                      </label>
+                      <span className="text-[10px] text-white/30 hidden sm:inline">입력창 바깥을 클릭하면 자동 저장됩니다.</span>
+                    </div>
+                    <textarea
+                      defaultValue={stats.text}
+                      onBlur={(e) => handleMemoBlur(card, e.target.value)}
+                      placeholder="이 조항의 암기 팁, 두음, 판례 등 학습에 필요한 메모를 자유롭게 작성하세요..."
+                      className="w-full h-40 sm:h-48 bg-amber-950/10 border border-amber-500/30 rounded p-4 text-[13px] sm:text-sm text-amber-100/90 outline-none focus:border-amber-500 focus:bg-amber-950/20 focus:shadow-[0_0_15px_rgba(245,158,11,0.1)] transition-all resize-y custom-scrollbar leading-relaxed"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 mt-2">
+                    <div className="flex flex-col items-center justify-center text-[10px] sm:text-xs font-mono bg-black/40 p-3 rounded border border-white/5">
+                        <span className="text-white/40 mb-1">최고기록</span>
+                        <span className="text-teal-400 font-bold text-sm">{stats.bestTime > 0 ? `${stats.bestTime.toFixed(1)}초` : '-'}</span>
+                    </div>
+                    <div className="flex flex-col items-center justify-center text-[10px] sm:text-xs font-mono bg-black/40 p-3 rounded border border-white/5">
+                        <span className="text-white/40 mb-1">누적반복</span>
+                        <span className="text-indigo-400 font-bold text-sm">{stats.filled}회</span>
+                    </div>
+                    <div className="flex flex-col items-center justify-center text-[10px] sm:text-xs font-mono bg-black/40 p-3 rounded border border-white/5">
+                        <span className="text-white/40 mb-1">정답/오답</span>
+                        <span className="text-sm font-bold"><span className="text-green-400">{stats.totalCorrect}</span> <span className="text-white/30 text-xs">/</span> <span className="text-red-400">{stats.totalWrong}</span></span>
+                    </div>
+                  </div>
+
+                  <button 
+                      disabled={isMax || isEnhancing || !canUpgrade}
+                      onClick={(e) => { e.stopPropagation(); handleEnhanceCard(card, stats); }}
+                      className={`w-full py-3 mt-2 text-xs font-bold rounded-sm transition-all flex justify-center items-center gap-2 ${
+                          isMax ? 'bg-yellow-600/20 text-yellow-500 border border-yellow-500/30 cursor-not-allowed' : 
+                          !canUpgrade ? 'bg-gray-800/50 text-gray-500 border border-gray-600/30 cursor-not-allowed' :
+                          goalBalance >= cost ? 'bg-white/10 hover:bg-white/20 text-white border border-white/20 shadow-lg' : 
+                          'bg-red-900/20 text-red-500/50 border border-red-500/20 cursor-not-allowed'
+                      }`}
+                  >
+                      {isMax ? '최고 레벨(50) 달성 완료' : !canUpgrade ? `강화 불가 (현재 학습 ${stats.filled}회 / 필요 ${stats.upgrade + 1}회)` : `💎 포인트로 강화 시도 (비용: ${cost}P)`}
+                  </button>
+
+                </div>
+              ) : (
+                <div className="p-4 text-[13px] text-white/40 line-clamp-2 leading-relaxed bg-black/20">
+                  {previewText}...
+                </div>
+              )}
             </div>
           );
         })}
       </div>
+      
+      {savedCards.length === 0 && (
+        <div className="text-center py-24 flex flex-col items-center gap-4">
+          <span className="text-4xl opacity-20">🗂️</span>
+          <span className="text-white/40 text-sm font-bold tracking-widest">수집된 카드가 없습니다.</span>
+        </div>
+      )}
     </div>
   );
-
-  function renderTightCard(card: any) {
-    const lines = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '').split('\n');
-    const firstLine = lines[0] || "";
-    
-    let displayTitle = firstLine.replace(/\[(법|령|칙|규|정관|규정)\]/g, '').replace(/\(\s*내용\s*\)/g, '').replace(/내용/g, '').trim();
-    if (!displayTitle) displayTitle = "제목 없음";
-
-    let prefix = "[법]"; let titleColor = "text-red-500";
-    if (firstLine.includes('[정관]')) { prefix = "[정관]"; titleColor = "text-yellow-500"; }
-    else if (firstLine.includes('[칙]') || firstLine.includes('[규]') || firstLine.includes('[규정]')) { prefix = "[칙]"; titleColor = "text-green-500"; }
-    else if (firstLine.includes('[령]')) { prefix = "[령]"; titleColor = "text-blue-400"; }
-
-    const stats = getExtendedStats(card.memo);
-    const isMax = stats.upgrade >= 50;
-    const canUpgrade = stats.upgrade < stats.filled;
-    const cost = (stats.upgrade + 1) * 20;
-    const isExpanded = expandedId === card.id;
-
-    let borderClass = "border-white/10 bg-black/40 hover:bg-white/5";
-    if (isMax) borderClass = "border-yellow-500/50 bg-yellow-950/20 shadow-[0_0_10px_rgba(250,204,21,0.15)]";
-    else if (stats.upgrade >= 40) borderClass = "border-red-500/40 bg-red-950/20";
-    else if (stats.upgrade >= 30) borderClass = "border-fuchsia-500/40 bg-fuchsia-950/20";
-    else if (stats.upgrade >= 20) borderClass = "border-purple-500/40 bg-purple-950/20";
-    else if (stats.upgrade >= 10) borderClass = "border-blue-500/40 bg-blue-950/20";
-    else if (stats.upgrade >= 5) borderClass = "border-teal-500/40 bg-teal-950/20";
-
-    return (
-        <div key={card.id} onClick={() => setExpandedId(isExpanded ? null : card.id)} className={`relative flex flex-col rounded-sm border transition-all cursor-pointer p-1.5 w-full ${borderClass}`}>
-            <div className="flex justify-between items-center gap-2">
-                <div className={`${titleColor} font-bold text-[11px] truncate w-full`} title={`${prefix} ${displayTitle}`}>
-                    <span className="opacity-80">{prefix}</span> {displayTitle}
-                </div>
-                <div className={`text-[9px] font-mono font-bold whitespace-nowrap shrink-0 ${isMax ? 'text-yellow-500 animate-pulse' : 'text-white/50'}`}>
-                    {isMax ? '★MAX' : `+${stats.upgrade}`}
-                </div>
-            </div>
-
-            <div className="text-[10px] text-white/40 mt-0.5 truncate w-full font-serif" title={stats.text || "메모 없음"}>
-                {stats.text || "메모 없음"}
-            </div>
-
-            {isExpanded && (
-                <div className="mt-2 pt-2 border-t border-white/10 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1">
-                    <div className="flex justify-between items-center text-[9px] font-mono bg-black/40 p-1 rounded border border-white/5">
-                        <span className="text-white/40">최고기록</span><span className="text-teal-400 font-bold">{stats.bestTime > 0 ? `${stats.bestTime.toFixed(1)}초` : '-'}</span>
-                    </div>
-                    <div className="flex justify-between items-center text-[9px] font-mono bg-black/40 p-1 rounded border border-white/5">
-                        <span className="text-white/40">누적반복</span><span className="text-indigo-400 font-bold">{stats.filled}회</span>
-                    </div>
-                    <div className="flex justify-between items-center text-[9px] font-mono bg-black/40 p-1 rounded border border-white/5">
-                        <span className="text-white/40">정답/오답</span><span><span className="text-green-400">O:{stats.totalCorrect}</span> <span className="text-white/30">|</span> <span className="text-red-400">X:{stats.totalWrong}</span></span>
-                    </div>
-                    <button 
-                        disabled={isMax || isEnhancing || !canUpgrade}
-                        onClick={(e) => { e.stopPropagation(); handleEnhanceCard(card, stats); }}
-                        className={`w-full py-1.5 mt-1 text-[10px] font-bold rounded-sm transition-all flex justify-center items-center gap-1 ${
-                            isMax ? 'bg-yellow-600/20 text-yellow-500 border border-yellow-500/30 cursor-not-allowed' : 
-                            !canUpgrade ? 'bg-gray-800/50 text-gray-500 border border-gray-600/30 cursor-not-allowed' :
-                            goalBalance >= cost ? 'bg-white/10 hover:bg-white/20 text-white border border-white/20' : 
-                            'bg-red-900/20 text-red-500/50 border border-red-500/20 cursor-not-allowed'
-                        }`}
-                    >
-                        {isMax ? '최고 레벨(50) 달성' : !canUpgrade ? `강화 불가 (학습 ${stats.filled}회 / 필요 ${stats.upgrade + 1}회)` : `💎 강화 시도 (${cost}P)`}
-                    </button>
-                </div>
-            )}
-        </div>
-    );
-  }
 };
