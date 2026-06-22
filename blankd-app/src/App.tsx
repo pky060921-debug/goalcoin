@@ -80,7 +80,6 @@ const getExtendedStats = (memoStr: string) => {
   }
 };
 
-// 💡 [핵심 최적화 1] 상태(State) 분리 입력기: 타자를 아무리 빨리 쳐도 메인 스레드가 멈추지 않는 마법의 컴포넌트
 const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict, hintLetter }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
@@ -90,7 +89,6 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // 💡 사전을 매번 뒤지지 않도록, 정답이 될 수 있는 글자들을 미리 계산해 둠 (CPU 점유율 0%)
   const validAnswers = useMemo(() => {
       const expectedClean = expected.replace(/\s+/g, '').toLowerCase();
       const answers = [expectedClean];
@@ -172,7 +170,7 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
     return { hasError: true, errorMessage: error.message }; 
   }
   componentDidCatch(error: any, errorInfo: any) { 
-    this.props.fallbackLog(`🚨 렌더링 예외 발생 핸들링 진단: ${error.message}`); 
+    this.props.fallbackLog(`🚨 렌더링 예외 발생: ${error.message}`); 
   }
   render() {
     if (this.state.hasError) return (
@@ -185,7 +183,6 @@ class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: s
   }
 }
 
-// 💡 오프라인 가상 큐 (기기에 임시 저장)
 const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
   try {
     const targetId = payload.id || payload.card_id;
@@ -202,7 +199,7 @@ const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
     }
     localStorage.setItem('blankd_sync_queue', JSON.stringify(q));
   } catch (e) { 
-    console.error("동기화 가상 큐 적재 실패 진단:", e); 
+    console.error("동기화 가상 큐 적재 실패:", e); 
   }
 };
 
@@ -213,13 +210,8 @@ function MainApp() {
   const safeAddress = suiWalletAccount?.address || zkLogin?.address || "";
   const isLoggedIn = safeAddress.length > 0;
 
-  const [activeTab, setActiveTab] = useState(() => {
-    return localStorage.getItem('blankd_active_tab') || 'progress';
-  });
-
-  useEffect(() => {
-    localStorage.setItem('blankd_active_tab', activeTab);
-  }, [activeTab]);
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('blankd_active_tab') || 'progress');
+  useEffect(() => { localStorage.setItem('blankd_active_tab', activeTab); }, [activeTab]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -229,9 +221,7 @@ function MainApp() {
     return true; 
   });
 
-  useEffect(() => {
-    localStorage.setItem('blankd_sidebar_open', String(isSidebarOpen));
-  }, [isSidebarOpen]);
+  useEffect(() => { localStorage.setItem('blankd_sidebar_open', String(isSidebarOpen)); }, [isSidebarOpen]);
 
   const [categories, setCategories] = useState<any[]>([]);
   const [savedCards, setSavedCards] = useState<any[]>([]);
@@ -268,20 +258,6 @@ function MainApp() {
 
   const [hintLetter, setHintLetter] = useState<string | null>(null);
   const [isFrozen, setIsFrozen] = useState<boolean>(false);
-
-  const handleUpdateBalance = (changeAmount: number) => {
-    setGoalBalance(prev => {
-      const newBalance = prev + changeAmount;
-      localStorage.setItem(`blankd_off_bal_${safeAddress}`, newBalance.toString());
-      if (!isOffline && safeAddress) {
-        fetch("https://api.blankd.top/api/update-balance", {
-          method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet_address: safeAddress, balance: newBalance })
-        }).catch(e => console.error("포인트 동기화 실패:", e));
-      }
-      return newBalance;
-    });
-  };
 
   const [globalDict, setGlobalDict] = useState<{ stopwords: string[], inclusions: string[], abbrs: Record<string, string> }>({
     stopwords: [], inclusions: [], abbrs: {}
@@ -322,7 +298,6 @@ function MainApp() {
     }
   };
 
-  // 💡 [로컬 우선 동기화 엔진 1] 밀린 문제 기록만 서버로 올림
   const flushQueue = async () => {
     if (!safeAddress) return false; 
     try {
@@ -342,7 +317,7 @@ function MainApp() {
 
           if (res.ok) {
             localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
-            addLog(`✅ 오프라인 학습 데이터(${q.answers.length}건) ➔ 서버 전송 완료`);
+            addLog(`✅ 오프라인 작업 ➔ 서버 전송 완료`);
           }
       }
       return true;
@@ -352,7 +327,6 @@ function MainApp() {
     }
   };
 
-  // 💡 [로컬 우선 동기화 엔진 2] 서버 데이터와 내 폰 데이터를 비교해 더 큰 값을 인정 (덮어쓰기 방지)
   const loadAllData = async (isManualSync = false) => {
     if (!safeAddress) return;
     try {
@@ -395,7 +369,6 @@ function MainApp() {
         }
       } catch (e) {}
 
-      // 로컬 포인트가 더 높으면 깎지 않음
       const serverBalance = userData.balance || 0;
       const localBalance = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
       const actualBalance = Math.max(serverBalance, localBalance);
@@ -457,8 +430,23 @@ function MainApp() {
     }
   };
 
+  const handleUpdateBalance = (changeAmount: number) => {
+    setGoalBalance(prev => {
+      const newBalance = prev + changeAmount;
+      localStorage.setItem(`blankd_off_bal_${safeAddress}`, newBalance.toString());
+      if (!isOffline && safeAddress) {
+        fetch("https://api.blankd.top/api/update-balance", {
+          method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: safeAddress, balance: newBalance })
+        }).catch(e => console.error("포인트 동기화 실패:", e));
+      }
+      return newBalance;
+    });
+  };
+
   const saveGlobalDict = async (newDict: any) => {
     setGlobalDict(newDict); 
+    localStorage.setItem(`blankd_off_dict_${safeAddress}`, JSON.stringify(newDict));
     
     try {
       await api.updateGlobalDict(safeAddress, newDict);
@@ -493,6 +481,7 @@ function MainApp() {
         });
         setTimeout(() => addLog(`✅ 전역 빈칸 자동 생성 완료!`), 1000);
       }
+      localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(updatedCards.map(c => { const { _isModified, ...rest } = c; return rest; })));
       return updatedCards.map(c => { const { _isModified, ...rest } = c; return rest; });
     });
   };
@@ -514,7 +503,7 @@ function MainApp() {
       enokiFlow.handleAuthCallback().then(() => { 
         window.history.replaceState(null, '', window.location.pathname); 
         addLog("✅ 로그인 콜백 처리 완료"); 
-      }).catch((err: any) => addLog(`🚨 인증 실패 진단: ${err.message}`));
+      }).catch((err: any) => addLog(`🚨 인증 실패: ${err.message}`));
     }
     if (isLoggedIn) loadAllData();
   }, [isLoggedIn, safeAddress, enokiFlow]);
@@ -532,9 +521,7 @@ function MainApp() {
           exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
           
           fetch("https://api.blankd.top/api/save-card", {
-            method: "POST", 
-            keepalive: true, 
-            headers: { "Content-Type": "application/json" },
+            method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ wallet_address: safeAddress, card_id: currentCard.id, card_content: currentCard.content, answer_text: currentCard.answer_text || "", folder_name: currentCard.folder_name, memo: JSON.stringify(exStats) })
           }).catch(()=>{});
         }
@@ -573,7 +560,7 @@ function MainApp() {
           await loadAllData();
         }
     } catch (e: any) { 
-      addLog(`🚨 분할 처리 통신 에러 진단`);
+      addLog(`🚨 분할 처리 에러`);
     }
   };
 
@@ -636,12 +623,16 @@ function MainApp() {
         await loadAllData(); onComplete(); 
       }
     } catch (e) {
-      console.error("카드 생성 오류 진단:", e);
+      console.error("카드 생성 오류:", e);
     }
   };
 
   const handleUpdateMemoBackground = async (id: number, memo: string) => {
-    setSavedCards(prev => prev.map(c => c.id === id ? { ...c, memo } : c));
+    setSavedCards(prev => {
+      const next = prev.map(c => c.id === id ? { ...c, memo } : c);
+      localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
+      return next;
+    });
     pushToQueue('MEMO', { id, memo });
     
     if (!isOffline) {
@@ -727,7 +718,7 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // 💡 [핵심 최적화 2] 렉/프리징에도 오차가 발생하지 않는 원자시계 스톱워치 (Date.now() 보정)
+  // 💡 [핵심 최적화 2] 렉/프리징에도 오차가 발생하지 않는 원자시계 스톱워치 (Date.now() 기반)
   useEffect(() => {
     let interval: any;
     if (activeCard && currentBlankIdx < blanks.length) {
@@ -921,31 +912,7 @@ function MainApp() {
     flushQueue();
   };
 
-  const syncProgressToServer = () => {
-    if (isOffline || !safeAddress || !activeCardRef.current) return;
-    const card = activeCardRef.current;
-    
-    const exStats = getExtendedStats(card.memo);
-    exStats.text = statsRef.current.text;
-    exStats.filled = statsRef.current.filled;
-    exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
-    const newMemo = JSON.stringify(exStats);
-
-    fetch("https://api.blankd.top/api/save-card", {
-      method: "POST",
-      keepalive: true, 
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        wallet_address: safeAddress,
-        card_id: card.id,
-        card_content: card.content,
-        answer_text: card.answer_text || "",
-        folder_name: card.folder_name,
-        memo: newMemo
-      })
-    }).catch(()=>{});
-  };
-
+  // 💡 [핵심 최적화 3] 빈칸 정답을 맞출 때마다 매번 서버를 괴롭히던 "syncProgressToServer()" 완전 삭제!
   const handleSequentialInput = (overrideInput?: string | any) => {
     if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
@@ -976,14 +943,12 @@ function MainApp() {
           } else {
             localStorage.removeItem(`blankd_progress_${activeCard.id}`); finishCard();
           }
-          syncProgressToServer(); 
           return currentBlanks;
         });
       }, 150);
     } else { 
       setInputStatus('wrong'); 
       statsRef.current.wrongIndices.add(currentBlankIdx); 
-      syncProgressToServer(); 
       setTimeout(() => setInputStatus('idle'), 500);
     }
   };
@@ -1000,7 +965,6 @@ function MainApp() {
         } else {
           localStorage.removeItem(`blankd_progress_${activeCard.id}`); finishCard();
         }
-        syncProgressToServer(); 
         return currentBlanks;
       });
     }, 800);
