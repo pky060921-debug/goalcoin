@@ -404,26 +404,34 @@ def extract_exam_text_with_color(file_obj, is_answer=False):
         return file_obj.read().decode('utf-8', errors='ignore')
 
 def parse_answers_from_text(text: str, question_count: int) -> list:
+    """정답 파싱: 인라인 번호-정답(최우선) → 빨간색 마킹 → 연속 기호 묶음(표) 순으로 시도."""
+    num_map = {'①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5'}
     ans_dict = {}
-    num_map = {'①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5',
-               '1': '1', '2': '2', '3': '3', '4': '4', '5': '5'}
 
-    red_matches = re.findall(r'\[🔴([①②③④⑤1-5])\]', text)
-    if red_matches:
-        for i, ans in enumerate(red_matches):
-            ans_dict[i + 1] = num_map.get(ans, ans)
-
-    table_matches = re.findall(r'(\d+)\s*[.)\s]\s*([①②③④⑤1-5])\b', text)
-    for num, ans in table_matches:
+    # 1. 인라인 "1.③" "1)②" "1번:③" "1-③" 형태 — 번호가 명시되어 가장 신뢰도 높음
+    inline_matches = re.findall(r'(\d{1,3})\s*(?:번)?\s*[.)\:\-]\s*([①②③④⑤])', text)
+    for num, ans in inline_matches:
         n = int(num)
-        if 1 <= n <= question_count + 5:
-            ans_dict[n] = num_map.get(ans, ans)
+        if 1 <= n <= question_count:
+            ans_dict[n] = num_map[ans]
 
-    if not ans_dict:
-        seq_matches = re.findall(r'[①②③④⑤]', text)
-        if len(seq_matches) >= question_count // 2:
-            for i, ans in enumerate(seq_matches[:question_count]):
-                ans_dict[i + 1] = num_map.get(ans, ans)
+    # 2. 빨간색 마킹 (단일 기호만) — 70% 이상 채워질 때만 신뢰
+    if len(ans_dict) < question_count * 0.7:
+        red_matches = re.findall(r'\[🔴\s*([①②③④⑤])\s*\]', text)
+        if len(red_matches) >= question_count * 0.7:
+            for i, ans in enumerate(red_matches[:question_count]):
+                ans_dict.setdefault(i + 1, num_map[ans])
+
+    # 3. 연속 기호 묶음 — "문항/정답" 표처럼 기호 3개 이상이 연달아 나오는 구간 탐지
+    #    (문제 본문의 보기는 한 줄에 기호 1개 + 긴 설명문이라 이 패턴에 안 걸림)
+    if len(ans_dict) < question_count * 0.7:
+        runs = re.findall(r'(?:[①②③④⑤]\s*){3,}', text)
+        if runs:
+            longest = max(runs, key=len)
+            syms = re.findall(r'[①②③④⑤]', longest)
+            if abs(len(syms) - question_count) <= 3:
+                for i, ans in enumerate(syms[:question_count]):
+                    ans_dict.setdefault(i + 1, num_map[ans])
 
     return [ans_dict.get(i + 1, '') for i in range(question_count)]
 
@@ -559,9 +567,11 @@ def upload_exam_coop():
         if answer_file:
             answer_text = extract_exam_text_with_color(answer_file)
             answers = parse_answers_from_text(answer_text, len(valid_chunks))
+            print(f"[정답 파싱-별도파일] 문항수={len(valid_chunks)} 매칭={sum(1 for a in answers if a)}개 | {answers}", file=sys.stderr)
+            print(f"[정답파일 원문 앞 500자]\n{answer_text[:500]}", file=sys.stderr)
         else:
-            answer_section = exam_text 
-            answers = parse_answers_from_text(answer_section, len(valid_chunks))
+            answers = parse_answers_from_text(exam_text, len(valid_chunks))
+            print(f"[정답 파싱-문제파일내] 문항수={len(valid_chunks)} 매칭={sum(1 for a in answers if a)}개 | {answers}", file=sys.stderr)
 
         conn = get_db_connection()
         conn.execute(
