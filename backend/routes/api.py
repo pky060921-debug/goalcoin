@@ -220,6 +220,25 @@ def init_golden_db():
             wallet_address TEXT PRIMARY KEY,
             custom_stopwords TEXT
         )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS exam_banks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            wallet_address TEXT,
+            filename TEXT,
+            total_questions INTEGER DEFAULT 0,
+            processed_count INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'processing',
+            error_message TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS question_bank (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bank_id INTEGER,
+            wallet_address TEXT,
+            question_no INTEGER,
+            question_text TEXT,
+            correct_answer TEXT DEFAULT '',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
         
         try: conn.execute('ALTER TABLE categories ADD COLUMN sort_order INTEGER DEFAULT 999999')
         except: pass
@@ -453,95 +472,64 @@ def delete_pending_exam():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# 💡 모의고사 CBT 변환 엔진
+# 💡 AI 기반 모의고사 → 문제은행 생성 엔진
 # ==========================================
-@api_bp.route('/upload-exam-cbt', methods=['POST'])
-def upload_exam_cbt():
-    import traceback
-    import sys
-    import requests
-    import json
-    
-    try:
-        wallet_address = request.form.get('wallet_address')
-        file = request.files.get('file')
-        
-        if not file or not wallet_address:
-            return jsonify({"error": "파일이나 인증 정보가 없습니다."}), 400
-            
-        exam_text = extract_text_from_file(file)
-        if not exam_text:
-            return jsonify({"error": "파일에서 텍스트를 추출하지 못했습니다."}), 400
-            
-        safe_exam_text = exam_text[:2500].replace('"', "'")
-        
-        prompt = (
-            "당신은 아주 정확한 데이터 추출기입니다.\n"
-            "아래 [문서 내용]을 읽고, 최대 5개의 객관식 문제를 찾아 JSON 배열로만 출력하세요.\n\n"
-            "[문서 내용]\n"
-            f"{safe_exam_text}\n\n"
-            "[🚨 절대 준수 규칙 🚨]\n"
-            "1. JSON 문법을 완벽히 지키세요.\n"
-            "2. 해설 내용에 줄바꿈이 필요하면 반드시 '<br>'을 쓰세요. 엔터키는 금지입니다.\n"
-            "3. 아래의 마크다운 형식을 그대로 복사해서 내용을 채워 넣는 것으로 출력을 시작하세요.\n\n"
-            "```json\n"
-            "{\n"
-            '  "questions": [\n'
-            "    {\n"
-            '      "id": 1,\n'
-            '      "questionText": "다음 중 ~은?",\n'
-            '      "choices": ["보기1", "보기2", "보기3", "보기4"],\n'
-            '      "correctAnswer": 0,\n'
-            '      "explanation": "해설입니다."\n'
-            "    }\n"
-            "  ]\n"
-            "}\n"
-            "```\n"
-            "자, 지금 바로 위 형식대로 출력을 시작하세요:"
-        )
 
-        print("🤖 [gemma4:26b] 모의고사 파싱 시작 (경량화 모드)...", file=sys.stderr)
-        url = "http://localhost:11434/api/generate"
-        payload = {
-            "model": "gemma4:26b",
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.1,
-                "num_ctx": 4096,     
-                "num_predict": 1500, 
-                "top_k": 40,
-                "top_p": 0.9,
-                "repeat_penalty": 1.15
-            }
-        }
-        
-        resp = requests.post(url, json=payload, timeout=600)
-        resp.raise_for_status()
-        
-        response_text = resp.json().get("response", "").strip()
-        
-        if not response_text:
-            raise ValueError("AI가 여전히 빈 응답을 반환했습니다. 모델(gemma4:26b)이 현재 상태에서 응답할 수 없습니다.")
+def _rough_split_questions(exam_text: str) -> list:
+    """1차 거친 분리: 문제 단위로만 자른다. 정밀 정제는 AI가 담당."""
+    exam_text = re.sub(r'-\s*\d+\s*-', '', exam_text)
+    exam_text = re.sub(r'【[^】]+】', '', exam_text)
+    exam_text = re.split(r'[\*＊]?\s*단\s*답\s*형', exam_text)[0]
+    chunks = re.split(r'(?m)^(?=\s*(?:문\s*)?\d+\s*[.)]\s*[^\s\d])', exam_text)
+    valid_chunks = [
+        c.strip() for c in chunks
+        if c.strip() and len(c.strip()) > 10
+        and re.search(r'[①②③④⑤]', c)
+    ]
+    return valid_chunks
 
-        result = clean_and_parse_json(response_text)
-        
-        if isinstance(result, dict) and "questions" in result:
-            for q in result["questions"]:
-                if "explanation" in q and isinstance(q["explanation"], str):
-                    q["explanation"] = q["explanation"].replace("<br>", "\n")
-                if "questionText" in q and isinstance(q["questionText"], str):
-                    q["questionText"] = q["questionText"].replace("<br>", "\n")
-                    
-        print("✅ [gemma4:26b] 변환 성공!", file=sys.stderr)
-        return jsonify(result)
-        
-    except Exception as e:
-        print(f"\n[🔥 CBT 모의고사 변환 에러]\n{traceback.format_exc()}\n", file=sys.stderr)
-        return jsonify({"error": str(e)}), 500
 
-@api_bp.route('/upload-exam-coop', methods=['POST'])
-def upload_exam_coop():
+def _ai_parse_question_batch(raw_chunks: list, answer_context: str) -> list:
+    """원본 문제 조각들을 AI에게 보내 정제된 JSON 문제 배열로 변환."""
+    joined = "\n\n---\n\n".join(raw_chunks)
+    ref_block = f"\n[정답 참고자료 - 있으면 최우선으로 사용]\n{answer_context[:1500]}\n" if answer_context else ""
+
+    prompt = (
+        "당신은 시험지 원문을 정제하는 데이터 추출기입니다.\n"
+        "아래 [원본 문제들]은 PDF에서 추출된 텍스트라 띄어쓰기/줄바꿈이 깨져 있을 수 있습니다.\n"
+        "각 문제를 읽고 question_text는 원문 그대로(보기 ①②③④⑤ 포함) 자연스럽게 다듬고,\n"
+        "correct_answer는 1~5 중 하나의 정답 번호를 판단하세요.\n\n"
+        "[정답 판단 규칙]\n"
+        "1. 텍스트 안에 [🔴...] 로 마킹된 부분이 있으면 그것이 정답 표시이니 최우선으로 사용하세요.\n"
+        "2. 아래 [정답 참고자료]가 있으면 문제 번호를 대조하여 사용하세요.\n"
+        "3. 둘 다 없으면 당신의 법령 지식으로 가장 가능성 높은 정답을 추론하세요. 확신이 없으면 빈 문자열로 두세요.\n"
+        f"{ref_block}\n"
+        "[원본 문제들]\n"
+        f"{joined}\n\n"
+        "각 문제마다 원래 문제 번호(question_no)를 그대로 유지하여 다음 JSON 배열 형식으로만 출력하세요:\n"
+        '[{"question_no": 1, "question_text": "...", "correct_answer": "3"}, ...]'
+    )
+
+    url = "http://localhost:11434/api/chat"
+    payload = {
+        "model": "gemma4:26b",
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "think": False,
+        "options": {"num_ctx": 8192, "num_predict": 2000, "temperature": 0.1}
+    }
+    resp = requests.post(url, json=payload, timeout=300)
+    resp.raise_for_status()
+    raw = (resp.json().get("message") or {}).get("content", "").strip()
+    raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
+    parsed = clean_and_parse_json(raw)
+    if isinstance(parsed, dict):
+        parsed = parsed.get("questions") or list(parsed.values())[0] if parsed else []
+    return parsed if isinstance(parsed, list) else []
+
+
+@api_bp.route('/upload-exam-ai', methods=['POST'])
+def upload_exam_ai():
     try:
         wallet_address = request.form.get('wallet_address')
         exam_file = request.files.get('exam_file')
@@ -551,68 +539,145 @@ def upload_exam_coop():
             return jsonify({"error": "문제 파일이나 인증 정보가 없습니다."}), 400
 
         exam_text = extract_exam_text_with_color(exam_file)
-        exam_text = re.sub(r'-\s*\d+\s*-', '', exam_text)
-        exam_text = re.sub(r'【[^】]+】', '', exam_text)
+        raw_chunks = _rough_split_questions(exam_text)
+        if not raw_chunks:
+            return jsonify({"error": "문제를 찾지 못했습니다. 파일 형식을 확인해주세요."}), 400
 
-        exam_text = re.split(r'[\*＊]?\s*단\s*답\s*형', exam_text)[0]
-
-        chunks = re.split(r'(?m)^(?=\s*(?:문\s*)?\d+\s*[.)]\s*[^\s\d])', exam_text)
-        valid_chunks = [
-            c.strip() for c in chunks
-            if c.strip() and len(c.strip()) > 10
-            and re.search(r'[①②③④⑤]', c)
-        ]
-
-        answers = []
+        answer_context = ""
         if answer_file:
-            answer_text = extract_exam_text_with_color(answer_file)
-            answers = parse_answers_from_text(answer_text, len(valid_chunks))
-            print(f"[정답 파싱-별도파일] 문항수={len(valid_chunks)} 매칭={sum(1 for a in answers if a)}개 | {answers}", file=sys.stderr)
-            print(f"[정답파일 원문 앞 500자]\n{answer_text[:500]}", file=sys.stderr)
-        else:
-            answers = parse_answers_from_text(exam_text, len(valid_chunks))
-            print(f"[정답 파싱-문제파일내] 문항수={len(valid_chunks)} 매칭={sum(1 for a in answers if a)}개 | {answers}", file=sys.stderr)
+            answer_context = extract_exam_text_with_color(answer_file)
 
         conn = get_db_connection()
-        conn.execute(
-            "INSERT INTO pending_exams (wallet_address, filename, chunks_json, answers_json) VALUES (?, ?, ?, ?)",
-            (wallet_address, exam_file.filename,
-             json.dumps(valid_chunks, ensure_ascii=False),
-             json.dumps(answers, ensure_ascii=False))
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO exam_banks (wallet_address, filename, total_questions, processed_count, status) VALUES (?, ?, ?, 0, 'processing')",
+            (wallet_address, exam_file.filename, len(raw_chunks))
         )
+        bank_id = cursor.lastrowid
         conn.commit()
         conn.close()
-        has_answers = any(answers)
-        return jsonify({
-            "message": "업로드 완료",
-            "question_count": len(valid_chunks),
-            "answer_count": sum(1 for a in answers if a),
-            "has_answers": has_answers
-        })
+
+        def process_with_ai():
+            BATCH_SIZE = 4
+            total_inserted = 0
+            try:
+                for batch_start in range(0, len(raw_chunks), BATCH_SIZE):
+                    batch = raw_chunks[batch_start:batch_start + BATCH_SIZE]
+                    try:
+                        parsed_items = _ai_parse_question_batch(batch, answer_context)
+                    except Exception as e:
+                        print(f"[AI 배치 처리 오류 - 원본으로 폴백] {e}", file=sys.stderr)
+                        parsed_items = [
+                            {"question_no": batch_start + i + 1, "question_text": c, "correct_answer": ""}
+                            for i, c in enumerate(batch)
+                        ]
+
+                    conn2 = get_db_connection()
+                    cur2 = conn2.cursor()
+                    for idx, item in enumerate(parsed_items):
+                        if not isinstance(item, dict):
+                            continue
+                        q_no = item.get("question_no", batch_start + idx + 1)
+                        q_text = (item.get("question_text") or "").strip()
+                        ans = str(item.get("correct_answer") or "").strip()
+                        if not q_text:
+                            continue
+                        cur2.execute(
+                            "INSERT INTO question_bank (bank_id, wallet_address, question_no, question_text, correct_answer) VALUES (?, ?, ?, ?, ?)",
+                            (bank_id, wallet_address, q_no, q_text, ans)
+                        )
+                        total_inserted += 1
+                    cur2.execute(
+                        "UPDATE exam_banks SET processed_count = ? WHERE id = ?",
+                        (min(batch_start + BATCH_SIZE, len(raw_chunks)), bank_id)
+                    )
+                    conn2.commit()
+                    conn2.close()
+                    print(f"[문제은행 #{bank_id}] {min(batch_start + BATCH_SIZE, len(raw_chunks))}/{len(raw_chunks)} 처리 완료", file=sys.stderr)
+
+                conn3 = get_db_connection()
+                conn3.execute(
+                    "UPDATE exam_banks SET status = 'completed', total_questions = ? WHERE id = ?",
+                    (total_inserted, bank_id)
+                )
+                conn3.commit()
+                conn3.close()
+                print(f"[문제은행 #{bank_id}] 전체 완료 - 총 {total_inserted}문항", file=sys.stderr)
+            except Exception as e:
+                print(f"[문제은행 #{bank_id} 처리 실패] {traceback.format_exc()}", file=sys.stderr)
+                conn4 = get_db_connection()
+                conn4.execute(
+                    "UPDATE exam_banks SET status = 'failed', error_message = ? WHERE id = ?",
+                    (str(e), bank_id)
+                )
+                conn4.commit()
+                conn4.close()
+
+        threading.Thread(target=process_with_ai).start()
+        return jsonify({"message": "AI 분석을 시작했습니다.", "bank_id": bank_id, "question_count": len(raw_chunks)})
     except Exception as e:
         print(f"[업로드 오류] {traceback.format_exc()}", file=sys.stderr)
         return jsonify({"error": str(e)}), 500
 
-@api_bp.route('/get-pending-exams', methods=['GET'])
-def get_pending_exams():
+
+@api_bp.route('/get-exam-banks', methods=['GET'])
+def get_exam_banks():
     try:
         wallet_address = request.args.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT id, filename, chunks_json, answers_json FROM pending_exams WHERE wallet_address = ? ORDER BY id DESC",
+            "SELECT id, filename, total_questions, processed_count, status, error_message FROM exam_banks WHERE wallet_address = ? ORDER BY id DESC",
             (wallet_address,)
         )
-        results = []
-        for r in cursor.fetchall():
-            results.append({
-                "id": r[0],
-                "filename": r[1],
-                "chunks": json.loads(r[2]),
-                "answers": json.loads(r[3]) if r[3] else []
-            })
+        results = [
+            {
+                "id": r[0], "filename": r[1], "total_questions": r[2],
+                "processed_count": r[3], "status": r[4], "error_message": r[5]
+            }
+            for r in cursor.fetchall()
+        ]
         conn.close()
         return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route('/get-exam-bank-questions', methods=['GET'])
+def get_exam_bank_questions():
+    try:
+        bank_id = request.args.get('bank_id')
+        wallet_address = request.args.get('wallet_address')
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, question_no, question_text, correct_answer FROM question_bank WHERE bank_id = ? AND wallet_address = ? ORDER BY question_no ASC, id ASC",
+            (bank_id, wallet_address)
+        )
+        results = [
+            {"id": r[0], "question_no": r[1], "question_text": r[2], "correct_answer": r[3]}
+            for r in cursor.fetchall()
+        ]
+        conn.close()
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route('/delete-exam-bank', methods=['POST'])
+def delete_exam_bank():
+    try:
+        data = request.json or {}
+        bank_id = data.get('bank_id')
+        wallet_address = data.get('wallet_address')
+        if not bank_id or not wallet_address:
+            return jsonify({"error": "권한 없음"}), 400
+        conn = get_db_connection()
+        conn.execute("DELETE FROM exam_banks WHERE id = ? AND wallet_address = ?", (bank_id, wallet_address))
+        conn.execute("DELETE FROM question_bank WHERE bank_id = ? AND wallet_address = ?", (bank_id, wallet_address))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "삭제 완료"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1093,7 +1158,7 @@ def delete_all():
         wallet_address = request.json.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
-        for table in ['categories', 'cards', 'exams', 'pending_exams', 'golden_exams']:
+        for table in ['categories', 'cards', 'exams', 'pending_exams', 'golden_exams', 'exam_banks', 'question_bank']:
             cursor.execute(f"DELETE FROM {table} WHERE wallet_address = ?", (wallet_address,))
         conn.commit()
         conn.close()
