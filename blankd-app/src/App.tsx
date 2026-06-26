@@ -11,6 +11,14 @@ import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 import { RecordTab } from "./tabs/RecordTab";
 
+// 💡 [핵심 수정 1] 절대 오차가 없는 한국 시간(KST) 추출 함수
+const getKoreanDateString = () => {
+  const now = new Date();
+  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+  const kst = new Date(utc + (9 * 60 * 60 * 1000));
+  return kst.toISOString().split('T')[0];
+};
+
 const autoApplyDictHelper = (content: string, dict: any) => {
   try {
     if (!dict) return content;
@@ -718,7 +726,6 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // 💡 [핵심 최적화 2] 렉/프리징에도 오차가 발생하지 않는 원자시계 스톱워치 (Date.now() 기반)
   useEffect(() => {
     let interval: any;
     if (activeCard && currentBlankIdx < blanks.length) {
@@ -797,7 +804,9 @@ function MainApp() {
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
 
-    const todayStr = new Date().toISOString().split('T')[0];
+    // 💡 [핵심 수정] KST 날짜 강제 주입
+    const todayStr = getKoreanDateString();
+    
     setActivityLog(prev => {
       const next = { ...prev };
       next[todayStr] = (next[todayStr] || 0) + correctCount;
@@ -912,7 +921,6 @@ function MainApp() {
     flushQueue();
   };
 
-  // 💡 [핵심 최적화 3] 빈칸 정답을 맞출 때마다 매번 서버를 괴롭히던 "syncProgressToServer()" 완전 삭제!
   const handleSequentialInput = (overrideInput?: string | any) => {
     if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
@@ -1356,9 +1364,18 @@ function MainApp() {
                 <div className="h-5 sm:h-6 w-px bg-white/10"></div>
                 <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">예상 합격률</span><span className="text-[10px] sm:text-xs font-bold text-indigo-400">{passProbability}%</span></div>
                 <div className="h-5 sm:h-6 w-px bg-white/10 hidden sm:block"></div>
+                
+                {/* 💡 [핵심 수정 2] 로그아웃 시 로컬 오프라인 데이터 서버로 즉시 강제 전송 */}
                 <button onClick={async () => { 
                   try {
                     addLog("🔄 로그아웃 전 데이터 안전 동기화 중...");
+                    const offBal = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
+                    const offActivityLog = JSON.parse(localStorage.getItem(`blankd_activity_log_${safeAddress}`) || '{}');
+                    const offClaimedRewards = JSON.parse(localStorage.getItem(`blankd_claimed_rewards_${safeAddress}`) || '{}');
+                    await fetch("https://api.blankd.top/api/update-balance", {
+                      method: "POST", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ wallet_address: safeAddress, balance: offBal, activity_log: offActivityLog, claimed_rewards: offClaimedRewards })
+                    });
                     await flushQueue();
                   } catch(e: any) {}
                   await enokiFlow.logout(); 
