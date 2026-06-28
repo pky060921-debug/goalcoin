@@ -47,23 +47,52 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
     fetchRanking();
   }, []);
 
+  // 💡 [정밀 진단 모드] 서버 에러를 숨기지 않고 화면에 그대로 팝업 띄움
   const handleFileUploadAndSubmit = async () => {
     if (!lawFile) { alert("전송할 원본 학습용 데이터 파일(.txt)을 선택해주십시오."); return; }
+    
     try {
       setIsUploading(true);
-      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[업로드] 자료 파일 '${lawFile.name}' 가공 대기열 등록 완료.`]);
-      const data = await api.uploadExamCoop(lawFile, safeAddress);
+      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[진단 시작] 📡 서버(api.blankd.top)로 파일 전송 시도 중...`]);
+      
+      const formData = new FormData();
+      formData.append("file", lawFile);
+      formData.append("wallet_address", safeAddress);
+
+      // api.ts를 거치지 않고 직접 통신하여 원시 에러(Raw Error)를 포획합니다.
+      const res = await fetch(`https://api.blankd.top/api/upload-pdf`, { 
+          method: "POST", 
+          body: formData 
+      });
+
+      const statusCode = res.status;
+      const rawText = await res.text(); // 서버가 뱉어낸 진짜 텍스트(에러 포함)
+
+      if (!res.ok) {
+          // 서버가 500, 502 등의 에러를 반환한 경우
+          throw new Error(`[HTTP 상태코드: ${statusCode}]\n서버 응답 내용: ${rawText.substring(0, 300)}...`);
+      }
+
+      // 정상이면 JSON 파싱 진행
+      const data = JSON.parse(rawText);
+
       if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[성공] ${data.count || 0}개의 학습 조항 노드가 데이터베이스에 정착되었습니다.`]);
       
       const updatedCats = await api.getCategories(safeAddress);
       if (setCategories) setCategories(updatedCats);
       
-      alert(`성공적으로 ${data.count || 0}개의 조항이 마이그레이션 파싱되었습니다.`);
+      alert(`✅ 성공적으로 ${data.count || 0}개의 조항이 마이그레이션 파싱되었습니다.`);
       setLawFile(null);
+
     } catch (err: any) {
-      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `❌ [에러] 업로드 실패 파서 로그: ${err.message}`]);
-      alert(`가공 업로드 실패 알림: ${err.message}`);
-    } finally { setIsUploading(false); }
+      console.error(err);
+      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `❌ [에러] 통신 실패: ${err.message}`]);
+      
+      // 사용자 화면에 에러를 직격으로 띄웁니다.
+      alert(`🚨 업로드 실패 원인 정밀 진단 🚨\n\n${err.message}\n\n터미널(F12 또는 화면 하단)을 확인해주세요.\n(Failed to fetch가 뜨면 서버가 완전히 꺼졌거나 파이썬 패키지 충돌입니다)`);
+    } finally { 
+      setIsUploading(false); 
+    }
   };
 
   const handleExportExcel = async () => {
@@ -71,14 +100,12 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
     setIsExporting(true);
     const downloadUrl = `https://api.blankd.top/api/export-excel?wallet_address=${safeAddress}&t=${Date.now()}`;
     if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `🔍 [진단 탐색] 주소: ${safeAddress} 기반 엑셀 빌드 유닛 요청 전송.`]);
-
     try {
       const checkRes = await fetch(downloadUrl, { method: 'GET' });
       if (!checkRes.ok) {
         const errorJson = await checkRes.json().catch(() => ({}));
         const mainError = errorJson.error || "알 수 없는 백엔드 가동 중단";
         const traceLog = errorJson.traceback || "트레이스백 없음";
-
         if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `❌ [서버거절] 원인: ${mainError}`, `🚨 [추적로그]: ${traceLog.substring(0, 150)}...`]);
         alert(`❌ [서버 내부 진단 결과] 다운로드 실패\n\n요약: ${mainError}\n\n*상세 정보는 하단 터미널을 확인하세요.`);
         setIsExporting(false);
@@ -92,7 +119,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
       link.setAttribute('download', `blankd_내자료_백업_${new Date().toISOString().slice(0,10)}.xlsx`);
       document.body.appendChild(link); link.click();
       window.URL.revokeObjectURL(blobUrl); document.body.removeChild(link);
-      
       if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `✅ [정상 완료] 엑셀 패키지 다운로드가 성공했습니다.`]);
     } catch (err: any) {
       if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `❌ [통신차단] 프론트 브라우저가 서버 접속에 실패했습니다: ${err.message}`]);
