@@ -14,6 +14,11 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
   const [rankingData, setRankingData] = useState<any[]>([]);
   const [isLoadingRanking, setIsLoadingRanking] = useState(false);
 
+  // 💡 [수정됨] 일괄 교정 툴용 State
+  const [fromReps, setFromReps] = useState("");
+  const [toReps, setToReps] = useState("");
+  const [isUpdatingReps, setIsUpdatingReps] = useState(false);
+
   useEffect(() => {
     const fetchUserEmail = async () => {
       try {
@@ -47,52 +52,29 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
     fetchRanking();
   }, []);
 
-  // 💡 [정밀 진단 모드] 서버 에러를 숨기지 않고 화면에 그대로 팝업 띄움
   const handleFileUploadAndSubmit = async () => {
     if (!lawFile) { alert("전송할 원본 학습용 데이터 파일(.txt)을 선택해주십시오."); return; }
-    
     try {
       setIsUploading(true);
-      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[진단 시작] 📡 서버(api.blankd.top)로 파일 전송 시도 중...`]);
-      
+      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[진단 시작] 📡 서버로 파일 전송 시도 중...`]);
       const formData = new FormData();
       formData.append("file", lawFile);
       formData.append("wallet_address", safeAddress);
-
-      // api.ts를 거치지 않고 직접 통신하여 원시 에러(Raw Error)를 포획합니다.
-      const res = await fetch(`https://api.blankd.top/api/upload-pdf`, { 
-          method: "POST", 
-          body: formData 
-      });
-
+      const res = await fetch(`https://api.blankd.top/api/upload-pdf`, { method: "POST", body: formData });
       const statusCode = res.status;
-      const rawText = await res.text(); // 서버가 뱉어낸 진짜 텍스트(에러 포함)
-
-      if (!res.ok) {
-          // 서버가 500, 502 등의 에러를 반환한 경우
-          throw new Error(`[HTTP 상태코드: ${statusCode}]\n서버 응답 내용: ${rawText.substring(0, 300)}...`);
-      }
-
-      // 정상이면 JSON 파싱 진행
+      const rawText = await res.text(); 
+      if (!res.ok) { throw new Error(`[HTTP 상태코드: ${statusCode}]\n서버 응답: ${rawText.substring(0, 300)}...`); }
       const data = JSON.parse(rawText);
-
-      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[성공] ${data.count || 0}개의 학습 조항 노드가 데이터베이스에 정착되었습니다.`]);
-      
+      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[성공] ${data.count || 0}개의 학습 조항 노드가 정착되었습니다.`]);
       const updatedCats = await api.getCategories(safeAddress);
       if (setCategories) setCategories(updatedCats);
-      
       alert(`✅ 성공적으로 ${data.count || 0}개의 조항이 마이그레이션 파싱되었습니다.`);
       setLawFile(null);
-
     } catch (err: any) {
       console.error(err);
       if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `❌ [에러] 통신 실패: ${err.message}`]);
-      
-      // 사용자 화면에 에러를 직격으로 띄웁니다.
-      alert(`🚨 업로드 실패 원인 정밀 진단 🚨\n\n${err.message}\n\n터미널(F12 또는 화면 하단)을 확인해주세요.\n(Failed to fetch가 뜨면 서버가 완전히 꺼졌거나 파이썬 패키지 충돌입니다)`);
-    } finally { 
-      setIsUploading(false); 
-    }
+      alert(`🚨 업로드 실패 원인 정밀 진단 🚨\n\n${err.message}\n\n터미널(F12 또는 하단)을 확인해주세요.`);
+    } finally { setIsUploading(false); }
   };
 
   const handleExportExcel = async () => {
@@ -111,7 +93,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
         setIsExporting(false);
         return;
       }
-
       const blob = await checkRes.blob();
       const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -119,10 +100,10 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
       link.setAttribute('download', `blankd_내자료_백업_${new Date().toISOString().slice(0,10)}.xlsx`);
       document.body.appendChild(link); link.click();
       window.URL.revokeObjectURL(blobUrl); document.body.removeChild(link);
-      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `✅ [정상 완료] 엑셀 패키지 다운로드가 성공했습니다.`]);
+      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `✅ [정상 완료] 엑셀 다운로드 성공.`]);
     } catch (err: any) {
-      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `❌ [통신차단] 프론트 브라우저가 서버 접속에 실패했습니다: ${err.message}`]);
-      alert(`❌ [네트워크 차단 진단]\n서버와 통신망이 연결되지 않았습니다.\n\n사유: ${err.message}`);
+      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `❌ [통신차단] 프론트 브라우저 통신 실패: ${err.message}`]);
+      alert(`❌ [네트워크 차단 진단]\n서버 연결 실패\n사유: ${err.message}`);
     } finally { setIsExporting(false); }
   };
 
@@ -130,20 +111,99 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
     const file = e.target.files?.[0];
     if (!file || !safeAddress) return;
     if (!window.confirm("엑셀 내용에 따라 데이터베이스 내역이 즉시 일괄 수정 및 덮어쓰기됩니다. 진행하시겠습니까?")) { e.target.value = ""; return; }
-
-    setIsImporting(true); setUploadLog("⏳ 엑셀 바이너리 구조 해석 및 데이터베이스 동기화 반영 중...");
+    setIsImporting(true); setUploadLog("⏳ 엑셀 바이너리 구조 해석 및 동기화 반영 중...");
     const formData = new FormData();
     formData.append("file", file); formData.append("wallet_address", safeAddress);
-
     try {
       const res = await fetch("https://api.blankd.top/api/import-excel", { method: "POST", body: formData });
       const result = await res.json().catch(() => ({}));
       if (res.ok) {
-        setUploadLog("✅ 성공: 데이터베이스 일괄 동기화 및 갱신이 완료되었습니다!");
-        if (typeof loadAllData === 'function') await loadAllData(); 
+        setUploadLog("✅ 성공: 데이터베이스 일괄 동기화 완료!");
+        if (typeof loadAllData === 'function') await loadAllData(true); 
       } else { throw new Error(result.error || "엑셀 파일 가공 동기화 실패"); }
-    } catch (err: any) { setUploadLog(`❌ 실패: ${err.message || "엑셀 파일 내부 규격 불일치 오류"}`);
+    } catch (err: any) { setUploadLog(`❌ 실패: ${err.message || "엑셀 규격 오류"}`);
     } finally { setIsImporting(false); e.target.value = ""; }
+  };
+
+  // 💡 [수정됨] 조건을 만족하는 모든 카드를 찾아 일괄 수정하는 로직
+  const handleBulkUpdateReps = async () => {
+    const fromVal = parseInt(fromReps);
+    const toVal = parseInt(toReps);
+    
+    if (isNaN(fromVal) || isNaN(toVal)) {
+      alert("현재 횟수와 변경할 목표 횟수를 모두 숫자로 입력해주세요.");
+      return;
+    }
+
+    if (!window.confirm(`현재 반복 횟수가 [${fromVal}회]인 모든 카드를 [${toVal}회]로 일괄 변경하시겠습니까?`)) {
+      return;
+    }
+
+    setIsUpdatingReps(true);
+    try {
+      const localCardsStr = localStorage.getItem(`blankd_off_card_${safeAddress}`);
+      if (!localCardsStr) throw new Error("로컬에 저장된 카드 데이터가 없습니다.");
+      let localCards = JSON.parse(localCardsStr);
+
+      let changeCount = 0;
+      const updateFns: any[] = [];
+      const nextCards = [...localCards];
+
+      for (let i = 0; i < nextCards.length; i++) {
+        const card = nextCards[i];
+        let memoObj = { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0 };
+        try {
+          if (card.memo && card.memo.startsWith('{')) {
+            memoObj = { ...memoObj, ...JSON.parse(card.memo) };
+          }
+        } catch(e) {}
+
+        if (memoObj.filled === fromVal) {
+          changeCount++;
+          memoObj.filled = toVal;
+          const newMemo = JSON.stringify(memoObj);
+          nextCards[i] = { ...card, memo: newMemo };
+
+          const payload = {
+            wallet_address: safeAddress || "ENOKI_USER",
+            card_id: parseInt(card.id, 10),
+            card_content: card.content,
+            answer_text: card.answer_text || "",
+            folder_name: card.folder_name,
+            memo: newMemo
+          };
+
+          updateFns.push(() => fetch("https://api.blankd.top/api/save-card", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          }));
+        }
+      }
+
+      if (changeCount === 0) {
+        alert(`❌ 현재 반복 횟수가 ${fromVal}회인 카드가 존재하지 않습니다.`);
+        setIsUpdatingReps(false);
+        return;
+      }
+
+      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[일괄 교정] ${changeCount}개의 카드를 ${fromVal}회 ➔ ${toVal}회로 변경 중...`]);
+
+      // 서버 무리를 막기 위해 5개씩 나누어서 배치 처리
+      for (let i = 0; i < updateFns.length; i += 5) {
+        await Promise.all(updateFns.slice(i, i + 5).map(fn => fn()));
+      }
+
+      localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(nextCards));
+      if (typeof loadAllData === 'function') await loadAllData(true);
+      
+      alert(`✅ [교정 성공] 총 ${changeCount}개 카드의 반복 횟수가 ${toVal}회로 일괄 변경되었습니다.`);
+      setFromReps(""); setToReps("");
+    } catch(err: any) {
+      alert(`❌ 일괄 변경 실패: ${err.message}`);
+    } finally {
+      setIsUpdatingReps(false);
+    }
   };
 
   const formatAddress = (addr: string) => {
@@ -183,7 +243,7 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
         <div className="border-t border-white/10"></div>
 
-        {/* 🎨 화면 테마 설정 (신규 기능) */}
+        {/* 🎨 화면 테마 설정 */}
         <div className="space-y-3">
           <div className="text-xs text-white/50 font-bold tracking-wider font-mono uppercase flex items-center gap-2">
             <span>🎨</span> 화면 테마 설정
@@ -237,6 +297,44 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
             ) : (
               <div className="text-center text-white/40 text-[11px] py-6">랭킹 데이터가 존재하지 않습니다.</div>
             )}
+          </div>
+        </div>
+
+        <div className="border-t border-white/10"></div>
+
+        {/* 💡 [수정됨] 조건부 일괄 데이터 교정 (어드민) */}
+        <div className="space-y-3">
+          <div className="text-xs text-indigo-400 font-bold tracking-wider font-mono uppercase flex items-center gap-2">
+            <span>🛠️</span> 학습 횟수 일괄 교정 (어드민)
+          </div>
+          <div className="p-4 bg-black/40 border border-white/5 rounded-sm space-y-4">
+            <p className="text-[10px] sm:text-[11px] text-white/40 leading-relaxed">
+              특정 반복(채우기) 횟수를 가진 <span className="text-indigo-400">모든 카드</span>를 찾아 원하는 횟수로 한꺼번에 덮어씁니다.<br/>
+              예) 현재 0회인 카드를 모두 1회로 변경
+            </p>
+            <div className="flex gap-2">
+              <input 
+                type="number" 
+                placeholder="현재 횟수 (예: 0)" 
+                value={fromReps}
+                onChange={(e) => setFromReps(e.target.value)}
+                className="flex-1 bg-black/50 border border-white/10 p-2.5 text-xs text-white/90 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full"
+              />
+              <input 
+                type="number" 
+                placeholder="변경할 횟수 (예: 1)" 
+                value={toReps}
+                onChange={(e) => setToReps(e.target.value)}
+                className="flex-1 bg-black/50 border border-white/10 p-2.5 text-xs text-white/90 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full"
+              />
+              <button 
+                onClick={handleBulkUpdateReps} 
+                disabled={isUpdatingReps || fromReps === "" || toReps === ""}
+                className={`px-4 font-bold text-[11px] rounded-sm transition-all shadow-md shrink-0 ${isUpdatingReps || fromReps === "" || toReps === "" ? 'bg-white/5 text-white/30 border border-white/10 cursor-not-allowed' : 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/50 hover:bg-indigo-600/40'}`}
+              >
+                {isUpdatingReps ? "적용 중.." : "일괄 변경"}
+              </button>
+            </div>
           </div>
         </div>
 
