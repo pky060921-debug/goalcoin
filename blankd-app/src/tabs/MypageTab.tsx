@@ -14,7 +14,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
   const [rankingData, setRankingData] = useState<any[]>([]);
   const [isLoadingRanking, setIsLoadingRanking] = useState(false);
 
-  // 💡 [수정됨] 일괄 교정 툴용 State
   const [fromReps, setFromReps] = useState("");
   const [toReps, setToReps] = useState("");
   const [isUpdatingReps, setIsUpdatingReps] = useState(false);
@@ -125,7 +124,53 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
     } finally { setIsImporting(false); e.target.value = ""; }
   };
 
-  // 💡 [수정됨] 조건을 만족하는 모든 카드를 찾아 일괄 수정하는 로직
+  // 💡 [신규 추가] 로컬(기기) 캐시 데이터를 서버 DB로 강제로 쏴주는 펌핑 함수
+  const handleForceSync = async () => {
+    if (!window.confirm("현재 기기 화면에 보이는 최신 반복 횟수와 기록들을 서버 DB로 강제 덮어쓰기 합니다. 진행하시겠습니까?")) return;
+    
+    setIsImporting(true); 
+    setUploadLog("⏳ 기기(로컬)에 갇혀있던 최신 데이터를 서버 DB로 펌핑 중...");
+    
+    try {
+      const localCardsStr = localStorage.getItem(`blankd_off_card_${safeAddress}`);
+      if (!localCardsStr) throw new Error("동기화할 로컬 데이터가 없습니다.");
+      
+      const localCards = JSON.parse(localCardsStr);
+      let syncCount = 0;
+
+      for (const card of localCards) {
+        let filled = 0;
+        try { if (card.memo) filled = JSON.parse(card.memo).filled || 0; } catch(e) {}
+        
+        // 1번 이상 반복된(데이터가 수정된) 카드들만 추출해서 서버로 발송
+        if (filled > 0) {
+          await fetch("https://api.blankd.top/api/save-card", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              wallet_address: safeAddress,
+              card_id: parseInt(card.id, 10),
+              card_content: card.content,
+              answer_text: card.answer_text || "",
+              folder_name: card.folder_name,
+              memo: card.memo
+            })
+          });
+          syncCount++;
+        }
+      }
+      
+      // 전송이 끝났으므로 막혀있던 가상 큐도 깨끗하게 비워줍니다.
+      localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
+      
+      setUploadLog(`✅ 성공: 기기에 보관되어 있던 ${syncCount}개의 학습 기록이 서버 DB에 완벽히 저장되었습니다!`);
+    } catch (err: any) {
+      setUploadLog(`❌ 강제 동기화 실패: ${err.message}`);
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const handleBulkUpdateReps = async () => {
     const fromVal = parseInt(fromReps);
     const toVal = parseInt(toReps);
@@ -189,7 +234,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
       if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[일괄 교정] ${changeCount}개의 카드를 ${fromVal}회 ➔ ${toVal}회로 변경 중...`]);
 
-      // 서버 무리를 막기 위해 5개씩 나누어서 배치 처리
       for (let i = 0; i < updateFns.length; i += 5) {
         await Promise.all(updateFns.slice(i, i + 5).map(fn => fn()));
       }
@@ -302,7 +346,7 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
         <div className="border-t border-white/10"></div>
 
-        {/* 💡 [수정됨] 조건부 일괄 데이터 교정 (어드민) */}
+        {/* 🛠️ 조건부 일괄 데이터 교정 (어드민) */}
         <div className="space-y-3">
           <div className="text-xs text-indigo-400 font-bold tracking-wider font-mono uppercase flex items-center gap-2">
             <span>🛠️</span> 학습 횟수 일괄 교정 (어드민)
@@ -340,23 +384,26 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
         <div className="border-t border-white/10"></div>
 
-        {/* 엑셀 관리 */}
+        {/* 📊 데이터베이스 엑셀 통합 관리 (강제 동기화 버튼 추가) */}
         <div className="space-y-3">
           <div className="text-xs text-white/50 font-bold tracking-wider font-mono uppercase">📊 데이터베이스 엑셀 통합 관리</div>
           <div className="p-4 bg-black/40 border border-white/5 rounded-sm space-y-4">
             <p className="text-[10px] sm:text-[11px] text-white/40 leading-relaxed">
-              데이터베이스에 보관된 만들기(카테고리) 및 채우기(카드) 전체 정보를 한 장의 통합 엑셀로 추출합니다. 데이터를 수정하여 다시 업로드하면 <span className="text-amber-400 font-bold">기존 조항은 일괄 덮어쓰기 수정</span>되며, 새로운 행은 신규 추가됩니다.
+              기기 화면에 보이는 숫자가 엑셀에 반영되지 않는다면 <span className="text-teal-400 font-bold">강제 동기화</span>를 진행해 주세요.
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button onClick={handleExportExcel} disabled={isExporting} className={`w-full py-2.5 px-3 border rounded-sm font-bold text-[11px] transition-all shadow-md ${isExporting ? "bg-white/5 border-white/10 text-white/30 cursor-not-allowed" : "bg-indigo-600/20 border-indigo-500 text-indigo-400 hover:bg-indigo-600/30 cursor-pointer"}`}>
-                {isExporting ? "⏳ 실시간 진단 유닛 가동 중..." : "📥 전체 DB 엑셀 다운로드"}
+                {isExporting ? "⏳ 다운로드 중..." : "📥 엑셀 DB 추출"}
               </button>
               <div className="relative">
                 <input type="file" accept=".xlsx, .xls" id="excel-import-file-mypage" onChange={handleImportExcel} disabled={isImporting} className="hidden" />
                 <label htmlFor="excel-import-file-mypage" className={`w-full py-2.5 px-3 border rounded-sm font-bold text-[11px] text-center block cursor-pointer transition-all shadow-md ${isImporting ? "bg-white/5 border-white/10 text-white/30 cursor-not-allowed" : "bg-amber-500/10 border-amber-500/50 text-amber-400 hover:bg-amber-500/20"}`}>
-                  {isImporting ? "🔄 일괄 동기화 반영 중..." : "📤 수정된 엑셀 업로드 (DB 변경)"}
+                  {isImporting ? "🔄 반영 중..." : "📤 엑셀 업로드"}
                 </label>
               </div>
+              <button onClick={handleForceSync} disabled={isImporting} className={`w-full py-2.5 px-3 border rounded-sm font-bold text-[11px] transition-all shadow-md ${isImporting ? "bg-white/5 border-white/10 text-white/30 cursor-not-allowed" : "bg-teal-600/20 border-teal-500 text-teal-400 hover:bg-teal-600/30 cursor-pointer"}`}>
+                {isImporting ? "🔄 펌핑 중..." : "🚀 화면 ➔ DB 강제 동기화"}
+              </button>
             </div>
             {uploadLog && (
               <div className={`p-2.5 text-[11px] rounded-sm border font-mono ${uploadLog.includes('❌') ? 'bg-red-950/20 border-red-500/30 text-red-400' : uploadLog.includes('✅') ? 'bg-teal-950/20 border-teal-500/30 text-teal-300' : 'bg-white/5 border-white/10 text-white/60 animate-pulse'}`}>
