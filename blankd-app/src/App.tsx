@@ -11,7 +11,7 @@ import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 import { RecordTab } from "./tabs/RecordTab";
 
-// 💡 [핵심 수정 1] 절대 오차가 없는 한국 시간(KST) 추출 함수
+// 절대 오차가 없는 한국 시간(KST) 추출 함수
 const getKoreanDateString = () => {
   const now = new Date();
   const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
@@ -276,12 +276,21 @@ function MainApp() {
   const [tempKey, setTempKey] = useState("");
   const [tempValue, setTempValue] = useState("");
 
-  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+  // 💡 [핵심 수정] 오프라인 모드 상태를 실제 기기의 인터넷(Wi-Fi/LTE) 연결 상태와 100% 동기화
+  const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
   useEffect(() => {
-    const handleOnline = () => setIsOffline(false);
-    const handleOffline = () => setIsOffline(true);
+    const handleOnline = () => {
+      setIsOffline(false); // 실제 인터넷이 연결되었을 때만 해제
+      addLog("🌐 [시스템] 물리적 네트워크 연결 복구. 대기열 동기화 시작...");
+      flushQueue(); 
+    };
+    const handleOffline = () => {
+      setIsOffline(true); // 실제 인터넷이 끊겼을 때만 켜짐
+      addLog("⚠️ [시스템] 통신 단절 감지. 안전한 오프라인 모드로 자동 전환됩니다.");
+    };
+    
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
@@ -325,12 +334,12 @@ function MainApp() {
 
           if (res.ok) {
             localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
-            addLog(`✅ 오프라인 작업 ➔ 서버 전송 완료`);
+            addLog(`✅ 대기열 서버 전송 완료 (Memos: ${q.memos.length}, Answers: ${q.answers.length})`);
           }
       }
       return true;
     } catch (e) { 
-      setIsOffline(true);
+      // 💡 통신 실패 시 더 이상 강제로 isOffline(true)를 만들지 않습니다.
       return false;
     }
   };
@@ -338,6 +347,7 @@ function MainApp() {
   const loadAllData = async (isManualSync = false) => {
     if (!safeAddress) return;
     try {
+      // 오프라인 상태가 아니면 큐를 무조건 비우기 시도
       if (!isOffline || isManualSync || navigator.onLine) {
          await flushQueue();
       }
@@ -415,11 +425,10 @@ function MainApp() {
       localStorage.setItem(`blankd_claimed_rewards_${safeAddress}`, JSON.stringify(mergedClaims));
       localStorage.setItem(`blankd_off_dict_${safeAddress}`, JSON.stringify(newDict));
       
-      setIsOffline(false);
       if (isManualSync) addLog(`✅ 동기화 완료: 서버와 로컬 데이터 병합 성공`);
     } catch (e: any) {
-      setIsOffline(true);
-      addLog(`⚠️ 서버 접속 불가: 오프라인 캐시를 불러옵니다.`);
+      // 💡 핵심 변경: 서버 지연 시 오프라인 모드(UI)를 억지로 켜지 않습니다. 단순히 로컬 데이터만 호출합니다.
+      addLog(`⚠️ 서버 응답 지연: 기기 내장 캐시(로컬) 데이터를 우선 표시합니다.`);
       try {
         const offCat = JSON.parse(localStorage.getItem(`blankd_off_cat_${safeAddress}`) || '[]');
         const offCard = JSON.parse(localStorage.getItem(`blankd_off_card_${safeAddress}`) || '[]');
@@ -518,7 +527,13 @@ function MainApp() {
 
   useEffect(() => {
     if (!safeAddress) return;
-    const interval = setInterval(flushQueue, 30000); 
+    const interval = setInterval(() => {
+      // 실제 네트워크가 연결되어 있을 때만 주기적 동기화 시도
+      if (navigator.onLine) {
+        flushQueue();
+      }
+    }, 30000); 
+    
     const handleVisibility = () => { 
       if(document.visibilityState === 'hidden' || document.visibilityState === 'unloaded') {
         const currentCard = activeCardRef.current;
@@ -528,16 +543,18 @@ function MainApp() {
           exStats.filled = statsRef.current.filled;
           exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
           
-          fetch("https://api.blankd.top/api/save-card", {
-            method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ wallet_address: safeAddress, card_id: currentCard.id, card_content: currentCard.content, answer_text: currentCard.answer_text || "", folder_name: currentCard.folder_name, memo: JSON.stringify(exStats) })
-          }).catch(()=>{});
+          if (navigator.onLine) {
+            fetch("https://api.blankd.top/api/save-card", {
+              method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ wallet_address: safeAddress, card_id: currentCard.id, card_content: currentCard.content, answer_text: currentCard.answer_text || "", folder_name: currentCard.folder_name, memo: JSON.stringify(exStats) })
+            }).catch(()=>{});
+          }
         }
         
         if (currentCard) {
           localStorage.setItem(`blankd_elapsed_${currentCard.id}`, elapsedRef.current.toString());
         }
-        flushQueue(); 
+        if (navigator.onLine) flushQueue(); 
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
@@ -643,7 +660,7 @@ function MainApp() {
     });
     pushToQueue('MEMO', { id, memo });
     
-    if (!isOffline) {
+    if (navigator.onLine) {
       const target = savedCards.find((c:any) => c.id === id);
       if (target) {
         fetch("https://api.blankd.top/api/save-card", {
@@ -804,7 +821,6 @@ function MainApp() {
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
 
-    // 💡 [핵심 수정] KST 날짜 강제 주입
     const todayStr = getKoreanDateString();
     
     setActivityLog(prev => {
@@ -812,7 +828,7 @@ function MainApp() {
       next[todayStr] = (next[todayStr] || 0) + correctCount;
       localStorage.setItem(`blankd_activity_log_${safeAddress}`, JSON.stringify(next));
       
-      if (!isOffline) {
+      if (navigator.onLine) {
         fetch("https://api.blankd.top/api/update-balance", {
            method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
            body: JSON.stringify({ wallet_address: safeAddress, activity_log: next })
@@ -910,7 +926,7 @@ function MainApp() {
     });
     pushToQueue('MEMO', { id: currentId, memo: newMemo });
     
-    if (!isOffline) {
+    if (navigator.onLine) {
       try {
         await fetch("https://api.blankd.top/api/save-card", {
           method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
@@ -1365,7 +1381,6 @@ function MainApp() {
                 <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">예상 합격률</span><span className="text-[10px] sm:text-xs font-bold text-indigo-400">{passProbability}%</span></div>
                 <div className="h-5 sm:h-6 w-px bg-white/10 hidden sm:block"></div>
                 
-                {/* 💡 [핵심 수정 2] 로그아웃 시 로컬 오프라인 데이터 서버로 즉시 강제 전송 */}
                 <button onClick={async () => { 
                   try {
                     addLog("🔄 로그아웃 전 데이터 안전 동기화 중...");
