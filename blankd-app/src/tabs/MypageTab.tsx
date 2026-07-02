@@ -124,7 +124,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
     } finally { setIsImporting(false); e.target.value = ""; }
   };
 
-  // 💡 [신규 추가] 로컬(기기) 캐시 데이터를 서버 DB로 강제로 쏴주는 펌핑 함수
   const handleForceSync = async () => {
     if (!window.confirm("현재 기기 화면에 보이는 최신 반복 횟수와 기록들을 서버 DB로 강제 덮어쓰기 합니다. 진행하시겠습니까?")) return;
     
@@ -142,7 +141,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
         let filled = 0;
         try { if (card.memo) filled = JSON.parse(card.memo).filled || 0; } catch(e) {}
         
-        // 1번 이상 반복된(데이터가 수정된) 카드들만 추출해서 서버로 발송
         if (filled > 0) {
           await fetch("https://api.blankd.top/api/save-card", {
             method: "POST",
@@ -160,7 +158,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
         }
       }
       
-      // 전송이 끝났으므로 막혀있던 가상 큐도 깨끗하게 비워줍니다.
       localStorage.setItem('blankd_sync_queue', JSON.stringify({ memos: [], answers: [] }));
       
       setUploadLog(`✅ 성공: 기기에 보관되어 있던 ${syncCount}개의 학습 기록이 서버 DB에 완벽히 저장되었습니다!`);
@@ -296,6 +293,43 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
             <button onClick={() => setTheme('black')} className={`py-2.5 rounded-sm text-xs font-bold transition-all shadow-sm ${theme === 'black' ? 'bg-gray-800 text-white border border-gray-500' : 'bg-white/5 text-white/40 border border-transparent hover:bg-white/10'}`}>다크 (블랙)</button>
             <button onClick={() => setTheme('white')} className={`py-2.5 rounded-sm text-xs font-bold transition-all shadow-sm ${theme === 'white' ? 'bg-gray-200 text-gray-900 border border-gray-400' : 'bg-white/5 text-white/40 border border-transparent hover:bg-white/10'}`}>라이트 (화이트)</button>
             <button onClick={() => setTheme('green')} className={`py-2.5 rounded-sm text-xs font-bold transition-all shadow-sm ${theme === 'green' ? 'bg-green-800 text-green-50 border border-green-500' : 'bg-white/5 text-white/40 border border-transparent hover:bg-white/10'}`}>칠판 (그린)</button>
+          </div>
+        </div>
+
+        <div className="border-t border-white/10"></div>
+
+        {/* 🧠 복습 모드 설정 (신규 추가) */}
+        <div className="space-y-3">
+          <div className="text-xs text-indigo-400 font-bold tracking-wider font-mono uppercase flex items-center gap-2">
+            <span>🧠</span> 복습 모드 설정
+          </div>
+          <div className="bg-black/40 border border-white/5 p-4 rounded-sm space-y-4">
+            <p className="text-[10px] sm:text-[11px] text-white/40 leading-relaxed">
+              학습 완료 후 카드의 <span className="text-indigo-400 font-bold">다음 복습 간격</span>을 결정하는 방식을 선택합니다.
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              <button 
+                onClick={() => setStudyMode('일반')} 
+                className={`py-2.5 rounded-sm text-xs font-bold transition-all shadow-sm ${studyMode === '일반' ? 'bg-indigo-600 text-white border border-indigo-400' : 'bg-white/5 text-white/40 border border-transparent hover:bg-white/10'}`}>
+                기본 (현재)
+              </button>
+              <button 
+                onClick={() => setStudyMode('AI자동')} 
+                className={`py-2.5 rounded-sm text-xs font-bold transition-all shadow-sm ${studyMode === 'AI자동' ? 'bg-indigo-600 text-white border border-indigo-400' : 'bg-white/5 text-white/40 border border-transparent hover:bg-white/10'}`}>
+                AI 자동 계산
+              </button>
+              <button 
+                onClick={() => setStudyMode('수동')} 
+                className={`py-2.5 rounded-sm text-xs font-bold transition-all shadow-sm ${studyMode === '수동' ? 'bg-indigo-600 text-white border border-indigo-400' : 'bg-white/5 text-white/40 border border-transparent hover:bg-white/10'}`}>
+                수동 (Anki식)
+              </button>
+            </div>
+            
+            <div className="text-[10px] sm:text-[11px] text-indigo-300 bg-indigo-950/30 p-3 rounded-sm border border-indigo-500/20 leading-relaxed">
+              {studyMode === '일반' && "📍 현재 설정: 설정된 기본 간격에 맞춰 순차적으로 카드를 복습합니다."}
+              {studyMode === 'AI자동' && "🤖 현재 설정: 오답률과 소요 시간을 분석하여 최적의 복습 주기를 AI가 자동으로 계산합니다."}
+              {studyMode === '수동' && "🕹️ 현재 설정: 학습 종료 시 [다시/어려움/알맞음/쉬움] 4가지 버튼이 나타나며, 유저가 직접 난이도를 판단하여 간격을 선택합니다."}
+            </div>
           </div>
         </div>
 
