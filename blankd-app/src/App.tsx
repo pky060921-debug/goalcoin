@@ -11,7 +11,7 @@ import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 import { RecordTab } from "./tabs/RecordTab";
 
-// 절대 오차가 없는 한국 시간(KST) 추출 함수
+// 💡 [핵심 수정 1] 절대 오차가 없는 한국 시간(KST) 추출 함수 (아침 9시 이전 기록 오류 완벽 해결)
 const getKoreanDateString = () => {
   const now = new Date();
   const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
@@ -276,18 +276,18 @@ function MainApp() {
   const [tempKey, setTempKey] = useState("");
   const [tempValue, setTempValue] = useState("");
 
-  // 💡 [핵심 수정] 오프라인 모드 상태를 실제 기기의 인터넷(Wi-Fi/LTE) 연결 상태와 100% 동기화
+  // 💡 [핵심 수정 2] 오프라인 모드를 실제 기기 상태와 동기화 (가짜 오프라인 방지)
   const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
   useEffect(() => {
     const handleOnline = () => {
-      setIsOffline(false); // 실제 인터넷이 연결되었을 때만 해제
+      setIsOffline(false); 
       addLog("🌐 [시스템] 물리적 네트워크 연결 복구. 대기열 동기화 시작...");
       flushQueue(); 
     };
     const handleOffline = () => {
-      setIsOffline(true); // 실제 인터넷이 끊겼을 때만 켜짐
+      setIsOffline(true);
       addLog("⚠️ [시스템] 통신 단절 감지. 안전한 오프라인 모드로 자동 전환됩니다.");
     };
     
@@ -339,7 +339,6 @@ function MainApp() {
       }
       return true;
     } catch (e) { 
-      // 💡 통신 실패 시 더 이상 강제로 isOffline(true)를 만들지 않습니다.
       return false;
     }
   };
@@ -347,7 +346,6 @@ function MainApp() {
   const loadAllData = async (isManualSync = false) => {
     if (!safeAddress) return;
     try {
-      // 오프라인 상태가 아니면 큐를 무조건 비우기 시도
       if (!isOffline || isManualSync || navigator.onLine) {
          await flushQueue();
       }
@@ -427,7 +425,6 @@ function MainApp() {
       
       if (isManualSync) addLog(`✅ 동기화 완료: 서버와 로컬 데이터 병합 성공`);
     } catch (e: any) {
-      // 💡 핵심 변경: 서버 지연 시 오프라인 모드(UI)를 억지로 켜지 않습니다. 단순히 로컬 데이터만 호출합니다.
       addLog(`⚠️ 서버 응답 지연: 기기 내장 캐시(로컬) 데이터를 우선 표시합니다.`);
       try {
         const offCat = JSON.parse(localStorage.getItem(`blankd_off_cat_${safeAddress}`) || '[]');
@@ -451,7 +448,7 @@ function MainApp() {
     setGoalBalance(prev => {
       const newBalance = prev + changeAmount;
       localStorage.setItem(`blankd_off_bal_${safeAddress}`, newBalance.toString());
-      if (!isOffline && safeAddress) {
+      if (!isOffline && safeAddress && navigator.onLine) {
         fetch("https://api.blankd.top/api/update-balance", {
           method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, balance: newBalance })
@@ -528,7 +525,6 @@ function MainApp() {
   useEffect(() => {
     if (!safeAddress) return;
     const interval = setInterval(() => {
-      // 실제 네트워크가 연결되어 있을 때만 주기적 동기화 시도
       if (navigator.onLine) {
         flushQueue();
       }
@@ -821,6 +817,7 @@ function MainApp() {
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
 
+    // 💡 [핵심 수정] KST (한국 시간) 함수를 사용하여 오늘 날짜 문자열 추출!
     const todayStr = getKoreanDateString();
     
     setActivityLog(prev => {
