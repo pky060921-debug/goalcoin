@@ -11,12 +11,9 @@ import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 import { RecordTab } from "./tabs/RecordTab";
 
-// 💡 [핵심 수정 1] 절대 오차가 없는 한국 시간(KST) 추출 함수 (아침 9시 이전 기록 오류 완벽 해결)
 const getKoreanDateString = () => {
-  const now = new Date();
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const kst = new Date(utc + (9 * 60 * 60 * 1000));
-  return kst.toISOString().split('T')[0];
+  const kstTime = Date.now() + (9 * 60 * 60 * 1000);
+  return new Date(kstTime).toISOString().split('T')[0];
 };
 
 const autoApplyDictHelper = (content: string, dict: any) => {
