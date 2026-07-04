@@ -11,23 +11,39 @@ const safeParseStats = (memoStr: string) => {
     return parseCardStats(memoStr);
 };
 
+// 💡 [핵심 수정] 운영체제 환경에 구애받지 않는 절대적인 KST(한국 시간) 변환기
+const getKSTDateString = () => {
+  const kstTime = Date.now() + (9 * 60 * 60 * 1000);
+  return new Date(kstTime).toISOString().split('T')[0];
+};
+
+const getKSTInfo = () => {
+  const kstTime = Date.now() + (9 * 60 * 60 * 1000);
+  const kstDate = new Date(kstTime);
+  return {
+      year: kstDate.getUTCFullYear(),
+      month: kstDate.getUTCMonth()
+  };
+};
+
 export const DashboardTab = ({ 
   categories, savedCards, setActiveTab, setExpandedId, setActiveCard, 
   goalBalance, handleUpdateBalance, 
   activityLog, claimedRewards, setClaimedRewards, safeAddress,
   loadAllData, isOffline
 }: any) => {
-  const [currentDate, setCurrentDate] = useState(new Date());
+  const kstNow = getKSTInfo();
+  // 💡 [달력 수정] 기준월을 KST로 강제 고정하여 표시 시차 없앰
+  const [calYear, setCalYear] = useState(kstNow.year);
+  const [calMonth, setCalMonth] = useState(kstNow.month);
+  
   const [isSyncing, setIsSyncing] = useState(false);
-
-  // 💡 [수정] DashboardTab.tsx 내부의 handleManualSync 함수를 찾아 교체하세요.
 
   const handleManualSync = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
     try {
       if (typeof loadAllData === 'function') {
-        // 💡 true 옵션을 주어 서버 접속 전 무조건 기기(로컬)의 큐를 밀어넣습니다.
         await loadAllData(true);
         alert('✅ 동기화 완료! 현재 기기(스마트폰/PC)의 작업 내역이 서버에 우선 반영되었습니다.');
       }
@@ -43,11 +59,11 @@ export const DashboardTab = ({
     return saved ? parseInt(saved, 10) : 30;
   });
 
-  const currentMonthStr = new Date().toISOString().slice(0, 7); 
+  const todayStr = getKSTDateString();
+  const currentMonthStr = todayStr.slice(0, 7); 
   const [lastModifiedMonth, setLastModifiedMonth] = useState(() => {
     return localStorage.getItem(`blankd_cycle_modified_month_${safeAddress}`) || '';
   });
-
   const canEditCycle = lastModifiedMonth !== currentMonthStr;
 
   const handleCycleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -77,7 +93,7 @@ export const DashboardTab = ({
             setLastModifiedMonth(currentMonthStr);
             localStorage.setItem(`blankd_cycle_modified_month_${safeAddress}`, currentMonthStr);
         } else {
-            setTargetCycle(parseInt(currentSaved, 10)); 
+            setTargetCycle(parseInt(currentSaved, 10));
         }
     } else {
         setTargetCycle(finalVal); 
@@ -94,14 +110,16 @@ export const DashboardTab = ({
        method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
        body: JSON.stringify({ wallet_address: safeAddress, claimed_rewards: next })
     }).catch(()=>{});
-    
     alert(`🎉 목표 달성! 보상으로 ${points}P가 지급되었습니다.`);
   };
 
   const changeMonth = (offset: number) => {
-    const newDate = new Date(currentDate);
-    newDate.setMonth(currentDate.getMonth() + offset);
-    setCurrentDate(newDate);
+    let newMonth = calMonth + offset;
+    let newYear = calYear;
+    if (newMonth > 11) { newMonth -= 12; newYear++; }
+    else if (newMonth < 0) { newMonth += 12; newYear--; }
+    setCalMonth(newMonth);
+    setCalYear(newYear);
   };
 
   const stats = useMemo(() => {
@@ -122,23 +140,22 @@ export const DashboardTab = ({
     return { total, correct, wrong, unplayed };
   }, [savedCards]);
 
-  const todayStr = new Date().toISOString().split('T')[0];
   const dailyFilled = activityLog[todayStr] || 0;
 
-  const weekStart = new Date();
-  weekStart.setHours(0, 0, 0, 0);
-  weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-  const weekKey = weekStart.toISOString().split('T')[0];
+  // 💡 KST 기반 주간 계산 로직
+  const kstNowObj = new Date(Date.now() + (9 * 60 * 60 * 1000));
+  kstNowObj.setUTCHours(0, 0, 0, 0);
+  kstNowObj.setUTCDate(kstNowObj.getUTCDate() - kstNowObj.getUTCDay());
+  const weekKey = kstNowObj.toISOString().split('T')[0];
 
   let weeklyFilled = 0;
   for (let i = 0; i < 7; i++) {
-    const d = new Date(weekStart);
-    d.setDate(d.getDate() + i);
+    const d = new Date(kstNowObj.getTime());
+    d.setUTCDate(d.getUTCDate() + i);
     weeklyFilled += activityLog[d.toISOString().split('T')[0]] || 0;
   }
 
-  const d = new Date();
-  const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const monthKey = currentMonthStr;
   let monthlyFilled = 0;
   Object.keys(activityLog).forEach(dateStr => {
     if (dateStr.startsWith(monthKey)) monthlyFilled += activityLog[dateStr];
@@ -155,10 +172,12 @@ export const DashboardTab = ({
     monthly: { title: "월간 집중 훈련", target: monthlyTarget, reward: monthlyTarget, current: monthlyFilled, key: `monthly_${monthKey}` }
   };
 
-  const year = currentDate.getFullYear();
-  const month = currentDate.getMonth();
-  const firstDay = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  // KST 달력 일자 렌더링
+  const firstDayKST = new Date(Date.UTC(calYear, calMonth, 1));
+  const firstDay = firstDayKST.getUTCDay();
+  const daysInMonthKST = new Date(Date.UTC(calYear, calMonth + 1, 0));
+  const daysInMonth = daysInMonthKST.getUTCDate();
+  
   const blankCells = Array.from({ length: firstDay });
   const dayCells = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
@@ -166,7 +185,6 @@ export const DashboardTab = ({
     const isCompleted = goal.current >= goal.target;
     const isClaimed = claimedRewards[goal.key];
     const progressPercent = Math.min((goal.current / goal.target) * 100, 100);
-
     return (
       <div className="bg-[#0a0a0c] border border-white/10 p-5 rounded-sm flex flex-col gap-3 shadow-md relative overflow-hidden">
         {isCompleted && !isClaimed && <div className="absolute top-0 right-0 bg-amber-500 text-black text-[9px] font-bold px-2 py-0.5 rounded-bl-sm animate-pulse">달성 완료!</div>}
@@ -259,7 +277,7 @@ export const DashboardTab = ({
             <h2 className="text-[14px] font-bold text-white/80">📅 나의 학습 기록</h2>
             <div className="flex items-center gap-4 bg-white/5 rounded-sm px-2 py-1">
               <button onClick={() => changeMonth(-1)} className="text-white/40 hover:text-teal-400 px-2 font-bold transition-colors">&lt;</button>
-              <span className="text-[12px] font-mono font-bold text-white/70 w-20 text-center">{year}년 {month + 1}월</span>
+              <span className="text-[12px] font-mono font-bold text-white/70 w-20 text-center">{calYear}년 {calMonth + 1}월</span>
               <button onClick={() => changeMonth(1)} className="text-white/40 hover:text-teal-400 px-2 font-bold transition-colors">&gt;</button>
             </div>
           </div>
@@ -273,7 +291,7 @@ export const DashboardTab = ({
           <div className="grid grid-cols-7 gap-1 sm:gap-2">
             {blankCells.map((_, i) => <div key={`b-${i}`} className="aspect-square"></div>)}
             {dayCells.map(day => {
-              const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
               const count = activityLog[dateStr] || 0;
               
               let bgClass = "bg-white/5 text-white/20 border border-white/5";
