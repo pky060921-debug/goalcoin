@@ -1677,59 +1677,78 @@ def get_balance():
 # ==========================================
 @api_bp.route('/generate-ox', methods=['POST', 'OPTIONS'])
 def generate_ox():
-    if request.method == 'OPTIONS': 
+    if request.method == 'OPTIONS':
         return jsonify({}), 200
-        
+
+    def _call_ollama(prompt_text, retries=2):
+        for attempt in range(retries):
+            resp = requests.post(
+                "http://localhost:11434/api/chat",
+                json={
+                    "model": "gemma4:26b",
+                    "messages": [{"role": "user", "content": prompt_text}],
+                    "stream": False,
+                    "think": False,
+                    "options": {
+                        "temperature": 0.2,
+                        "top_p": 0.85,
+                        "top_k": 40,
+                        "num_ctx": 4096,
+                        "num_predict": 350,
+                        "repeat_penalty": 1.4,
+                        "repeat_last_n": 128,
+                    }
+                },
+                timeout=120
+            )
+            resp.raise_for_status()
+            raw = (resp.json().get("message") or {}).get("content", "").strip()
+            raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
+            raw = raw.replace('```json', '').replace('```', '').strip()
+
+            # 반복 루프 감지: 같은 단어가 4번 이상 연속 → 재시도
+            if re.search(r'(\S{2,})(?:\s+\1){3,}', raw):
+                print(f"[OX] 반복 루프 감지, 재시도 {attempt+1}/{retries}", file=sys.stderr)
+                continue
+            return raw
+        return ""
+
     try:
         data = request.json
-        content = data.get('content', '')
-        
-        # 💡 [핵심 수정 1] 프롬프트 대폭 강화: '예시(Few-Shot)'를 명확히 제공하여 모델의 오작동을 차단합니다.
-        prompt = f"""당신은 대한민국 법학 전문 출제위원입니다.
-주어진 [법령 조항]을 분석하여 실전 시험용 고난도 OX 퀴즈 1개를 출제하세요.
+        content_text = (data.get('content') or '').strip()
+        if not content_text:
+            return jsonify({"error": "법령 내용이 비어있습니다."}), 400
 
-[출제 규칙]
-1. 지문은 실제 시험처럼 '~한다.', '~이다.' 형식의 간결한 문장으로 만들 것.
-2. '권한 주체 변형', '숫자/기일 변경', '할 수 있다/하여야 한다 변경' 등의 함정을 사용하여 오답(X) 지문을 만들거나, 원문을 살려 정답(O) 지문을 만들 것.
-3. explanation(해설)에는 원문과 비교하여 왜 O인지 X인지 구체적이고 논리적으로 적을 것.
-4. 반드시 다른 인사말 없이 아래 JSON 형식으로만 출력할 것.
+        prompt = (
+            "당신은 대한민국 법학 전문 출제위원입니다.\n"
+            "주어진 [법령 조항]으로 OX 퀴즈 1개를 만드세요.\n\n"
+            "규칙: 권한 주체 변형, 숫자 변경, 의무/재량 변경 등의 함정을 활용하세요.\n"
+            "반드시 JSON 한 줄로만 출력하세요. 설명 금지.\n\n"
+            '예시: {"question": "공단은 정관을 변경하려면 대통령의 승인을 받아야 한다.", "answer": "X", "explanation": "보건복지부장관의 승인이 필요합니다."}\n\n'
+            "[법령 조항]\n"
+            + content_text[:1000]
+        )
 
-[응답 JSON 예시]
-{{"question": "공단은 정관을 변경하려면 대통령의 승인을 받아야 한다.", "answer": "X", "explanation": "대통령이 아니라 보건복지부장관의 승인을 받아야 합니다. (권한 주체 변형)"}}
+        raw = _call_ollama(prompt)
+        if not raw:
+            return jsonify({"error": "AI가 유효한 응답을 생성하지 못했습니다. 다시 시도해주세요."}), 500
 
-[법령 조항]
-{content}
-"""
-        
-        ollama_url = "http://localhost:11434/api/generate"
-        payload = {
-            "model": "gemma4:26b",  # 대표님이 사용하시는 태그명 확인 필수
-            "prompt": prompt,
-            "format": "json",       
-            "stream": False,
-            # 💡 [핵심 수정 2] 창의성(환각) 통제: temperature를 0.1로 낮추어 기계적이고 논리적인 답변만 내놓도록 강제합니다.
-            "options": {
-                "temperature": 0.1,
-                "top_p": 0.5
-            }
-        }
-        
-        response = requests.post(ollama_url, json=payload)
-        response.raise_for_status()
-        
-        result = response.json()
-        raw_text = result.get("response", "{}")
-        
-        # 💡 [핵심 수정 3] JSON 파싱 오류 방지: Gemma가 가끔 뱉어내는 마크다운 코드 블록(```json) 찌꺼기를 강제로 청소합니다.
-        raw_text = raw_text.replace('```json', '').replace('```', '').strip()
-        
-        quiz_data = json.loads(raw_text)
-        
+        # JSON만 추출
+        match = re.search(r'\{.*\}', raw, re.DOTALL)
+        if not match:
+            return jsonify({"error": "JSON을 찾을 수 없습니다.", "raw": raw[:200]}), 500
+
+        quiz_data = json.loads(match.group())
+
+        # 필수 필드 검증
+        if not quiz_data.get('question') or not quiz_data.get('answer'):
+            return jsonify({"error": "문제 또는 정답이 비어있습니다.", "raw": raw[:200]}), 500
+
         return jsonify(quiz_data), 200
 
-    except json.JSONDecodeError as e:
-        logging.error(f"OX 퀴즈 생성 실패 (JSON 파싱 에러): {raw_text}")
-        return jsonify({"error": "모델이 올바른 JSON 형식을 반환하지 않았습니다."}), 500
+    except json.JSONDecodeError:
+        logging.error(f"OX JSON 파싱 에러: {raw[:200]}")
+        return jsonify({"error": "JSON 파싱 실패", "raw": raw[:200]}), 500
     except Exception as e:
         logging.error(f"OX 퀴즈 생성 실패: {str(e)}")
         return jsonify({"error": str(e)}), 500
