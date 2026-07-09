@@ -1673,82 +1673,47 @@ def get_balance():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# 💡 AI 전체 조항 OX 퀴즈 일괄 생성 API (Gemma 로컬 모델 최적화 버전)
+# 💡 AI 전체 조항 OX 퀴즈 일괄 생성 API (Gemma 로컬 모델 전용)
 # ==========================================
 @api_bp.route('/generate-ox', methods=['POST', 'OPTIONS'])
 def generate_ox():
-    if request.method == 'OPTIONS':
+    if request.method == 'OPTIONS': 
         return jsonify({}), 200
-
-    def _call_ollama(prompt_text, retries=2):
-        for attempt in range(retries):
-            resp = requests.post(
-                "http://localhost:11434/api/chat",
-                json={
-                    "model": "gemma4:26b",
-                    "messages": [{"role": "user", "content": prompt_text}],
-                    "stream": False,
-                    "think": False,
-                    "options": {
-                        "temperature": 0.2,
-                        "top_p": 0.85,
-                        "top_k": 40,
-                        "num_ctx": 4096,
-                        "num_predict": 350,
-                        "repeat_penalty": 1.4,
-                        "repeat_last_n": 128,
-                    }
-                },
-                timeout=120
-            )
-            resp.raise_for_status()
-            raw = (resp.json().get("message") or {}).get("content", "").strip()
-            raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
-            raw = raw.replace('```json', '').replace('```', '').strip()
-
-            # 반복 루프 감지: 같은 단어가 4번 이상 연속 → 재시도
-            if re.search(r'(\S{2,})(?:\s+\1){3,}', raw):
-                print(f"[OX] 반복 루프 감지, 재시도 {attempt+1}/{retries}", file=sys.stderr)
-                continue
-            return raw
-        return ""
-
+        
     try:
         data = request.json
-        content_text = (data.get('content') or '').strip()
-        if not content_text:
-            return jsonify({"error": "법령 내용이 비어있습니다."}), 400
-
-        prompt = (
-            "당신은 대한민국 법학 전문 출제위원입니다.\n"
-            "주어진 [법령 조항]으로 OX 퀴즈 1개를 만드세요.\n\n"
-            "규칙: 권한 주체 변형, 숫자 변경, 의무/재량 변경 등의 함정을 활용하세요.\n"
-            "반드시 JSON 한 줄로만 출력하세요. 설명 금지.\n\n"
-            '예시: {"question": "공단은 정관을 변경하려면 대통령의 승인을 받아야 한다.", "answer": "X", "explanation": "보건복지부장관의 승인이 필요합니다."}\n\n'
-            "[법령 조항]\n"
-            + content_text[:1000]
-        )
-
-        raw = _call_ollama(prompt)
-        if not raw:
-            return jsonify({"error": "AI가 유효한 응답을 생성하지 못했습니다. 다시 시도해주세요."}), 500
-
-        # JSON만 추출
-        match = re.search(r'\{.*\}', raw, re.DOTALL)
-        if not match:
-            return jsonify({"error": "JSON을 찾을 수 없습니다.", "raw": raw[:200]}), 500
-
-        quiz_data = json.loads(match.group())
-
-        # 필수 필드 검증
-        if not quiz_data.get('question') or not quiz_data.get('answer'):
-            return jsonify({"error": "문제 또는 정답이 비어있습니다.", "raw": raw[:200]}), 500
-
+        content = data.get('content', '')
+        
+        # 기출문제 분석 기반 AI 출제위원 프롬프트
+        prompt = f"""당신은 건강보험 및 법학 전문 출제위원입니다. 다음 법령 조항을 바탕으로 실전 시험에 완벽히 대비할 수 있는 고난도 OX 퀴즈 1개를 생성하세요.
+        [출제 함정 공식]: 권한 주체 변형, 숫자/기한 변형, '다만' 예외 조항의 원칙화, '할 수 있다/하여야 한다' 강제성 변형, 유사 개념 혼동 중 하나를 반드시 사용하여 매력적인 오답(X) 지문이나 완벽한 정답(O) 지문을 만드세요.
+        
+        반드시 다음 JSON(딕셔너리) 형식으로만 응답하세요:
+        {{"question": "OX 문제 지문", "answer": "O 또는 X", "explanation": "왜 O인지 X인지에 대한 명확하고 상세한 해설"}}
+        
+        법령 조항: {content}"""
+        
+        # 💡 구글 Gemini 대신 Localhost의 Ollama(Gemma) API를 직접 호출합니다.
+        ollama_url = "http://localhost:11434/api/generate"
+        payload = {
+            "model": "gemma4:26b",  # 대표님이 구동하시는 정확한 모델 태그명
+            "prompt": prompt,
+            "format": "json",       # Gemma에게 응답을 JSON 형태로 강제합니다.
+            "stream": False
+        }
+        
+        # 로컬 AI 서버로 요청 발사
+        response = requests.post(ollama_url, json=payload)
+        response.raise_for_status()
+        
+        result = response.json()
+        raw_text = result.get("response", "{}")
+        
+        # Gemma가 반환한 텍스트를 JSON 객체로 파싱
+        quiz_data = json.loads(raw_text)
+        
         return jsonify(quiz_data), 200
 
-    except json.JSONDecodeError:
-        logging.error(f"OX JSON 파싱 에러: {raw[:200]}")
-        return jsonify({"error": "JSON 파싱 실패", "raw": raw[:200]}), 500
     except Exception as e:
-        logging.error(f"OX 퀴즈 생성 실패: {str(e)}")
+        logging.error(f"OX 퀴즈 생성 실패(Gemma 통신 에러): {str(e)}")
         return jsonify({"error": str(e)}), 500
