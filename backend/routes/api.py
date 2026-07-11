@@ -1699,7 +1699,7 @@ def extract_pdf_text():
 
 
 # ==========================================
-# 💡 모의고사 텍스트 ➔ 보기별 OX 분할 API (Gemma 환각 방지 최적화)
+# 💡 모의고사 텍스트 ➔ 보기별 OX 분할 API (/api/chat 안전 엔진 사용)
 # ==========================================
 @api_bp.route('/parse-exam-to-ox', methods=['POST', 'OPTIONS'])
 def parse_exam_to_ox():
@@ -1708,9 +1708,8 @@ def parse_exam_to_ox():
         data = request.json
         content = data.get('content', '')
         
-        # 💡 [환각 방지] 명확한 예시(Few-shot)를 주입하여 헛소리와 마크다운 오류를 차단합니다.
         prompt = f"""당신은 대한민국 법학 전문 모의고사 분석기입니다.
-다음 제공된 [모의고사 텍스트]를 읽고, 문제의 각 보기(가, 나, 다 또는 ①, ②, ③ 등)를 완벽하게 분리하여 각각 독립된 OX 퀴즈로 만드세요.
+다음 제공된 [모의고사 텍스트 조각]을 읽고, 문제의 각 보기(가, 나, 다 또는 ①, ②, ③ 등)를 완벽하게 분리하여 각각 독립된 OX 퀴즈로 만드세요.
 또한 각 보기가 어떤 법령 조항에 해당하는지 추정하여 제목과 폴더명을 분류하세요.
 
 [응답 규칙]
@@ -1728,33 +1727,87 @@ def parse_exam_to_ox():
   }}
 ]
 
-[모의고사 텍스트]
+[모의고사 텍스트 조각]
 {content}
 """
-        ollama_url = "http://localhost:11434/api/generate"
+        # 💡 /api/generate 대신 안전한 /api/chat을 사용하고 메모리 버퍼(num_ctx)를 명시하여 500 에러를 차단합니다.
+        url = "http://localhost:11434/api/chat"
         payload = {
             "model": "gemma4:26b",
-            "prompt": prompt,
-            "format": "json",
+            "messages": [{"role": "user", "content": prompt}],
             "stream": False,
+            "think": False,
             "options": {
-                "temperature": 0.1,  # 💡 논리력을 극대화하기 위해 창의성을 억제합니다.
-                "top_p": 0.5
+                "num_ctx": 8192,
+                "num_predict": 2048,
+                "temperature": 0.1
             }
         }
         
-        response = requests.post(ollama_url, json=payload)
+        response = requests.post(url, json=payload, timeout=300)
         response.raise_for_status()
         
-        result = response.json()
-        raw_text = result.get("response", "[]")
+        raw_text = (response.json().get("message") or {}).get("content", "").strip()
+        raw_text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL).strip()
         
-        # 💡 [정제] 가끔 섞여 나오는 ```json 마크다운 찌꺼기를 강제 제거합니다.
-        raw_text = raw_text.replace('```json', '').replace('```', '').strip()
-        
-        parsed_quizzes = json.loads(raw_text)
+        # 💡 api (6).py 상단에 선언된 내장 완충 파서를 사용하여 에러 없는 파싱 보장
+        parsed_quizzes = clean_and_parse_json(raw_text)
+        if not isinstance(parsed_quizzes, list):
+            parsed_quizzes = []
+            
         return jsonify({"quizzes": parsed_quizzes}), 200
 
     except Exception as e:
         logging.error(f"모의고사 분할 파싱 실패: {str(e)}")
         return jsonify({"error": f"AI 분석 오류: {str(e)}"}), 500
+
+
+# ==========================================
+# 💡 AI 전체 조항 OX 퀴즈 일괄 생성 API (/api/chat 안전 엔진 사용)
+# ==========================================
+@api_bp.route('/generate-ox', methods=['POST', 'OPTIONS'])
+def generate_ox():
+    if request.method == 'OPTIONS': 
+        return jsonify({}), 200
+        
+    try:
+        data = request.json
+        content = data.get('content', '')
+        
+        prompt = f"""당신은 대한민국 법학 전문 출제위원입니다. 다음 법령 조항을 바탕으로 실전 시험에 완벽히 대비할 수 있는 고난도 OX 퀴즈 1개를 생성하세요.
+[출제 함정 공식]: 권한 주체 변형, 숫자/기한 변형, '다만' 예외 조항의 원칙화, '할 수 있다/하여야 한다' 강제성 변형 중 하나를 반드시 사용하여 매력적인 오답(X) 지문이나 완벽한 정답(O) 지문을 만드세요.
+
+반드시 다음 JSON(딕셔너리) 형식으로만 응답하세요:
+{{"question": "OX 문제 지문", "answer": "O 또는 X", "explanation": "왜 O인지 X인지에 대한 명확하고 상세한 해설"}}
+
+법령 조항: {content}"""
+        
+        # 💡 동일하게 /api/chat 으로 통일하여 서버 뻗음 방지
+        url = "http://localhost:11434/api/chat"
+        payload = {
+            "model": "gemma4:26b",
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "think": False,
+            "options": {
+                "num_ctx": 4096,
+                "num_predict": 1024,
+                "temperature": 0.1
+            }
+        }
+        
+        response = requests.post(url, json=payload, timeout=300)
+        response.raise_for_status()
+        
+        raw_text = (response.json().get("message") or {}).get("content", "").strip()
+        raw_text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL).strip()
+        
+        quiz_data = clean_and_parse_json(raw_text)
+        if not isinstance(quiz_data, dict):
+            quiz_data = {"question": "생성 실패", "answer": "X", "explanation": "파싱 오류"}
+            
+        return jsonify(quiz_data), 200
+
+    except Exception as e:
+        logging.error(f"OX 퀴즈 생성 실패(Gemma 통신 에러): {str(e)}")
+        return jsonify({"error": str(e)}), 500
