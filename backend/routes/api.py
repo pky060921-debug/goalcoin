@@ -1673,47 +1673,88 @@ def get_balance():
         return jsonify({"error": str(e)}), 500
 
 # ==========================================
-# 💡 AI 전체 조항 OX 퀴즈 일괄 생성 API (Gemma 로컬 모델 전용)
+# 💡 모의고사 PDF 텍스트 무손실 추출 API
 # ==========================================
-@api_bp.route('/generate-ox', methods=['POST', 'OPTIONS'])
-def generate_ox():
-    if request.method == 'OPTIONS': 
-        return jsonify({}), 200
+@api_bp.route('/extract-pdf-text', methods=['POST', 'OPTIONS'])
+def extract_pdf_text():
+    if request.method == 'OPTIONS': return jsonify({}), 200
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "파일이 없습니다."}), 400
+            
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "선택된 파일이 없습니다."}), 400
+
+        doc = fitz.open(stream=file.read(), filetype="pdf")
+        text = ""
+        for page in doc:
+            text += page.get_text() + "\n"
+            
+        return jsonify({"text": text.strip()}), 200
         
+    except Exception as e:
+        logging.error(f"PDF 텍스트 추출 실패: {str(e)}")
+        return jsonify({"error": f"PDF 추출 오류: {str(e)}"}), 500
+
+
+# ==========================================
+# 💡 모의고사 텍스트 ➔ 보기별 OX 분할 API (Gemma 환각 방지 최적화)
+# ==========================================
+@api_bp.route('/parse-exam-to-ox', methods=['POST', 'OPTIONS'])
+def parse_exam_to_ox():
+    if request.method == 'OPTIONS': return jsonify({}), 200
     try:
         data = request.json
         content = data.get('content', '')
         
-        # 기출문제 분석 기반 AI 출제위원 프롬프트
-        prompt = f"""당신은 건강보험 및 법학 전문 출제위원입니다. 다음 법령 조항을 바탕으로 실전 시험에 완벽히 대비할 수 있는 고난도 OX 퀴즈 1개를 생성하세요.
-        [출제 함정 공식]: 권한 주체 변형, 숫자/기한 변형, '다만' 예외 조항의 원칙화, '할 수 있다/하여야 한다' 강제성 변형, 유사 개념 혼동 중 하나를 반드시 사용하여 매력적인 오답(X) 지문이나 완벽한 정답(O) 지문을 만드세요.
-        
-        반드시 다음 JSON(딕셔너리) 형식으로만 응답하세요:
-        {{"question": "OX 문제 지문", "answer": "O 또는 X", "explanation": "왜 O인지 X인지에 대한 명확하고 상세한 해설"}}
-        
-        법령 조항: {content}"""
-        
-        # 💡 구글 Gemini 대신 Localhost의 Ollama(Gemma) API를 직접 호출합니다.
+        # 💡 [환각 방지] 명확한 예시(Few-shot)를 주입하여 헛소리와 마크다운 오류를 차단합니다.
+        prompt = f"""당신은 대한민국 법학 전문 모의고사 분석기입니다.
+다음 제공된 [모의고사 텍스트]를 읽고, 문제의 각 보기(가, 나, 다 또는 ①, ②, ③ 등)를 완벽하게 분리하여 각각 독립된 OX 퀴즈로 만드세요.
+또한 각 보기가 어떤 법령 조항에 해당하는지 추정하여 제목과 폴더명을 분류하세요.
+
+[응답 규칙]
+1. 반드시 마크다운(```json)이나 다른 인사말 없이 순수한 JSON 배열 형식으로만 응답할 것.
+2. 각 보기는 하나의 독립된 문장으로 완성할 것.
+
+[응답 JSON 배열 구조 예시]
+[
+  {{
+    "folder_name": "국민건강보험법", 
+    "title": "[법] 제1조 (목적)", 
+    "question": "건강보험법은 국민의 질병, 부상에 대한 치료에 대해서만 보험급여를 실시한다.", 
+    "answer": "X", 
+    "explanation": "질병, 부상뿐만 아니라 출산, 사망 및 건강증진에 대해서도 보험급여를 실시합니다."
+  }}
+]
+
+[모의고사 텍스트]
+{content}
+"""
         ollama_url = "http://localhost:11434/api/generate"
         payload = {
-            "model": "gemma4:26b",  # 대표님이 구동하시는 정확한 모델 태그명
+            "model": "gemma4:26b",
             "prompt": prompt,
-            "format": "json",       # Gemma에게 응답을 JSON 형태로 강제합니다.
-            "stream": False
+            "format": "json",
+            "stream": False,
+            "options": {
+                "temperature": 0.1,  # 💡 논리력을 극대화하기 위해 창의성을 억제합니다.
+                "top_p": 0.5
+            }
         }
         
-        # 로컬 AI 서버로 요청 발사
         response = requests.post(ollama_url, json=payload)
         response.raise_for_status()
         
         result = response.json()
-        raw_text = result.get("response", "{}")
+        raw_text = result.get("response", "[]")
         
-        # Gemma가 반환한 텍스트를 JSON 객체로 파싱
-        quiz_data = json.loads(raw_text)
+        # 💡 [정제] 가끔 섞여 나오는 ```json 마크다운 찌꺼기를 강제 제거합니다.
+        raw_text = raw_text.replace('```json', '').replace('```', '').strip()
         
-        return jsonify(quiz_data), 200
+        parsed_quizzes = json.loads(raw_text)
+        return jsonify({"quizzes": parsed_quizzes}), 200
 
     except Exception as e:
-        logging.error(f"OX 퀴즈 생성 실패(Gemma 통신 에러): {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        logging.error(f"모의고사 분할 파싱 실패: {str(e)}")
+        return jsonify({"error": f"AI 분석 오류: {str(e)}"}), 500
