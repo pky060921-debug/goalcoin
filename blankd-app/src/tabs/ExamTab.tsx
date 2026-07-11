@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-const BASE_URL = "https://api.blankd.top/api";
+const BASE_URL = "[https://api.blankd.top/api](https://api.blankd.top/api)";
 
 export const ExamTab = ({ walletAddress, address }: any) => {
   const safeAddress = walletAddress || address;
@@ -46,34 +46,56 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     }
   };
 
-  // 2. 텍스트 ➔ AI (Gemma) 보기별 분할 파싱 로직
+  // 💡 [핵심 업그레이드] 서버 500 과부하 방지를 위한 스마트 배치 분할 파싱
   const handleParseWithAI = async () => {
     if (!extractedText.trim()) return alert("추출된 텍스트가 없습니다.");
     
     setIsParsing(true);
-    setSystemLog("🤖 로컬 AI(Gemma)가 모의고사를 분석하여 보기 단위 OX 퀴즈로 쪼개는 중입니다. (1~2분 소요될 수 있습니다)");
+    setParsedQuizzes([]); // 기존 리스트 초기화
     
-    try {
-      // 너무 길면 AI가 뻗을 수 있으므로 4000자씩 끊어서 보냅니다.
-      const res = await fetch(`${BASE_URL}/parse-exam-to-ox`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: extractedText.substring(0, 4000) })
-      });
+    // 텍스트를 1800자 단위로 안전하게 나눕니다.
+    const CHUNK_SIZE = 1800;
+    const textChunks: string[] = [];
+    for (let i = 0; i < extractedText.length; i += CHUNK_SIZE) {
+      textChunks.push(extractedText.substring(i, i + CHUNK_SIZE));
+    }
 
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || `HTTP Error ${res.status}`);
+    setSystemLog(`🤖 로컬 AI(Gemma) 가동 중... (총 ${textChunks.length}개 구간으로 나누어 안전하게 분해합니다)`);
+    
+    let allQuizzes: any[] = [];
+    let successChunks = 0;
+
+    for (let idx = 0; idx < textChunks.length; idx++) {
+      setSystemLog(`🤖 AI가 모의고사를 보기 단위로 쪼개고 있습니다... (${idx + 1} / ${textChunks.length} 구간 처리 중)`);
+      
+      try {
+        const res = await fetch(`${BASE_URL}/parse-exam-to-ox`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: textChunks[idx] })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.quizzes)) {
+            allQuizzes = [...allQuizzes, ...data.quizzes];
+            setParsedQuizzes([...allQuizzes]); // 실시간 화면 갱신
+            successChunks++;
+          }
+        } else {
+          console.error(`Chunk ${idx + 1} 처리 중 서버 에러 발생`);
+        }
+      } catch (error: any) {
+        console.error(`Chunk ${idx + 1} 네트워크 에러:`, error);
       }
+    }
 
-      const data = await res.json();
-      setParsedQuizzes(data.quizzes || []);
-      setSystemLog(`✅ 총 ${data.quizzes?.length || 0}개의 OX 퀴즈가 성공적으로 분리되었습니다!`);
-    } catch (error: any) {
-      alert(`🚨 AI 파싱 실패\n\n원인: ${error.message}\n\nOllama(Gemma) 모델이 켜져 있는지 확인해주세요.`);
-      setSystemLog(`❌ 파싱 실패: ${error.message}`);
-    } finally {
-      setIsParsing(false);
+    setIsParsing(false);
+    if (allQuizzes.length > 0) {
+      setSystemLog(`✅ 총 ${successChunks}개 구간 분석 완료! (${allQuizzes.length}개 OX 퀴즈 분리 성공)`);
+    } else {
+      setSystemLog(`❌ AI 분해 실패. 텍스트 내용이나 Ollama 서버 상태를 확인해주세요.`);
+      alert("AI 분석에 실패했습니다. Ollama 서버가 켜져 있는지 확인해주세요.");
     }
   };
 
@@ -182,7 +204,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
               disabled={isParsing}
               className={`px-4 py-2 text-xs font-bold rounded-sm border transition-all ${isParsing ? 'bg-white/5 text-white/30 cursor-not-allowed' : 'bg-teal-600/20 text-teal-400 border-teal-500 hover:bg-teal-600/40'}`}
             >
-              {isParsing ? "AI 분해 중..." : "🤖 보기 단위로 분할 파싱"}
+              {isParsing ? "AI 스마트 분해 중..." : "🤖 보기 단위로 분할 파싱"}
             </button>
           </div>
 
