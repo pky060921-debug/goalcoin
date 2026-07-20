@@ -250,6 +250,8 @@ function MainApp() {
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
+  const mistakeCountRef = useRef(0);
+  const [leftLives, setLeftLives] = useState(0);
   
   const elapsedRef = useRef(0);
   const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
@@ -714,8 +716,14 @@ function MainApp() {
       setBlanks(restoredBlanks); setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); setInputStatus('idle');
 
       const stats = getExtendedStats(activeCard.memo); 
-      const timePerBlank = Math.max(3.0, 10.0 - (stats.filled * 0.5));
+      
+      const timePerBlank = 5.0; // 빈칸당 5초 고정
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
+      
+      mistakeCountRef.current = 0; // 오답 횟수 초기화
+      // 최대 허용 오답 수 = 전체 빈칸 수 - 반복 학습(채우기) 횟수 (최소 0회)
+      const maxMistakes = Math.max(0, foundBlanks.length - stats.filled);
+      setLeftLives(maxMistakes); 
       
       const savedElapsed = parseFloat(localStorage.getItem(`blankd_elapsed_${activeCard.id}`) || '0');
       elapsedRef.current = savedElapsed;
@@ -964,16 +972,45 @@ function MainApp() {
           return currentBlanks;
         });
       }, 150);
+      
     } else { 
       setInputStatus('wrong'); 
       statsRef.current.wrongIndices.add(currentBlankIdx); 
-      setTimeout(() => setInputStatus('idle'), 500);
+
+      // 오답 횟수 증가 및 남은 기회 차감
+      mistakeCountRef.current += 1;
+      const maxMistakes = Math.max(0, blanks.length - statsRef.current.filled);
+      setLeftLives(Math.max(0, maxMistakes - mistakeCountRef.current));
+
+      // 허용 횟수 초과 시 즉시 강제 종료
+      if (mistakeCountRef.current > maxMistakes) {
+        setTimeout(() => {
+          alert(`🚨 허용된 오답 기회(${maxMistakes}회)를 모두 소진했습니다!\n현재까지의 기록만 저장 후 종료됩니다.`);
+          finishCard();
+        }, 100);
+      } else {
+        setTimeout(() => setInputStatus('idle'), 500);
+      }
     }
   };
   
   const handleShowAnswer = () => {
     if (!blanks[currentBlankIdx]) return;
-    setInputStatus('wrong'); statsRef.current.wrongIndices.add(currentBlankIdx);
+    setInputStatus('wrong'); 
+    statsRef.current.wrongIndices.add(currentBlankIdx);
+
+    mistakeCountRef.current += 1;
+    const maxMistakes = Math.max(0, blanks.length - statsRef.current.filled);
+    setLeftLives(Math.max(0, maxMistakes - mistakeCountRef.current));
+
+    if (mistakeCountRef.current > maxMistakes) {
+      setTimeout(() => {
+        alert(`🚨 허용된 오답 기회(${maxMistakes}회)를 모두 소진했습니다!\n현재까지의 기록만 저장 후 종료됩니다.`);
+        finishCard();
+      }, 100);
+      return;
+    }
+
     setBlanks(prev => { const nb = [...prev]; if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; return nb; });
     setTimeout(() => {
       setInputStatus('idle');
@@ -1105,7 +1142,12 @@ function MainApp() {
             <div className={`${titleColor} font-bold text-[14px] leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
               {displayTitle}
             </div>
-            <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm shrink-0">Page {displayPage + 1}</span>
+            <div className="flex items-center gap-2 shrink-0">
+              <span className={`text-[11px] font-bold font-mono px-2 py-1 rounded shadow-sm transition-colors ${leftLives > 0 ? 'bg-teal-900/30 text-teal-400 border border-teal-500/50' : 'bg-red-900/50 text-white border border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]'}`}>
+                💖 기회: {leftLives}번
+              </span>
+              <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
+            </div>
         </div>
         <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
         <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
