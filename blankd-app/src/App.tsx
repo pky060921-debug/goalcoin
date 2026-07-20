@@ -717,7 +717,7 @@ function MainApp() {
 
       const stats = getExtendedStats(activeCard.memo); 
       
-      const timePerBlank = 5.0; // 빈칸당 5초 고정
+      const timePerBlank = 10.0; // 빈칸당 5초 고정
       setTotalTimeLimit(timePerBlank * foundBlanks.length); 
       
       mistakeCountRef.current = 0; // 오답 횟수 초기화
