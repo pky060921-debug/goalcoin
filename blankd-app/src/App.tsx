@@ -282,9 +282,12 @@ function MainApp() {
   useEffect(() => {
     const handleOnline = () => {
       setIsOffline(false); 
-      addLog("🌐 [시스템] 물리적 네트워크 연결 복구. 대기열 동기화 시작...");
-      flushQueue(); 
+      addLog("🌐 [시스템] 인터넷 연결 복구. 로컬 데이터 최대값 동기화 시작...");
+      flushQueue()
+        .then(() => syncAllLocalCardsToServer()) // 💡 1. 기기의 모든 기록을 서버에 밀어넣음
+        .then(() => loadAllData(true));          // 💡 2. 서버에서 갱신된 최댓값을 다시 다운로드함
     };
+
     const handleOffline = () => {
       setIsOffline(true);
       addLog("⚠️ [시스템] 통신 단절 감지. 안전한 오프라인 모드로 자동 전환됩니다.");
@@ -312,6 +315,28 @@ function MainApp() {
         setDeferredPrompt(null);
       });
     }
+  };
+
+    // 💡 [추가] 인터넷 연결 시 기기의 모든 로컬 카드 학습 횟수를 서버로 일괄 전송
+  const syncAllLocalCardsToServer = async () => {
+    if (!safeAddress || !navigator.onLine) return false;
+    try {
+      const localCards = JSON.parse(localStorage.getItem(`blankd_off_card_${safeAddress}`) || '[]');
+      const memosToSync = localCards
+          .filter((c: any) => c.id && !String(c.id).startsWith('temp_') && !isNaN(parseInt(c.id)))
+          .map((c: any) => ({ id: c.id, memo: c.memo }));
+          
+      if (memosToSync.length > 0) {
+          await fetch("https://api.blankd.top/api/sync-batch", {
+              method: "POST", 
+              keepalive: true, 
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ wallet_address: safeAddress, memos: memosToSync, answers: [] })
+          });
+          return true;
+      }
+    } catch(e) {}
+    return false;
   };
 
   const flushQueue = async () => {
@@ -342,11 +367,12 @@ function MainApp() {
     }
   };
 
-  const loadAllData = async (isManualSync = false) => {
+    const loadAllData = async (isManualSync = false) => {
     if (!safeAddress) return;
     try {
       if (!isOffline || isManualSync || navigator.onLine) {
          await flushQueue();
+         await syncAllLocalCardsToServer(); // 💡 DB에서 데이터를 가져오기 전에 무조건 싹 다 밀어올려서 최댓값을 계산하게 만듦
       }
 
       const fetchWithDiagnostic = async (url: string, name: string) => {
