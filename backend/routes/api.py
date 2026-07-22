@@ -1068,7 +1068,6 @@ def split_category():
     except Exception as e:
         return jsonify({"error": "분할 실패"}), 500
 
-# 💡 [핵심 버그 수정] 라우팅 중복 선언 방지
 @api_bp.route('/save-card', methods=['POST'])
 def save_card():
     try:
@@ -1179,8 +1178,29 @@ def sync_batch():
         conn = get_db_connection()
         cursor = conn.cursor()
 
+                # 💡 [변경] 서버와 클라이언트의 memo를 비교하여 무조건 최댓값(Max) 유지
         for m in memos:
-            cursor.execute("UPDATE cards SET memo = ? WHERE id = ? AND wallet_address = ?", (m.get('memo', ''), m.get('id'), wallet_address))
+            card_id = m.get('id')
+            client_memo_str = m.get('memo', '{}')
+            
+            cursor.execute("SELECT memo FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
+            row = cursor.fetchone()
+            
+            if row:
+                db_memo_str = row[0] if row[0] else "{}"
+                try:
+                    db_memo = json.loads(db_memo_str)
+                    client_memo = json.loads(client_memo_str)
+                    
+                    # 반복 횟수(filled)와 정답 수(totalCorrect)를 최대값으로 덮어쓰기
+                    client_memo['filled'] = max(int(db_memo.get('filled', 0)), int(client_memo.get('filled', 0)))
+                    client_memo['totalCorrect'] = max(int(db_memo.get('totalCorrect', 0)), int(client_memo.get('totalCorrect', 0)))
+                    
+                    final_memo_str = json.dumps(client_memo, ensure_ascii=False)
+                except Exception:
+                    final_memo_str = client_memo_str
+                    
+                cursor.execute("UPDATE cards SET memo = ? WHERE id = ? AND wallet_address = ?", (final_memo_str, card_id, wallet_address))
 
         reward_coins = 0 
 
