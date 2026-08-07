@@ -72,16 +72,17 @@ const getExtendedStats = (memoStr: string) => {
       const p = JSON.parse(memoStr || '{}');
       return {
         text: p.text || "", filled: p.filled || 0, wrongIndices: p.wrongIndices || [],
-        upgrade: p.upgrade || 0, bestTime: p.bestTime || 0, totalCorrect: p.totalCorrect || 0, totalWrong: p.totalWrong || 0
+        upgrade: p.upgrade || 0, bestTime: p.bestTime || 0, totalCorrect: p.totalCorrect || 0, totalWrong: p.totalWrong || 0,
+        history: p.history || [] // 학습 이력 및 오답 기록 누적 보존
       };
     }
   } catch(e) {}
   
   try {
     const old = parseCardStats(memoStr);
-    return { text: old.text || "", filled: old.filled || 0, wrongIndices: old.wrongIndices || [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0 };
+    return { text: old.text || "", filled: old.filled || 0, wrongIndices: old.wrongIndices || [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [] };
   } catch(e) {
-    return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0 };
+    return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [] };
   }
 };
 
@@ -121,16 +122,24 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
 
   useEffect(() => {
     const handleInput = (e: Event) => {
+        if (inputStatus !== 'idle') return;
         const newVal = (e.target as HTMLInputElement).value;
         const cleanInput = newVal.replace(/\s+/g, '').toLowerCase();
+        if (cleanInput === '') return;
         if (validAnswers.includes(cleanInput)) {
-            onSubmit(newVal);
+            (e.target as HTMLInputElement).value = '';
+            onSubmit(newVal); 
         }
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.isComposing) return; // 💡 한글 IME 조합 완료 시의 유령 엔터 무시
         if (e.key === 'Enter') {
-            const newVal = (e.target as HTMLInputElement).value;
+            if (inputStatus !== 'idle') return;
+            const el = e.target as HTMLInputElement;
+            const newVal = el.value;
+            if (newVal.replace(/\s+/g, '') === '') return; 
+            el.value = '';
             onSubmit(newVal);
         }
     };
@@ -144,7 +153,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
             el.removeEventListener('keydown', handleKeyDown);
         };
     }
-  }, [validAnswers, onSubmit]);
+  }, [validAnswers, onSubmit, inputStatus]);
   
   return (
     <input
@@ -156,7 +165,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
         hintLetter ? 'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
         'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400'
       }`}
-      style={{ width: `${Math.max(expected.length * 1.2, 3)}em` }}
+      style={{ width: `${Math.max(expected.length * 1.2, 3)}em`, maxWidth: '100%' }}
     />
   );
 }, (prevProps, nextProps) => {
@@ -250,11 +259,13 @@ function MainApp() {
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
+
+  // 💡 생명력 관리 및 모드/중복잠금 변수
   const mistakeCountRef = useRef(0);
   const [leftLives, setLeftLives] = useState(0);
-  
-  const elapsedRef = useRef(0);
-  const [totalTimeLimit, setTotalTimeLimit] = useState<number>(0);
+  const [inputMode, setInputMode] = useState<'typing'|'touch'>('touch');
+  const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
+  const isProcessingRef = useRef(false);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
   const [activityLog, setActivityLog] = useState<Record<string, number>>({});
@@ -275,7 +286,6 @@ function MainApp() {
   const [tempKey, setTempKey] = useState("");
   const [tempValue, setTempValue] = useState("");
 
-  // 💡 [핵심 수정 2] 오프라인 모드를 실제 기기 상태와 동기화 (가짜 오프라인 방지)
   const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
@@ -284,8 +294,8 @@ function MainApp() {
       setIsOffline(false); 
       addLog("🌐 [시스템] 인터넷 연결 복구. 로컬 데이터 최대값 동기화 시작...");
       flushQueue()
-        .then(() => syncAllLocalCardsToServer()) // 💡 1. 기기의 모든 기록을 서버에 밀어넣음
-        .then(() => loadAllData(true));          // 💡 2. 서버에서 갱신된 최댓값을 다시 다운로드함
+        .then(() => syncAllLocalCardsToServer())
+        .then(() => loadAllData(true));
     };
 
     const handleOffline = () => {
@@ -317,7 +327,6 @@ function MainApp() {
     }
   };
 
-    // 💡 [추가] 인터넷 연결 시 기기의 모든 로컬 카드 학습 횟수를 서버로 일괄 전송
   const syncAllLocalCardsToServer = async () => {
     if (!safeAddress || !navigator.onLine) return false;
     try {
@@ -367,12 +376,12 @@ function MainApp() {
     }
   };
 
-    const loadAllData = async (isManualSync = false) => {
+  const loadAllData = async (isManualSync = false) => {
     if (!safeAddress) return;
     try {
       if (!isOffline || isManualSync || navigator.onLine) {
          await flushQueue();
-         await syncAllLocalCardsToServer(); // 💡 DB에서 데이터를 가져오기 전에 무조건 싹 다 밀어올려서 최댓값을 계산하게 만듦
+         await syncAllLocalCardsToServer(); 
       }
 
       const fetchWithDiagnostic = async (url: string, name: string) => {
@@ -550,9 +559,7 @@ function MainApp() {
   useEffect(() => {
     if (!safeAddress) return;
     const interval = setInterval(() => {
-      if (navigator.onLine) {
-        flushQueue();
-      }
+      if (navigator.onLine) flushQueue();
     }, 30000); 
     
     const handleVisibility = () => { 
@@ -570,10 +577,6 @@ function MainApp() {
               body: JSON.stringify({ wallet_address: safeAddress, card_id: currentCard.id, card_content: currentCard.content, answer_text: currentCard.answer_text || "", folder_name: currentCard.folder_name, memo: JSON.stringify(exStats) })
             }).catch(()=>{});
           }
-        }
-        
-        if (currentCard) {
-          localStorage.setItem(`blankd_elapsed_${currentCard.id}`, elapsedRef.current.toString());
         }
         if (navigator.onLine) flushQueue(); 
       }
@@ -741,25 +744,24 @@ function MainApp() {
 
       setBlanks(restoredBlanks); setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); setInputStatus('idle');
 
+      // 💡 조항의 모든 정답을 중복 제거하고 무작위로 섞어서 터치 객관식 버튼 세팅
+      const uniqueAnswers = Array.from(new Set(foundBlanks.map(b => b.answer)));
+      setTouchCandidates(uniqueAnswers.sort(() => Math.random() - 0.5));
+
       const stats = getExtendedStats(activeCard.memo); 
       
-      const timePerBlank = 10.0; // 빈칸당 5초 고정
-      setTotalTimeLimit(timePerBlank * foundBlanks.length); 
-      
-      mistakeCountRef.current = 0; // 오답 횟수 초기화
-      // 최대 허용 오답 수 = 전체 빈칸 수 - 반복 학습(채우기) 횟수 (최소 0회)
+      mistakeCountRef.current = 0;
       const maxMistakes = Math.max(0, foundBlanks.length - stats.filled);
       setLeftLives(maxMistakes); 
-      
-      const savedElapsed = parseFloat(localStorage.getItem(`blankd_elapsed_${activeCard.id}`) || '0');
-      elapsedRef.current = savedElapsed;
 
       setIsMemoOpen(false);
       setIsFrozen(false); setHintLetter(null); 
 
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
-      statsRef.current = { text: cleanText, filled: stats.filled, wrongIndices: new Set(stats.wrongIndices) };
+      // 💡 유령 오답 기록 누적 방지를 위해 매번 new Set()으로 빈 상태 시작
+      statsRef.current = { text: cleanText, filled: stats.filled, wrongIndices: new Set() };
+      
       const cleanTitle = getStrictTitleOnly(cleanContent);
       localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
       localStorage.setItem('blankd_last_enhanced_title', cleanTitle || "이름 없는 카드");
@@ -770,62 +772,21 @@ function MainApp() {
     }
   }, [activeCard]);
 
+  // 💡 모드 전환이나 다음 빈칸 이동 시 화면 중앙 자동 스크롤
   useEffect(() => {
-    let interval: any;
-    if (activeCard && currentBlankIdx < blanks.length) {
-      const startRealTime = Date.now();
-      const startElapsed = elapsedRef.current;
-
-      interval = setInterval(() => {
-        if (isFrozen || isDictModalOpen) {
-          return; 
-        }
-        
-        const now = Date.now();
-        const next = startElapsed + (now - startRealTime) / 1000;
-        elapsedRef.current = next;
-
-        const elapsedEl = document.getElementById('blankd-timer-sec');
-        const leftEl = document.getElementById('blankd-timer-left');
-        const progressEl = document.getElementById('blankd-timer-fill');
-        const leftContainer = document.getElementById('blankd-timer-left-container');
-
-        if (elapsedEl) elapsedEl.innerText = next.toFixed(1);
-        if (leftEl) {
-           const left = Math.max(0, totalTimeLimit - next);
-           leftEl.innerText = left.toFixed(1);
-           if (leftContainer) {
-               if (left < 5) leftContainer.className = 'text-red-400 font-bold';
-               else leftContainer.className = 'text-teal-400';
-           }
-        }
-        if (progressEl) {
-           const pct = totalTimeLimit > 0 ? Math.min((next / totalTimeLimit) * 100, 100) : 0;
-           progressEl.style.width = `${pct}%`;
-           if (pct > 80 && !isFrozen) {
-              progressEl.className = 'h-full transition-all duration-100 ease-linear bg-red-500';
-           }
-        }
-
-        if (Math.floor(next * 10) % 10 === 0) {
-            localStorage.setItem(`blankd_elapsed_${activeCard.id}`, next.toFixed(1));
-        }
-
-        if (next >= totalTimeLimit) {
-          clearInterval(interval);
-          setTimeout(() => { alert("집중 시간 초과! 현재 기록을 저장합니다."); finishCard(); }, 10);
-        }
-      }, 100);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [activeCard, currentBlankIdx, blanks.length, totalTimeLimit, isFrozen, isDictModalOpen]);
+      if (activeCard) {
+          const timer = setTimeout(() => {
+              const el = document.getElementById('active-blank');
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 100);
+          return () => clearTimeout(timer);
+      }
+  }, [currentBlankIdx, inputMode, activeCard]);
 
   const finishCard = async (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
-    const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = elapsedRef.current;
+    const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = 0;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     
     const correctCount = Math.max(0, blanks.length - wrongArr.length);
@@ -836,9 +797,14 @@ function MainApp() {
     exStats.filled = statsRef.current.filled + 1; 
     exStats.wrongIndices = wrongArr;
     
-    if (exStats.bestTime === 0 || finalTime < exStats.bestTime) {
-      exStats.bestTime = finalTime;
-    }
+    // 💡 학습 일시 및 오답 단어 히스토리 영구 기록
+    const nowTimeStr = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('T', ' ').substring(0, 19);
+    if (!exStats.history) exStats.history = [];
+    exStats.history.push({
+      date: nowTimeStr,
+      wrongCount: wrongArr.length,
+      wrongWords: wrongArr.map(idx => blanks[idx]?.answer).filter(Boolean)
+    });
     
     exStats.totalCorrect += correctCount;
     exStats.totalWrong += wrongArr.length;
@@ -848,9 +814,7 @@ function MainApp() {
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
 
-    // 💡 [핵심 수정] KST (한국 시간) 함수를 사용하여 오늘 날짜 문자열 추출!
     const todayStr = getKoreanDateString();
-    
     setActivityLog(prev => {
       const next = { ...prev };
       next[todayStr] = (next[todayStr] || 0) + correctCount;
@@ -896,9 +860,7 @@ function MainApp() {
 
     const nextReviewDate = new Date(); nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
 
-    const folderCards = savedCards.filter(c => c.folder_name === currentFolder).sort((a,b) => {
-        return parseInt(a.id, 10) - parseInt(b.id, 10);
-    });
+    const folderCards = savedCards.filter(c => c.folder_name === currentFolder);
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
     const nextCard = folderCards[currentIdx + 1] || null;
 
@@ -945,8 +907,6 @@ function MainApp() {
     const newMemo = JSON.stringify(exStats);
     setActiveCard(null);
 
-    localStorage.setItem(`blankd_elapsed_${currentId}`, elapsedRef.current.toFixed(1));
-
     setSavedCards(prev => {
       const next = prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c);
       localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
@@ -966,7 +926,10 @@ function MainApp() {
   };
 
   const handleSequentialInput = (overrideInput?: string | any) => {
+    if (isProcessingRef.current) return; // 💡 0.001초 차이 중복 연타 및 이중 엔터 방어
     if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
+    
+    isProcessingRef.current = true; // 🚧 자물쇠 잠금
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
     let isCorrect = (expected === actual);
@@ -985,6 +948,7 @@ function MainApp() {
       setInputStatus('correct');
       setBlanks(prev => { const nb = [...prev]; if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; return nb; });
       statsRef.current.wrongIndices.delete(currentBlankIdx);
+      
       setTimeout(() => {
         setInputStatus('idle'); 
         setBlanks(currentBlanks => {
@@ -997,31 +961,37 @@ function MainApp() {
           }
           return currentBlanks;
         });
+        isProcessingRef.current = false; // 🔓 정답 처리 후 잠금 해제
       }, 150);
       
     } else { 
       setInputStatus('wrong'); 
       statsRef.current.wrongIndices.add(currentBlankIdx); 
 
-      // 오답 횟수 증가 및 남은 기회 차감
       mistakeCountRef.current += 1;
       const maxMistakes = Math.max(0, blanks.length - statsRef.current.filled);
       setLeftLives(Math.max(0, maxMistakes - mistakeCountRef.current));
 
-      // 허용 횟수 초과 시 즉시 강제 종료
       if (mistakeCountRef.current > maxMistakes) {
         setTimeout(() => {
-          alert(`🚨 허용된 오답 기회(${maxMistakes}회)를 모두 소진했습니다!\n현재까지의 기록만 저장 후 종료됩니다.`);
+          alert(`🚨 허용된 오답 기회(${maxMistakes}회)를 모두 소진했습니다!`);
+          isProcessingRef.current = false;
           finishCard();
         }, 100);
       } else {
-        setTimeout(() => setInputStatus('idle'), 500);
+        setTimeout(() => {
+            setInputStatus('idle');
+            isProcessingRef.current = false; // 🔓 오답 처리 후 잠금 해제
+        }, 500);
       }
     }
   };
   
   const handleShowAnswer = () => {
+    if (isProcessingRef.current) return;
     if (!blanks[currentBlankIdx]) return;
+    
+    isProcessingRef.current = true;
     setInputStatus('wrong'); 
     statsRef.current.wrongIndices.add(currentBlankIdx);
 
@@ -1031,7 +1001,8 @@ function MainApp() {
 
     if (mistakeCountRef.current > maxMistakes) {
       setTimeout(() => {
-        alert(`🚨 허용된 오답 기회(${maxMistakes}회)를 모두 소진했습니다!\n현재까지의 기록만 저장 후 종료됩니다.`);
+        alert(`🚨 허용된 오답 기회(${maxMistakes}회)를 모두 소진했습니다!`);
+        isProcessingRef.current = false;
         finishCard();
       }, 100);
       return;
@@ -1048,6 +1019,7 @@ function MainApp() {
         }
         return currentBlanks;
       });
+      isProcessingRef.current = false;
     }, 800);
   };
 
@@ -1151,11 +1123,22 @@ function MainApp() {
                 <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
               );
             } else if (isCurrent) {
-              contentToRender.push(
-                <InlineBlankInput key={`blank-${currentBlankIdx}`} inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
-              );
+              // 💡 모드에 따라 입력창 또는 터치 박스 전환 및 id 부여 (자동 스크롤용)
+              if (inputMode === 'typing') {
+                  contentToRender.push(
+                    <span id="active-blank" key={`blank-${currentBlankIdx}`}>
+                      <InlineBlankInput inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
+                    </span>
+                  );
+              } else {
+                  contentToRender.push(
+                    <span id="active-blank" key={`blank-${currentBlankIdx}`} className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 'bg-amber-900/30 text-amber-400 border-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.3)]'}`}>
+                      {inputStatus === 'wrong' ? '❌' : inputStatus === 'correct' ? '✅' : '?'}
+                    </span>
+                  );
+              }
             } else {
-              contentToRender.push(<span key={i} className="inline-block min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
+              contentToRender.push(<span key={i} className="inline-block min-w-[40px] sm:min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
             }
             bIdx++;
           } else { contentToRender.push(<span key={i}>{part}</span>); }
@@ -1163,50 +1146,72 @@ function MainApp() {
     });
     
     return (
-      <div className="flex flex-col gap-6 w-full overflow-hidden">
-        <div className="flex justify-between items-center border-b border-white/10 pb-2 w-full gap-3 overflow-hidden">
-            <div className={`${titleColor} font-bold text-[14px] leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
-              {displayTitle}
+      <div className="flex flex-col w-full h-[65vh] sm:h-[75vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
+        {/* 💡 상단 스크롤 영역 (본문) - 꽉 차게 뻗어나갑니다. */}
+        <div className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar px-3 py-4 md:px-5 pb-12">
+            <div className="flex justify-between items-center border-b border-white/10 pb-2 w-full gap-3 overflow-hidden mb-4 sticky top-0 bg-[#0a0a0c] z-20 pt-1">
+                <div className={`${titleColor} font-bold text-[14px] leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
+                  {displayTitle}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`text-[11px] font-bold font-mono px-2 py-1 rounded shadow-sm transition-colors ${leftLives > 0 ? 'bg-teal-900/30 text-teal-400 border border-teal-500/50' : 'bg-red-900/50 text-white border border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)] animate-pulse'}`}>
+                    💖 기회: {leftLives}번
+                  </span>
+                  <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
+                </div>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className={`text-[11px] font-bold font-mono px-2 py-1 rounded shadow-sm transition-colors ${leftLives > 0 ? 'bg-teal-900/30 text-teal-400 border border-teal-500/50' : 'bg-red-900/50 text-white border border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]'}`}>
-                💖 기회: {leftLives}번
-              </span>
-              <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
+            {/* 💡 break-all break-words 적용으로 왼쪽 밀림 완벽 차단 */}
+            <div className="whitespace-pre-wrap leading-relaxed text-[15px] sm:text-[17px] font-serif break-all break-words w-full max-w-full text-white/90">
+                {contentToRender}
             </div>
+            {isMemoOpen && (
+              <div className="mt-6 pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
+                 <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { 
+                     statsRef.current.text = e.target.value; 
+                     const exStats = getExtendedStats(activeCard.memo);
+                     exStats.text = e.target.value;
+                     exStats.filled = statsRef.current.filled;
+                     exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+                     handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats)); 
+                 }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all shadow-inner" autoFocus/>
+              </div>
+            )}
         </div>
-        <div className="whitespace-pre-wrap leading-relaxed text-[15px] font-serif break-keep min-h-[160px]">{contentToRender}</div>
-        <div className="flex justify-between items-center w-full mb-2 gap-2 flex-wrap">
-          <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-1.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
-            {isMemoOpen ? '닫기 ✕' : '메모 열기'}
-          </button>
-          
-          <button onClick={() => { setDictTab('abbr'); setIsDictModalOpen(true); }} className="px-3 py-1.5 bg-indigo-900/30 text-indigo-400 border border-indigo-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-indigo-900/50 transition-all shadow-md">
-            ⚡ 약어 추가
-          </button>
 
-          <button onClick={toggleVoiceRecognition} className={`flex-1 min-w-[120px] py-1.5 border rounded-sm text-[11px] font-bold transition-all shadow-md ${isListening ? 'bg-red-600/50 text-white border-red-500 animate-pulse' : 'bg-blue-900/30 text-blue-400 border-blue-500/50 hover:bg-blue-900/50'}`}>
-            {isListening ? '음성 인식 끄기' : '음성으로 입력'}
-          </button>
-          <button id="show-answer-btn" onClick={handleShowAnswer} className="px-3 py-1.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded-sm text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
-            정답 보기 (오답 처리)
-          </button>
+        {/* 💡 하단 고정 컨트롤 영역 (터치 후보 및 버튼) - 절대 밀려나지 않습니다. */}
+        <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-3 z-30 flex flex-col gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
+            {inputMode === 'touch' && touchCandidates.length > 0 && (
+              <div className="flex flex-wrap gap-2 w-full max-h-[25vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/50 rounded border border-white/5 shadow-inner">
+                <div className="w-full text-[11px] text-teal-400 mb-1 font-bold flex items-center gap-1">
+                  <span className="animate-pulse">👆</span> 아래 단어를 터치하여 빈칸을 채우세요
+                </div>
+                {touchCandidates.map((ans, idx) => (
+                   <button 
+                     key={idx} 
+                     onClick={() => handleSequentialInput(ans)} 
+                     className="px-3 py-2.5 bg-[#1a1b23] border border-white/10 rounded text-[13px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex-1 min-w-[80px]"
+                   >
+                     {ans}
+                   </button>
+                ))}
+              </div>
+            )}
+            
+            <div className="flex justify-between items-center w-full gap-2 flex-wrap">
+              <button onClick={() => setInputMode(prev => prev === 'typing' ? 'touch' : 'typing')} className="px-3 py-2.5 bg-zinc-900/80 text-zinc-300 border border-zinc-500/50 rounded text-[11px] sm:text-xs font-bold flex-1 hover:bg-zinc-800 transition-all shadow-md flex items-center justify-center gap-2">
+                {inputMode === 'typing' ? '👆 터치 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
+              </button>
+              <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-2.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
+                {isMemoOpen ? '닫기 ✕' : '메모 열기'}
+              </button>
+              <button onClick={handleShowAnswer} className="px-3 py-2.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
+                정답 보기(오답)
+              </button>
+            </div>
         </div>
-        {isMemoOpen && (
-          <div className="pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
-             <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { 
-                 statsRef.current.text = e.target.value; 
-                 const exStats = getExtendedStats(activeCard.memo);
-                 exStats.text = e.target.value;
-                 exStats.filled = statsRef.current.filled;
-                 exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
-                 handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats)); 
-             }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all" autoFocus/>
-          </div>
-        )}
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, touchCandidates]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
@@ -1534,8 +1539,8 @@ function MainApp() {
       {activeCard && (
         <CardModal 
           activeCard={activeCard} 
-          totalTimeLimit={totalTimeLimit} 
-          elapsed={elapsedRef.current} 
+          totalTimeLimit={0} 
+          elapsed={0} 
           inputStatus={inputStatus} 
           renderContent={renderContent} 
           onClose={handleCloseModal} 
