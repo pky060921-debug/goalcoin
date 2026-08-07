@@ -110,24 +110,37 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
       return answers;
   }, [expected, abbrDict]);
 
+  // 💡 포커스 유실 방지 로직 강화
   useEffect(() => {
-    if (inputRef.current) inputRef.current.focus();
-  }, []);
+    if (inputStatus === 'idle' && inputRef.current) {
+        const timer = setTimeout(() => {
+            if (inputRef.current) inputRef.current.focus();
+        }, 10);
+        return () => clearTimeout(timer);
+    }
+  }, [expected, inputStatus]);
   
   useEffect(() => { 
     if (inputStatus === 'correct' || inputStatus === 'idle') {
         if (inputRef.current) inputRef.current.value = '';
+    } else if (inputStatus === 'wrong') {
+        // 💡 오답 시 입력창에 정답을 강제로 띄워줌
+        if (inputRef.current) inputRef.current.value = expected;
     }
-  }, [inputStatus]);
+  }, [inputStatus, expected]);
 
   useEffect(() => {
     const handleInput = (e: Event) => {
-        if (inputStatus !== 'idle') return;
-        const newVal = (e.target as HTMLInputElement).value;
+        if (inputStatus !== 'idle') {
+            e.preventDefault();
+            return;
+        }
+        const el = e.target as HTMLInputElement;
+        const newVal = el.value;
         const cleanInput = newVal.replace(/\s+/g, '').toLowerCase();
         if (cleanInput === '') return;
         if (validAnswers.includes(cleanInput)) {
-            (e.target as HTMLInputElement).value = '';
+            el.value = '';
             onSubmit(newVal); 
         }
     };
@@ -135,11 +148,12 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
     const handleKeyDown = (e: KeyboardEvent) => {
         if (e.isComposing) return; 
         if (e.key === 'Enter') {
+            e.preventDefault();
             if (inputStatus !== 'idle') return;
             const el = e.target as HTMLInputElement;
             const newVal = el.value;
-            if (newVal.replace(/\s+/g, '') === '') return; 
             el.value = '';
+            // 💡 빈칸이어도 제출 처리 (오답으로 넘기기 위함)
             onSubmit(newVal);
         }
     };
@@ -158,7 +172,8 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
   return (
     <input
       ref={inputRef}
-      placeholder={hintLetter ? hintLetter : ""}
+      placeholder={inputStatus === 'wrong' ? expected : (hintLetter ? hintLetter : "")}
+      readOnly={inputStatus !== 'idle'} // 채점 중에는 터치(수정) 불가 상태로 락(Lock)
       className={`inline-block mx-1 px-1.5 py-0.5 text-center font-bold border-b-2 outline-none transition-all ${
         inputStatus === 'wrong' ? 'bg-red-900/40 text-red-300 border-red-500 placeholder-red-400' :
         inputStatus === 'correct' ? 'bg-teal-900/40 text-teal-300 border-teal-500' :
@@ -262,7 +277,7 @@ function MainApp() {
 
   const mistakeCountRef = useRef(0);
   const [leftLives, setLeftLives] = useState(0);
-  const [inputMode, setInputMode] = useState<'typing'|'touch'>('typing');
+  const [inputMode, setInputMode] = useState<'typing'|'touch'>('typing'); // 💡 기본 모드: 타이핑
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   const isProcessingRef = useRef(false);
 
@@ -743,7 +758,6 @@ function MainApp() {
 
       setBlanks(restoredBlanks); setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); setInputStatus('idle');
 
-      // 💡 조항의 모든 정답을 중복 제거하고 가나다순으로 섞어서 터치 객관식 버튼 세팅
       const uniqueAnswers = Array.from(new Set(foundBlanks.map(b => b.answer)));
       setTouchCandidates(uniqueAnswers.sort((a, b) => a.localeCompare(b, 'ko')));
 
@@ -770,16 +784,15 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // 화면 중앙 자동 스크롤
   useEffect(() => {
-      if (activeCard) {
+      if (activeCard && inputStatus === 'idle') {
           const timer = setTimeout(() => {
               const el = document.getElementById('active-blank');
               if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }, 100);
+          }, 50);
           return () => clearTimeout(timer);
       }
-  }, [currentBlankIdx, inputMode, activeCard]);
+  }, [currentBlankIdx, inputMode, activeCard, inputStatus]);
 
   const finishCard = async (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
@@ -940,26 +953,34 @@ function MainApp() {
       });
     }
 
+    // 💡 다음 칸으로 넘어가는 공통 함수
+    const advanceToNext = () => {
+        setBlanks(prev => {
+          const nb = [...prev];
+          if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true;
+          return nb;
+        });
+        
+        if (currentBlankIdx + 1 < blanks.length) {
+            setCurrentBlankIdx(prevIdx => {
+              const nextIdx = prevIdx + 1;
+              localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
+              return nextIdx;
+            });
+            setInputStatus('idle');
+            isProcessingRef.current = false;
+        } else {
+            localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+            setInputStatus('idle');
+            isProcessingRef.current = false;
+            finishCard();
+        }
+    };
+
     if (isCorrect) {
       setInputStatus('correct');
-      setBlanks(prev => { const nb = [...prev]; if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; return nb; });
       statsRef.current.wrongIndices.delete(currentBlankIdx);
-      
-      setTimeout(() => {
-        setInputStatus('idle'); 
-        setBlanks(currentBlanks => {
-          if (currentBlankIdx + 1 < currentBlanks.length) {
-            setCurrentBlankIdx(prevIdx => {
-              const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx;
-            });
-          } else {
-            localStorage.removeItem(`blankd_progress_${activeCard.id}`); finishCard();
-          }
-          return currentBlanks;
-        });
-        isProcessingRef.current = false; 
-      }, 150);
-      
+      setTimeout(advanceToNext, 150); 
     } else { 
       setInputStatus('wrong'); 
       statsRef.current.wrongIndices.add(currentBlankIdx); 
@@ -975,10 +996,8 @@ function MainApp() {
           finishCard();
         }, 100);
       } else {
-        setTimeout(() => {
-            setInputStatus('idle');
-            isProcessingRef.current = false; 
-        }, 500);
+        // 💡 오답일 경우, 입력창이 빨간색으로 0.6초간 유지되며 정답을 띄워준 후 스킵합니다.
+        setTimeout(advanceToNext, 600);
       }
     }
   };
@@ -1004,18 +1023,18 @@ function MainApp() {
       return;
     }
 
-    setBlanks(prev => { const nb = [...prev]; if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; return nb; });
     setTimeout(() => {
-      setInputStatus('idle');
-      setBlanks(currentBlanks => {
-        if (currentBlankIdx + 1 < currentBlanks.length) {
+      setBlanks(prev => { const nb = [...prev]; if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; return nb; });
+      if (currentBlankIdx + 1 < blanks.length) {
           setCurrentBlankIdx(prevIdx => { const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx; });
-        } else {
-          localStorage.removeItem(`blankd_progress_${activeCard.id}`); finishCard();
-        }
-        return currentBlanks;
-      });
-      isProcessingRef.current = false;
+          setInputStatus('idle');
+          isProcessingRef.current = false;
+      } else {
+          localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+          setInputStatus('idle');
+          isProcessingRef.current = false;
+          finishCard();
+      }
     }, 800);
   };
 
@@ -1119,18 +1138,17 @@ function MainApp() {
                 <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
               );
             } else if (isCurrent) {
-              } else if (isCurrent) {
               if (inputMode === 'typing') {
                   contentToRender.push(
-                    // 💡 핵심: key를 고정 문자열로 변경하여 컴포넌트가 파괴되지 않게(키보드 고정) 만듭니다.
+                    // 💡 동일한 Key로 렌더링 유지 + 내부 useEffect로 포커스 자동 복구
                     <span id="active-blank" key="active-blank-input-fixed">
                       <InlineBlankInput inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
                     </span>
                   );
               } else {
                   contentToRender.push(
-                    <span id="active-blank" key={`blank-${currentBlankIdx}`} className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 'bg-amber-900/30 text-amber-400 border-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.3)]'}`}>
-                      {inputStatus === 'wrong' ? '❌' : inputStatus === 'correct' ? '✅' : '?'}
+                    <span id="active-blank" key="active-blank-input-fixed" className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 'bg-amber-900/30 text-amber-400 border-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.3)]'}`}>
+                      {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '?'}
                     </span>
                   );
               }
@@ -1320,7 +1338,7 @@ function MainApp() {
         .text-white\\/40, .text-white\\/50 { color: #4b5563 !important; font-weight: 600; }
         .text-white\\/60, .text-white\\/70 { color: #374151 !important; font-weight: 700; }
         .text-white\\/80, .text-white\\/90 { color: #1f2937 !important; font-weight: 700; }
-        .text-white\\/95 { color: #111827 !important; font-weight: 700; }
+        .text-white\\/95, .text-white { color: #111827 !important; font-weight: 700; }
         .text-\\[\\#d1d1d1\\] { color: #111827 !important; font-weight: 700; }
         
         .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #9ca3af !important; }
@@ -1534,14 +1552,10 @@ function MainApp() {
       {activeCard && (
         <CardModal 
           activeCard={activeCard} 
-          totalTimeLimit={0} 
-          elapsed={0} 
-          inputStatus={inputStatus} 
           renderContent={renderContent} 
           onClose={handleCloseModal} 
           goalBalance={goalBalance}
           handleUseItem={handleUseItem}
-          isFrozen={isFrozen}
         />
       )}
     </div>
