@@ -1119,9 +1119,11 @@ function MainApp() {
                 <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
               );
             } else if (isCurrent) {
+              } else if (isCurrent) {
               if (inputMode === 'typing') {
                   contentToRender.push(
-                    <span id="active-blank" key={`blank-${currentBlankIdx}`}>
+                    // 💡 핵심: key를 고정 문자열로 변경하여 컴포넌트가 파괴되지 않게(키보드 고정) 만듭니다.
+                    <span id="active-blank" key="active-blank-input-fixed">
                       <InlineBlankInput inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
                     </span>
                   );
