@@ -1325,7 +1325,8 @@ function MainApp() {
         .text-white\\/20, .text-white\\/30 { color: #6b7280 !important; font-weight: 600; }
         .text-white\\/40, .text-white\\/50 { color: #4b5563 !important; font-weight: 600; }
         .text-white\\/60, .text-white\\/70 { color: #374151 !important; font-weight: 700; }
-        .text-white\\/80 { color: #1f2937 !important; font-weight: 700; }
+        .text-white\\/80, .text-white\\/90 { color: #1f2937 !important; font-weight: 700; }
+        .text-white\\/95, .text-white { color: #111827 !important; font-weight: 700; }
         .text-\\[\\#d1d1d1\\] { color: #111827 !important; font-weight: 700; }
         
         .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #9ca3af !important; }
