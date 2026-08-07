@@ -262,7 +262,7 @@ function MainApp() {
 
   const mistakeCountRef = useRef(0);
   const [leftLives, setLeftLives] = useState(0);
-  const [inputMode, setInputMode] = useState<'typing'|'touch'>('touch');
+  const [inputMode, setInputMode] = useState<'typing'|'touch'>('typing');
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   const isProcessingRef = useRef(false);
 
