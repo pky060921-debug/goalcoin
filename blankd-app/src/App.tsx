@@ -73,7 +73,7 @@ const getExtendedStats = (memoStr: string) => {
       return {
         text: p.text || "", filled: p.filled || 0, wrongIndices: p.wrongIndices || [],
         upgrade: p.upgrade || 0, bestTime: p.bestTime || 0, totalCorrect: p.totalCorrect || 0, totalWrong: p.totalWrong || 0,
-        history: p.history || [] // 학습 이력 및 오답 기록 누적 보존
+        history: p.history || [] 
       };
     }
   } catch(e) {}
@@ -133,7 +133,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.isComposing) return; // 💡 한글 IME 조합 완료 시의 유령 엔터 무시
+        if (e.isComposing) return; 
         if (e.key === 'Enter') {
             if (inputStatus !== 'idle') return;
             const el = e.target as HTMLInputElement;
@@ -260,7 +260,6 @@ function MainApp() {
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
 
-  // 💡 생명력 관리 및 모드/중복잠금 변수
   const mistakeCountRef = useRef(0);
   const [leftLives, setLeftLives] = useState(0);
   const [inputMode, setInputMode] = useState<'typing'|'touch'>('touch');
@@ -744,9 +743,9 @@ function MainApp() {
 
       setBlanks(restoredBlanks); setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); setInputStatus('idle');
 
-      // 💡 조항의 모든 정답을 중복 제거하고 무작위로 섞어서 터치 객관식 버튼 세팅
+      // 💡 조항의 모든 정답을 중복 제거하고 가나다순으로 섞어서 터치 객관식 버튼 세팅
       const uniqueAnswers = Array.from(new Set(foundBlanks.map(b => b.answer)));
-      setTouchCandidates(uniqueAnswers.sort(() => Math.random() - 0.5));
+      setTouchCandidates(uniqueAnswers.sort((a, b) => a.localeCompare(b, 'ko')));
 
       const stats = getExtendedStats(activeCard.memo); 
       
@@ -759,7 +758,6 @@ function MainApp() {
 
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
-      // 💡 유령 오답 기록 누적 방지를 위해 매번 new Set()으로 빈 상태 시작
       statsRef.current = { text: cleanText, filled: stats.filled, wrongIndices: new Set() };
       
       const cleanTitle = getStrictTitleOnly(cleanContent);
@@ -772,7 +770,7 @@ function MainApp() {
     }
   }, [activeCard]);
 
-  // 💡 모드 전환이나 다음 빈칸 이동 시 화면 중앙 자동 스크롤
+  // 화면 중앙 자동 스크롤
   useEffect(() => {
       if (activeCard) {
           const timer = setTimeout(() => {
@@ -797,7 +795,6 @@ function MainApp() {
     exStats.filled = statsRef.current.filled + 1; 
     exStats.wrongIndices = wrongArr;
     
-    // 💡 학습 일시 및 오답 단어 히스토리 영구 기록
     const nowTimeStr = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('T', ' ').substring(0, 19);
     if (!exStats.history) exStats.history = [];
     exStats.history.push({
@@ -865,7 +862,6 @@ function MainApp() {
     const nextCard = folderCards[currentIdx + 1] || null;
 
     localStorage.removeItem(`blankd_progress_${currentId}`);
-    localStorage.removeItem(`blankd_elapsed_${currentId}`);
 
     setActiveCard(nextCard);
     setSavedCards(prev => {
@@ -926,10 +922,10 @@ function MainApp() {
   };
 
   const handleSequentialInput = (overrideInput?: string | any) => {
-    if (isProcessingRef.current) return; // 💡 0.001초 차이 중복 연타 및 이중 엔터 방어
+    if (isProcessingRef.current) return; 
     if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
     
-    isProcessingRef.current = true; // 🚧 자물쇠 잠금
+    isProcessingRef.current = true; 
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
     let isCorrect = (expected === actual);
@@ -961,7 +957,7 @@ function MainApp() {
           }
           return currentBlanks;
         });
-        isProcessingRef.current = false; // 🔓 정답 처리 후 잠금 해제
+        isProcessingRef.current = false; 
       }, 150);
       
     } else { 
@@ -981,7 +977,7 @@ function MainApp() {
       } else {
         setTimeout(() => {
             setInputStatus('idle');
-            isProcessingRef.current = false; // 🔓 오답 처리 후 잠금 해제
+            isProcessingRef.current = false; 
         }, 500);
       }
     }
@@ -1123,7 +1119,6 @@ function MainApp() {
                 <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
               );
             } else if (isCurrent) {
-              // 💡 모드에 따라 입력창 또는 터치 박스 전환 및 id 부여 (자동 스크롤용)
               if (inputMode === 'typing') {
                   contentToRender.push(
                     <span id="active-blank" key={`blank-${currentBlankIdx}`}>
@@ -1147,7 +1142,6 @@ function MainApp() {
     
     return (
       <div className="flex flex-col w-full h-[65vh] sm:h-[75vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
-        {/* 💡 상단 스크롤 영역 (본문) - 꽉 차게 뻗어나갑니다. */}
         <div className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar px-3 py-4 md:px-5 pb-12">
             <div className="flex justify-between items-center border-b border-white/10 pb-2 w-full gap-3 overflow-hidden mb-4 sticky top-0 bg-[#0a0a0c] z-20 pt-1">
                 <div className={`${titleColor} font-bold text-[14px] leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
@@ -1160,7 +1154,6 @@ function MainApp() {
                   <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
                 </div>
             </div>
-            {/* 💡 break-all break-words 적용으로 왼쪽 밀림 완벽 차단 */}
             <div className="whitespace-pre-wrap leading-relaxed text-[15px] sm:text-[17px] font-serif break-all break-words w-full max-w-full text-white/90">
                 {contentToRender}
             </div>
@@ -1178,10 +1171,9 @@ function MainApp() {
             )}
         </div>
 
-        {/* 💡 하단 고정 컨트롤 영역 (터치 후보 및 버튼) - 절대 밀려나지 않습니다. */}
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-3 z-30 flex flex-col gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             {inputMode === 'touch' && touchCandidates.length > 0 && (
-              <div className="flex flex-wrap gap-2 w-full max-h-[25vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/50 rounded border border-white/5 shadow-inner">
+              <div className="flex flex-wrap gap-2 w-full max-h-[25vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[11px] text-teal-400 mb-1 font-bold flex items-center gap-1">
                   <span className="animate-pulse">👆</span> 아래 단어를 터치하여 빈칸을 채우세요
                 </div>
@@ -1189,7 +1181,7 @@ function MainApp() {
                    <button 
                      key={idx} 
                      onClick={() => handleSequentialInput(ans)} 
-                     className="px-3 py-2.5 bg-[#1a1b23] border border-white/10 rounded text-[13px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex-1 min-w-[80px]"
+                     className="px-3 py-2.5 bg-black/40 border border-white/20 rounded text-[13px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex-1 min-w-[80px]"
                    >
                      {ans}
                    </button>
@@ -1326,7 +1318,7 @@ function MainApp() {
         .text-white\\/40, .text-white\\/50 { color: #4b5563 !important; font-weight: 600; }
         .text-white\\/60, .text-white\\/70 { color: #374151 !important; font-weight: 700; }
         .text-white\\/80, .text-white\\/90 { color: #1f2937 !important; font-weight: 700; }
-        .text-white\\/95, .text-white { color: #111827 !important; font-weight: 700; }
+        .text-white\\/95 { color: #111827 !important; font-weight: 700; }
         .text-\\[\\#d1d1d1\\] { color: #111827 !important; font-weight: 700; }
         
         .bg-\\[\\#08080a\\] { background-color: #ffffff !important; border-color: #9ca3af !important; }
@@ -1334,7 +1326,7 @@ function MainApp() {
         .bg-\\[\\#0a0a0c\\] { background-color: #ffffff !important; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border-color: #d1d5db !important; }
         .bg-\\[\\#0d0d0f\\] { background-color: #f3f4f6 !important; }
         
-        .bg-black\\/30, .bg-black\\/40, .bg-black\\/50, .bg-black\\/60 { 
+        .bg-black\\/20, .bg-black\\/30, .bg-black\\/40, .bg-black\\/50, .bg-black\\/60 { 
           background-color: #f9fafb !important; color: #111827 !important; border-color: #9ca3af !important; 
         }
         .bg-white\\/5, .bg-white\\/10 { 
