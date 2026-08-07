@@ -1039,7 +1039,6 @@ def get_categories():
         wallet_address = request.args.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
-        # 💡 [정렬 기준 수정] sort_order를 최우선 기준으로 정렬합니다.
         cursor.execute("SELECT id, title, content, folder_name FROM categories WHERE wallet_address = ? ORDER BY sort_order ASC, id ASC", (wallet_address,))
         cats = [{"id": r[0], "title": r[1], "content": r[2], "folder_name": r[3]} for r in cursor.fetchall()]
         conn.close()
@@ -1068,6 +1067,9 @@ def split_category():
     except Exception as e:
         return jsonify({"error": "분할 실패"}), 500
 
+# ==========================================
+# 💡 단일 카드 저장 및 업데이트 라우터 (Max 방어 & History 병합 로직 적용)
+# ==========================================
 @api_bp.route('/save-card', methods=['POST'])
 def save_card():
     try:
@@ -1087,10 +1089,34 @@ def save_card():
         
         if card_id:
             print(f"DEBUG: 카드 수정 시도 - ID: {card_id}, wallet: {wallet_address}")
+            cursor.execute("SELECT memo FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
+            row = cursor.fetchone()
+            final_memo_str = memo
+            
+            if row and row[0]:
+                try:
+                    db_memo = json.loads(row[0])
+                    client_memo = json.loads(memo)
+                    
+                    # 반복 횟수(filled)와 정답 수(totalCorrect)를 최대값으로 덮어쓰기
+                    client_memo['filled'] = max(int(db_memo.get('filled', 0)), int(client_memo.get('filled', 0)))
+                    client_memo['totalCorrect'] = max(int(db_memo.get('totalCorrect', 0)), int(client_memo.get('totalCorrect', 0)))
+                    
+                    # 💡 [추가] 학습 일자 및 오답 히스토리 누적 병합 (날짜/시간 기준 중복 제거)
+                    db_history = db_memo.get('history', [])
+                    client_history = client_memo.get('history', [])
+                    merged_history = {str(item.get('date', '')): item for item in db_history + client_history if item.get('date')}
+                    
+                    # 시간순 정렬하여 최신순으로 다시 배열에 넣기
+                    client_memo['history'] = sorted(list(merged_history.values()), key=lambda x: x['date'])
+                    
+                    final_memo_str = json.dumps(client_memo, ensure_ascii=False)
+                except Exception:
+                    pass
+
             cursor.execute('''UPDATE cards SET card_content=?, answer_text=?, folder_name=?, memo=? 
                               WHERE id=? AND wallet_address=?''', 
-                              (card_content, answer_text, folder_name, memo, card_id, wallet_address))
-            # 💡 수정된 행이 있는지 확인
+                              (card_content, answer_text, folder_name, final_memo_str, card_id, wallet_address))
             print(f"DEBUG: 수정된 행의 수: {cursor.rowcount}")
         else:
             print("DEBUG: 카드 신규 생성 시도")
@@ -1113,7 +1139,6 @@ def get_my_cards():
         wallet_address = request.args.get('wallet_address')
         conn = get_db_connection()
         cursor = conn.cursor()
-        # 💡 [정렬 기준 수정] sort_order를 최우선 기준으로 정렬합니다.
         cursor.execute("SELECT id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo FROM cards WHERE wallet_address = ? ORDER BY sort_order ASC, id ASC", (wallet_address,))
         cards = [{"id": r[0], "content": r[1], "answer": r[2], "options": json.loads(r[3]), "level": r[4], "next_review_time": r[5], "status": r[6], "best_time": r[7], "folder_name": r[8], "memo": r[9] or ""} for r in cursor.fetchall()]
         conn.close()
@@ -1165,6 +1190,9 @@ def delete_all():
     except Exception as e:
         return jsonify({"error": "초기화 실패"}), 500
 
+# ==========================================
+# 💡 배치 동기화 라우터 (Max 방어 & History 병합 로직 적용)
+# ==========================================
 @api_bp.route('/sync-batch', methods=['POST'])
 def sync_batch():
     try:
@@ -1178,7 +1206,6 @@ def sync_batch():
         conn = get_db_connection()
         cursor = conn.cursor()
 
-                # 💡 [변경] 서버와 클라이언트의 memo를 비교하여 무조건 최댓값(Max) 유지
         for m in memos:
             card_id = m.get('id')
             client_memo_str = m.get('memo', '{}')
@@ -1189,12 +1216,21 @@ def sync_batch():
             if row:
                 db_memo_str = row[0] if row[0] else "{}"
                 try:
+                    import json
                     db_memo = json.loads(db_memo_str)
                     client_memo = json.loads(client_memo_str)
                     
-                    # 반복 횟수(filled)와 정답 수(totalCorrect)를 최대값으로 덮어쓰기
+                    # 1. 반복 횟수(filled)와 정답 수(totalCorrect)를 최대값으로 덮어쓰기
                     client_memo['filled'] = max(int(db_memo.get('filled', 0)), int(client_memo.get('filled', 0)))
                     client_memo['totalCorrect'] = max(int(db_memo.get('totalCorrect', 0)), int(client_memo.get('totalCorrect', 0)))
+                    
+                    # 💡 2. [추가] 학습 일자 및 오답 히스토리 누적 병합 (날짜/시간 기준 중복 제거)
+                    db_history = db_memo.get('history', [])
+                    client_history = client_memo.get('history', [])
+                    merged_history = {str(item.get('date', '')): item for item in db_history + client_history if item.get('date')}
+                    
+                    # 시간순 정렬하여 최신순으로 다시 배열에 넣기
+                    client_memo['history'] = sorted(list(merged_history.values()), key=lambda x: x['date'])
                     
                     final_memo_str = json.dumps(client_memo, ensure_ascii=False)
                 except Exception:
@@ -1211,13 +1247,9 @@ def sync_batch():
 
             cursor.execute("SELECT level, best_time FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
             row = cursor.fetchone()
-            # 💡 [추가할 부분] 이 4줄을 바로 아래에 복사해서 붙여넣으세요!
             if not row:
-                # 현재 지갑 주소에 데이터가 없다면, DB에 존재하는 다른 주소의 옛날 데이터를 강제로 찾아옵니다.
                 cursor.execute("SELECT custom_stopwords, custom_abbrs, custom_inclusions FROM user_settings WHERE custom_stopwords IS NOT NULL AND custom_stopwords != '[]' LIMIT 1")
                 row = cursor.fetchone()
-                        
-            conn.close()
         
             if row:
                 current_lv, best_time = row[0], row[1]
@@ -1294,8 +1326,6 @@ def update_card_memo():
     except Exception as e:
         return jsonify({"error": "메모 업데이트 실패"}), 500
 
-# 💡 [핵심 버그 수정] 사용하지 않거나 충돌을 유발하는 낡은 단어장 함수들(get_stopwords, update_stopwords) 완전히 제거 완료
-
 @api_bp.route('/save-checkpoint', methods=['POST'])
 def save_checkpoint():
     try:
@@ -1367,10 +1397,8 @@ def get_global_dict():
                 if isinstance(data, list):
                     return data
                 if isinstance(data, dict):
-                    # fallback_key 우선 (예: 'include', 'stop')
                     if fallback_key and fallback_key in data:
                         return data[fallback_key]
-                    # 구형 통합 포맷 {"stop":[], "include":[]} 처리
                     if 'stop' in data:
                         return data['stop']
                     if 'stopwords' in data:
@@ -1395,8 +1423,6 @@ def get_global_dict():
         stopwords  = force_repair_list(raw_stopwords,  fallback_key='stop')
         inclusions = force_repair_list(raw_inclusions, fallback_key='include')
 
-        # 💡 구형: custom_stopwords 하나에 {"stop":[], "include":[]} 통합 저장했던 경우
-        # inclusions가 비어 있고, 구형 stopwords에 include 키가 있으면 복구
         if not inclusions and raw_stopwords:
             try:
                 old = json.loads(raw_stopwords)
@@ -1443,9 +1469,6 @@ def update_global_dict():
 import pandas as pd
 import io
 
-# ==========================================
-# 💡 [컬럼 예외 완벽 해결] 내 지갑 주소 기준 데이터 전체 엑셀 다운로드 API
-# ==========================================
 @api_bp.route('/export-excel', methods=['GET'])
 def export_excel_final():
     import openpyxl
@@ -1460,10 +1483,8 @@ def export_excel_final():
         return jsonify({"error": "인증되지 않은 접근입니다. 지갑 주소가 누락되었습니다."}), 400
 
     try:
-        # 💡 openpyxl 워크북 객체를 메모리에 다이렉트로 직접 생성 (기본 시트 자동 생성됨)
         wb = openpyxl.Workbook()
         
-        # openpyxl 기본 생성 시트 가져오기 및 요약 정보 주입
         ws_default = wb.active
         ws_default.title = "안내_및_요약"
         ws_default.views.sheetView[0].showGridLines = True
@@ -1473,7 +1494,6 @@ def export_excel_final():
         ws_default["A2"] = "백업 일시:"
         ws_default["B2"] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        # 디자인 서식 지정
         for cell in [ws_default["A1"], ws_default["A2"]]:
             cell.font = Font(bold=True, color="FFFFFF")
             cell.fill = PatternFill(start_color="4F46E5", end_color="4F46E5", fill_type="solid")
@@ -1481,9 +1501,7 @@ def export_excel_final():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 1. 만들기 탭 데이터 처리 (categories)
         if target in ['all', 'categories']:
-            # 💡 [진단 해결] categories 테이블에는 memo 컬럼이 없으므로 조회 대상에서 제외하여 정합성을 수복합니다.
             cursor.execute(
                 "SELECT id, folder_name, title, content FROM categories WHERE wallet_address = ? ORDER BY id ASC", 
                 (wallet_address,)
@@ -1500,9 +1518,7 @@ def export_excel_final():
             for row in rows_cat:
                 ws_cat.append([row[0], row[1], row[2], row[3]])
                 
-        # 2. 채우기 탭 데이터 처리 (cards)
         if target in ['all', 'cards']:
-            # 💡 cards 테이블은 기존 기획서 명세대로 memo 컬럼을 포함하여 온전하게 추출합니다.
             cursor.execute(
                 "SELECT id, folder_name, card_content, answer_text, memo FROM cards WHERE wallet_address = ? ORDER BY id ASC", 
                 (wallet_address,)
@@ -1521,7 +1537,6 @@ def export_excel_final():
                 
         conn.close()
         
-        # 가상 바이너리 파일로 스트리밍 빌드
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
@@ -1538,9 +1553,6 @@ def export_excel_final():
         print(f"❌ [백엔드 치명적 에러 캐치]\n{err_msg}", file=sys.stderr)
         return jsonify({"error": f"서버 내부 연산 장애: {str(e)}", "traceback": err_msg}), 500
 
-# ==========================================
-# 💡 [신규 추가] 드래그/버튼 기반 순서 변경 업데이트 API
-# ==========================================
 @api_bp.route('/update-order', methods=['POST'])
 def update_order():
     try:
@@ -1555,7 +1567,6 @@ def update_order():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 전달받은 ID 배열의 인덱스(0, 1, 2...)를 그대로 sort_order에 덮어씌웁니다.
         for index, item_id in enumerate(ordered_ids):
             cursor.execute(f"UPDATE {table} SET sort_order = ? WHERE id = ? AND wallet_address = ?", (index, item_id, wallet_address))
             
@@ -1567,9 +1578,6 @@ def update_order():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-# ==========================================
-# 💡 [신규 추가] 앱 전체 사용자 빈칸 채우기 랭킹 API
-# ==========================================
 @api_bp.route('/ranking', methods=['GET'])
 def get_ranking():
     import json
@@ -1577,7 +1585,6 @@ def get_ranking():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        # 모든 카드의 소유자(wallet_address)와 memo(학습 통계)를 가져옵니다.
         cursor.execute("SELECT wallet_address, memo FROM cards WHERE wallet_address IS NOT NULL AND wallet_address != ''")
         rows = cursor.fetchall()
         conn.close()
@@ -1588,7 +1595,6 @@ def get_ranking():
             memo = row[1] or ""
             filled = 0
             
-            # 카드별 학습 횟수 추출 (안전한 다중 파싱 지원)
             try:
                 parsed = json.loads(memo)
                 if isinstance(parsed, dict):
@@ -1606,7 +1612,6 @@ def get_ranking():
                 user_scores[wallet] = 0
             user_scores[wallet] += filled
 
-        # 랭킹 정렬 및 0회 유저 제외 (상위 50명까지만 반환)
         sorted_ranking = sorted(user_scores.items(), key=lambda x: x[1], reverse=True)
         top_ranking = [{"wallet_address": k, "total_filled": v} for k, v in sorted_ranking if v > 0][:50]
 
@@ -1628,7 +1633,6 @@ def update_balance():
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # 💡 [안전장치] user_settings 테이블에 컬럼이 없을 경우를 대비한 자동 생성
         try: cursor.execute("ALTER TABLE user_settings ADD COLUMN goal_balance INTEGER DEFAULT 0")
         except: pass
         try: cursor.execute("ALTER TABLE user_settings ADD COLUMN activity_log TEXT DEFAULT '{}'")
@@ -1645,7 +1649,6 @@ def update_balance():
             
             updates, params = [], []
             
-            # 💡 [핵심 방어 로직] 들어온 포인트가 기존 서버 포인트보다 "클 때만" 덮어쓰기 허용
             if incoming_bal is not None and incoming_bal > db_bal:
                 updates.append("goal_balance = ?")
                 params.append(incoming_bal)
@@ -1717,7 +1720,6 @@ def extract_pdf_text():
         logging.error(f"PDF 텍스트 추출 실패: {str(e)}")
         return jsonify({"error": f"PDF 추출 오류: {str(e)}"}), 500
 
-
 # ==========================================
 # 💡 모의고사 텍스트 ➔ 보기별 OX 분할 API (/api/chat 안전 엔진 사용)
 # ==========================================
@@ -1734,7 +1736,7 @@ def parse_exam_to_ox():
 
 [응답 규칙]
 1. 반드시 마크다운(```json)이나 다른 인사말 없이 순수한 JSON 배열 형식으로만 응답할 것.
-2. 각 보기는 하나의 독립된 문장으로 완성할 것.
+2. 각 보기는 하나의 독립 문장으로 완성할 것.
 
 [응답 JSON 배열 구조 예시]
 [
@@ -1750,7 +1752,6 @@ def parse_exam_to_ox():
 [모의고사 텍스트 조각]
 {content}
 """
-        # 💡 /api/generate 대신 안전한 /api/chat을 사용하고 메모리 버퍼(num_ctx)를 명시하여 500 에러를 차단합니다.
         url = "http://localhost:11434/api/chat"
         payload = {
             "model": "gemma4:26b",
@@ -1770,7 +1771,6 @@ def parse_exam_to_ox():
         raw_text = (response.json().get("message") or {}).get("content", "").strip()
         raw_text = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL).strip()
         
-        # 💡 api (6).py 상단에 선언된 내장 완충 파서를 사용하여 에러 없는 파싱 보장
         parsed_quizzes = clean_and_parse_json(raw_text)
         if not isinstance(parsed_quizzes, list):
             parsed_quizzes = []
@@ -1780,7 +1780,6 @@ def parse_exam_to_ox():
     except Exception as e:
         logging.error(f"모의고사 분할 파싱 실패: {str(e)}")
         return jsonify({"error": f"AI 분석 오류: {str(e)}"}), 500
-
 
 # ==========================================
 # 💡 AI 전체 조항 OX 퀴즈 일괄 생성 API (/api/chat 안전 엔진 사용)
@@ -1802,7 +1801,6 @@ def generate_ox():
 
 법령 조항: {content}"""
         
-        # 💡 동일하게 /api/chat 으로 통일하여 서버 뻗음 방지
         url = "http://localhost:11434/api/chat"
         payload = {
             "model": "gemma4:26b",
