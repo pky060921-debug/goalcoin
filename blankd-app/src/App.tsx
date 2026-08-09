@@ -16,6 +16,19 @@ const getKoreanDateString = () => {
   return new Date(kstTime).toISOString().split('T')[0];
 };
 
+// 💡 초성 추출 엔진 추가
+const CHO_HANGUL = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'];
+const getChosung = (str: string) => {
+  if (!str) return '기타';
+  const code = str.charCodeAt(0) - 0xAC00;
+  if (code > -1 && code < 11172) {
+    return CHO_HANGUL[Math.floor(code / 588)];
+  }
+  if (/[a-zA-Z]/.test(str[0])) return str[0].toUpperCase();
+  if (/[0-9]/.test(str[0])) return '숫자';
+  return '기타';
+};
+
 const autoApplyDictHelper = (content: string, dict: any) => {
   try {
     if (!dict) return content;
@@ -110,7 +123,6 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
       return answers;
   }, [expected, abbrDict]);
 
-  // 💡 포커스 유실 방지 로직 강화
   useEffect(() => {
     if (inputStatus === 'idle' && inputRef.current) {
         const timer = setTimeout(() => {
@@ -124,7 +136,6 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
     if (inputStatus === 'correct' || inputStatus === 'idle') {
         if (inputRef.current) inputRef.current.value = '';
     } else if (inputStatus === 'wrong') {
-        // 💡 오답 시 입력창에 정답을 강제로 띄워줌
         if (inputRef.current) inputRef.current.value = expected;
     }
   }, [inputStatus, expected]);
@@ -153,7 +164,6 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
             const el = e.target as HTMLInputElement;
             const newVal = el.value;
             el.value = '';
-            // 💡 빈칸이어도 제출 처리 (오답으로 넘기기 위함)
             onSubmit(newVal);
         }
     };
@@ -173,7 +183,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
     <input
       ref={inputRef}
       placeholder={inputStatus === 'wrong' ? expected : (hintLetter ? hintLetter : "")}
-      readOnly={inputStatus !== 'idle'} // 채점 중에는 터치(수정) 불가 상태로 락(Lock)
+      readOnly={inputStatus !== 'idle'} 
       className={`inline-block mx-1 px-1.5 py-0.5 text-center font-bold border-b-2 outline-none transition-all ${
         inputStatus === 'wrong' ? 'bg-red-900/40 text-red-300 border-red-500 placeholder-red-400' :
         inputStatus === 'correct' ? 'bg-teal-900/40 text-teal-300 border-teal-500' :
@@ -267,6 +277,10 @@ function MainApp() {
   const [theme, setTheme] = useState(() => localStorage.getItem('blankd_theme') || 'black');
   useEffect(() => { localStorage.setItem('blankd_theme', theme); }, [theme]);
   
+  // 💡 글자 크기 조절 상태 (1~5단계, 기본값 3)
+  const [fontSizeLevel, setFontSizeLevel] = useState<number>(() => parseInt(localStorage.getItem('blankd_font_size') || '3'));
+  useEffect(() => { localStorage.setItem('blankd_font_size', fontSizeLevel.toString()); }, [fontSizeLevel]);
+  
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
@@ -277,8 +291,11 @@ function MainApp() {
 
   const mistakeCountRef = useRef(0);
   const [leftLives, setLeftLives] = useState(0);
-  const [inputMode, setInputMode] = useState<'typing'|'touch'>('typing'); // 💡 기본 모드: 타이핑
+  const [inputMode, setInputMode] = useState<'typing'|'touch'>('typing'); 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
+  
+  // 💡 터치 모드: 현재 선택된 초성 상태
+  const [selectedChosung, setSelectedChosung] = useState<string | null>(null);
   const isProcessingRef = useRef(false);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
@@ -769,6 +786,7 @@ function MainApp() {
 
       setIsMemoOpen(false);
       setIsFrozen(false); setHintLetter(null); 
+      setSelectedChosung(null); // 카드 진입 시 초성 선택 초기화
 
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
@@ -953,13 +971,14 @@ function MainApp() {
       });
     }
 
-    // 💡 다음 칸으로 넘어가는 공통 함수
     const advanceToNext = () => {
         setBlanks(prev => {
           const nb = [...prev];
           if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true;
           return nb;
         });
+        
+        setSelectedChosung(null); // 💡 이동 시 초성 다시 리셋
         
         if (currentBlankIdx + 1 < blanks.length) {
             setCurrentBlankIdx(prevIdx => {
@@ -996,7 +1015,6 @@ function MainApp() {
           finishCard();
         }, 100);
       } else {
-        // 💡 오답일 경우, 입력창이 빨간색으로 0.6초간 유지되며 정답을 띄워준 후 스킵합니다.
         setTimeout(advanceToNext, 600);
       }
     }
@@ -1025,6 +1043,7 @@ function MainApp() {
 
     setTimeout(() => {
       setBlanks(prev => { const nb = [...prev]; if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; return nb; });
+      setSelectedChosung(null); // 💡 이동 시 초성 다시 리셋
       if (currentBlankIdx + 1 < blanks.length) {
           setCurrentBlankIdx(prevIdx => { const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx; });
           setInputStatus('idle');
@@ -1115,6 +1134,29 @@ function MainApp() {
     else if (titleLine.includes('[칙]') || titleLine.includes('[규]') || titleLine.includes('[규정]')) titleColor = "text-green-500";
     else if (titleLine.includes('[령]')) titleColor = "text-blue-400";
 
+    // 💡 글자 크기 매핑 로직 (5단계 연동)
+    const titleSizes = ['text-[12px] sm:text-[14px]', 'text-[14px] sm:text-[16px]', 'text-[16px] sm:text-[18px]', 'text-[18px] sm:text-[20px]', 'text-[20px] sm:text-[24px]'];
+    const bodySizes = ['text-[13px] sm:text-[14px]', 'text-[15px] sm:text-[16px]', 'text-[17px] sm:text-[18px]', 'text-[19px] sm:text-[21px]', 'text-[22px] sm:text-[24px]'];
+    const titleClass = titleSizes[fontSizeLevel - 1] || 'text-[16px] sm:text-[18px]';
+    const bodyClass = bodySizes[fontSizeLevel - 1] || 'text-[17px] sm:text-[18px]';
+
+    // 💡 초성 그룹 매핑 엔진
+    const chosungGroups = (() => {
+       const groups: Record<string, string[]> = {};
+       touchCandidates.forEach(ans => {
+           const cho = getChosung(ans);
+           if (!groups[cho]) groups[cho] = [];
+           if (!groups[cho].includes(ans)) groups[cho].push(ans);
+       });
+       return groups;
+    })();
+
+    const availableChosungs = Object.keys(chosungGroups).sort((a,b) => {
+        if (a === '기타' || a === '숫자') return 1;
+        if (b === '기타' || b === '숫자') return -1;
+        return a.localeCompare(b, 'ko');
+    });
+
     const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter((p: string) => p !== '');
     let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
     for (let part of parts) {
@@ -1140,7 +1182,6 @@ function MainApp() {
             } else if (isCurrent) {
               if (inputMode === 'typing') {
                   contentToRender.push(
-                    // 💡 동일한 Key로 렌더링 유지 + 내부 useEffect로 포커스 자동 복구
                     <span id="active-blank" key="active-blank-input-fixed">
                       <InlineBlankInput inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
                     </span>
@@ -1164,17 +1205,25 @@ function MainApp() {
       <div className="flex flex-col w-full h-[65vh] sm:h-[75vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
         <div className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar px-3 py-4 md:px-5 pb-12">
             <div className="flex justify-between items-center border-b border-white/10 pb-2 w-full gap-3 overflow-hidden mb-4 sticky top-0 bg-[#0a0a0c] z-20 pt-1">
-                <div className={`${titleColor} font-bold text-[14px] leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
+                <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
                   {displayTitle}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {/* 💡 5단계 폰트 조절 UI (모바일 호환) */}
+                  <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
+                     <span className="text-[9px] sm:text-[10px] text-white/40 font-bold">크기</span>
+                     <button onClick={() => setFontSizeLevel(p => Math.max(1, p - 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">-</button>
+                     <span className="text-[10px] sm:text-[11px] font-mono text-white/80 w-3 text-center">{fontSizeLevel}</span>
+                     <button onClick={() => setFontSizeLevel(p => Math.min(5, p + 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
+                  </div>
                   <span className={`text-[11px] font-bold font-mono px-2 py-1 rounded shadow-sm transition-colors ${leftLives > 0 ? 'bg-teal-900/30 text-teal-400 border border-teal-500/50' : 'bg-red-900/50 text-white border border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)] animate-pulse'}`}>
                     💖 기회: {leftLives}번
                   </span>
-                  <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm">Page {displayPage + 1}</span>
+                  <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
                 </div>
             </div>
-            <div className="whitespace-pre-wrap leading-relaxed text-[15px] sm:text-[17px] font-serif break-all break-words w-full max-w-full text-white/90">
+            {/* 💡 본문 크기가 조절기(fontSizeLevel)에 따라 유기적으로 반응합니다. */}
+            <div className={`whitespace-pre-wrap leading-relaxed ${bodyClass} font-serif break-all break-words w-full max-w-full text-white/90`}>
                 {contentToRender}
             </div>
             {isMemoOpen && (
@@ -1192,20 +1241,42 @@ function MainApp() {
         </div>
 
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-3 z-30 flex flex-col gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
+            {/* 💡 2단계 초성 선택 터치 모드 UI */}
             {inputMode === 'touch' && touchCandidates.length > 0 && (
-              <div className="flex flex-wrap gap-2 w-full max-h-[25vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
-                <div className="w-full text-[11px] text-teal-400 mb-1 font-bold flex items-center gap-1">
-                  <span className="animate-pulse">👆</span> 아래 단어를 터치하여 빈칸을 채우세요
+              <div className="flex flex-col gap-2 w-full max-h-[30vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
+                <div className="w-full text-[11px] text-teal-400 mb-1 font-bold flex items-center justify-between">
+                  <div className="flex items-center gap-1">
+                    <span className="animate-pulse">👆</span> {selectedChosung ? `'${selectedChosung}' 시작 단어 선택` : '먼저 초성을 선택하세요'}
+                  </div>
+                  {selectedChosung && (
+                    <button onClick={() => setSelectedChosung(null)} className="px-2 py-0.5 bg-teal-900/40 border border-teal-500/50 rounded-sm text-teal-300 hover:bg-teal-900/60 active:scale-95 transition-all shadow-sm">
+                       🔙 다시선택
+                    </button>
+                  )}
                 </div>
-                {touchCandidates.map((ans, idx) => (
-                   <button 
-                     key={idx} 
-                     onClick={() => handleSequentialInput(ans)} 
-                     className="px-3 py-2.5 bg-black/40 border border-white/20 rounded text-[13px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex-1 min-w-[80px]"
-                   >
-                     {ans}
-                   </button>
-                ))}
+                <div className="flex flex-wrap gap-2 w-full">
+                  {!selectedChosung ? (
+                     availableChosungs.map((cho) => (
+                       <button
+                         key={cho}
+                         onClick={() => setSelectedChosung(cho)}
+                         className="px-3 py-2.5 bg-indigo-900/30 border border-indigo-500/30 rounded text-[13px] sm:text-[15px] font-bold text-indigo-300 hover:bg-indigo-800/50 hover:text-indigo-200 transition-all active:scale-95 shadow-md flex-1 min-w-[50px] text-center"
+                       >
+                         {cho}
+                       </button>
+                     ))
+                  ) : (
+                     chosungGroups[selectedChosung]?.map((ans, idx) => (
+                       <button
+                         key={idx}
+                         onClick={() => handleSequentialInput(ans)}
+                         className="px-3 py-2.5 bg-black/40 border border-white/20 rounded text-[13px] sm:text-[15px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex-1 min-w-[80px]"
+                       >
+                         {ans}
+                       </button>
+                     ))
+                  )}
+                </div>
               </div>
             )}
             
@@ -1223,7 +1294,7 @@ function MainApp() {
         </div>
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, touchCandidates]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, touchCandidates, selectedChosung, fontSizeLevel, leftLives]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
