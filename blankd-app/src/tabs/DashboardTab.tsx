@@ -11,7 +11,6 @@ const safeParseStats = (memoStr: string) => {
     return parseCardStats(memoStr);
 };
 
-// 💡 [핵심 수정] 운영체제 환경에 구애받지 않는 절대적인 KST(한국 시간) 변환기
 const getKSTDateString = () => {
   const kstTime = Date.now() + (9 * 60 * 60 * 1000);
   return new Date(kstTime).toISOString().split('T')[0];
@@ -30,14 +29,20 @@ export const DashboardTab = ({
   categories, savedCards, setActiveTab, setExpandedId, setActiveCard, 
   goalBalance, handleUpdateBalance, 
   activityLog, claimedRewards, setClaimedRewards, safeAddress,
-  loadAllData, isOffline
+  loadAllData, isOffline,
+  targetCycle, setTargetCycle // 💡 App.tsx에서 전달받는 전역 상태
 }: any) => {
   const kstNow = getKSTInfo();
-  // 💡 [달력 수정] 기준월을 KST로 강제 고정하여 표시 시차 없앰
   const [calYear, setCalYear] = useState(kstNow.year);
   const [calMonth, setCalMonth] = useState(kstNow.month);
   
   const [isSyncing, setIsSyncing] = useState(false);
+  const [tempCycle, setTempCycle] = useState<number | string>(targetCycle || 30);
+  const [isEditingCycle, setIsEditingCycle] = useState(false);
+
+  useEffect(() => {
+    setTempCycle(targetCycle || 30);
+  }, [targetCycle]);
 
   const handleManualSync = async () => {
     if (isSyncing) return;
@@ -54,50 +59,35 @@ export const DashboardTab = ({
     }
   };
 
-  const [targetCycle, setTargetCycle] = useState<number | string>(() => {
-    const saved = localStorage.getItem(`blankd_target_cycle_${safeAddress}`);
-    return saved ? parseInt(saved, 10) : 30;
-  });
-
   const todayStr = getKSTDateString();
-  const currentMonthStr = todayStr.slice(0, 7); 
-  const [lastModifiedMonth, setLastModifiedMonth] = useState(() => {
-    return localStorage.getItem(`blankd_cycle_modified_month_${safeAddress}`) || '';
-  });
-  const canEditCycle = lastModifiedMonth !== currentMonthStr;
 
-  const handleCycleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!canEditCycle) return;
-    const val = parseInt(e.target.value, 10);
-    if (!isNaN(val) && val > 0) {
-        setTargetCycle(val);
-    } else if (e.target.value === '') {
-        setTargetCycle('');
+  // 💡 [핵심] 300P 지불하여 마스터 주기 변경
+  const handleStartEditCycle = () => {
+    if (goalBalance < 300) {
+      alert('🚨 포인트가 부족합니다. 마스터 주기를 변경하려면 300 P가 필요합니다!');
+      return;
+    }
+    if (window.confirm('300 P를 지불하고 마스터 주기를 변경하시겠습니까?')) {
+      handleUpdateBalance(-300);
+      setIsEditingCycle(true);
     }
   };
 
-  const handleCycleBlur = () => {
-    if (!canEditCycle) return;
+  const handleSaveCycle = () => {
+    let finalVal = Number(tempCycle);
+    if (isNaN(finalVal) || finalVal < 1) finalVal = 30;
     
-    const currentSaved = localStorage.getItem(`blankd_target_cycle_${safeAddress}`) || '30';
-    let finalVal = targetCycle;
+    setTargetCycle(finalVal);
+    setIsEditingCycle(false);
     
-    if (targetCycle === '' || Number(targetCycle) < 1) {
-        finalVal = 30;
+    // 서버에 즉시 동기화
+    if (!isOffline && safeAddress && navigator.onLine) {
+      fetch("https://api.blankd.top/api/update-balance", {
+        method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, target_cycle: finalVal })
+      }).catch(()=>{});
     }
-
-    if (currentSaved !== finalVal.toString()) {
-        if (window.confirm(`마스터 주기를 ${finalVal}일로 변경하시겠습니까?\n(주의: 마스터 주기는 한 달에 한 번만 변경 가능합니다)`)) {
-            setTargetCycle(finalVal);
-            localStorage.setItem(`blankd_target_cycle_${safeAddress}`, finalVal.toString());
-            setLastModifiedMonth(currentMonthStr);
-            localStorage.setItem(`blankd_cycle_modified_month_${safeAddress}`, currentMonthStr);
-        } else {
-            setTargetCycle(parseInt(currentSaved, 10));
-        }
-    } else {
-        setTargetCycle(finalVal); 
-    }
+    alert(`✅ 마스터 주기가 ${finalVal}일로 변경되었습니다!`);
   };
 
   const saveClaim = (key: string, points: number) => {
@@ -142,7 +132,6 @@ export const DashboardTab = ({
 
   const dailyFilled = activityLog[todayStr] || 0;
 
-  // 💡 KST 기반 주간 계산 로직
   const kstNowObj = new Date(Date.now() + (9 * 60 * 60 * 1000));
   kstNowObj.setUTCHours(0, 0, 0, 0);
   kstNowObj.setUTCDate(kstNowObj.getUTCDate() - kstNowObj.getUTCDay());
@@ -155,7 +144,7 @@ export const DashboardTab = ({
     weeklyFilled += activityLog[d.toISOString().split('T')[0]] || 0;
   }
 
-  const monthKey = currentMonthStr;
+  const monthKey = todayStr.slice(0, 7);
   let monthlyFilled = 0;
   Object.keys(activityLog).forEach(dateStr => {
     if (dateStr.startsWith(monthKey)) monthlyFilled += activityLog[dateStr];
@@ -172,7 +161,6 @@ export const DashboardTab = ({
     monthly: { title: "월간 집중 훈련", target: monthlyTarget, reward: monthlyTarget, current: monthlyFilled, key: `monthly_${monthKey}` }
   };
 
-  // KST 달력 일자 렌더링
   const firstDayKST = new Date(Date.UTC(calYear, calMonth, 1));
   const firstDay = firstDayKST.getUTCDay();
   const daysInMonthKST = new Date(Date.UTC(calYear, calMonth + 1, 0));
@@ -250,23 +238,36 @@ export const DashboardTab = ({
             <span className="text-white/40">미학습 {stats.unplayed}개</span>
           </div>
           
-          <div className="flex items-center gap-2 bg-white/5 px-3 py-2 rounded-sm border border-white/10 shrink-0 w-full xl:w-auto">
+          <div className="flex items-center gap-2 bg-white/5 px-3 py-2 rounded-sm border border-white/10 shrink-0 w-full xl:w-auto flex-wrap">
             <span className="text-[11px] sm:text-xs text-white/50 font-bold">전체 빈칸을</span>
-            <input 
-              type="number" 
-              value={targetCycle} 
-              onChange={handleCycleChange}
-              onBlur={handleCycleBlur}
-              disabled={!canEditCycle}
-              className={`w-14 bg-black/50 border border-white/20 rounded p-1 text-center text-[12px] font-bold outline-none transition-colors ${!canEditCycle ? 'text-white/30 cursor-not-allowed opacity-60' : 'text-amber-400 focus:border-amber-500'}`}
-              min="1"
-              max="365"
-              title={!canEditCycle ? "마스터 주기는 한 달에 한 번만 변경 가능합니다." : "마스터 주기 설정"}
-            />
-            <span className="text-[11px] sm:text-xs text-white/50 font-bold whitespace-nowrap">
-              일 주기로 마스터 <span className="text-amber-400 ml-1">(일일 목표: {dailyTarget}칸)</span>
-            </span>
-            {!canEditCycle && <span className="text-[9px] text-red-400 font-bold ml-1 tracking-tighter">(이번 달 변경완료)</span>}
+            
+            {isEditingCycle ? (
+              <div className="flex items-center gap-1">
+                <input 
+                  type="number" 
+                  value={tempCycle} 
+                  onChange={(e) => setTempCycle(e.target.value)}
+                  className="w-14 bg-black/80 border border-amber-500 rounded p-1 text-center text-[12px] font-bold outline-none text-amber-400"
+                  min="1" max="365" autoFocus
+                />
+                <button onClick={handleSaveCycle} className="px-2 py-1 bg-amber-500 text-black text-[10px] font-bold rounded hover:bg-amber-400">저장</button>
+                <button onClick={() => setIsEditingCycle(false)} className="px-2 py-1 bg-white/10 text-white/60 text-[10px] rounded hover:bg-white/20">취소</button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-[14px] font-mono font-bold text-amber-400 border-b border-amber-500/50 px-1">{targetCycle}</span>
+                <span className="text-[11px] sm:text-xs text-white/50 font-bold whitespace-nowrap">
+                  일 주기로 마스터 <span className="text-amber-400 ml-1">(일일 목표: {dailyTarget}칸)</span>
+                </span>
+                <button 
+                  onClick={handleStartEditCycle}
+                  title="300 P를 지불하고 마스터 주기를 자유롭게 변경합니다."
+                  className="ml-2 px-2.5 py-1 bg-indigo-900/40 border border-indigo-500/50 text-indigo-300 text-[10px] font-bold rounded hover:bg-indigo-900/80 transition-colors shadow-sm whitespace-nowrap"
+                >
+                  ⚡ 주기 변경 (-300P)
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
