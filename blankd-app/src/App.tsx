@@ -16,7 +16,6 @@ const getKoreanDateString = () => {
   return new Date(kstTime).toISOString().split('T')[0];
 };
 
-// 💡 초성 추출 엔진 추가
 const CHO_HANGUL = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'];
 const getChosung = (str: string) => {
   if (!str) return '기타';
@@ -277,10 +276,28 @@ function MainApp() {
   const [theme, setTheme] = useState(() => localStorage.getItem('blankd_theme') || 'black');
   useEffect(() => { localStorage.setItem('blankd_theme', theme); }, [theme]);
   
-  // 💡 글자 크기 조절 상태 (1~5단계, 기본값 3)
-  const [fontSizeLevel, setFontSizeLevel] = useState<number>(() => parseInt(localStorage.getItem('blankd_font_size') || '3'));
-  useEffect(() => { localStorage.setItem('blankd_font_size', fontSizeLevel.toString()); }, [fontSizeLevel]);
-  
+  // 💡 [핵심] 서버-클라이언트 간 설정 동기화를 위한 전역 마스터 주기 & 폰트 크기 상태
+  const [targetCycle, setTargetCycle] = useState<number>(() => {
+    return parseInt(localStorage.getItem(`blankd_target_cycle_${safeAddress}`) || '30', 10);
+  });
+  const [fontSizeLevel, setFontSizeLevel] = useState<number>(() => {
+    return parseInt(localStorage.getItem(`blankd_font_size_${safeAddress}`) || '3', 10);
+  });
+
+  useEffect(() => {
+    localStorage.setItem(`blankd_target_cycle_${safeAddress}`, targetCycle.toString());
+  }, [targetCycle, safeAddress]);
+
+  useEffect(() => {
+    localStorage.setItem(`blankd_font_size_${safeAddress}`, fontSizeLevel.toString());
+    if (!isOffline && safeAddress && navigator.onLine) {
+       fetch("https://api.blankd.top/api/update-balance", {
+         method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+         body: JSON.stringify({ wallet_address: safeAddress, font_size: fontSizeLevel })
+       }).catch(()=>{});
+    }
+  }, [fontSizeLevel, safeAddress, isOffline]);
+
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
@@ -293,8 +310,6 @@ function MainApp() {
   const [leftLives, setLeftLives] = useState(0);
   const [inputMode, setInputMode] = useState<'typing'|'touch'>('typing'); 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
-  
-  // 💡 터치 모드: 현재 선택된 초성 상태
   const [selectedChosung, setSelectedChosung] = useState<string | null>(null);
   const isProcessingRef = useRef(false);
 
@@ -426,7 +441,7 @@ function MainApp() {
       const [catRes, cardRes, userData, dictRes] = await Promise.all([
         fetchWithDiagnostic(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`, '카테고리'),
         fetchWithDiagnostic(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`, '카드'),
-        fetch(`https://api.blankd.top/api/get-balance?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()).catch(() => ({ balance: 0, activity_log: {}, claimed_rewards: {} })),
+        fetch(`https://api.blankd.top/api/get-balance?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()).catch(() => ({ balance: 0, activity_log: {}, claimed_rewards: {}, target_cycle: 30, font_size: 3 })),
         api.getGlobalDict(safeAddress).catch(() => ({ stopwords: [], inclusions: [], abbrs: {} }))
       ]);
 
@@ -454,6 +469,10 @@ function MainApp() {
       const localBalance = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
       const actualBalance = Math.max(serverBalance, localBalance);
       
+      // 💡 [핵심] 서버에서 내려준 주기 & 폰트 크기로 전역 동기화
+      if (userData.target_cycle) setTargetCycle(Number(userData.target_cycle));
+      if (userData.font_size) setFontSizeLevel(Number(userData.font_size));
+
       const serverActivityLog = userData.activity_log || {};
       const localActivityLog = JSON.parse(localStorage.getItem(`blankd_activity_log_${safeAddress}`) || '{}');
       const mergedActivity = { ...serverActivityLog };
@@ -786,7 +805,7 @@ function MainApp() {
 
       setIsMemoOpen(false);
       setIsFrozen(false); setHintLetter(null); 
-      setSelectedChosung(null); // 카드 진입 시 초성 선택 초기화
+      setSelectedChosung(null); 
 
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
@@ -978,7 +997,7 @@ function MainApp() {
           return nb;
         });
         
-        setSelectedChosung(null); // 💡 이동 시 초성 다시 리셋
+        setSelectedChosung(null); 
         
         if (currentBlankIdx + 1 < blanks.length) {
             setCurrentBlankIdx(prevIdx => {
@@ -1043,7 +1062,7 @@ function MainApp() {
 
     setTimeout(() => {
       setBlanks(prev => { const nb = [...prev]; if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; return nb; });
-      setSelectedChosung(null); // 💡 이동 시 초성 다시 리셋
+      setSelectedChosung(null); 
       if (currentBlankIdx + 1 < blanks.length) {
           setCurrentBlankIdx(prevIdx => { const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx; });
           setInputStatus('idle');
@@ -1134,13 +1153,12 @@ function MainApp() {
     else if (titleLine.includes('[칙]') || titleLine.includes('[규]') || titleLine.includes('[규정]')) titleColor = "text-green-500";
     else if (titleLine.includes('[령]')) titleColor = "text-blue-400";
 
-    // 💡 글자 크기 매핑 로직 (5단계 연동)
-    const titleSizes = ['text-[12px] sm:text-[14px]', 'text-[14px] sm:text-[16px]', 'text-[16px] sm:text-[18px]', 'text-[18px] sm:text-[20px]', 'text-[20px] sm:text-[24px]'];
-    const bodySizes = ['text-[13px] sm:text-[14px]', 'text-[15px] sm:text-[16px]', 'text-[17px] sm:text-[18px]', 'text-[19px] sm:text-[21px]', 'text-[22px] sm:text-[24px]'];
-    const titleClass = titleSizes[fontSizeLevel - 1] || 'text-[16px] sm:text-[18px]';
-    const bodyClass = bodySizes[fontSizeLevel - 1] || 'text-[17px] sm:text-[18px]';
+    // 💡 [크기 개편] 1단계 크기를 최소 10px~11px까지 극단적으로 줄여서 더 작게 볼 수 있도록 변경
+    const titleSizes = ['text-[11px] sm:text-[12px]', 'text-[13px] sm:text-[14px]', 'text-[15px] sm:text-[16px]', 'text-[17px] sm:text-[18px]', 'text-[19px] sm:text-[22px]'];
+    const bodySizes  = ['text-[10px] sm:text-[11px]', 'text-[12px] sm:text-[13px]', 'text-[14px] sm:text-[16px]', 'text-[17px] sm:text-[19px]', 'text-[20px] sm:text-[23px]'];
+    const titleClass = titleSizes[fontSizeLevel - 1] || 'text-[15px] sm:text-[16px]';
+    const bodyClass  = bodySizes[fontSizeLevel - 1] || 'text-[14px] sm:text-[16px]';
 
-    // 💡 초성 그룹 매핑 엔진
     const chosungGroups = (() => {
        const groups: Record<string, string[]> = {};
        touchCandidates.forEach(ans => {
@@ -1194,7 +1212,7 @@ function MainApp() {
                   );
               }
             } else {
-              contentToRender.push(<span key={i} className="inline-block min-w-[40px] sm:min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
+              contentToRender.push(<span key={i} className="inline-block min-w-[40px] sm:min-w-[50px] h-4 sm:h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
             }
             bIdx++;
           } else { contentToRender.push(<span key={i}>{part}</span>); }
@@ -1209,7 +1227,6 @@ function MainApp() {
                   {displayTitle}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {/* 💡 5단계 폰트 조절 UI (모바일 호환) */}
                   <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
                      <span className="text-[9px] sm:text-[10px] text-white/40 font-bold">크기</span>
                      <button onClick={() => setFontSizeLevel(p => Math.max(1, p - 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">-</button>
@@ -1222,7 +1239,6 @@ function MainApp() {
                   <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
                 </div>
             </div>
-            {/* 💡 본문 크기가 조절기(fontSizeLevel)에 따라 유기적으로 반응합니다. */}
             <div className={`whitespace-pre-wrap leading-relaxed ${bodyClass} font-serif break-all break-words w-full max-w-full text-white/90`}>
                 {contentToRender}
             </div>
@@ -1241,7 +1257,6 @@ function MainApp() {
         </div>
 
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-3 z-30 flex flex-col gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
-            {/* 💡 2단계 초성 선택 터치 모드 UI */}
             {inputMode === 'touch' && touchCandidates.length > 0 && (
               <div className="flex flex-col gap-2 w-full max-h-[30vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[11px] text-teal-400 mb-1 font-bold flex items-center justify-between">
@@ -1325,7 +1340,7 @@ function MainApp() {
     return (
       <>
         <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
-          <DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} activityLog={activityLog} claimedRewards={claimedRewards} setClaimedRewards={setClaimedRewards} safeAddress={safeAddress} loadAllData={loadAllData} isOffline={isOffline} />
+          <DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} activityLog={activityLog} claimedRewards={claimedRewards} setClaimedRewards={setClaimedRewards} safeAddress={safeAddress} loadAllData={loadAllData} isOffline={isOffline} targetCycle={targetCycle} setTargetCycle={setTargetCycle} />
         </div>
         <div className={activeTab === 'create' ? 'block' : 'hidden'}>
           <CraftTab categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} expandedId={expandedId} setExpandedId={setExpandedId} handleDeleteCategory={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} globalDict={globalDict} saveGlobalDict={saveGlobalDict} />
@@ -1344,7 +1359,7 @@ function MainApp() {
         </div>
       </>
     );
-  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, zkLogin, studyMode, setStudyMode, globalDict, theme, goalBalance, activityLog, claimedRewards, isOffline]);
+  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, zkLogin, studyMode, setStudyMode, globalDict, theme, goalBalance, activityLog, claimedRewards, isOffline, targetCycle]);
 
   const renderDictionaryUI = (isMobile: boolean) => (
     <div className={`flex flex-col w-full h-full ${isMobile ? 'bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 rounded-sm' : 'bg-[#08080a]/80 border border-white/10 p-5 rounded-sm shadow-xl backdrop-blur-sm'}`}>
