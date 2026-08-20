@@ -11,38 +11,14 @@ import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 import { RecordTab } from "./tabs/RecordTab";
 
-// 💡 Vite 빌드 압축(Minification) 시 발생하는 TDZ 에러를 원천 차단하기 위해
-// 모든 최상위 함수들을 const가 아닌 일반 function으로 선언하여 강제 호이스팅시킵니다.
-
-class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
-  constructor(props: any) { 
-    super(props); 
-    this.state = { hasError: false, errorMessage: "" }; 
-  }
-  static getDerivedStateFromError(error: any) { 
-    return { hasError: true, errorMessage: error.message }; 
-  }
-  componentDidCatch(error: any, errorInfo: any) { 
-    this.props.fallbackLog(`🚨 렌더링 예외 발생: ${error.message}`); 
-  }
-  render() {
-    if (this.state.hasError) return (
-      <div className="p-6 text-red-400 font-mono border border-red-500/30 bg-red-900/10 rounded-sm shadow-xl">
-        <h3 className="text-lg font-bold mb-2">🔥 화면 렌더링 복구 활성화</h3>
-        <p className="text-sm opacity-80">{this.state.errorMessage}</p>
-      </div>
-    );
-    return this.props.children;
-  }
-}
-
-function getKoreanDateString() {
+const getKoreanDateString = () => {
   const kstTime = Date.now() + (9 * 60 * 60 * 1000);
   return new Date(kstTime).toISOString().split('T')[0];
-}
+};
 
+// 💡 초성 추출 엔진 추가
 const CHO_HANGUL = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'];
-function getChosung(str: string) {
+const getChosung = (str: string) => {
   if (!str) return '기타';
   const code = str.charCodeAt(0) - 0xAC00;
   if (code > -1 && code < 11172) {
@@ -51,9 +27,9 @@ function getChosung(str: string) {
   if (/[a-zA-Z]/.test(str[0])) return str[0].toUpperCase();
   if (/[0-9]/.test(str[0])) return '숫자';
   return '기타';
-}
+};
 
-function autoApplyDictHelper(content: string, dict: any) {
+const autoApplyDictHelper = (content: string, dict: any) => {
   try {
     if (!dict) return content;
     let fixedContent = content.replace(/\[ORIG_ID:(\d+)\]/g, '[[ORIG_ID:$1]]');
@@ -101,9 +77,9 @@ function autoApplyDictHelper(content: string, dict: any) {
   } catch (err: any) {
     return content;
   }
-}
+};
 
-function getExtendedStats(memoStr: string) {
+const getExtendedStats = (memoStr: string) => {
   try {
     if (memoStr && memoStr.trim().startsWith('{')) {
       const p = JSON.parse(memoStr || '{}');
@@ -121,30 +97,15 @@ function getExtendedStats(memoStr: string) {
   } catch(e) {
     return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [] };
   }
-}
+};
 
-function pushToQueue(type: 'MEMO' | 'ANSWER', payload: any) {
-  try {
-    const targetId = payload.id || payload.card_id;
-    if (typeof targetId === 'string' && targetId.startsWith('temp_')) return; 
-    if (!targetId || isNaN(parseInt(targetId as string, 10))) return;
-
-    const qStr = localStorage.getItem('blankd_sync_queue');
-    const q = qStr ? JSON.parse(qStr) : { memos: [], answers: [] };
-    if (type === 'MEMO') {
-      q.memos = q.memos.filter((m: any) => m.id !== payload.id); 
-      q.memos.push(payload);
-    } else if (type === 'ANSWER') {
-      q.answers.push(payload);
-    }
-    localStorage.setItem('blankd_sync_queue', JSON.stringify(q));
-  } catch (e) { 
-    console.error("동기화 가상 큐 적재 실패:", e); 
-  }
-}
-
-// 💡 React.memo를 제거하고 일반 함수로 선언하여 Vite의 압축 버그를 회피합니다.
-function InlineBlankInput({ inputStatus, onSubmit, expected, abbrDict, hintLetter }: any) {
+const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict, hintLetter }: {
+  inputStatus: string;
+  onSubmit: (val: string) => void;
+  expected: string; 
+  abbrDict: Record<string, string>;
+  hintLetter?: string | null;
+}) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const validAnswers = useMemo(() => {
@@ -153,7 +114,7 @@ function InlineBlankInput({ inputStatus, onSubmit, expected, abbrDict, hintLette
       if (abbrDict) {
           Object.entries(abbrDict).forEach(([k, v]) => {
               const strK = k.replace(/\s+/g, '').toLowerCase();
-              const strV = (v as string).replace(/\s+/g, '').toLowerCase();
+              const strV = v.replace(/\s+/g, '').toLowerCase();
               const orig = strK.length >= strV.length ? strK : strV;
               const short = strK.length < strV.length ? strK : strV;
               if (expectedClean === orig) answers.push(short);
@@ -203,7 +164,6 @@ function InlineBlankInput({ inputStatus, onSubmit, expected, abbrDict, hintLette
             const el = e.target as HTMLInputElement;
             const newVal = el.value;
             el.value = '';
-            // 💡 아무것도 입력하지 않고 엔터 쳐도 스킵(오답) 처리되게 제출!
             onSubmit(newVal);
         }
     };
@@ -233,7 +193,54 @@ function InlineBlankInput({ inputStatus, onSubmit, expected, abbrDict, hintLette
       style={{ width: `${Math.max(expected.length * 1.2, 3)}em`, maxWidth: '100%' }}
     />
   );
+}, (prevProps, nextProps) => {
+  return prevProps.inputStatus === nextProps.inputStatus && 
+         prevProps.expected === nextProps.expected && 
+         prevProps.abbrDict === nextProps.abbrDict && 
+         prevProps.hintLetter === nextProps.hintLetter;
+});
+
+class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
+  constructor(props: any) { 
+    super(props); 
+    this.state = { hasError: false, errorMessage: "" }; 
+  }
+  static getDerivedStateFromError(error: any) { 
+    return { hasError: true, errorMessage: error.message }; 
+  }
+  componentDidCatch(error: any, errorInfo: any) { 
+    this.props.fallbackLog(`🚨 렌더링 예외 발생: ${error.message}`); 
+  }
+  render() {
+    if (this.state.hasError) return (
+      <div className="p-6 text-red-400 font-mono border border-red-500/30 bg-red-900/10 rounded-sm shadow-xl">
+        <h3 className="text-lg font-bold mb-2">🔥 화면 렌더링 복구 활성화</h3>
+        <p className="text-sm opacity-80">{this.state.errorMessage}</p>
+      </div>
+    );
+    return this.props.children;
+  }
 }
+
+const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
+  try {
+    const targetId = payload.id || payload.card_id;
+    if (typeof targetId === 'string' && targetId.startsWith('temp_')) return; 
+    if (!targetId || isNaN(parseInt(targetId as string, 10))) return;
+
+    const qStr = localStorage.getItem('blankd_sync_queue');
+    const q = qStr ? JSON.parse(qStr) : { memos: [], answers: [] };
+    if (type === 'MEMO') {
+      q.memos = q.memos.filter((m: any) => m.id !== payload.id); 
+      q.memos.push(payload);
+    } else if (type === 'ANSWER') {
+      q.answers.push(payload);
+    }
+    localStorage.setItem('blankd_sync_queue', JSON.stringify(q));
+  } catch (e) { 
+    console.error("동기화 가상 큐 적재 실패:", e); 
+  }
+};
 
 function MainApp() {
   const enokiFlow = useEnokiFlow();
@@ -270,27 +277,10 @@ function MainApp() {
   const [theme, setTheme] = useState(() => localStorage.getItem('blankd_theme') || 'black');
   useEffect(() => { localStorage.setItem('blankd_theme', theme); }, [theme]);
   
-  const [targetCycle, setTargetCycle] = useState<number>(() => {
-    return parseInt(localStorage.getItem(`blankd_target_cycle_${safeAddress}`) || '30', 10);
-  });
-  const [fontSizeLevel, setFontSizeLevel] = useState<number>(() => {
-    return parseInt(localStorage.getItem(`blankd_font_size_${safeAddress}`) || '3', 10);
-  });
-
-  useEffect(() => {
-    localStorage.setItem(`blankd_target_cycle_${safeAddress}`, targetCycle.toString());
-  }, [targetCycle, safeAddress]);
-
-  useEffect(() => {
-    localStorage.setItem(`blankd_font_size_${safeAddress}`, fontSizeLevel.toString());
-    if (!isOffline && safeAddress && navigator.onLine) {
-       fetch("https://api.blankd.top/api/update-balance", {
-         method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
-         body: JSON.stringify({ wallet_address: safeAddress, font_size: fontSizeLevel })
-       }).catch(()=>{});
-    }
-  }, [fontSizeLevel, safeAddress, isOffline]);
-
+  // 💡 글자 크기 조절 상태 (1~5단계, 기본값 3)
+  const [fontSizeLevel, setFontSizeLevel] = useState<number>(() => parseInt(localStorage.getItem('blankd_font_size') || '3'));
+  useEffect(() => { localStorage.setItem('blankd_font_size', fontSizeLevel.toString()); }, [fontSizeLevel]);
+  
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
@@ -301,9 +291,10 @@ function MainApp() {
 
   const mistakeCountRef = useRef(0);
   const [leftLives, setLeftLives] = useState(0);
-  // 💡 기본 모드: 타이핑 모드
   const [inputMode, setInputMode] = useState<'typing'|'touch'>('typing'); 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
+  
+  // 💡 터치 모드: 현재 선택된 초성 상태
   const [selectedChosung, setSelectedChosung] = useState<string | null>(null);
   const isProcessingRef = useRef(false);
 
@@ -435,7 +426,7 @@ function MainApp() {
       const [catRes, cardRes, userData, dictRes] = await Promise.all([
         fetchWithDiagnostic(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`, '카테고리'),
         fetchWithDiagnostic(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`, '카드'),
-        fetch(`https://api.blankd.top/api/get-balance?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()).catch(() => ({ balance: 0, activity_log: {}, claimed_rewards: {}, target_cycle: 30, font_size: 3 })),
+        fetch(`https://api.blankd.top/api/get-balance?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()).catch(() => ({ balance: 0, activity_log: {}, claimed_rewards: {} })),
         api.getGlobalDict(safeAddress).catch(() => ({ stopwords: [], inclusions: [], abbrs: {} }))
       ]);
 
@@ -463,9 +454,6 @@ function MainApp() {
       const localBalance = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
       const actualBalance = Math.max(serverBalance, localBalance);
       
-      if (userData.target_cycle) setTargetCycle(Number(userData.target_cycle));
-      if (userData.font_size) setFontSizeLevel(Number(userData.font_size));
-
       const serverActivityLog = userData.activity_log || {};
       const localActivityLog = JSON.parse(localStorage.getItem(`blankd_activity_log_${safeAddress}`) || '{}');
       const mergedActivity = { ...serverActivityLog };
@@ -798,7 +786,7 @@ function MainApp() {
 
       setIsMemoOpen(false);
       setIsFrozen(false); setHintLetter(null); 
-      setSelectedChosung(null); 
+      setSelectedChosung(null); // 카드 진입 시 초성 선택 초기화
 
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
@@ -976,7 +964,7 @@ function MainApp() {
     if (!isCorrect && globalDict.abbrs) {
       Object.entries(globalDict.abbrs).forEach(([k, v]) => {
         const strK = k.replace(/\s+/g, '').toLowerCase();
-        const strV = (v as string).replace(/\s+/g, '').toLowerCase();
+        const strV = v.replace(/\s+/g, '').toLowerCase();
         const orig = strK.length >= strV.length ? strK : strV;
         const short = strK.length < strV.length ? strK : strV;
         if (expected === orig && actual === short) { isCorrect = true; }
@@ -990,7 +978,7 @@ function MainApp() {
           return nb;
         });
         
-        setSelectedChosung(null); 
+        setSelectedChosung(null); // 💡 이동 시 초성 다시 리셋
         
         if (currentBlankIdx + 1 < blanks.length) {
             setCurrentBlankIdx(prevIdx => {
@@ -1055,7 +1043,7 @@ function MainApp() {
 
     setTimeout(() => {
       setBlanks(prev => { const nb = [...prev]; if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; return nb; });
-      setSelectedChosung(null); 
+      setSelectedChosung(null); // 💡 이동 시 초성 다시 리셋
       if (currentBlankIdx + 1 < blanks.length) {
           setCurrentBlankIdx(prevIdx => { const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx; });
           setInputStatus('idle');
@@ -1146,11 +1134,13 @@ function MainApp() {
     else if (titleLine.includes('[칙]') || titleLine.includes('[규]') || titleLine.includes('[규정]')) titleColor = "text-green-500";
     else if (titleLine.includes('[령]')) titleColor = "text-blue-400";
 
-    const titleSizes = ['text-[11px] sm:text-[12px]', 'text-[13px] sm:text-[14px]', 'text-[15px] sm:text-[16px]', 'text-[17px] sm:text-[18px]', 'text-[19px] sm:text-[22px]'];
-    const bodySizes  = ['text-[10px] sm:text-[11px]', 'text-[12px] sm:text-[13px]', 'text-[14px] sm:text-[16px]', 'text-[17px] sm:text-[19px]', 'text-[20px] sm:text-[23px]'];
-    const titleClass = titleSizes[fontSizeLevel - 1] || 'text-[15px] sm:text-[16px]';
-    const bodyClass  = bodySizes[fontSizeLevel - 1] || 'text-[14px] sm:text-[16px]';
+    // 💡 글자 크기 매핑 로직 (5단계 연동)
+    const titleSizes = ['text-[12px] sm:text-[14px]', 'text-[14px] sm:text-[16px]', 'text-[16px] sm:text-[18px]', 'text-[18px] sm:text-[20px]', 'text-[20px] sm:text-[24px]'];
+    const bodySizes = ['text-[13px] sm:text-[14px]', 'text-[15px] sm:text-[16px]', 'text-[17px] sm:text-[18px]', 'text-[19px] sm:text-[21px]', 'text-[22px] sm:text-[24px]'];
+    const titleClass = titleSizes[fontSizeLevel - 1] || 'text-[16px] sm:text-[18px]';
+    const bodyClass = bodySizes[fontSizeLevel - 1] || 'text-[17px] sm:text-[18px]';
 
+    // 💡 초성 그룹 매핑 엔진
     const chosungGroups = (() => {
        const groups: Record<string, string[]> = {};
        touchCandidates.forEach(ans => {
@@ -1204,7 +1194,7 @@ function MainApp() {
                   );
               }
             } else {
-              contentToRender.push(<span key={i} className="inline-block min-w-[40px] sm:min-w-[50px] h-4 sm:h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
+              contentToRender.push(<span key={i} className="inline-block min-w-[40px] sm:min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
             }
             bIdx++;
           } else { contentToRender.push(<span key={i}>{part}</span>); }
@@ -1219,6 +1209,7 @@ function MainApp() {
                   {displayTitle}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {/* 💡 5단계 폰트 조절 UI (모바일 호환) */}
                   <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
                      <span className="text-[9px] sm:text-[10px] text-white/40 font-bold">크기</span>
                      <button onClick={() => setFontSizeLevel(p => Math.max(1, p - 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">-</button>
@@ -1231,6 +1222,7 @@ function MainApp() {
                   <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
                 </div>
             </div>
+            {/* 💡 본문 크기가 조절기(fontSizeLevel)에 따라 유기적으로 반응합니다. */}
             <div className={`whitespace-pre-wrap leading-relaxed ${bodyClass} font-serif break-all break-words w-full max-w-full text-white/90`}>
                 {contentToRender}
             </div>
@@ -1249,6 +1241,7 @@ function MainApp() {
         </div>
 
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-3 z-30 flex flex-col gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
+            {/* 💡 2단계 초성 선택 터치 모드 UI */}
             {inputMode === 'touch' && touchCandidates.length > 0 && (
               <div className="flex flex-col gap-2 w-full max-h-[30vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[11px] text-teal-400 mb-1 font-bold flex items-center justify-between">
@@ -1332,7 +1325,7 @@ function MainApp() {
     return (
       <>
         <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
-          <DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} activityLog={activityLog} claimedRewards={claimedRewards} setClaimedRewards={setClaimedRewards} safeAddress={safeAddress} loadAllData={loadAllData} isOffline={isOffline} targetCycle={targetCycle} setTargetCycle={setTargetCycle} />
+          <DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} activityLog={activityLog} claimedRewards={claimedRewards} setClaimedRewards={setClaimedRewards} safeAddress={safeAddress} loadAllData={loadAllData} isOffline={isOffline} />
         </div>
         <div className={activeTab === 'create' ? 'block' : 'hidden'}>
           <CraftTab categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} expandedId={expandedId} setExpandedId={setExpandedId} handleDeleteCategory={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} globalDict={globalDict} saveGlobalDict={saveGlobalDict} />
@@ -1351,7 +1344,7 @@ function MainApp() {
         </div>
       </>
     );
-  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, zkLogin, studyMode, setStudyMode, globalDict, theme, goalBalance, activityLog, claimedRewards, isOffline, targetCycle]);
+  }, [activeTab, categories, savedCards, colCount, viewMode, useAiRecommend, safeAddress, lawFile, expandedId, enokiFlow, zkLogin, studyMode, setStudyMode, globalDict, theme, goalBalance, activityLog, claimedRewards, isOffline]);
 
   const renderDictionaryUI = (isMobile: boolean) => (
     <div className={`flex flex-col w-full h-full ${isMobile ? 'bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 rounded-sm' : 'bg-[#08080a]/80 border border-white/10 p-5 rounded-sm shadow-xl backdrop-blur-sm'}`}>
@@ -1484,7 +1477,7 @@ function MainApp() {
       `;
     }
     return `body { background-color: #0d0d0f; }`; 
-  }
+  };
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
