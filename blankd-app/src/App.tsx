@@ -11,13 +11,36 @@ import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 import { RecordTab } from "./tabs/RecordTab";
 
-const getKoreanDateString = () => {
+// 💡 렌더링 에러 차단을 위해 클래스/함수 호이스팅 강제 적용
+class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
+  constructor(props: any) { 
+    super(props); 
+    this.state = { hasError: false, errorMessage: "" }; 
+  }
+  static getDerivedStateFromError(error: any) { 
+    return { hasError: true, errorMessage: error.message }; 
+  }
+  componentDidCatch(error: any, errorInfo: any) { 
+    this.props.fallbackLog(`🚨 렌더링 예외 발생: ${error.message}`); 
+  }
+  render() {
+    if (this.state.hasError) return (
+      <div className="p-6 text-red-400 font-mono border border-red-500/30 bg-red-900/10 rounded-sm shadow-xl">
+        <h3 className="text-lg font-bold mb-2">🔥 화면 렌더링 복구 활성화</h3>
+        <p className="text-sm opacity-80">{this.state.errorMessage}</p>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
+function getKoreanDateString() {
   const kstTime = Date.now() + (9 * 60 * 60 * 1000);
   return new Date(kstTime).toISOString().split('T')[0];
-};
+}
 
 const CHO_HANGUL = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'];
-const getChosung = (str: string) => {
+function getChosung(str: string) {
   if (!str) return '기타';
   const code = str.charCodeAt(0) - 0xAC00;
   if (code > -1 && code < 11172) {
@@ -26,9 +49,9 @@ const getChosung = (str: string) => {
   if (/[a-zA-Z]/.test(str[0])) return str[0].toUpperCase();
   if (/[0-9]/.test(str[0])) return '숫자';
   return '기타';
-};
+}
 
-const autoApplyDictHelper = (content: string, dict: any) => {
+function autoApplyDictHelper(content: string, dict: any) {
   try {
     if (!dict) return content;
     let fixedContent = content.replace(/\[ORIG_ID:(\d+)\]/g, '[[ORIG_ID:$1]]');
@@ -76,9 +99,9 @@ const autoApplyDictHelper = (content: string, dict: any) => {
   } catch (err: any) {
     return content;
   }
-};
+}
 
-const getExtendedStats = (memoStr: string) => {
+function getExtendedStats(memoStr: string) {
   try {
     if (memoStr && memoStr.trim().startsWith('{')) {
       const p = JSON.parse(memoStr || '{}');
@@ -96,15 +119,35 @@ const getExtendedStats = (memoStr: string) => {
   } catch(e) {
     return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [] };
   }
-};
+}
 
-const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict, hintLetter }: {
+function pushToQueue(type: 'MEMO' | 'ANSWER', payload: any) {
+  try {
+    const targetId = payload.id || payload.card_id;
+    if (typeof targetId === 'string' && targetId.startsWith('temp_')) return; 
+    if (!targetId || isNaN(parseInt(targetId as string, 10))) return;
+
+    const qStr = localStorage.getItem('blankd_sync_queue');
+    const q = qStr ? JSON.parse(qStr) : { memos: [], answers: [] };
+    if (type === 'MEMO') {
+      q.memos = q.memos.filter((m: any) => m.id !== payload.id); 
+      q.memos.push(payload);
+    } else if (type === 'ANSWER') {
+      q.answers.push(payload);
+    }
+    localStorage.setItem('blankd_sync_queue', JSON.stringify(q));
+  } catch (e) { 
+    console.error("동기화 가상 큐 적재 실패:", e); 
+  }
+}
+
+function InlineBlankInputComponent({ inputStatus, onSubmit, expected, abbrDict, hintLetter }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
   expected: string; 
   abbrDict: Record<string, string>;
   hintLetter?: string | null;
-}) => {
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const validAnswers = useMemo(() => {
@@ -122,6 +165,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
       return answers;
   }, [expected, abbrDict]);
 
+  // 💡 포커스 유실을 방어하여 모바일 키보드 덜컹거림 완벽 차단
   useEffect(() => {
     if (inputStatus === 'idle' && inputRef.current) {
         const timer = setTimeout(() => {
@@ -163,6 +207,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
             const el = e.target as HTMLInputElement;
             const newVal = el.value;
             el.value = '';
+            // 💡 빈칸일 때 엔터를 치면 오답 스킵(Pass) 처리되도록 제출 허용
             onSubmit(newVal);
         }
     };
@@ -192,54 +237,14 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
       style={{ width: `${Math.max(expected.length * 1.2, 3)}em`, maxWidth: '100%' }}
     />
   );
-}, (prevProps, nextProps) => {
+}
+
+const InlineBlankInput = React.memo(InlineBlankInputComponent, (prevProps, nextProps) => {
   return prevProps.inputStatus === nextProps.inputStatus && 
          prevProps.expected === nextProps.expected && 
          prevProps.abbrDict === nextProps.abbrDict && 
          prevProps.hintLetter === nextProps.hintLetter;
 });
-
-class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
-  constructor(props: any) { 
-    super(props); 
-    this.state = { hasError: false, errorMessage: "" }; 
-  }
-  static getDerivedStateFromError(error: any) { 
-    return { hasError: true, errorMessage: error.message }; 
-  }
-  componentDidCatch(error: any, errorInfo: any) { 
-    this.props.fallbackLog(`🚨 렌더링 예외 발생: ${error.message}`); 
-  }
-  render() {
-    if (this.state.hasError) return (
-      <div className="p-6 text-red-400 font-mono border border-red-500/30 bg-red-900/10 rounded-sm shadow-xl">
-        <h3 className="text-lg font-bold mb-2">🔥 화면 렌더링 복구 활성화</h3>
-        <p className="text-sm opacity-80">{this.state.errorMessage}</p>
-      </div>
-    );
-    return this.props.children;
-  }
-}
-
-const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
-  try {
-    const targetId = payload.id || payload.card_id;
-    if (typeof targetId === 'string' && targetId.startsWith('temp_')) return; 
-    if (!targetId || isNaN(parseInt(targetId as string, 10))) return;
-
-    const qStr = localStorage.getItem('blankd_sync_queue');
-    const q = qStr ? JSON.parse(qStr) : { memos: [], answers: [] };
-    if (type === 'MEMO') {
-      q.memos = q.memos.filter((m: any) => m.id !== payload.id); 
-      q.memos.push(payload);
-    } else if (type === 'ANSWER') {
-      q.answers.push(payload);
-    }
-    localStorage.setItem('blankd_sync_queue', JSON.stringify(q));
-  } catch (e) { 
-    console.error("동기화 가상 큐 적재 실패:", e); 
-  }
-};
 
 function MainApp() {
   const enokiFlow = useEnokiFlow();
@@ -276,7 +281,6 @@ function MainApp() {
   const [theme, setTheme] = useState(() => localStorage.getItem('blankd_theme') || 'black');
   useEffect(() => { localStorage.setItem('blankd_theme', theme); }, [theme]);
   
-  // 💡 [핵심] 서버-클라이언트 간 설정 동기화를 위한 전역 마스터 주기 & 폰트 크기 상태
   const [targetCycle, setTargetCycle] = useState<number>(() => {
     return parseInt(localStorage.getItem(`blankd_target_cycle_${safeAddress}`) || '30', 10);
   });
@@ -469,7 +473,6 @@ function MainApp() {
       const localBalance = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
       const actualBalance = Math.max(serverBalance, localBalance);
       
-      // 💡 [핵심] 서버에서 내려준 주기 & 폰트 크기로 전역 동기화
       if (userData.target_cycle) setTargetCycle(Number(userData.target_cycle));
       if (userData.font_size) setFontSizeLevel(Number(userData.font_size));
 
@@ -1034,6 +1037,7 @@ function MainApp() {
           finishCard();
         }, 100);
       } else {
+        // 💡 오답 시 빨간색 유지 후 스킵
         setTimeout(advanceToNext, 600);
       }
     }
@@ -1153,7 +1157,6 @@ function MainApp() {
     else if (titleLine.includes('[칙]') || titleLine.includes('[규]') || titleLine.includes('[규정]')) titleColor = "text-green-500";
     else if (titleLine.includes('[령]')) titleColor = "text-blue-400";
 
-    // 💡 [크기 개편] 1단계 크기를 최소 10px~11px까지 극단적으로 줄여서 더 작게 볼 수 있도록 변경
     const titleSizes = ['text-[11px] sm:text-[12px]', 'text-[13px] sm:text-[14px]', 'text-[15px] sm:text-[16px]', 'text-[17px] sm:text-[18px]', 'text-[19px] sm:text-[22px]'];
     const bodySizes  = ['text-[10px] sm:text-[11px]', 'text-[12px] sm:text-[13px]', 'text-[14px] sm:text-[16px]', 'text-[17px] sm:text-[19px]', 'text-[20px] sm:text-[23px]'];
     const titleClass = titleSizes[fontSizeLevel - 1] || 'text-[15px] sm:text-[16px]';
