@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { parseCardStats } from '../utils/constants';
 
-const safeParseStats = (memoStr: string) => {
+function safeParseStats(memoStr: string) {
     try {
         if (memoStr && memoStr.trim().startsWith('{')) {
             const p = JSON.parse(memoStr);
@@ -9,29 +9,29 @@ const safeParseStats = (memoStr: string) => {
         }
     } catch(e) {}
     return parseCardStats(memoStr);
-};
+}
 
-const getKSTDateString = () => {
+function getKSTDateString() {
   const kstTime = Date.now() + (9 * 60 * 60 * 1000);
   return new Date(kstTime).toISOString().split('T')[0];
-};
+}
 
-const getKSTInfo = () => {
+function getKSTInfo() {
   const kstTime = Date.now() + (9 * 60 * 60 * 1000);
   const kstDate = new Date(kstTime);
   return {
       year: kstDate.getUTCFullYear(),
       month: kstDate.getUTCMonth()
   };
-};
+}
 
-export const DashboardTab = ({ 
+export function DashboardTab({ 
   categories, savedCards, setActiveTab, setExpandedId, setActiveCard, 
   goalBalance, handleUpdateBalance, 
   activityLog, claimedRewards, setClaimedRewards, safeAddress,
   loadAllData, isOffline,
-  targetCycle, setTargetCycle // 💡 App.tsx에서 전달받는 전역 상태
-}: any) => {
+  targetCycle, setTargetCycle 
+}: any) {
   const kstNow = getKSTInfo();
   const [calYear, setCalYear] = useState(kstNow.year);
   const [calMonth, setCalMonth] = useState(kstNow.month);
@@ -61,7 +61,6 @@ export const DashboardTab = ({
 
   const todayStr = getKSTDateString();
 
-  // 💡 [핵심] 300P 지불하여 마스터 주기 변경
   const handleStartEditCycle = () => {
     if (goalBalance < 300) {
       alert('🚨 포인트가 부족합니다. 마스터 주기를 변경하려면 300 P가 필요합니다!');
@@ -80,7 +79,6 @@ export const DashboardTab = ({
     setTargetCycle(finalVal);
     setIsEditingCycle(false);
     
-    // 서버에 즉시 동기화
     if (!isOffline && safeAddress && navigator.onLine) {
       fetch("https://api.blankd.top/api/update-balance", {
         method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
@@ -318,4 +316,4 @@ export const DashboardTab = ({
       </div>
     </div>
   );
-};
+}
