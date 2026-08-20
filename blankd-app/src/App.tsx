@@ -11,7 +11,9 @@ import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 import { RecordTab } from "./tabs/RecordTab";
 
-// 💡 렌더링 에러 차단을 위해 클래스/함수 호이스팅 강제 적용
+// 💡 Vite 빌드 압축(Minification) 시 발생하는 TDZ 에러를 원천 차단하기 위해
+// 모든 최상위 함수들을 const가 아닌 일반 function으로 선언하여 강제 호이스팅시킵니다.
+
 class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
   constructor(props: any) { 
     super(props); 
@@ -141,13 +143,8 @@ function pushToQueue(type: 'MEMO' | 'ANSWER', payload: any) {
   }
 }
 
-function InlineBlankInputComponent({ inputStatus, onSubmit, expected, abbrDict, hintLetter }: {
-  inputStatus: string;
-  onSubmit: (val: string) => void;
-  expected: string; 
-  abbrDict: Record<string, string>;
-  hintLetter?: string | null;
-}) {
+// 💡 React.memo를 제거하고 일반 함수로 선언하여 Vite의 압축 버그를 회피합니다.
+function InlineBlankInput({ inputStatus, onSubmit, expected, abbrDict, hintLetter }: any) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const validAnswers = useMemo(() => {
@@ -156,7 +153,7 @@ function InlineBlankInputComponent({ inputStatus, onSubmit, expected, abbrDict, 
       if (abbrDict) {
           Object.entries(abbrDict).forEach(([k, v]) => {
               const strK = k.replace(/\s+/g, '').toLowerCase();
-              const strV = v.replace(/\s+/g, '').toLowerCase();
+              const strV = (v as string).replace(/\s+/g, '').toLowerCase();
               const orig = strK.length >= strV.length ? strK : strV;
               const short = strK.length < strV.length ? strK : strV;
               if (expectedClean === orig) answers.push(short);
@@ -165,7 +162,6 @@ function InlineBlankInputComponent({ inputStatus, onSubmit, expected, abbrDict, 
       return answers;
   }, [expected, abbrDict]);
 
-  // 💡 포커스 유실을 방어하여 모바일 키보드 덜컹거림 완벽 차단
   useEffect(() => {
     if (inputStatus === 'idle' && inputRef.current) {
         const timer = setTimeout(() => {
@@ -207,7 +203,7 @@ function InlineBlankInputComponent({ inputStatus, onSubmit, expected, abbrDict, 
             const el = e.target as HTMLInputElement;
             const newVal = el.value;
             el.value = '';
-            // 💡 빈칸일 때 엔터를 치면 오답 스킵(Pass) 처리되도록 제출 허용
+            // 💡 아무것도 입력하지 않고 엔터 쳐도 스킵(오답) 처리되게 제출!
             onSubmit(newVal);
         }
     };
@@ -238,13 +234,6 @@ function InlineBlankInputComponent({ inputStatus, onSubmit, expected, abbrDict, 
     />
   );
 }
-
-const InlineBlankInput = React.memo(InlineBlankInputComponent, (prevProps, nextProps) => {
-  return prevProps.inputStatus === nextProps.inputStatus && 
-         prevProps.expected === nextProps.expected && 
-         prevProps.abbrDict === nextProps.abbrDict && 
-         prevProps.hintLetter === nextProps.hintLetter;
-});
 
 function MainApp() {
   const enokiFlow = useEnokiFlow();
@@ -312,6 +301,7 @@ function MainApp() {
 
   const mistakeCountRef = useRef(0);
   const [leftLives, setLeftLives] = useState(0);
+  // 💡 기본 모드: 타이핑 모드
   const [inputMode, setInputMode] = useState<'typing'|'touch'>('typing'); 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   const [selectedChosung, setSelectedChosung] = useState<string | null>(null);
@@ -986,7 +976,7 @@ function MainApp() {
     if (!isCorrect && globalDict.abbrs) {
       Object.entries(globalDict.abbrs).forEach(([k, v]) => {
         const strK = k.replace(/\s+/g, '').toLowerCase();
-        const strV = v.replace(/\s+/g, '').toLowerCase();
+        const strV = (v as string).replace(/\s+/g, '').toLowerCase();
         const orig = strK.length >= strV.length ? strK : strV;
         const short = strK.length < strV.length ? strK : strV;
         if (expected === orig && actual === short) { isCorrect = true; }
@@ -1037,7 +1027,6 @@ function MainApp() {
           finishCard();
         }, 100);
       } else {
-        // 💡 오답 시 빨간색 유지 후 스킵
         setTimeout(advanceToNext, 600);
       }
     }
@@ -1495,7 +1484,7 @@ function MainApp() {
       `;
     }
     return `body { background-color: #0d0d0f; }`; 
-  };
+  }
 
   return (
     <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
