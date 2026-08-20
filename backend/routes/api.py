@@ -1621,9 +1621,6 @@ def get_ranking():
         traceback.print_exc()
         return jsonify({"error": "랭킹 조회 실패", "details": str(e)}), 500
 
-# ==========================================
-# 💡 포인트, 활동 로그 및 사용자 커스텀 설정(주기, 폰트크기) 통합 동기화 API
-# ==========================================
 @api_bp.route('/update-balance', methods=['POST', 'OPTIONS'])
 def update_balance():
     if request.method == 'OPTIONS': return jsonify({}), 200
@@ -1636,19 +1633,14 @@ def update_balance():
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # 💡 안전장치: 컬럼 누락 방지 자동 생성
         try: cursor.execute("ALTER TABLE user_settings ADD COLUMN goal_balance INTEGER DEFAULT 0")
         except: pass
         try: cursor.execute("ALTER TABLE user_settings ADD COLUMN activity_log TEXT DEFAULT '{}'")
         except: pass
         try: cursor.execute("ALTER TABLE user_settings ADD COLUMN claimed_rewards TEXT DEFAULT '{}'")
         except: pass
-        try: cursor.execute("ALTER TABLE user_settings ADD COLUMN target_cycle INTEGER DEFAULT 30")
-        except: pass
-        try: cursor.execute("ALTER TABLE user_settings ADD COLUMN font_size INTEGER DEFAULT 3")
-        except: pass
         
-        cursor.execute("SELECT goal_balance, activity_log, claimed_rewards, target_cycle, font_size FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+        cursor.execute("SELECT goal_balance, activity_log, claimed_rewards FROM user_settings WHERE wallet_address = ?", (wallet_address,))
         row = cursor.fetchone()
         
         if row:
@@ -1657,8 +1649,7 @@ def update_balance():
             
             updates, params = [], []
             
-            # 포인트 차감(주기 변경)도 반영할 수 있도록 incoming이 None이 아니면 갱신
-            if incoming_bal is not None:
+            if incoming_bal is not None and incoming_bal > db_bal:
                 updates.append("goal_balance = ?")
                 params.append(incoming_bal)
                 
@@ -1670,20 +1661,12 @@ def update_balance():
                 updates.append("claimed_rewards = ?")
                 params.append(json.dumps(data.get('claimed_rewards')))
                 
-            if data.get('target_cycle') is not None:
-                updates.append("target_cycle = ?")
-                params.append(int(data.get('target_cycle')))
-                
-            if data.get('font_size') is not None:
-                updates.append("font_size = ?")
-                params.append(int(data.get('font_size')))
-                
             if updates:
                 params.append(wallet_address)
                 cursor.execute(f"UPDATE user_settings SET {', '.join(updates)} WHERE wallet_address = ?", params)
         else:
-            cursor.execute("INSERT INTO user_settings (wallet_address, goal_balance, activity_log, claimed_rewards, target_cycle, font_size) VALUES (?, ?, ?, ?, ?, ?)", 
-                (wallet_address, data.get('balance') or 0, json.dumps(data.get('activity_log') or {}), json.dumps(data.get('claimed_rewards') or {}), int(data.get('target_cycle') or 30), int(data.get('font_size') or 3)))
+            cursor.execute("INSERT INTO user_settings (wallet_address, goal_balance, activity_log, claimed_rewards) VALUES (?, ?, ?, ?)", 
+                (wallet_address, data.get('balance') or 0, json.dumps(data.get('activity_log') or {}), json.dumps(data.get('claimed_rewards') or {})))
             
         conn.commit()
         conn.close()
@@ -1700,17 +1683,15 @@ def get_balance():
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         try:
-            cursor.execute("SELECT goal_balance, activity_log, claimed_rewards, target_cycle, font_size FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+            cursor.execute("SELECT goal_balance, activity_log, claimed_rewards FROM user_settings WHERE wallet_address = ?", (wallet_address,))
             row = cursor.fetchone()
             balance = row['goal_balance'] if row and row['goal_balance'] is not None else 0
             activity_log = json.loads(row['activity_log']) if row and row['activity_log'] else {}
             claimed_rewards = json.loads(row['claimed_rewards']) if row and row['claimed_rewards'] else {}
-            target_cycle = row['target_cycle'] if row and row['target_cycle'] is not None else 30
-            font_size = row['font_size'] if row and row['font_size'] is not None else 3
         except:
-            balance, activity_log, claimed_rewards, target_cycle, font_size = 0, {}, {}, 30, 3
+            balance, activity_log, claimed_rewards = 0, {}, {}
         conn.close()
-        return jsonify({"balance": balance, "activity_log": activity_log, "claimed_rewards": claimed_rewards, "target_cycle": target_cycle, "font_size": font_size}), 200
+        return jsonify({"balance": balance, "activity_log": activity_log, "claimed_rewards": claimed_rewards}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
