@@ -11,12 +11,38 @@ import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 import { RecordTab } from "./tabs/RecordTab";
 
+// 🚨 [진단용 최상위 에러 추적기] 화면이 하얗게 죽는 것을 막고 원인을 텍스트로 출력합니다.
+class GlobalErrorBoundary extends Component<{children: ReactNode}, {hasError: boolean, error: any, errorInfo: any}> {
+  constructor(props: any) { 
+    super(props); 
+    this.state = { hasError: false, error: null, errorInfo: null }; 
+  }
+  static getDerivedStateFromError(error: any) { 
+    return { hasError: true, error }; 
+  }
+  componentDidCatch(error: any, errorInfo: any) { 
+    this.setState({ errorInfo });
+    console.error("🚨 글로벌 에러 포착:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) return (
+      <div className="p-6 bg-red-950 text-white min-h-screen">
+        <h1 className="text-xl font-bold mb-4 text-red-400">🚨 치명적 렌더링 오류 발생 (White Screen 차단)</h1>
+        <p className="mb-4 text-sm opacity-80">아래 에러 메시지를 복사해서 개발자에게 전달해 주세요.</p>
+        <pre className="text-xs bg-black p-4 overflow-auto border border-red-500/30 text-red-200">{String(this.state.error)}</pre>
+        <pre className="text-xs bg-black p-4 mt-4 overflow-auto border border-red-500/30 text-white/60">{this.state.errorInfo?.componentStack}</pre>
+        <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="mt-6 px-4 py-2 bg-white text-black font-bold rounded">캐시 초기화 및 새로고침</button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
 const getKoreanDateString = () => {
   const kstTime = Date.now() + (9 * 60 * 60 * 1000);
   return new Date(kstTime).toISOString().split('T')[0];
 };
 
-// 💡 초성 추출 엔진 추가
 const CHO_HANGUL = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'];
 const getChosung = (str: string) => {
   if (!str) return '기타';
@@ -96,6 +122,26 @@ const getExtendedStats = (memoStr: string) => {
     return { text: old.text || "", filled: old.filled || 0, wrongIndices: old.wrongIndices || [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [] };
   } catch(e) {
     return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [] };
+  }
+};
+
+const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
+  try {
+    const targetId = payload.id || payload.card_id;
+    if (typeof targetId === 'string' && targetId.startsWith('temp_')) return; 
+    if (!targetId || isNaN(parseInt(targetId as string, 10))) return;
+
+    const qStr = localStorage.getItem('blankd_sync_queue');
+    const q = qStr ? JSON.parse(qStr) : { memos: [], answers: [] };
+    if (type === 'MEMO') {
+      q.memos = q.memos.filter((m: any) => m.id !== payload.id); 
+      q.memos.push(payload);
+    } else if (type === 'ANSWER') {
+      q.answers.push(payload);
+    }
+    localStorage.setItem('blankd_sync_queue', JSON.stringify(q));
+  } catch (e) { 
+    console.error("동기화 가상 큐 적재 실패:", e); 
   }
 };
 
@@ -200,48 +246,6 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
          prevProps.hintLetter === nextProps.hintLetter;
 });
 
-class ErrorBoundary extends Component<{children: ReactNode, fallbackLog: (msg: string) => void}, {hasError: boolean, errorMessage: string}> {
-  constructor(props: any) { 
-    super(props); 
-    this.state = { hasError: false, errorMessage: "" }; 
-  }
-  static getDerivedStateFromError(error: any) { 
-    return { hasError: true, errorMessage: error.message }; 
-  }
-  componentDidCatch(error: any, errorInfo: any) { 
-    this.props.fallbackLog(`🚨 렌더링 예외 발생: ${error.message}`); 
-  }
-  render() {
-    if (this.state.hasError) return (
-      <div className="p-6 text-red-400 font-mono border border-red-500/30 bg-red-900/10 rounded-sm shadow-xl">
-        <h3 className="text-lg font-bold mb-2">🔥 화면 렌더링 복구 활성화</h3>
-        <p className="text-sm opacity-80">{this.state.errorMessage}</p>
-      </div>
-    );
-    return this.props.children;
-  }
-}
-
-const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
-  try {
-    const targetId = payload.id || payload.card_id;
-    if (typeof targetId === 'string' && targetId.startsWith('temp_')) return; 
-    if (!targetId || isNaN(parseInt(targetId as string, 10))) return;
-
-    const qStr = localStorage.getItem('blankd_sync_queue');
-    const q = qStr ? JSON.parse(qStr) : { memos: [], answers: [] };
-    if (type === 'MEMO') {
-      q.memos = q.memos.filter((m: any) => m.id !== payload.id); 
-      q.memos.push(payload);
-    } else if (type === 'ANSWER') {
-      q.answers.push(payload);
-    }
-    localStorage.setItem('blankd_sync_queue', JSON.stringify(q));
-  } catch (e) { 
-    console.error("동기화 가상 큐 적재 실패:", e); 
-  }
-};
-
 function MainApp() {
   const enokiFlow = useEnokiFlow();
   const zkLogin = useZkLogin();
@@ -277,7 +281,6 @@ function MainApp() {
   const [theme, setTheme] = useState(() => localStorage.getItem('blankd_theme') || 'black');
   useEffect(() => { localStorage.setItem('blankd_theme', theme); }, [theme]);
   
-  // 💡 글자 크기 조절 상태 (1~5단계, 기본값 3)
   const [fontSizeLevel, setFontSizeLevel] = useState<number>(() => parseInt(localStorage.getItem('blankd_font_size') || '3'));
   useEffect(() => { localStorage.setItem('blankd_font_size', fontSizeLevel.toString()); }, [fontSizeLevel]);
   
@@ -289,13 +292,10 @@ function MainApp() {
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
 
-  const mistakeCountRef = useRef(0);
-  const [leftLives, setLeftLives] = useState(0);
+  const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const [inputMode, setInputMode] = useState<'typing'|'touch'>('typing'); 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   
-  // 💡 터치 모드: 현재 선택된 초성 상태
-  const [selectedChosung, setSelectedChosung] = useState<string | null>(null);
   const isProcessingRef = useRef(false);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
@@ -319,6 +319,45 @@ function MainApp() {
 
   const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  // 💡 초성 계산기 캐싱
+  const chosungGroups = useMemo(() => {
+    const groups: Record<string, string[]> = {};
+    touchCandidates.forEach(ans => {
+        const cho = getChosung(ans);
+        if (!groups[cho]) groups[cho] = [];
+        if (!groups[cho].includes(ans)) groups[cho].push(ans);
+    });
+    return groups;
+  }, [touchCandidates]);
+
+  // 💡 [핵심기능] 정답과 같은 초성의 단어들만 즉시 추출
+  const activeTouchCandidates = useMemo(() => {
+    if (!blanks[currentBlankIdx]) return [];
+    const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '');
+    const targetCho = getChosung(expected);
+    return chosungGroups[targetCho] || [];
+  }, [currentBlankIdx, blanks, chosungGroups]);
+
+  // 💡 1~9 단축키 연동 (스피드런 지원)
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (inputMode !== 'touch' || !activeCard) return;
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+
+      const keyNum = parseInt(e.key, 10);
+      if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= 9) {
+          e.preventDefault();
+          const idx = keyNum - 1;
+          if (activeTouchCandidates[idx]) {
+             handleSequentialInput(activeTouchCandidates[idx]);
+          }
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [inputMode, activeCard, activeTouchCandidates, blanks, currentBlankIdx, inputStatus]);
+
 
   useEffect(() => {
     const handleOnline = () => {
@@ -565,7 +604,6 @@ function MainApp() {
     });
   };
 
-  const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
 
   const [expandedId, setExpandedId] = useState<number | null>(() => {
@@ -780,13 +818,8 @@ function MainApp() {
 
       const stats = getExtendedStats(activeCard.memo); 
       
-      mistakeCountRef.current = 0;
-      const maxMistakes = Math.max(0, foundBlanks.length - stats.filled);
-      setLeftLives(maxMistakes); 
-
       setIsMemoOpen(false);
       setIsFrozen(false); setHintLetter(null); 
-      setSelectedChosung(null); // 카드 진입 시 초성 선택 초기화
 
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
@@ -952,11 +985,35 @@ function MainApp() {
     flushQueue();
   };
 
+  // 💡 정답 후 강제로 다음 칸/조항으로 넘어가는 헬퍼 함수
+  const forceAdvance = () => {
+    setBlanks(prev => {
+      const nb = [...prev];
+      if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true;
+      return nb;
+    });
+    
+    if (currentBlankIdx + 1 < blanks.length) {
+        setCurrentBlankIdx(prevIdx => {
+          const nextIdx = prevIdx + 1;
+          localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
+          return nextIdx;
+        });
+        setInputStatus('idle');
+        isProcessingRef.current = false;
+    } else {
+        localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+        setInputStatus('idle');
+        isProcessingRef.current = false;
+        finishCard();
+    }
+  };
+
   const handleSequentialInput = (overrideInput?: string | any) => {
     if (isProcessingRef.current) return; 
-    if (inputStatus === 'correct' || inputStatus === 'wrong' || !blanks[currentBlankIdx]) return;
-    
-    isProcessingRef.current = true; 
+    if (inputStatus === 'correct' || !blanks[currentBlankIdx]) return;
+    if (inputStatus === 'wrong') return; // 이미 오답 대기 중복 클릭 방지
+
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
     let isCorrect = (expected === actual);
@@ -964,58 +1021,32 @@ function MainApp() {
     if (!isCorrect && globalDict.abbrs) {
       Object.entries(globalDict.abbrs).forEach(([k, v]) => {
         const strK = k.replace(/\s+/g, '').toLowerCase();
-        const strV = v.replace(/\s+/g, '').toLowerCase();
+        const strV = (v as string).replace(/\s+/g, '').toLowerCase();
         const orig = strK.length >= strV.length ? strK : strV;
         const short = strK.length < strV.length ? strK : strV;
         if (expected === orig && actual === short) { isCorrect = true; }
       });
     }
 
-    const advanceToNext = () => {
-        setBlanks(prev => {
-          const nb = [...prev];
-          if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true;
-          return nb;
-        });
-        
-        setSelectedChosung(null); // 💡 이동 시 초성 다시 리셋
-        
-        if (currentBlankIdx + 1 < blanks.length) {
-            setCurrentBlankIdx(prevIdx => {
-              const nextIdx = prevIdx + 1;
-              localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
-              return nextIdx;
-            });
-            setInputStatus('idle');
-            isProcessingRef.current = false;
-        } else {
-            localStorage.removeItem(`blankd_progress_${activeCard.id}`);
-            setInputStatus('idle');
-            isProcessingRef.current = false;
-            finishCard();
-        }
-    };
-
     if (isCorrect) {
+      isProcessingRef.current = true; 
       setInputStatus('correct');
       statsRef.current.wrongIndices.delete(currentBlankIdx);
-      setTimeout(advanceToNext, 150); 
+      setTimeout(forceAdvance, 150); 
     } else { 
+      isProcessingRef.current = true; 
       setInputStatus('wrong'); 
       statsRef.current.wrongIndices.add(currentBlankIdx); 
+      
+      // 💡 [기능 1] 오답 시 10 포인트 차감 적용
+      handleUpdateBalance(-10);
+      addLog(`❌ 오답! (-10P)`);
 
-      mistakeCountRef.current += 1;
-      const maxMistakes = Math.max(0, blanks.length - statsRef.current.filled);
-      setLeftLives(Math.max(0, maxMistakes - mistakeCountRef.current));
-
-      if (mistakeCountRef.current > maxMistakes) {
-        setTimeout(() => {
-          alert(`🚨 허용된 오답 기회(${maxMistakes}회)를 모두 소진했습니다!`);
-          isProcessingRef.current = false;
-          finishCard();
-        }, 100);
+      if (currentBlankIdx + 1 < blanks.length) {
+          setTimeout(forceAdvance, 600); 
       } else {
-        setTimeout(advanceToNext, 600);
+          // 💡 [기능 2] 마지막 빈칸에서 틀렸을 때는 '다음' 버튼 대기를 위해 자동 이동 중단
+          isProcessingRef.current = false; 
       }
     }
   };
@@ -1023,38 +1054,22 @@ function MainApp() {
   const handleShowAnswer = () => {
     if (isProcessingRef.current) return;
     if (!blanks[currentBlankIdx]) return;
-    
+    if (inputStatus === 'wrong') return; 
+
     isProcessingRef.current = true;
     setInputStatus('wrong'); 
     statsRef.current.wrongIndices.add(currentBlankIdx);
 
-    mistakeCountRef.current += 1;
-    const maxMistakes = Math.max(0, blanks.length - statsRef.current.filled);
-    setLeftLives(Math.max(0, maxMistakes - mistakeCountRef.current));
+    // 💡 [기능 1] 정답 보기(스킵) 시에도 10 포인트 차감 적용
+    handleUpdateBalance(-10);
+    addLog(`❌ 정답 확인 (-10P)`);
 
-    if (mistakeCountRef.current > maxMistakes) {
-      setTimeout(() => {
-        alert(`🚨 허용된 오답 기회(${maxMistakes}회)를 모두 소진했습니다!`);
+    if (currentBlankIdx + 1 < blanks.length) {
+        setTimeout(forceAdvance, 800);
+    } else {
+        // 💡 [기능 2] 마지막 빈칸에서 스킵할 때도 '다음' 버튼 대기를 위해 자동 이동 중단
         isProcessingRef.current = false;
-        finishCard();
-      }, 100);
-      return;
     }
-
-    setTimeout(() => {
-      setBlanks(prev => { const nb = [...prev]; if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true; return nb; });
-      setSelectedChosung(null); // 💡 이동 시 초성 다시 리셋
-      if (currentBlankIdx + 1 < blanks.length) {
-          setCurrentBlankIdx(prevIdx => { const nextIdx = prevIdx + 1; localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString()); return nextIdx; });
-          setInputStatus('idle');
-          isProcessingRef.current = false;
-      } else {
-          localStorage.removeItem(`blankd_progress_${activeCard.id}`);
-          setInputStatus('idle');
-          isProcessingRef.current = false;
-          finishCard();
-      }
-    }, 800);
   };
 
   const toggleVoiceRecognition = () => {
@@ -1134,28 +1149,10 @@ function MainApp() {
     else if (titleLine.includes('[칙]') || titleLine.includes('[규]') || titleLine.includes('[규정]')) titleColor = "text-green-500";
     else if (titleLine.includes('[령]')) titleColor = "text-blue-400";
 
-    // 💡 글자 크기 매핑 로직 (5단계 연동)
-    const titleSizes = ['text-[12px] sm:text-[14px]', 'text-[14px] sm:text-[16px]', 'text-[16px] sm:text-[18px]', 'text-[18px] sm:text-[20px]', 'text-[20px] sm:text-[24px]'];
-    const bodySizes = ['text-[13px] sm:text-[14px]', 'text-[15px] sm:text-[16px]', 'text-[17px] sm:text-[18px]', 'text-[19px] sm:text-[21px]', 'text-[22px] sm:text-[24px]'];
-    const titleClass = titleSizes[fontSizeLevel - 1] || 'text-[16px] sm:text-[18px]';
-    const bodyClass = bodySizes[fontSizeLevel - 1] || 'text-[17px] sm:text-[18px]';
-
-    // 💡 초성 그룹 매핑 엔진
-    const chosungGroups = (() => {
-       const groups: Record<string, string[]> = {};
-       touchCandidates.forEach(ans => {
-           const cho = getChosung(ans);
-           if (!groups[cho]) groups[cho] = [];
-           if (!groups[cho].includes(ans)) groups[cho].push(ans);
-       });
-       return groups;
-    })();
-
-    const availableChosungs = Object.keys(chosungGroups).sort((a,b) => {
-        if (a === '기타' || a === '숫자') return 1;
-        if (b === '기타' || b === '숫자') return -1;
-        return a.localeCompare(b, 'ko');
-    });
+    const titleSizes = ['text-[11px] sm:text-[12px]', 'text-[13px] sm:text-[14px]', 'text-[15px] sm:text-[16px]', 'text-[17px] sm:text-[18px]', 'text-[19px] sm:text-[22px]'];
+    const bodySizes  = ['text-[10px] sm:text-[11px]', 'text-[12px] sm:text-[13px]', 'text-[14px] sm:text-[16px]', 'text-[17px] sm:text-[19px]', 'text-[20px] sm:text-[23px]'];
+    const titleClass = titleSizes[fontSizeLevel - 1] || 'text-[15px] sm:text-[16px]';
+    const bodyClass  = bodySizes[fontSizeLevel - 1] || 'text-[14px] sm:text-[16px]';
 
     const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter((p: string) => p !== '');
     let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
@@ -1194,7 +1191,7 @@ function MainApp() {
                   );
               }
             } else {
-              contentToRender.push(<span key={i} className="inline-block min-w-[40px] sm:min-w-[50px] h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
+              contentToRender.push(<span key={i} className="inline-block min-w-[40px] sm:min-w-[50px] h-4 sm:h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
             }
             bIdx++;
           } else { contentToRender.push(<span key={i}>{part}</span>); }
@@ -1209,20 +1206,15 @@ function MainApp() {
                   {displayTitle}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {/* 💡 5단계 폰트 조절 UI (모바일 호환) */}
                   <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
                      <span className="text-[9px] sm:text-[10px] text-white/40 font-bold">크기</span>
                      <button onClick={() => setFontSizeLevel(p => Math.max(1, p - 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">-</button>
                      <span className="text-[10px] sm:text-[11px] font-mono text-white/80 w-3 text-center">{fontSizeLevel}</span>
                      <button onClick={() => setFontSizeLevel(p => Math.min(5, p + 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
                   </div>
-                  <span className={`text-[11px] font-bold font-mono px-2 py-1 rounded shadow-sm transition-colors ${leftLives > 0 ? 'bg-teal-900/30 text-teal-400 border border-teal-500/50' : 'bg-red-900/50 text-white border border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)] animate-pulse'}`}>
-                    💖 기회: {leftLives}번
-                  </span>
                   <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
                 </div>
             </div>
-            {/* 💡 본문 크기가 조절기(fontSizeLevel)에 따라 유기적으로 반응합니다. */}
             <div className={`whitespace-pre-wrap leading-relaxed ${bodyClass} font-serif break-all break-words w-full max-w-full text-white/90`}>
                 {contentToRender}
             </div>
@@ -1241,60 +1233,60 @@ function MainApp() {
         </div>
 
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-3 z-30 flex flex-col gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
-            {/* 💡 2단계 초성 선택 터치 모드 UI */}
-            {inputMode === 'touch' && touchCandidates.length > 0 && (
-              <div className="flex flex-col gap-2 w-full max-h-[30vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
+            
+            {/* 💡 [기능 3] 터치 모드: 정답과 초성이 동일한 단어들만 다이렉트로 즉시 표시 */}
+            {inputMode === 'touch' && activeTouchCandidates.length > 0 && (
+              <div className="flex flex-col gap-2 w-full max-h-[35vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[11px] text-teal-400 mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
-                    <span className="animate-pulse">👆</span> {selectedChosung ? `'${selectedChosung}' 시작 단어 선택` : '먼저 초성을 선택하세요'}
+                    <span className="animate-pulse">👆</span> 터치하여 정답을 선택하세요 (1~9 핫키)
                   </div>
-                  {selectedChosung && (
-                    <button onClick={() => setSelectedChosung(null)} className="px-2 py-0.5 bg-teal-900/40 border border-teal-500/50 rounded-sm text-teal-300 hover:bg-teal-900/60 active:scale-95 transition-all shadow-sm">
-                       🔙 다시선택
-                    </button>
-                  )}
                 </div>
-                <div className="flex flex-wrap gap-2 w-full">
-                  {!selectedChosung ? (
-                     availableChosungs.map((cho) => (
-                       <button
-                         key={cho}
-                         onClick={() => setSelectedChosung(cho)}
-                         className="px-3 py-2.5 bg-indigo-900/30 border border-indigo-500/30 rounded text-[13px] sm:text-[15px] font-bold text-indigo-300 hover:bg-indigo-800/50 hover:text-indigo-200 transition-all active:scale-95 shadow-md flex-1 min-w-[50px] text-center"
-                       >
-                         {cho}
-                       </button>
-                     ))
-                  ) : (
-                     chosungGroups[selectedChosung]?.map((ans, idx) => (
-                       <button
-                         key={idx}
-                         onClick={() => handleSequentialInput(ans)}
-                         className="px-3 py-2.5 bg-black/40 border border-white/20 rounded text-[13px] sm:text-[15px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex-1 min-w-[80px]"
-                       >
-                         {ans}
-                       </button>
-                     ))
-                  )}
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 w-full">
+                   {activeTouchCandidates.map((ans, idx) => (
+                     <button
+                       key={idx}
+                       onClick={() => handleSequentialInput(ans)}
+                       className="relative px-2 py-4 sm:py-5 bg-black/40 border border-white/20 rounded text-[13px] sm:text-[15px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex items-center justify-center break-keep"
+                     >
+                       {idx < 9 && <span className="absolute top-1 left-1.5 text-[10px] text-teal-500/60 font-mono">[{idx+1}]</span>}
+                       {ans}
+                     </button>
+                   ))}
                 </div>
               </div>
             )}
             
-            <div className="flex justify-between items-center w-full gap-2 flex-wrap">
-              <button onClick={() => setInputMode(prev => prev === 'typing' ? 'touch' : 'typing')} className="px-3 py-2.5 bg-zinc-900/80 text-zinc-300 border border-zinc-500/50 rounded text-[11px] sm:text-xs font-bold flex-1 hover:bg-zinc-800 transition-all shadow-md flex items-center justify-center gap-2">
-                {inputMode === 'typing' ? '👆 터치 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
+            {/* 💡 [기능 2] 마지막 빈칸 오답 시 다음 조항으로 넘어가는 강력한 버튼 */}
+            {inputStatus === 'wrong' && currentBlankIdx === blanks.length - 1 ? (
+              <button 
+                onClick={() => {
+                  if (!isProcessingRef.current) {
+                     isProcessingRef.current = true;
+                     forceAdvance();
+                  }
+                }} 
+                className="w-full py-3 bg-red-600/80 hover:bg-red-500 text-white text-[13px] sm:text-[15px] font-bold rounded shadow-[0_0_15px_rgba(220,38,38,0.5)] animate-pulse border border-red-400 flex justify-center items-center gap-2"
+              >
+                <span>다음 조항으로 넘어가기 ▶</span>
               </button>
-              <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-2.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
-                {isMemoOpen ? '닫기 ✕' : '메모 열기'}
-              </button>
-              <button onClick={handleShowAnswer} className="px-3 py-2.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
-                정답 보기(오답)
-              </button>
-            </div>
+            ) : (
+              <div className="flex justify-between items-center w-full gap-2 flex-wrap">
+                <button onClick={() => setInputMode(prev => prev === 'typing' ? 'touch' : 'typing')} className="px-3 py-2.5 bg-zinc-900/80 text-zinc-300 border border-zinc-500/50 rounded text-[11px] sm:text-xs font-bold flex-1 hover:bg-zinc-800 transition-all shadow-md flex items-center justify-center gap-2">
+                  {inputMode === 'typing' ? '👆 터치 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
+                </button>
+                <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-2.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
+                  {isMemoOpen ? '닫기 ✕' : '메모 열기'}
+                </button>
+                <button onClick={handleShowAnswer} className="px-3 py-2.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
+                  정답 보기(스킵)
+                </button>
+              </div>
+            )}
         </div>
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, touchCandidates, selectedChosung, fontSizeLevel, leftLives]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, touchCandidates, fontSizeLevel, activeTouchCandidates]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
@@ -1573,9 +1565,7 @@ function MainApp() {
       ) : (
         <div className="w-full max-w-[1600px] mx-auto flex gap-4 sm:gap-6 px-2 sm:px-4 lg:px-8 items-start pb-10 transition-all duration-300">
           <main className="flex-1 w-full min-w-0 transition-all duration-300">
-            <ErrorBoundary fallbackLog={addLog}>
-              {memoizedTabs}
-            </ErrorBoundary>
+            {memoizedTabs}
           </main>
           
           {isSidebarOpen ? (
@@ -1633,4 +1623,11 @@ function MainApp() {
   );
 }
 
-export default function App() { return <MainApp />; }
+// 💡 시스템 최상단에 에러 추적기를 씌워서 앱 뻗음 현상을 완벽히 통제합니다.
+export default function App() { 
+  return (
+    <GlobalErrorBoundary>
+      <MainApp />
+    </GlobalErrorBoundary>
+  ); 
+}
