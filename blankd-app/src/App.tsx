@@ -145,7 +145,13 @@ const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
   }
 };
 
-function InlineBlankInput({ inputStatus, onSubmit, expected, abbrDict, hintLetter }: any) {
+const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict, hintLetter }: {
+  inputStatus: string;
+  onSubmit: (val: string) => void;
+  expected: string; 
+  abbrDict: Record<string, string>;
+  hintLetter?: string | null;
+}) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const validAnswers = useMemo(() => {
@@ -154,7 +160,7 @@ function InlineBlankInput({ inputStatus, onSubmit, expected, abbrDict, hintLette
       if (abbrDict) {
           Object.entries(abbrDict).forEach(([k, v]) => {
               const strK = k.replace(/\s+/g, '').toLowerCase();
-              const strV = (v as string).replace(/\s+/g, '').toLowerCase();
+              const strV = v.replace(/\s+/g, '').toLowerCase();
               const orig = strK.length >= strV.length ? strK : strV;
               const short = strK.length < strV.length ? strK : strV;
               if (expectedClean === orig) answers.push(short);
@@ -233,7 +239,12 @@ function InlineBlankInput({ inputStatus, onSubmit, expected, abbrDict, hintLette
       style={{ width: `${Math.max(expected.length * 1.2, 3)}em`, maxWidth: '100%' }}
     />
   );
-}
+}, (prevProps, nextProps) => {
+  return prevProps.inputStatus === nextProps.inputStatus && 
+         prevProps.expected === nextProps.expected && 
+         prevProps.abbrDict === nextProps.abbrDict && 
+         prevProps.hintLetter === nextProps.hintLetter;
+});
 
 function MainApp() {
   const enokiFlow = useEnokiFlow();
@@ -270,27 +281,9 @@ function MainApp() {
   const [theme, setTheme] = useState(() => localStorage.getItem('blankd_theme') || 'black');
   useEffect(() => { localStorage.setItem('blankd_theme', theme); }, [theme]);
   
-  const [targetCycle, setTargetCycle] = useState<number>(() => {
-    return parseInt(localStorage.getItem(`blankd_target_cycle_${safeAddress}`) || '30', 10);
-  });
-  const [fontSizeLevel, setFontSizeLevel] = useState<number>(() => {
-    return parseInt(localStorage.getItem(`blankd_font_size_${safeAddress}`) || '3', 10);
-  });
-
-  useEffect(() => {
-    localStorage.setItem(`blankd_target_cycle_${safeAddress}`, targetCycle.toString());
-  }, [targetCycle, safeAddress]);
-
-  useEffect(() => {
-    localStorage.setItem(`blankd_font_size_${safeAddress}`, fontSizeLevel.toString());
-    if (!isOffline && safeAddress && navigator.onLine) {
-       fetch("https://api.blankd.top/api/update-balance", {
-         method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
-         body: JSON.stringify({ wallet_address: safeAddress, font_size: fontSizeLevel })
-       }).catch(()=>{});
-    }
-  }, [fontSizeLevel, safeAddress, isOffline]);
-
+  const [fontSizeLevel, setFontSizeLevel] = useState<number>(() => parseInt(localStorage.getItem('blankd_font_size') || '3'));
+  useEffect(() => { localStorage.setItem('blankd_font_size', fontSizeLevel.toString()); }, [fontSizeLevel]);
+  
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
@@ -327,50 +320,24 @@ function MainApp() {
   const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
-  // 💡 [핵심] 보기 9개 스마트 필터링 시스템
+  // 💡 초성 계산기 캐싱
+  const chosungGroups = useMemo(() => {
+    const groups: Record<string, string[]> = {};
+    touchCandidates.forEach(ans => {
+        const cho = getChosung(ans);
+        if (!groups[cho]) groups[cho] = [];
+        if (!groups[cho].includes(ans)) groups[cho].push(ans);
+    });
+    return groups;
+  }, [touchCandidates]);
+
+  // 💡 [핵심기능] 정답과 같은 초성의 단어들만 즉시 추출
   const activeTouchCandidates = useMemo(() => {
     if (!blanks[currentBlankIdx]) return [];
-    
-    // 1. 현재 정답 추출
-    const expectedRaw = blanks[currentBlankIdx].answer;
-    const expectedClean = expectedRaw.replace(/\s+/g, '');
-    const targetCho = getChosung(expectedClean);
-
-    // 2. 단어들을 '같은 초성'과 '다른 초성' 두 그룹으로 분류 (정답 본인은 제외)
-    const sameCho: string[] = [];
-    const otherCho: string[] = [];
-    
-    touchCandidates.forEach(ans => {
-       if (ans.replace(/\s+/g, '') === expectedClean) return; 
-       if (getChosung(ans.replace(/\s+/g, '')) === targetCho) {
-           sameCho.push(ans);
-       } else {
-           otherCho.push(ans);
-       }
-    });
-    
-    // 3. 무작위로 섞는 도우미 함수
-    const shuffle = (array: string[]) => [...array].sort(() => Math.random() - 0.5);
-    
-    // 4. 정답을 제외한 나머지 '오답(함정)' 8개를 채웁니다.
-    let distractors: string[] = [];
-    if (sameCho.length >= 8) {
-        // 같은 초성이 8개 이상 충분히 많으면 그 안에서만 8개 무작위 추출
-        distractors = shuffle(sameCho).slice(0, 8);
-    } else {
-        // 같은 초성이 부족하면 일단 다 넣고, 모자란 만큼 다른 초성에서 무작위로 뽑아옵니다.
-        distractors = [...sameCho];
-        const needed = 8 - distractors.length;
-        distractors = [...distractors, ...shuffle(otherCho).slice(0, needed)];
-    }
-    
-    // 5. 정답 1개 + 함정 8개를 합쳐서 최대 9개를 만듭니다.
-    const finalCandidates = [...distractors, expectedRaw];
-    
-    // 6. 위치가 매번 바뀌면 눈이 아프므로 '가나다순'으로 예쁘게 정렬해 줍니다.
-    return finalCandidates.sort((a, b) => a.localeCompare(b, 'ko'));
-
-  }, [currentBlankIdx, blanks, touchCandidates]); // 💡 오답 시에도 섞이지 않도록 inputStatus를 제외합니다.
+    const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '');
+    const targetCho = getChosung(expected);
+    return chosungGroups[targetCho] || [];
+  }, [currentBlankIdx, blanks, chosungGroups]);
 
   // 💡 1~9 단축키 연동 (스피드런 지원)
   useEffect(() => {
@@ -637,7 +604,6 @@ function MainApp() {
     });
   };
 
-  const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   const isClosingRef = useRef(false);
 
   const [expandedId, setExpandedId] = useState<number | null>(() => {
@@ -1019,6 +985,7 @@ function MainApp() {
     flushQueue();
   };
 
+  // 💡 정답 후 강제로 다음 칸/조항으로 넘어가는 헬퍼 함수
   const forceAdvance = () => {
     setBlanks(prev => {
       const nb = [...prev];
@@ -1045,7 +1012,7 @@ function MainApp() {
   const handleSequentialInput = (overrideInput?: string | any) => {
     if (isProcessingRef.current) return; 
     if (inputStatus === 'correct' || !blanks[currentBlankIdx]) return;
-    if (inputStatus === 'wrong') return; 
+    if (inputStatus === 'wrong') return; // 이미 오답 대기 중복 클릭 방지
 
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
@@ -1071,12 +1038,14 @@ function MainApp() {
       setInputStatus('wrong'); 
       statsRef.current.wrongIndices.add(currentBlankIdx); 
       
+      // 💡 [기능 1] 오답 시 10 포인트 차감 적용
       handleUpdateBalance(-10);
       addLog(`❌ 오답! (-10P)`);
 
       if (currentBlankIdx + 1 < blanks.length) {
           setTimeout(forceAdvance, 600); 
       } else {
+          // 💡 [기능 2] 마지막 빈칸에서 틀렸을 때는 '다음' 버튼 대기를 위해 자동 이동 중단
           isProcessingRef.current = false; 
       }
     }
@@ -1091,15 +1060,75 @@ function MainApp() {
     setInputStatus('wrong'); 
     statsRef.current.wrongIndices.add(currentBlankIdx);
 
+    // 💡 [기능 1] 정답 보기(스킵) 시에도 10 포인트 차감 적용
     handleUpdateBalance(-10);
     addLog(`❌ 정답 확인 (-10P)`);
 
     if (currentBlankIdx + 1 < blanks.length) {
         setTimeout(forceAdvance, 800);
     } else {
+        // 💡 [기능 2] 마지막 빈칸에서 스킵할 때도 '다음' 버튼 대기를 위해 자동 이동 중단
         isProcessingRef.current = false;
     }
   };
+
+  const toggleVoiceRecognition = () => {
+    if (isListening) {
+      setIsListening(false);
+      if (recognitionRef.current) { recognitionRef.current.onend = null; recognitionRef.current.stop(); recognitionRef.current = null; }
+      addLog("🎤 음성 인식 종료됨"); return;
+    }
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) { alert("크롬 브라우저를 권장합니다."); return; }
+    
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'ko-KR'; recognition.interimResults = false; recognition.continuous = true; recognition.maxAlternatives = 1;
+    recognition.onstart = () => { setIsListening(true); addLog("🎙️ 음성 인식 활성화됨 (계속 듣는 중...)"); };
+    recognition.onresult = (event: any) => {
+      const last = event.results.length - 1;
+      const transcript = event.results[last][0].transcript;
+      const cleanText = transcript.replace(/\s+/g, '').replace(/[.,!?]/g, '');
+      addLog(`💬 인식: "${transcript}"`); setTimeout(() => handleSequentialInput(cleanText), 300);
+    };
+    recognition.onerror = (err: any) => { if (err.error !== 'no-speech') { setIsListening(false); recognitionRef.current = null; } };
+    recognition.onend = () => { if (recognitionRef.current) { try { recognitionRef.current.start(); } catch(e) {} } else { setIsListening(false); } };
+    recognitionRef.current = recognition; recognition.start();
+  };
+
+  const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => getExtendedStats(card.memo || "").filled || 0)) : 0;
+  const passProbability = Math.min(minFilledCount * 2, 100);
+
+  const { nextCatToCraft, nextStudyCard } = useMemo(() => {
+    let craftTarget = null; let studyTarget = null;
+    if (!isLoggedIn) return { nextCatToCraft: null, nextStudyCard: null };
+
+    if (categories && categories.length > 0) {
+      const craftedOrigIds = new Set(); const craftedTitles: string[] = [];
+      const cleanText = (text: string) => text ? text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '').replace(/[^가-힣a-zA-Z0-9一-龥]/g, '') : "";
+      savedCards.forEach((c: any) => {
+        const firstLine = c.content.split('\n')[0];
+        if (firstLine) craftedTitles.push(cleanText(firstLine));
+      });
+      const sortedCats = [...categories].sort((a: any, b: any) => a.id - b.id);
+      craftTarget = sortedCats.find((cat: any) => {
+        const cleanTitle = cleanText(cat.title || "");
+        return !(cleanTitle && craftedTitles.some(t => t === cleanTitle || t.endsWith(cleanTitle)));
+      });
+    }
+
+    if (savedCards && savedCards.length > 0) {
+      const cardsWithStatus = savedCards.map(c => {
+         const stats = getExtendedStats(c.memo);
+         return { ...c, repetitions: stats.filled || 0, origId: parseInt(c.id, 10) };
+      }).filter(c => !isNaN(c.origId)).sort((a, b) => a.origId - b.origId);
+      
+      if (cardsWithStatus.length > 0) {
+        const minReps = Math.min(...cardsWithStatus.map(c => c.repetitions));
+        studyTarget = cardsWithStatus.find(c => c.repetitions === minReps) || cardsWithStatus[0];
+      }
+    }
+    return { nextCatToCraft: craftTarget, nextStudyCard: studyTarget };
+  }, [isLoggedIn, categories, savedCards]);
 
   const memoizedCardContent = useMemo(() => {
     if (!activeCard) return null;
@@ -1205,6 +1234,7 @@ function MainApp() {
 
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-3 z-30 flex flex-col gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
+            {/* 💡 [기능 3] 터치 모드: 정답과 초성이 동일한 단어들만 다이렉트로 즉시 표시 */}
             {inputMode === 'touch' && activeTouchCandidates.length > 0 && (
               <div className="flex flex-col gap-2 w-full max-h-[35vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[11px] text-teal-400 mb-1 font-bold flex items-center justify-between">
@@ -1227,6 +1257,7 @@ function MainApp() {
               </div>
             )}
             
+            {/* 💡 [기능 2] 마지막 빈칸 오답 시 다음 조항으로 넘어가는 강력한 버튼 */}
             {inputStatus === 'wrong' && currentBlankIdx === blanks.length - 1 ? (
               <button 
                 onClick={() => {
@@ -1592,6 +1623,7 @@ function MainApp() {
   );
 }
 
+// 💡 시스템 최상단에 에러 추적기를 씌워서 앱 뻗음 현상을 완벽히 통제합니다.
 export default function App() { 
   return (
     <GlobalErrorBoundary>
