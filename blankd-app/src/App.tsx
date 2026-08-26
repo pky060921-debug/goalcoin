@@ -236,7 +236,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
         hintLetter ? 'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
         'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400'
       }`}
-      style={{ width: `${Math.max(expected.length * 1.2, 3)}em`, maxWidth: '100%' }}
+      style={{ width: '4.5em', maxWidth: '100%' }}
     />
   );
 }, (prevProps, nextProps) => {
