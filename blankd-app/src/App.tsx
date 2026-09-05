@@ -11,6 +11,7 @@ import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 import { RecordTab } from "./tabs/RecordTab";
 
+// 🚨 [진단용 최상위 에러 추적기] 화면이 하얗게 죽는 것을 막고 원인을 텍스트로 출력합니다.
 class GlobalErrorBoundary extends Component<{children: ReactNode}, {hasError: boolean, error: any, errorInfo: any}> {
   constructor(props: any) { 
     super(props); 
@@ -295,12 +296,16 @@ function MainApp() {
   const [inputMode, setInputMode] = useState<'typing'|'touch'>('typing'); 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   
-  // 💡 [신규] 수동 함정 보기(오답) 저장용 상태
-  const [customDistractors, setCustomDistractors] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem('blankd_custom_distractors') || '[]'); }
+  // 💡 [신규] 로컬 스토리지에 오답 그룹 저장
+  const [distractorGroups, setDistractorGroups] = useState<string[][]>(() => {
+    try { return JSON.parse(localStorage.getItem(`blankd_distractor_groups_${safeAddress}`) || '[]'); }
     catch { return []; }
   });
-  const [newDistractor, setNewDistractor] = useState("");
+
+  const saveDistractorGroups = (newGroups: string[][]) => {
+    setDistractorGroups(newGroups);
+    localStorage.setItem(`blankd_distractor_groups_${safeAddress}`, JSON.stringify(newGroups));
+  };
 
   const isProcessingRef = useRef(false);
 
@@ -319,24 +324,15 @@ function MainApp() {
   });
 
   const [isDictModalOpen, setIsDictModalOpen] = useState(false);
-  const [dictTab, setDictTab] = useState<'stop'|'include'|'abbr'>('abbr');
+  // 💡 사전 탭에 'group' 탭 추가
+  const [dictTab, setDictTab] = useState<'stop'|'include'|'abbr'|'group'>('abbr');
   const [tempKey, setTempKey] = useState("");
   const [tempValue, setTempValue] = useState("");
 
   const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
-  // 💡 수동 오답 추가 핸들러
-  const handleAddDistractor = () => {
-    if (!newDistractor.trim()) return;
-    const next = Array.from(new Set([...customDistractors, newDistractor.trim()]));
-    setCustomDistractors(next);
-    localStorage.setItem('blankd_custom_distractors', JSON.stringify(next));
-    setNewDistractor("");
-    addLog(`📝 수동 오답 '${newDistractor.trim()}' 추가 완료`);
-  };
-
-  // 💡 [핵심기능] 보기 4개 스마트 필터링 시스템 (정답 + 수동오답 + 같은초성 + 빈자리 무작위 다른초성)
+  // 💡 [핵심기능] 보기 4개 스마트 필터링 시스템 (정답 + 그룹오답 + 같은초성 + 다른초성 무작위)
   const activeTouchCandidates = useMemo(() => {
     if (!blanks[currentBlankIdx]) return [];
     
@@ -344,31 +340,41 @@ function MainApp() {
     const expectedClean = expectedRaw.replace(/\s+/g, '');
     const targetCho = getChosung(expectedClean);
 
-    // 전체 풀에 수동으로 추가한 오답들도 합칩니다.
-    const allPool = Array.from(new Set([...touchCandidates, ...customDistractors]));
-    const sameCho: string[] = [];
-    const otherCho: string[] = [];
-    
-    allPool.forEach(ans => {
-       if (ans.replace(/\s+/g, '') === expectedClean) return; 
-       if (getChosung(ans.replace(/\s+/g, '')) === targetCho) {
-           sameCho.push(ans);
-       } else {
-           otherCho.push(ans);
-       }
-    });
-    
+    // 1. 사전에서 오답 그룹 매칭 확인
+    let matchedGroup: string[] | null = null;
+    for (const group of distractorGroups) {
+        if (group.some(w => w.replace(/\s+/g, '') === expectedClean)) {
+            matchedGroup = group;
+            break;
+        }
+    }
+
     const shuffle = (array: string[]) => [...array].sort(() => Math.random() - 0.5);
-    
     let distractors: string[] = [];
-    if (sameCho.length >= 3) {
-        // 같은 초성이 충분히 많으면 거기서 무작위 3개 추출 (총 4개 생성)
-        distractors = shuffle(sameCho).slice(0, 3);
+
+    if (matchedGroup) {
+        // 그룹에 속해있다면 그룹 내 단어들을 1순위 오답으로 채택
+        const others = matchedGroup.filter(w => w.replace(/\s+/g, '') !== expectedClean);
+        distractors = shuffle(others).slice(0, 3);
+        
+        // 그룹 단어가 3개가 안되면 카드 내 다른 초성 단어로 땜빵
+        if (distractors.length < 3) {
+            const fallback = touchCandidates.filter(ans => ans.replace(/\s+/g, '') !== expectedClean && !distractors.includes(ans));
+            const needed = 3 - distractors.length;
+            distractors = [...distractors, ...shuffle(fallback).slice(0, needed)];
+        }
     } else {
-        // 부족하면 있는 걸 다 넣고, 모자란 만큼 다른 초성에서 뽑아옴
-        distractors = [...sameCho];
-        const needed = 3 - distractors.length;
-        distractors = [...distractors, ...shuffle(otherCho).slice(0, needed)];
+        // 그룹이 없다면 기존 로직 (같은 초성 -> 다른 초성)
+        const sameCho = touchCandidates.filter(ans => getChosung(ans.replace(/\s+/g, '')) === targetCho && ans.replace(/\s+/g, '') !== expectedClean);
+        const otherCho = touchCandidates.filter(ans => getChosung(ans.replace(/\s+/g, '')) !== targetCho && ans.replace(/\s+/g, '') !== expectedClean);
+        
+        if (sameCho.length >= 3) {
+            distractors = shuffle(sameCho).slice(0, 3);
+        } else {
+            distractors = [...sameCho];
+            const needed = 3 - distractors.length;
+            distractors = [...distractors, ...shuffle(otherCho).slice(0, needed)];
+        }
     }
     
     // 정답 1개 + 함정 최대 3개를 합쳐서 4개로 고정
@@ -377,9 +383,9 @@ function MainApp() {
     // 위치가 예측 가능하도록 '가나다순' 정렬
     return finalCandidates.sort((a, b) => a.localeCompare(b, 'ko'));
 
-  }, [currentBlankIdx, blanks, touchCandidates, customDistractors]); 
+  }, [currentBlankIdx, blanks, touchCandidates, distractorGroups]); 
 
-  // 💡 1~4 단축키 연동
+  // 💡 1~4 및 0(모름) 단축키 연동
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (inputMode !== 'touch' || !activeCard) return;
@@ -392,6 +398,10 @@ function MainApp() {
           if (activeTouchCandidates[idx]) {
              handleSequentialInput(activeTouchCandidates[idx]);
           }
+      } else if (e.key === '0' || e.key === 'Escape') {
+          // 0번이나 ESC 누르면 '모름' 처리
+          e.preventDefault();
+          handleSequentialInput('모름(강제오답)');
       }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
@@ -1269,9 +1279,9 @@ function MainApp() {
 
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-3 z-30 flex flex-col gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
-            {/* 💡 [기능 1] 터치 모드: 4개 고정 보기 (2x2) 및 수동 오답 추가 UI */}
+            {/* 💡 [기능 1] 터치 모드: 4개 고정 보기 (2x2) 및 하단 모름 버튼 */}
             {inputMode === 'touch' && activeTouchCandidates.length > 0 && (
-              <div className="flex flex-col gap-2 w-full max-h-[40vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
+              <div className="flex flex-col gap-2 w-full max-h-[45vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[11px] text-teal-400 mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
                     <span className="animate-pulse">👆</span> 터치하여 정답을 선택하세요 (1~4 핫키)
@@ -1291,19 +1301,13 @@ function MainApp() {
                    ))}
                 </div>
 
-                {/* 수동 함정(오답) 추가 입력창 */}
-                <div className="flex gap-2 mt-2 pt-2 border-t border-white/10">
-                   <input 
-                     value={newDistractor} 
-                     onChange={(e) => setNewDistractor(e.target.value)}
-                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddDistractor(); } }}
-                     placeholder="헷갈리는 함정 보기 직접 추가 (엔터)" 
-                     className="flex-1 bg-black/40 border border-white/20 px-3 py-2 rounded text-xs text-white outline-none focus:border-indigo-500 transition-colors"
-                   />
-                   <button onClick={handleAddDistractor} className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded shadow-md transition-colors whitespace-nowrap">
-                     추가
-                   </button>
-                </div>
+                {/* 💡 [기능 2] '모름' 버튼 (강제 오답 처리) */}
+                <button 
+                  onClick={() => handleSequentialInput('모름(강제오답)')} 
+                  className="w-full mt-1 py-3 bg-red-900/40 hover:bg-red-900/60 border border-red-500/30 text-red-400 text-[13px] font-bold rounded-sm shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
+                >
+                  🤔 모름 (오답 처리 후 다음 빈칸으로 넘어가기) <span className="text-[10px] text-red-500/60 font-mono ml-1">[0]</span>
+                </button>
               </div>
             )}
             
@@ -1335,11 +1339,11 @@ function MainApp() {
         </div>
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, touchCandidates, fontSizeLevel, activeTouchCandidates, customDistractors, newDistractor]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, touchCandidates, fontSizeLevel, activeTouchCandidates]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
-  const handleOpenDict = (tab: 'abbr' | 'include' | 'stop') => {
+  const handleOpenDict = (tab: 'abbr' | 'include' | 'stop' | 'group') => {
     setDictTab(tab);
     if (window.innerWidth >= 1024) { 
       setIsSidebarOpen(true);
@@ -1354,10 +1358,20 @@ function MainApp() {
       const orig = k.length >= v.length ? k : v; const short = k.length < v.length ? k : v;
       saveGlobalDict({ ...globalDict, abbrs: { ...globalDict.abbrs, [short]: orig } });
       setTempKey(""); setTempValue("");
-    } else if (dictTab !== 'abbr' && tempKey) {
+    } else if (dictTab === 'stop' || dictTab === 'include') {
+      if (!tempKey) return;
       const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
       const targetArray = dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions;
       saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words])) });
+      setTempKey("");
+    } else if (dictTab === 'group' && tempKey) {
+      // 💡 [신규] 4지선다 오답 그룹 추가 로직
+      const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
+      if (words.length > 1) {
+          saveDistractorGroups([...distractorGroups, words]);
+      } else {
+          alert("쉼표로 구분하여 최소 2개 이상의 단어를 입력해주세요.");
+      }
       setTempKey("");
     }
   };
@@ -1391,17 +1405,18 @@ function MainApp() {
     <div className={`flex flex-col w-full h-full ${isMobile ? 'bg-[#0a0a0c] border border-white/10 p-5 sm:p-6 rounded-sm' : 'bg-[#08080a]/80 border border-white/10 p-5 rounded-sm shadow-xl backdrop-blur-sm'}`}>
       <div className="flex justify-between items-start mb-6">
         <div className="flex gap-4 border-b border-white/10 w-full pt-1">
-          <button onClick={() => setDictTab('abbr')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'abbr' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-white/40 hover:text-white/70'}`}>⚡ 스마트 약어</button>
-          <button onClick={() => setDictTab('include')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'include' ? 'text-teal-400 border-b-2 border-teal-400' : 'text-white/40 hover:text-white/70'}`}>✅ 필수 포함</button>
-          <button onClick={() => setDictTab('stop')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'stop' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-white/40 hover:text-white/70'}`}>❌ 제외 단어</button>
+          <button onClick={() => setDictTab('abbr')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'abbr' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-white/40 hover:text-white/70'}`}>⚡ 약어</button>
+          <button onClick={() => setDictTab('include')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'include' ? 'text-teal-400 border-b-2 border-teal-400' : 'text-white/40 hover:text-white/70'}`}>✅ 포함</button>
+          <button onClick={() => setDictTab('stop')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'stop' ? 'text-amber-400 border-b-2 border-amber-400' : 'text-white/40 hover:text-white/70'}`}>❌ 제외</button>
+          <button onClick={() => setDictTab('group')} className={`text-[11px] sm:text-[13px] font-bold tracking-wide transition-all px-1 pb-2 -mb-[1px] ${dictTab === 'group' ? 'text-rose-400 border-b-2 border-rose-400' : 'text-white/40 hover:text-white/70'}`}>🔗 오답 그룹</button>
         </div>
         <button onClick={() => isMobile ? setIsDictModalOpen(false) : setIsSidebarOpen(false)} className="text-white/40 hover:text-white ml-4 text-xs font-bold bg-white/5 hover:bg-white/10 px-2 py-1 rounded-sm transition-all flex items-center gap-1 shrink-0">
-          {isMobile ? '✕ 닫기' : '▶ 사전 닫기'}
+          {isMobile ? '✕ 닫기' : '▶ 닫기'}
         </button>
       </div>
       
       <div className="flex gap-2 mb-5 shrink-0">
-        <input type="text" value={tempKey} onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder={dictTab === 'abbr' ? "원래 정답 (예: 행정안전부장관)" : "단어 입력 (쉼표 구분)"} className="flex-1 bg-black/50 border border-white/30 transition-colors w-full min-w-0" />
+        <input type="text" value={tempKey} onChange={(e) => setTempKey(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder={dictTab === 'abbr' ? "원래 정답 (예: 행정안전부장관)" : dictTab === 'group' ? "보건복지부장관, 공단, 요양기관 (쉼표 구분)" : "단어 입력 (쉼표 구분)"} className="flex-1 bg-black/50 border border-white/30 transition-colors w-full min-w-0" />
         {dictTab === 'abbr' && (
           <input type="text" value={tempValue} onChange={(e) => setTempValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleAddDictItem(); }} placeholder="약어 (예: 행안부장관)" className="flex-1 bg-black/50 border border-white/10 p-2 text-xs sm:text-sm text-white/80 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full min-w-0" />
         )}
@@ -1409,9 +1424,8 @@ function MainApp() {
       </div>
       
       <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 min-h-[160px]">
-        {dictTab === 'abbr' && Object.entries(globalDict.abbrs || {})
-          .sort((a, b) => a[1].localeCompare(b[1], 'ko'))
-          .map(([k, v]) => {
+        {/* 기존 사전 렌더링 로직 */}
+        {dictTab === 'abbr' && Object.entries(globalDict.abbrs || {}).map(([k, v]) => {
             const strK = k as string; const strV = v as string;
             const orig = strK.length >= strV.length ? strK : strV; const short = strK.length < strV.length ? strK : strV;
             return (
@@ -1423,9 +1437,7 @@ function MainApp() {
               </div>
             )
         })}
-        {dictTab !== 'abbr' && (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions)
-          .sort((a, b) => a.localeCompare(b, 'ko'))
-          .map((word: string) => (
+        {(dictTab === 'stop' || dictTab === 'include') && (dictTab === 'stop' ? globalDict.stopwords : globalDict.inclusions).map((word: string) => (
             <div key={word} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
               <span className={`px-2 py-0.5 rounded-sm border ${dictTab === 'stop' ? 'text-amber-400 bg-amber-900/10 border-amber-500/20' : 'text-teal-400 bg-teal-900/10 border-teal-500/20'}`}>{word}</span>
               <button onClick={() => {
@@ -1434,7 +1446,24 @@ function MainApp() {
               }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors">✕</button>
             </div>
         ))}
-        {((dictTab === 'abbr' && Object.keys(globalDict.abbrs || {}).length === 0) || (dictTab === 'stop' && (globalDict.stopwords || []).length === 0) || (dictTab === 'include' && (globalDict.inclusions || []).length === 0)) && (
+        {/* 💡 [신규] 오답 그룹 렌더링 로직 */}
+        {dictTab === 'group' && distractorGroups.map((group, idx) => (
+            <div key={idx} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {group.map((w, wIdx) => (
+                   <span key={wIdx} className="bg-rose-900/20 text-rose-300 px-1.5 py-0.5 rounded border border-rose-500/30 text-[10px] font-bold">{w}</span>
+                ))}
+              </div>
+              <button onClick={() => {
+                const next = [...distractorGroups];
+                next.splice(idx, 1);
+                saveDistractorGroups(next);
+              }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors shrink-0">✕</button>
+            </div>
+        ))}
+
+        {/* 안내 문구 */}
+        {((dictTab === 'abbr' && Object.keys(globalDict.abbrs || {}).length === 0) || (dictTab === 'stop' && (globalDict.stopwords || []).length === 0) || (dictTab === 'include' && (globalDict.inclusions || []).length === 0) || (dictTab === 'group' && distractorGroups.length === 0)) && (
           <div className="text-center py-8 text-white/20 text-[11px] sm:text-xs">등록된 단어가 없습니다.</div>
         )}
       </div>
