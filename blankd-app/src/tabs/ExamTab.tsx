@@ -1,8 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
-import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
-import 'react-pdf/dist/esm/Page/TextLayer.css';
 
+// 💡 에러를 유발하던 구버전 CSS 임포트 삭제 (필기 최적화를 위해 TextLayer를 껐으므로 불필요)
 // 💡 Vite 환경에서 pdf.js 워커를 안전하게 불러오기 위한 CDN 설정
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
