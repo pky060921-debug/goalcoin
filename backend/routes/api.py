@@ -1829,3 +1829,41 @@ def generate_ox():
     except Exception as e:
         logging.error(f"OX 퀴즈 생성 실패(Gemma 통신 에러): {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+# ==========================================
+# 💡 모의고사 태블릿 원격 채점용 프록시 API
+# ==========================================
+@api_bp.route('/grade-exam', methods=['POST', 'OPTIONS'])
+def grade_exam():
+    if request.method == 'OPTIONS': return jsonify({}), 200
+    try:
+        data = request.json
+        text = data.get('text', '')
+        question_count = data.get('question_count', 40)
+
+        prompt = f"""다음 텍스트는 모의고사 정답지 및 해설입니다.
+해설에 속지 말고, 1번부터 {question_count}번까지의 '최종 정답 번호(1~5)'만 추출하세요.
+반드시 마크다운 없이 순수한 JSON 객체(Dictionary) 형태로만 응답하세요.
+예시: {{"1": 3, "2": 4, "3": 1}}
+
+[정답지 텍스트]
+{text[:3000]}"""
+
+        url = "http://localhost:11434/api/chat"
+        payload = {
+            "model": "gemma4:26b",
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "options": {"temperature": 0.1}
+        }
+        resp = requests.post(url, json=payload, timeout=300)
+        resp.raise_for_status()
+        
+        raw_text = (resp.json().get("message") or {}).get("content", "").strip()
+        raw_text = re.sub(r'```json', '', raw_text)
+        raw_text = re.sub(r'```', '', raw_text).strip()
+        
+        import json
+        return jsonify(json.loads(raw_text)), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
