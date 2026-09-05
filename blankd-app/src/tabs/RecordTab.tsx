@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 
+// 💡 기록 데이터 추출 유틸리티
 const getExtendedStats = (memoStr: string) => {
   try {
     if (memoStr && memoStr.trim().startsWith('{')) {
@@ -14,24 +15,147 @@ const getExtendedStats = (memoStr: string) => {
   return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [] };
 };
 
+// 💡 [신규] 오답노트 전용 미니 빈칸 입력기
+const MiniInput = ({ expected, onSolve, abbrs }: any) => {
+  const [val, setVal] = useState('');
+  const [status, setStatus] = useState<'idle'|'correct'|'wrong'>('idle');
+
+  const validAnswers = useMemo(() => {
+      const expectedClean = expected.replace(/\s+/g, '').toLowerCase();
+      const answers = [expectedClean];
+      if (abbrs) {
+          Object.entries(abbrs).forEach(([k, v]) => {
+              const strK = k.replace(/\s+/g, '').toLowerCase();
+              const strV = (v as string).replace(/\s+/g, '').toLowerCase();
+              const orig = strK.length >= strV.length ? strK : strV;
+              const short = strK.length < strV.length ? strK : strV;
+              if (expectedClean === orig) answers.push(short);
+          });
+      }
+      return answers;
+  }, [expected, abbrs]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (status !== 'idle') return;
+      const v = e.target.value;
+      setVal(v);
+      const cleanInput = v.replace(/\s+/g, '').toLowerCase();
+      if (validAnswers.includes(cleanInput)) {
+          setStatus('correct');
+          setTimeout(onSolve, 150);
+      }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (status !== 'idle') return;
+      if (e.key === 'Enter') {
+          e.preventDefault();
+          if (!validAnswers.includes(val.replace(/\s+/g, '').toLowerCase())) {
+              setStatus('wrong');
+              setTimeout(() => {
+                  setVal('');
+                  setStatus('idle');
+              }, 800); // 0.8초간 정답(힌트) 노출 후 리셋
+          }
+      }
+  };
+
+  return (
+      <input
+          value={status === 'wrong' ? expected : status === 'correct' ? expected : val}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          readOnly={status !== 'idle'}
+          placeholder="?"
+          className={`inline-block mx-1 px-1.5 py-0.5 text-center font-bold border-b-2 outline-none transition-all w-[4.5em] shadow-inner ${
+              status === 'correct' ? 'bg-teal-900/40 text-teal-300 border-teal-500' : 
+              status === 'wrong' ? 'bg-red-900/60 text-red-200 border-red-500 placeholder-red-300/50' :
+              'bg-black/60 text-amber-300 border-amber-500/50 focus:border-amber-400 placeholder-white/20'
+          }`}
+      />
+  );
+};
+
+// 💡 [신규] 오답 문장 렌더링 및 상태 관리 컴포넌트
+const ReviewSentence = ({ sentence, wrongWords, globalDict }: any) => {
+  const [solvedIndices, setSolvedIndices] = useState<Set<number>>(new Set());
+  const parts = sentence.split(/(\[.*?\])/g);
+
+  return (
+      <div className="bg-black/60 text-white/80 border-l-2 border-red-500/50 p-3 rounded-r-sm text-[12px] sm:text-[13px] leading-relaxed font-serif break-keep my-2 shadow-sm">
+          {parts.map((part: string, j: number) => {
+              if (part.startsWith('[') && part.endsWith(']')) {
+                  const inner = part.replace(/\[|\]/g, '').trim();
+                  // 이 빈칸이 내가 과거에 틀렸던 단어인지 확인
+                  const isWrongWord = wrongWords.some((w: string) => w.replace(/\s+/g, '') === inner.replace(/\s+/g, ''));
+                  
+                  if (isWrongWord) {
+                      if (solvedIndices.has(j)) {
+                          return (
+                              <span key={j} className="text-teal-200 font-bold bg-teal-900/60 px-1.5 py-0.5 mx-1 rounded-sm border border-teal-500/50 shadow-sm transition-all duration-300 animate-in zoom-in">
+                                  {inner}
+                              </span>
+                          );
+                      } else {
+                          // 아직 안 푼 오답 빈칸은 입력창으로 표시
+                          return (
+                              <MiniInput 
+                                  key={j} 
+                                  expected={inner} 
+                                  abbrs={globalDict.abbrs} 
+                                  onSolve={() => {
+                                      const next = new Set(solvedIndices);
+                                      next.add(j);
+                                      setSolvedIndices(next);
+                                  }} 
+                              />
+                          );
+                      }
+                  } else {
+                      // 내가 틀리지 않았던 다른 빈칸들은 문맥 파악을 위해 그냥 텍스트로 고정 표시
+                      return <span key={j} className="text-white/50 font-bold mx-1 bg-white/5 px-1 rounded-sm">{inner}</span>;
+                  }
+              }
+              return <span key={j}>{part}</span>;
+          })}
+      </div>
+  );
+};
+
 export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAllData, safeAddress }: any) => {
   const [expandedId, setExpandedId] = useState<string | number | null>(null);
   const [localCards, setLocalCards] = useState<any[]>([]);
+  const [globalDict, setGlobalDict] = useState<{ abbrs: Record<string, string> }>({ abbrs: {} });
 
   useEffect(() => { setLocalCards(Array.isArray(savedCards) ? savedCards : []); }, [savedCards]);
+
+  // 스마트 약어 채점 지원을 위해 전역 사전 불러오기
+  useEffect(() => {
+      if (safeAddress) {
+          try {
+              const dict = JSON.parse(localStorage.getItem(`blankd_off_dict_${safeAddress}`) || '{"abbrs":{}}');
+              setGlobalDict(dict);
+          } catch(e) {}
+      }
+  }, [safeAddress]);
 
   const renderExpandableWrongCard = (card: any, wrongWords: string[]) => {
     const isExpanded = expandedId === card.id;
     const lines = card.content.split('\n');
     const title = lines[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim() || '제목 없음';
-    const bodyLines = lines.slice(1);
 
-    // 💡 [핵심] 오답 단어가 포함된 문장만 쏙 뽑아내기
+    const bodyText = lines.slice(1).join(' '); 
+    const bodySentences = bodyText
+      .replace(/([.!?])\s+/g, "$1|SPLIT|") 
+      .split("|SPLIT|") 
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+
     const wrongSentences = new Set<string>();
     
     wrongWords.forEach(ww => {
         const cleanWw = ww.replace(/\s+/g, '');
-        bodyLines.forEach(line => {
+        bodySentences.forEach(line => {
             const blanksInLine = line.match(/\[(.*?)\]/g) || [];
             const hasMatch = blanksInLine.some(b => b.replace(/\[|\]|\s+/g, '') === cleanWw);
             if (hasMatch) {
@@ -54,34 +178,27 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
              </div>
              <span className="shrink-0 bg-red-600 text-white text-[9px] sm:text-[10px] px-2 py-1 rounded-sm font-bold shadow-[0_0_10px_rgba(220,38,38,0.5)]">🚨 오답 발견</span>
           </div>
+          
+          <div className="flex flex-wrap gap-1 mt-2 w-full">
+             <span className="text-[10px] text-red-400 font-bold w-full mb-0.5">내가 틀렸던 빈칸 단어:</span>
+             {wrongWords.map(w => (
+                <span key={w} className="bg-red-900/50 text-red-200 border border-red-500/40 px-2 py-0.5 rounded-sm text-[10px] font-bold">
+                   {w}
+                </span>
+             ))}
+          </div>
         </div>
 
         {isExpanded && (
           <div className="w-full bg-[#0a0a0c] border border-red-500/30 p-4 mt-1 rounded-sm animate-in slide-in-from-top-2 shadow-inner">
-             <div className="flex flex-col gap-3 w-full">
-               <span className="text-[10px] text-red-400 font-bold tracking-widest border-b border-red-500/20 pb-1">내가 틀렸던 오답 문장:</span>
+             <div className="flex flex-col gap-1 w-full">
+               <div className="flex justify-between items-center border-b border-red-500/20 pb-2 mb-2">
+                 <span className="text-[10px] text-red-400 font-bold tracking-widest">📝 직접 타이핑하여 빈칸을 다시 풀어보세요. (엔터: 정답 힌트)</span>
+               </div>
                
-               {sentencesArr.length > 0 ? sentencesArr.map((sentence, i) => {
-                  // 💡 틀렸던 빈칸만 빨간색으로 강력하게 하이라이트
-                  const coloredSentence = sentence.split(/(\[.*?\])/g).map((part, j) => {
-                     if (part.startsWith('[') && part.endsWith(']')) {
-                        const inner = part.replace(/\[|\]/g, '').trim();
-                        const isWrongWord = wrongWords.some(w => w.replace(/\s+/g, '') === inner.replace(/\s+/g, ''));
-                        return (
-                          <span key={j} className={isWrongWord ? "text-red-200 font-bold bg-red-900/60 px-1 rounded-sm border border-red-500/50 shadow-sm" : "text-white/40"}>
-                            {part}
-                          </span>
-                        );
-                     }
-                     return <span key={j}>{part}</span>;
-                  });
-                  
-                  return (
-                     <div key={i} className="bg-black/60 text-white/80 border-l-2 border-red-500/50 p-2.5 rounded-r-sm text-[12px] sm:text-[13px] leading-relaxed font-serif break-keep">
-                        {coloredSentence}
-                     </div>
-                  );
-               }) : (
+               {sentencesArr.length > 0 ? sentencesArr.map((sentence, i) => (
+                  <ReviewSentence key={i} sentence={sentence} wrongWords={wrongWords} globalDict={globalDict} />
+               )) : (
                   <div className="text-white/40 text-[10px] py-2">오답 문장을 찾을 수 없습니다.</div>
                )}
              </div>
