@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 
-// 💡 에러를 유발하던 구버전 CSS 임포트 삭제 (필기 최적화를 위해 TextLayer를 껐으므로 불필요)
 // 💡 Vite 환경에서 pdf.js 워커를 안전하게 불러오기 위한 CDN 설정
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -17,27 +16,41 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [pageNumber, setPageNumber] = useState(1);
   const [questionCount, setQuestionCount] = useState<number>(40);
   
-  // OMR 및 채점 상태
-  const [userAnswers, setUserAnswers] = useState<Record<number, number>>({});
-  const [correctAnswers, setCorrectAnswers] = useState<Record<number, number> | null>(null);
+  // 💡 [해결 3] OMR 마킹 영구 저장 (탭을 이동해도 날아가지 않음)
+  const [userAnswers, setUserAnswers] = useState<Record<number, number>>(() => {
+    try { return JSON.parse(localStorage.getItem(`blankd_omr_${safeAddress}`) || '{}'); } catch { return {}; }
+  });
+  
+  const [correctAnswers, setCorrectAnswers] = useState<Record<number, number> | null>(() => {
+    try { return JSON.parse(localStorage.getItem(`blankd_omr_correct_${safeAddress}`) || 'null'); } catch { return null; }
+  });
+
   const [isGrading, setIsGrading] = useState(false);
-  const [score, setScore] = useState<{ correct: number, total: number } | null>(null);
+  const [score, setScore] = useState<{ correct: number, total: number } | null>(() => {
+    try { return JSON.parse(localStorage.getItem(`blankd_omr_score_${safeAddress}`) || 'null'); } catch { return null; }
+  });
   const [systemLog, setSystemLog] = useState<string>("");
 
-  // 필기(Canvas) 관련 상태
+  // 💡 [해결 3] S펜 필기 데이터 영구 저장
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [lines, setLines] = useState<Record<number, any[]>>({}); // 페이지별 필기 데이터 저장
+  const [lines, setLines] = useState<Record<number, any[]>>(() => {
+    try { return JSON.parse(localStorage.getItem(`blankd_drawings_${safeAddress}`) || '{}'); } catch { return {}; }
+  }); 
   const currentPathRef = useRef<any[]>([]);
+
+  // 상태 변경 시 로컬 스토리지에 실시간 동기화
+  useEffect(() => { localStorage.setItem(`blankd_omr_${safeAddress}`, JSON.stringify(userAnswers)); }, [userAnswers]);
+  useEffect(() => { localStorage.setItem(`blankd_drawings_${safeAddress}`, JSON.stringify(lines)); }, [lines]);
+  useEffect(() => { localStorage.setItem(`blankd_omr_correct_${safeAddress}`, JSON.stringify(correctAnswers)); }, [correctAnswers]);
+  useEffect(() => { localStorage.setItem(`blankd_omr_score_${safeAddress}`, JSON.stringify(score)); }, [score]);
 
   // 📄 PDF 로드 완료 핸들러
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
-    setPageNumber(1);
-    setLines({}); // 새 파일 로드 시 필기 초기화
   };
 
-  // ✍️ 캔버스 필기 로직 (Palm Rejection 적용)
+  // ✍️ 캔버스 렌더링
   const drawLines = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -48,7 +61,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     ctx.lineWidth = 2;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.strokeStyle = 'rgba(239, 68, 68, 0.8)'; // 빨간색 펜
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.8)'; // 빨간펜
 
     const pageLines = lines[pageNumber] || [];
     const allPaths = [...pageLines, currentPathRef.current].filter(p => p.length > 0);
@@ -67,17 +80,22 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     drawLines();
   }, [lines, pageNumber]);
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    // 💡 핵심: 손가락(touch)은 무시하고 오직 펜(pen)과 테스트용 마우스(mouse)만 허용합니다.
-    if (e.pointerType !== 'pen' && e.pointerType !== 'mouse') return;
-    
+  // 💡 [해결 2] 브라우저 확대/축소 비율과 캔버스 좌표를 1:1 매칭하는 보정 공식
+  const getScaledCoordinates = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    
+    if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY
+    };
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType !== 'pen' && e.pointerType !== 'mouse') return;
+    const { x, y } = getScaledCoordinates(e);
     setIsDrawing(true);
     currentPathRef.current = [{ x, y }];
     drawLines();
@@ -85,14 +103,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isDrawing || (e.pointerType !== 'pen' && e.pointerType !== 'mouse')) return;
-    
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    
+    const { x, y } = getScaledCoordinates(e);
     currentPathRef.current.push({ x, y });
     drawLines();
   };
@@ -109,21 +120,31 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     }
   };
 
-  // 📝 OMR 마킹 핸들러
   const handleAnswerSelect = (qNum: number, ans: number) => {
-    if (score) return; // 채점 완료 후에는 수정 불가
+    if (score) return; // 채점 후 수정 불가
     setUserAnswers(prev => ({ ...prev, [qNum]: ans }));
   };
 
-  // 🤖 트랙 B: AI 스마트 채점
+  // 기록 전체 초기화 (새로운 모의고사를 풀고 싶을 때)
+  const handleResetAll = () => {
+    if (window.confirm("모든 필기와 OMR 마킹 기록을 삭제하시겠습니까?")) {
+      setLines({});
+      setUserAnswers({});
+      setCorrectAnswers(null);
+      setScore(null);
+      setPageNumber(1);
+      setSystemLog("🔄 기록이 성공적으로 초기화되었습니다.");
+    }
+  };
+
+  // 💡 [해결 1] 프록시 API(백엔드)를 거쳐 안전하게 채점 요청
   const handleGradeExam = async () => {
     if (!answerFile) return alert("정답지 PDF 파일을 먼저 업로드해주세요.");
     
     setIsGrading(true);
-    setSystemLog("📡 정답지 PDF에서 텍스트를 추출하는 중...");
+    setSystemLog("📡 정답지 PDF 텍스트 추출 중...");
 
     try {
-      // 1. 정답지 텍스트 추출
       const formData = new FormData();
       formData.append("file", answerFile);
       const extractRes = await fetch(`${BASE_URL}/extract-pdf-text`, { method: "POST", body: formData });
@@ -131,39 +152,26 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       
       if (!extractData.text) throw new Error("텍스트 추출 실패");
 
-      setSystemLog("🤖 로컬 AI(Ollama)가 해설을 무시하고 정답 번호만 분석 중입니다...");
+      setSystemLog("🤖 백엔드 서버(Ollama)에서 정답 번호 추출 중...");
 
-      // 2. Ollama에게 정답 추출 지시
-      const prompt = `다음 텍스트는 모의고사 정답지 및 해설입니다.
-해설에 속지 말고, 1번부터 ${questionCount}번까지의 '최종 정답 번호(1~5)'만 추출하세요.
-반드시 마크다운 없이 순수한 JSON 객체(Dictionary) 형태로만 응답하세요.
-예시: {"1": 3, "2": 4, "3": 1}
-
-[정답지 텍스트]
-${extractData.text.substring(0, 3000)}`; // 앞부분 위주로 전달
-
-      const aiRes = await fetch("http://localhost:11434/api/chat", {
+      // 🚨 브라우저에서 직접 localhost를 부르지 않고 백엔드로 요청을 우회
+      const aiRes = await fetch(`${BASE_URL}/grade-exam`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "gemma4:26b",
-          messages: [{ role: "user", content: prompt }],
-          stream: false,
-          options: { temperature: 0.1 }
+          text: extractData.text,
+          question_count: questionCount
         })
       });
 
-      const aiData = await aiRes.json();
-      let rawText = aiData.message?.content || "";
-      rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-      
-      const parsedAnswers = JSON.parse(rawText);
+      if (!aiRes.ok) throw new Error("AI 채점 서버 연결 실패");
+
+      const parsedAnswers = await aiRes.json();
       setCorrectAnswers(parsedAnswers);
 
-      // 3. 채점 계산
       let correctCnt = 0;
       for (let i = 1; i <= questionCount; i++) {
-        if (userAnswers[i] && parsedAnswers[i] && userAnswers[i] === parseInt(parsedAnswers[i])) {
+        if (userAnswers[i] && parsedAnswers[String(i)] && userAnswers[i] === parseInt(parsedAnswers[String(i)])) {
           correctCnt++;
         }
       }
@@ -174,7 +182,7 @@ ${extractData.text.substring(0, 3000)}`; // 앞부분 위주로 전달
     } catch (e: any) {
       console.error(e);
       setSystemLog(`❌ 채점 오류: ${e.message}`);
-      alert("AI 채점 중 오류가 발생했습니다. 터미널을 확인해주세요.");
+      alert("서버 연결에 실패했습니다. 백엔드가 정상적으로 작동 중인지 확인해주세요.");
     } finally {
       setIsGrading(false);
     }
@@ -183,7 +191,7 @@ ${extractData.text.substring(0, 3000)}`; // 앞부분 위주로 전달
   return (
     <div className="flex flex-col lg:flex-row gap-6 w-full h-[85vh] max-w-[1800px] mx-auto animate-in fade-in">
       
-      {/* 📚 좌측: PDF 뷰어 및 펜 필기 영역 (75%) */}
+      {/* 📚 좌측: PDF 뷰어 및 펜 필기 영역 */}
       <div className="flex flex-col flex-[3] bg-[#0a0a0c] border border-white/10 rounded-sm shadow-xl overflow-hidden relative">
         <div className="flex justify-between items-center p-3 border-b border-white/10 bg-black/40">
           <div className="flex items-center gap-3">
@@ -192,14 +200,12 @@ ${extractData.text.substring(0, 3000)}`; // 앞부분 위주로 전달
           </div>
           <div className="flex gap-2 items-center">
              <label className="cursor-pointer bg-white/10 hover:bg-white/20 text-white text-[10px] px-3 py-1.5 rounded-sm transition-colors border border-white/5">
-               문제지 PDF 열기
+               문제지 열기
                <input type="file" accept=".pdf" className="hidden" onChange={e => setExamFile(e.target.files?.[0] || null)} />
              </label>
-             {examFile && (
-               <button onClick={() => setLines(prev => ({ ...prev, [pageNumber]: [] }))} className="bg-red-900/30 hover:bg-red-900/50 text-red-400 border border-red-500/30 text-[10px] px-3 py-1.5 rounded-sm transition-colors">
-                 현재 쪽 필기 지우기
-               </button>
-             )}
+             <button onClick={handleResetAll} className="bg-red-900/30 hover:bg-red-900/50 text-red-400 border border-red-500/30 text-[10px] px-3 py-1.5 rounded-sm transition-colors">
+               모든 기록 초기화
+             </button>
           </div>
         </div>
 
@@ -211,21 +217,19 @@ ${extractData.text.substring(0, 3000)}`; // 앞부분 위주로 전달
             </div>
           ) : (
             <div className="relative inline-block shadow-2xl">
-              {/* PDF 페이지 렌더링 */}
               <Document file={examFile} onLoadSuccess={onDocumentLoadSuccess} className="pointer-events-none">
                 <Page 
                   pageNumber={pageNumber} 
                   renderTextLayer={false} 
                   renderAnnotationLayer={false}
-                  width={800} // 데스크탑/태블릿 최적화 너비
+                  width={800} 
                 />
               </Document>
 
-              {/* S펜 필기용 투명 캔버스 레이어 */}
               <canvas
                 ref={canvasRef}
                 width={800}
-                height={1131} // A4 비율 대략적 높이
+                height={1131}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
@@ -237,7 +241,6 @@ ${extractData.text.substring(0, 3000)}`; // 앞부분 위주로 전달
           )}
         </div>
 
-        {/* PDF 하단 페이지 컨트롤러 */}
         {numPages && (
           <div className="flex justify-center items-center gap-4 p-3 bg-black/40 border-t border-white/10 shrink-0">
             <button 
@@ -261,7 +264,7 @@ ${extractData.text.substring(0, 3000)}`; // 앞부분 위주로 전달
         )}
       </div>
 
-      {/* 📋 우측: OMR 답안지 영역 (25%) */}
+      {/* 📋 우측: OMR 답안지 영역 */}
       <div className="flex flex-col flex-1 min-w-[280px] bg-[#0a0a0c] border border-white/10 rounded-sm shadow-xl overflow-hidden h-full">
         <div className="p-4 border-b border-white/10 bg-indigo-950/20">
           <div className="flex justify-between items-center mb-4">
@@ -300,19 +303,18 @@ ${extractData.text.substring(0, 3000)}`; // 앞부분 위주로 전달
                  disabled={isGrading || !answerFile}
                  className={`w-full py-3 text-xs font-bold rounded-sm transition-all shadow-md ${isGrading ? 'bg-white/10 text-white/30' : 'bg-teal-600 text-white hover:bg-teal-500'}`}
                >
-                 {isGrading ? "AI 정답 추출 및 채점 중..." : "🚀 자동 채점 시작"}
+                 {isGrading ? "AI 자동 채점 진행 중..." : "🚀 자동 채점 시작"}
                </button>
             </div>
           )}
         </div>
 
-        {/* OMR 마킹 리스트 */}
         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 bg-black/20">
           <div className="space-y-2 pb-10">
             {Array.from({ length: questionCount }).map((_, idx) => {
               const qNum = idx + 1;
-              const isCorrect = correctAnswers && userAnswers[qNum] === parseInt(correctAnswers[qNum] as any);
-              const isWrong = correctAnswers && userAnswers[qNum] !== parseInt(correctAnswers[qNum] as any);
+              const isCorrect = correctAnswers && userAnswers[qNum] === parseInt(correctAnswers[String(qNum)] as any);
+              const isWrong = correctAnswers && userAnswers[qNum] !== parseInt(correctAnswers[String(qNum)] as any);
 
               return (
                 <div key={qNum} className={`flex items-center gap-3 p-2 rounded-sm border ${isCorrect ? 'bg-teal-950/20 border-teal-500/30' : isWrong ? 'bg-red-950/20 border-red-500/30' : 'bg-white/5 border-transparent hover:border-white/10'}`}>
@@ -336,7 +338,6 @@ ${extractData.text.substring(0, 3000)}`; // 앞부분 위주로 전달
                     ))}
                   </div>
 
-                  {/* 채점 결과 표시 영역 */}
                   {correctAnswers && (
                     <div className="w-10 flex items-center justify-center shrink-0 border-l border-white/10 pl-2">
                       {isCorrect ? (
@@ -344,7 +345,7 @@ ${extractData.text.substring(0, 3000)}`; // 앞부분 위주로 전달
                       ) : (
                         <div className="flex flex-col items-center">
                           <span className="text-red-400 font-bold text-[10px]">❌</span>
-                          <span className="text-[9px] text-white/60 font-mono mt-0.5">정답:{correctAnswers[qNum] || '?'}</span>
+                          <span className="text-[9px] text-white/60 font-mono mt-0.5">답:{correctAnswers[String(qNum)] || '?'}</span>
                         </div>
                       )}
                     </div>
