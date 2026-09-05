@@ -22,7 +22,25 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
 
   const renderExpandableWrongCard = (card: any, wrongWords: string[]) => {
     const isExpanded = expandedId === card.id;
-    const title = card.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim() || '제목 없음';
+    const lines = card.content.split('\n');
+    const title = lines[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim() || '제목 없음';
+    const bodyLines = lines.slice(1);
+
+    // 💡 [핵심] 오답 단어가 포함된 문장만 쏙 뽑아내기
+    const wrongSentences = new Set<string>();
+    
+    wrongWords.forEach(ww => {
+        const cleanWw = ww.replace(/\s+/g, '');
+        bodyLines.forEach(line => {
+            const blanksInLine = line.match(/\[(.*?)\]/g) || [];
+            const hasMatch = blanksInLine.some(b => b.replace(/\[|\]|\s+/g, '') === cleanWw);
+            if (hasMatch) {
+                wrongSentences.add(line);
+            }
+        });
+    });
+
+    const sentencesArr = Array.from(wrongSentences);
 
     return (
       <div key={card.id} className="relative w-full perspective-1000 mb-2">
@@ -36,20 +54,37 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
              </div>
              <span className="shrink-0 bg-red-600 text-white text-[9px] sm:text-[10px] px-2 py-1 rounded-sm font-bold shadow-[0_0_10px_rgba(220,38,38,0.5)]">🚨 오답 발견</span>
           </div>
-          
-          <div className="flex flex-wrap gap-1 mt-2 w-full">
-             <span className="text-[10px] text-red-400 font-bold w-full mb-0.5">내가 틀렸던 빈칸 단어:</span>
-             {wrongWords.map(w => (
-                <span key={w} className="bg-red-900/50 text-red-200 border border-red-500/40 px-2 py-0.5 rounded-sm text-[10px] font-bold">
-                   {w}
-                </span>
-             ))}
-          </div>
         </div>
 
         {isExpanded && (
-          <div className="w-full bg-[#0a0a0c] border border-red-500/30 p-4 mt-1 rounded-sm text-[11px] sm:text-[12px] text-white/80 leading-relaxed font-serif animate-in slide-in-from-top-2 shadow-inner">
-             {card.content.split('\n').slice(1).join('\n')}
+          <div className="w-full bg-[#0a0a0c] border border-red-500/30 p-4 mt-1 rounded-sm animate-in slide-in-from-top-2 shadow-inner">
+             <div className="flex flex-col gap-3 w-full">
+               <span className="text-[10px] text-red-400 font-bold tracking-widest border-b border-red-500/20 pb-1">내가 틀렸던 오답 문장:</span>
+               
+               {sentencesArr.length > 0 ? sentencesArr.map((sentence, i) => {
+                  // 💡 틀렸던 빈칸만 빨간색으로 강력하게 하이라이트
+                  const coloredSentence = sentence.split(/(\[.*?\])/g).map((part, j) => {
+                     if (part.startsWith('[') && part.endsWith(']')) {
+                        const inner = part.replace(/\[|\]/g, '').trim();
+                        const isWrongWord = wrongWords.some(w => w.replace(/\s+/g, '') === inner.replace(/\s+/g, ''));
+                        return (
+                          <span key={j} className={isWrongWord ? "text-red-200 font-bold bg-red-900/60 px-1 rounded-sm border border-red-500/50 shadow-sm" : "text-white/40"}>
+                            {part}
+                          </span>
+                        );
+                     }
+                     return <span key={j}>{part}</span>;
+                  });
+                  
+                  return (
+                     <div key={i} className="bg-black/60 text-white/80 border-l-2 border-red-500/50 p-2.5 rounded-r-sm text-[12px] sm:text-[13px] leading-relaxed font-serif break-keep">
+                        {coloredSentence}
+                     </div>
+                  );
+               }) : (
+                  <div className="text-white/40 text-[10px] py-2">오답 문장을 찾을 수 없습니다.</div>
+               )}
+             </div>
           </div>
         )}
       </div>
@@ -76,7 +111,7 @@ export const RecordTab = ({ savedCards, goalBalance, handleUpdateBalance, loadAl
         <div>
           <h1 className="text-2xl sm:text-3xl font-serif text-red-400 tracking-tight mb-2">나의 취약점 (오답노트)</h1>
           <p className="text-[11px] sm:text-xs text-red-200/60 leading-relaxed">
-            한 번이라도 <span className="text-red-400 font-bold">오답을 입력했거나 스킵한 빈칸</span>이 포함된 조항들만 모아 보여줍니다.
+            한 번이라도 <span className="text-red-400 font-bold">오답을 입력했거나 스킵한 빈칸</span>이 포함된 조항의 문장들을 복습합니다.
           </p>
         </div>
       </div>
