@@ -11,7 +11,6 @@ import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 import { RecordTab } from "./tabs/RecordTab";
 
-// 🚨 [진단용 최상위 에러 추적기] 화면이 하얗게 죽는 것을 막고 원인을 텍스트로 출력합니다.
 class GlobalErrorBoundary extends Component<{children: ReactNode}, {hasError: boolean, error: any, errorInfo: any}> {
   constructor(props: any) { 
     super(props); 
@@ -296,6 +295,13 @@ function MainApp() {
   const [inputMode, setInputMode] = useState<'typing'|'touch'>('typing'); 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   
+  // 💡 [신규] 수동 함정 보기(오답) 저장용 상태
+  const [customDistractors, setCustomDistractors] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('blankd_custom_distractors') || '[]'); }
+    catch { return []; }
+  });
+  const [newDistractor, setNewDistractor] = useState("");
+
   const isProcessingRef = useRef(false);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
@@ -320,33 +326,67 @@ function MainApp() {
   const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
-  // 💡 초성 계산기 캐싱
-  const chosungGroups = useMemo(() => {
-    const groups: Record<string, string[]> = {};
-    touchCandidates.forEach(ans => {
-        const cho = getChosung(ans);
-        if (!groups[cho]) groups[cho] = [];
-        if (!groups[cho].includes(ans)) groups[cho].push(ans);
-    });
-    return groups;
-  }, [touchCandidates]);
+  // 💡 수동 오답 추가 핸들러
+  const handleAddDistractor = () => {
+    if (!newDistractor.trim()) return;
+    const next = Array.from(new Set([...customDistractors, newDistractor.trim()]));
+    setCustomDistractors(next);
+    localStorage.setItem('blankd_custom_distractors', JSON.stringify(next));
+    setNewDistractor("");
+    addLog(`📝 수동 오답 '${newDistractor.trim()}' 추가 완료`);
+  };
 
-  // 💡 [핵심기능] 정답과 같은 초성의 단어들만 즉시 추출
+  // 💡 [핵심기능] 보기 4개 스마트 필터링 시스템 (정답 + 수동오답 + 같은초성 + 빈자리 무작위 다른초성)
   const activeTouchCandidates = useMemo(() => {
     if (!blanks[currentBlankIdx]) return [];
-    const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '');
-    const targetCho = getChosung(expected);
-    return chosungGroups[targetCho] || [];
-  }, [currentBlankIdx, blanks, chosungGroups]);
+    
+    const expectedRaw = blanks[currentBlankIdx].answer;
+    const expectedClean = expectedRaw.replace(/\s+/g, '');
+    const targetCho = getChosung(expectedClean);
 
-  // 💡 1~9 단축키 연동 (스피드런 지원)
+    // 전체 풀에 수동으로 추가한 오답들도 합칩니다.
+    const allPool = Array.from(new Set([...touchCandidates, ...customDistractors]));
+    const sameCho: string[] = [];
+    const otherCho: string[] = [];
+    
+    allPool.forEach(ans => {
+       if (ans.replace(/\s+/g, '') === expectedClean) return; 
+       if (getChosung(ans.replace(/\s+/g, '')) === targetCho) {
+           sameCho.push(ans);
+       } else {
+           otherCho.push(ans);
+       }
+    });
+    
+    const shuffle = (array: string[]) => [...array].sort(() => Math.random() - 0.5);
+    
+    let distractors: string[] = [];
+    if (sameCho.length >= 3) {
+        // 같은 초성이 충분히 많으면 거기서 무작위 3개 추출 (총 4개 생성)
+        distractors = shuffle(sameCho).slice(0, 3);
+    } else {
+        // 부족하면 있는 걸 다 넣고, 모자란 만큼 다른 초성에서 뽑아옴
+        distractors = [...sameCho];
+        const needed = 3 - distractors.length;
+        distractors = [...distractors, ...shuffle(otherCho).slice(0, needed)];
+    }
+    
+    // 정답 1개 + 함정 최대 3개를 합쳐서 4개로 고정
+    const finalCandidates = [...distractors, expectedRaw];
+    
+    // 위치가 예측 가능하도록 '가나다순' 정렬
+    return finalCandidates.sort((a, b) => a.localeCompare(b, 'ko'));
+
+  }, [currentBlankIdx, blanks, touchCandidates, customDistractors]); 
+
+  // 💡 1~4 단축키 연동
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (inputMode !== 'touch' || !activeCard) return;
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
 
       const keyNum = parseInt(e.key, 10);
-      if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= 9) {
+      if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= 4) {
           e.preventDefault();
           const idx = keyNum - 1;
           if (activeTouchCandidates[idx]) {
@@ -985,7 +1025,6 @@ function MainApp() {
     flushQueue();
   };
 
-  // 💡 정답 후 강제로 다음 칸/조항으로 넘어가는 헬퍼 함수
   const forceAdvance = () => {
     setBlanks(prev => {
       const nb = [...prev];
@@ -1012,7 +1051,7 @@ function MainApp() {
   const handleSequentialInput = (overrideInput?: string | any) => {
     if (isProcessingRef.current) return; 
     if (inputStatus === 'correct' || !blanks[currentBlankIdx]) return;
-    if (inputStatus === 'wrong') return; // 이미 오답 대기 중복 클릭 방지
+    if (inputStatus === 'wrong') return; 
 
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
@@ -1038,14 +1077,12 @@ function MainApp() {
       setInputStatus('wrong'); 
       statsRef.current.wrongIndices.add(currentBlankIdx); 
       
-      // 💡 [기능 1] 오답 시 10 포인트 차감 적용
       handleUpdateBalance(-10);
       addLog(`❌ 오답! (-10P)`);
 
       if (currentBlankIdx + 1 < blanks.length) {
           setTimeout(forceAdvance, 600); 
       } else {
-          // 💡 [기능 2] 마지막 빈칸에서 틀렸을 때는 '다음' 버튼 대기를 위해 자동 이동 중단
           isProcessingRef.current = false; 
       }
     }
@@ -1060,14 +1097,12 @@ function MainApp() {
     setInputStatus('wrong'); 
     statsRef.current.wrongIndices.add(currentBlankIdx);
 
-    // 💡 [기능 1] 정답 보기(스킵) 시에도 10 포인트 차감 적용
     handleUpdateBalance(-10);
     addLog(`❌ 정답 확인 (-10P)`);
 
     if (currentBlankIdx + 1 < blanks.length) {
         setTimeout(forceAdvance, 800);
     } else {
-        // 💡 [기능 2] 마지막 빈칸에서 스킵할 때도 '다음' 버튼 대기를 위해 자동 이동 중단
         isProcessingRef.current = false;
     }
   };
@@ -1234,30 +1269,44 @@ function MainApp() {
 
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-3 z-30 flex flex-col gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
-            {/* 💡 [기능 3] 터치 모드: 정답과 초성이 동일한 단어들만 다이렉트로 즉시 표시 */}
+            {/* 💡 [기능 1] 터치 모드: 4개 고정 보기 (2x2) 및 수동 오답 추가 UI */}
             {inputMode === 'touch' && activeTouchCandidates.length > 0 && (
-              <div className="flex flex-col gap-2 w-full max-h-[35vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
+              <div className="flex flex-col gap-2 w-full max-h-[40vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[11px] text-teal-400 mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
-                    <span className="animate-pulse">👆</span> 터치하여 정답을 선택하세요 (1~9 핫키)
+                    <span className="animate-pulse">👆</span> 터치하여 정답을 선택하세요 (1~4 핫키)
                   </div>
                 </div>
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 w-full">
+                {/* 2x2 그리드 */}
+                <div className="grid grid-cols-2 gap-2 w-full">
                    {activeTouchCandidates.map((ans, idx) => (
                      <button
                        key={idx}
                        onClick={() => handleSequentialInput(ans)}
                        className="relative px-2 py-4 sm:py-5 bg-black/40 border border-white/20 rounded text-[13px] sm:text-[15px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex items-center justify-center break-keep"
                      >
-                       {idx < 9 && <span className="absolute top-1 left-1.5 text-[10px] text-teal-500/60 font-mono">[{idx+1}]</span>}
+                       {idx < 4 && <span className="absolute top-1 left-1.5 text-[10px] text-teal-500/60 font-mono">[{idx+1}]</span>}
                        {ans}
                      </button>
                    ))}
                 </div>
+
+                {/* 수동 함정(오답) 추가 입력창 */}
+                <div className="flex gap-2 mt-2 pt-2 border-t border-white/10">
+                   <input 
+                     value={newDistractor} 
+                     onChange={(e) => setNewDistractor(e.target.value)}
+                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddDistractor(); } }}
+                     placeholder="헷갈리는 함정 보기 직접 추가 (엔터)" 
+                     className="flex-1 bg-black/40 border border-white/20 px-3 py-2 rounded text-xs text-white outline-none focus:border-indigo-500 transition-colors"
+                   />
+                   <button onClick={handleAddDistractor} className="px-3 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded shadow-md transition-colors whitespace-nowrap">
+                     추가
+                   </button>
+                </div>
               </div>
             )}
             
-            {/* 💡 [기능 2] 마지막 빈칸 오답 시 다음 조항으로 넘어가는 강력한 버튼 */}
             {inputStatus === 'wrong' && currentBlankIdx === blanks.length - 1 ? (
               <button 
                 onClick={() => {
@@ -1286,7 +1335,7 @@ function MainApp() {
         </div>
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, touchCandidates, fontSizeLevel, activeTouchCandidates]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, touchCandidates, fontSizeLevel, activeTouchCandidates, customDistractors, newDistractor]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
@@ -1549,7 +1598,7 @@ function MainApp() {
       {isLoggedIn && (
         <nav className="border-b border-white/5 bg-black/40 py-1.5 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="w-full max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2 px-2 sm:px-4 md:px-8">
-            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '수집' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
+            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '나의 오답' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
             ))}
           </div>
