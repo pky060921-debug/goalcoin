@@ -16,7 +16,10 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [pageNumber, setPageNumber] = useState(1);
   const [questionCount, setQuestionCount] = useState<number>(40);
   
-  // 💡 [해결 3] OMR 마킹 영구 저장 (탭을 이동해도 날아가지 않음)
+  // 💡 [해결 1] PDF 원본 비율 동기화 상태 (S펜 위치 1:1 매칭용)
+  const [pageDim, setPageDim] = useState({ w: 800, h: 1131 });
+
+  // OMR 및 채점 상태
   const [userAnswers, setUserAnswers] = useState<Record<number, number>>(() => {
     try { return JSON.parse(localStorage.getItem(`blankd_omr_${safeAddress}`) || '{}'); } catch { return {}; }
   });
@@ -31,26 +34,42 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   });
   const [systemLog, setSystemLog] = useState<string>("");
 
-  // 💡 [해결 3] S펜 필기 데이터 영구 저장
+  // 필기(Canvas) 관련 상태
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
+  
+  // 💡 [해결 2] 필기 데이터 로컬 스토리지 연동 (압축 저장)
   const [lines, setLines] = useState<Record<number, any[]>>(() => {
     try { return JSON.parse(localStorage.getItem(`blankd_drawings_${safeAddress}`) || '{}'); } catch { return {}; }
   }); 
   const currentPathRef = useRef<any[]>([]);
 
   // 상태 변경 시 로컬 스토리지에 실시간 동기화
-  useEffect(() => { localStorage.setItem(`blankd_omr_${safeAddress}`, JSON.stringify(userAnswers)); }, [userAnswers]);
-  useEffect(() => { localStorage.setItem(`blankd_drawings_${safeAddress}`, JSON.stringify(lines)); }, [lines]);
-  useEffect(() => { localStorage.setItem(`blankd_omr_correct_${safeAddress}`, JSON.stringify(correctAnswers)); }, [correctAnswers]);
-  useEffect(() => { localStorage.setItem(`blankd_omr_score_${safeAddress}`, JSON.stringify(score)); }, [score]);
+  useEffect(() => { localStorage.setItem(`blankd_omr_${safeAddress}`, JSON.stringify(userAnswers)); }, [userAnswers, safeAddress]);
+  useEffect(() => { localStorage.setItem(`blankd_omr_correct_${safeAddress}`, JSON.stringify(correctAnswers)); }, [correctAnswers, safeAddress]);
+  useEffect(() => { localStorage.setItem(`blankd_omr_score_${safeAddress}`, JSON.stringify(score)); }, [score, safeAddress]);
+  
+  // 💡 데이터 용량 초과 방어 로직 적용
+  useEffect(() => {
+    try {
+        localStorage.setItem(`blankd_drawings_${safeAddress}`, JSON.stringify(lines));
+    } catch (e) {
+        console.warn("용량 초과로 일부 필기가 저장되지 않을 수 있습니다.");
+    }
+  }, [lines, safeAddress]);
 
-  // 📄 PDF 로드 완료 핸들러
+  // 📄 PDF 로드 및 렌더링 핸들러
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
   };
 
-  // ✍️ 캔버스 렌더링
+  const onPageLoadSuccess = (page: any) => {
+    // 💡 S펜 좌표 매칭을 위해 PDF 원본 비율을 추출합니다.
+    const vp = page.getViewport({ scale: 1 });
+    setPageDim({ w: vp.width, h: vp.height });
+  };
+
+  // ✍️ 캔버스 렌더링 (리액트가 새로고침되어도 그려줌)
   const drawLines = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -58,7 +77,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     if (!ctx) return;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 3;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = 'rgba(239, 68, 68, 0.8)'; // 빨간펜
@@ -78,23 +97,25 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
   useEffect(() => {
     drawLines();
-  }, [lines, pageNumber]);
+  }, [lines, pageNumber, pageDim]);
 
-  // 💡 [해결 2] 브라우저 확대/축소 비율과 캔버스 좌표를 1:1 매칭하는 보정 공식
+  // 💡 [해결 1] 정밀 좌표 보정 시스템
   const getScaledCoordinates = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
+    const scaleX = pageDim.w / rect.width;
+    const scaleY = pageDim.h / rect.height;
     return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY
+      x: Math.round((e.clientX - rect.left) * scaleX),
+      y: Math.round((e.clientY - rect.top) * scaleY)
     };
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    // 손가락 터치(스크롤) 차단, 오직 펜과 마우스만 허용
     if (e.pointerType !== 'pen' && e.pointerType !== 'mouse') return;
+    
     const { x, y } = getScaledCoordinates(e);
     setIsDrawing(true);
     currentPathRef.current = [{ x, y }];
@@ -103,8 +124,15 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
   const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isDrawing || (e.pointerType !== 'pen' && e.pointerType !== 'mouse')) return;
+    
     const { x, y } = getScaledCoordinates(e);
-    currentPathRef.current.push({ x, y });
+    const path = currentPathRef.current;
+    const lastPoint = path[path.length - 1];
+    
+    // 💡 [해결 2] 너무 미세한 움직임은 무시하여 필기 데이터를 압축 (용량 최적화)
+    if (lastPoint && Math.hypot(lastPoint.x - x, lastPoint.y - y) < 2) return;
+    
+    path.push({ x, y });
     drawLines();
   };
 
@@ -121,11 +149,10 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   };
 
   const handleAnswerSelect = (qNum: number, ans: number) => {
-    if (score) return; // 채점 후 수정 불가
+    if (score) return; // 채점 완료 후에는 수정 불가
     setUserAnswers(prev => ({ ...prev, [qNum]: ans }));
   };
 
-  // 기록 전체 초기화 (새로운 모의고사를 풀고 싶을 때)
   const handleResetAll = () => {
     if (window.confirm("모든 필기와 OMR 마킹 기록을 삭제하시겠습니까?")) {
       setLines({});
@@ -137,7 +164,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     }
   };
 
-  // 💡 [해결 1] 프록시 API(백엔드)를 거쳐 안전하게 채점 요청
+  // 🤖 트랙 B: AI 스마트 채점
   const handleGradeExam = async () => {
     if (!answerFile) return alert("정답지 PDF 파일을 먼저 업로드해주세요.");
     
@@ -154,7 +181,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
       setSystemLog("🤖 백엔드 서버(Ollama)에서 정답 번호 추출 중...");
 
-      // 🚨 브라우저에서 직접 localhost를 부르지 않고 백엔드로 요청을 우회
       const aiRes = await fetch(`${BASE_URL}/grade-exam`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -223,13 +249,15 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                   renderTextLayer={false} 
                   renderAnnotationLayer={false}
                   width={800} 
+                  onLoadSuccess={onPageLoadSuccess}
+                  onRenderSuccess={drawLines}
                 />
               </Document>
 
               <canvas
                 ref={canvasRef}
-                width={800}
-                height={1131}
+                width={pageDim.w} // 💡 추출한 원본 해상도를 Canvas 크기로 지정!
+                height={pageDim.h}
                 onPointerDown={handlePointerDown}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
@@ -280,6 +308,8 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                  <option value={20}>20문제</option>
                  <option value={40}>40문제</option>
                  <option value={50}>50문제</option>
+                 <option value={80}>80문제</option>
+                 <option value={100}>100문제</option>
                </select>
              </div>
           </div>
