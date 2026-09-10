@@ -11,7 +11,6 @@ import { ExamTab } from "./tabs/ExamTab";
 import { MypageTab } from "./tabs/MypageTab";
 import { RecordTab } from "./tabs/RecordTab";
 
-// 🚨 [진단용 최상위 에러 추적기] 화면이 하얗게 죽는 것을 막고 원인을 텍스트로 출력합니다.
 class GlobalErrorBoundary extends Component<{children: ReactNode}, {hasError: boolean, error: any, errorInfo: any}> {
   constructor(props: any) { 
     super(props); 
@@ -296,16 +295,6 @@ function MainApp() {
   const [inputMode, setInputMode] = useState<'typing'|'touch'>('typing'); 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   
-  const [distractorGroups, setDistractorGroups] = useState<string[][]>(() => {
-    try { return JSON.parse(localStorage.getItem(`blankd_distractor_groups_${safeAddress}`) || '[]'); }
-    catch { return []; }
-  });
-
-  const saveDistractorGroups = (newGroups: string[][]) => {
-    setDistractorGroups(newGroups);
-    localStorage.setItem(`blankd_distractor_groups_${safeAddress}`, JSON.stringify(newGroups));
-  };
-
   const isProcessingRef = useRef(false);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
@@ -318,8 +307,9 @@ function MainApp() {
   const [hintLetter, setHintLetter] = useState<string | null>(null);
   const [isFrozen, setIsFrozen] = useState<boolean>(false);
 
-  const [globalDict, setGlobalDict] = useState<{ stopwords: string[], inclusions: string[], abbrs: Record<string, string> }>({
-    stopwords: [], inclusions: [], abbrs: {}
+  // 💡 [핵심] 오답 그룹(groups) 전역 변수 추가
+  const [globalDict, setGlobalDict] = useState<{ stopwords: string[], inclusions: string[], abbrs: Record<string, string>, groups: string[][] }>({
+    stopwords: [], inclusions: [], abbrs: {}, groups: []
   });
 
   const [isDictModalOpen, setIsDictModalOpen] = useState(false);
@@ -340,6 +330,7 @@ function MainApp() {
     return groups;
   }, [touchCandidates]);
 
+  // 💡 스마트 터치 4지선다 필터 (전역 오답 그룹 연동)
   const activeTouchCandidates = useMemo(() => {
     if (!blanks[currentBlankIdx]) return [];
     
@@ -348,7 +339,7 @@ function MainApp() {
     const targetCho = getChosung(expectedClean);
 
     let matchedGroup: string[] | null = null;
-    for (const group of distractorGroups) {
+    for (const group of (globalDict.groups || [])) {
         if (group.some(w => w.replace(/\s+/g, '') === expectedClean)) {
             matchedGroup = group;
             break;
@@ -383,7 +374,7 @@ function MainApp() {
     const finalCandidates = [...distractors, expectedRaw];
     return finalCandidates.sort((a, b) => a.localeCompare(b, 'ko'));
 
-  }, [currentBlankIdx, blanks, touchCandidates, distractorGroups]); 
+  }, [currentBlankIdx, blanks, touchCandidates, globalDict.groups]); 
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -514,13 +505,14 @@ function MainApp() {
         fetchWithDiagnostic(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`, '카테고리'),
         fetchWithDiagnostic(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`, '카드'),
         fetch(`https://api.blankd.top/api/get-balance?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()).catch(() => ({ balance: 0, activity_log: {}, claimed_rewards: {} })),
-        api.getGlobalDict(safeAddress).catch(() => ({ stopwords: [], inclusions: [], abbrs: {} }))
+        api.getGlobalDict(safeAddress).catch(() => ({ stopwords: [], inclusions: [], abbrs: {}, groups: [] }))
       ]);
 
       const serverStopwords = Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [];
       const serverInclusions = Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [];
       let finalAbbrs = (dictRes.abbrs && typeof dictRes.abbrs === 'object' && !Array.isArray(dictRes.abbrs)) ? dictRes.abbrs : {};
-      const newDict = { stopwords: serverStopwords, inclusions: serverInclusions, abbrs: finalAbbrs };
+      const serverGroups = Array.isArray(dictRes.groups) ? dictRes.groups : [];
+      const newDict = { stopwords: serverStopwords, inclusions: serverInclusions, abbrs: finalAbbrs, groups: serverGroups };
 
       let finalCards = cardRes.cards || [];
       
@@ -584,7 +576,7 @@ function MainApp() {
         const offBal = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
         const offActivityLog = JSON.parse(localStorage.getItem(`blankd_activity_log_${safeAddress}`) || '{}');
         const offClaimedRewards = JSON.parse(localStorage.getItem(`blankd_claimed_rewards_${safeAddress}`) || '{}');
-        const offDict = JSON.parse(localStorage.getItem(`blankd_off_dict_${safeAddress}`) || '{"stopwords":[],"inclusions":[],"abbrs":{}}');
+        const offDict = JSON.parse(localStorage.getItem(`blankd_off_dict_${safeAddress}`) || '{"stopwords":[],"inclusions":[],"abbrs":{},"groups":[]}');
 
         setCategories(offCat);
         setSavedCards(offCard);
@@ -857,9 +849,26 @@ function MainApp() {
       
       const savedProgress = localStorage.getItem(`blankd_progress_${activeCard.id}`);
       const lastIdx = savedProgress ? parseInt(savedProgress, 10) : 0;
-      const restoredBlanks = foundBlanks.map((b, i) => ({ ...b, correct: i < lastIdx }));
+      
+      // 💡 [핵심] 오답 타겟팅 로직 (오답만 빈칸으로 풀기)
+      const targetWrong = activeCard._targetWrongWords || null;
+      const restoredBlanks = foundBlanks.map((b, i) => {
+          let isCorrect = i < lastIdx;
+          if (targetWrong) {
+              const cleanAns = b.answer.replace(/\s+/g, '');
+              const isTarget = targetWrong.some((w: string) => w.replace(/\s+/g, '') === cleanAns);
+              // 타겟 오답이 아니면 이미 맞춘 것으로 강제 통과 처리!
+              isCorrect = !isTarget;
+          }
+          return { ...b, correct: isCorrect };
+      });
 
-      setBlanks(restoredBlanks); setCurrentBlankIdx(lastIdx < foundBlanks.length ? lastIdx : 0); setInputStatus('idle');
+      setBlanks(restoredBlanks); 
+
+      // 💡 첫 번째로 풀어야 할 빈칸으로 쾌속 점프
+      const firstIdx = restoredBlanks.findIndex(b => !b.correct);
+      setCurrentBlankIdx(firstIdx !== -1 ? firstIdx : 0);
+      setInputStatus('idle');
 
       const uniqueAnswers = Array.from(new Set(foundBlanks.map(b => b.answer)));
       setTouchCandidates(uniqueAnswers.sort((a, b) => a.localeCompare(b, 'ko')));
@@ -899,12 +908,14 @@ function MainApp() {
     const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = 0;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     
-    const correctCount = Math.max(0, blanks.length - wrongArr.length);
+    // 오답 모드일 경우 맞은 개수 카운팅 생략
+    const isTargetMode = !!activeCard._targetWrongWords;
+    const correctCount = isTargetMode ? 0 : Math.max(0, blanks.length - wrongArr.length);
     const isCorrect = wrongArr.length === 0;
 
     const exStats = getExtendedStats(activeCard.memo);
     exStats.text = statsRef.current.text;
-    exStats.filled = statsRef.current.filled + 1; 
+    exStats.filled = exStats.filled + 1; 
     exStats.wrongIndices = wrongArr;
     
     const nowTimeStr = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('T', ' ').substring(0, 19);
@@ -971,7 +982,9 @@ function MainApp() {
 
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder);
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
-    const nextCard = folderCards[currentIdx + 1] || null;
+    
+    // 오답 모드가 아니면 다음 카드로 이동, 오답 모드면 종료 후 창 닫기 유도
+    const nextCard = isTargetMode ? null : (folderCards[currentIdx + 1] || null);
 
     localStorage.removeItem(`blankd_progress_${currentId}`);
 
@@ -986,9 +999,9 @@ function MainApp() {
     pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
     
     if (isOffline) {
-      addLog(`💾 오프라인 기록 (ID:${currentId}) | 내 기기에 우선 보존됨`);
+      addLog(`💾 오프라인 기록 보존됨`);
     } else {
-      addLog(`🎉 학습 완료! 기록 갱신 됨. +${earnedPoints} Point 획득`);
+      addLog(`🎉 완료! 기록 갱신 됨. +${earnedPoints} Point`);
       try {
         await fetch("https://api.blankd.top/api/save-card", {
           method: "POST", 
@@ -1040,12 +1053,12 @@ function MainApp() {
       return nb;
     });
     
-    if (currentBlankIdx + 1 < blanks.length) {
-        setCurrentBlankIdx(prevIdx => {
-          const nextIdx = prevIdx + 1;
-          localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
-          return nextIdx;
-        });
+    // 오답 모드에서도 틀린 빈칸만 건너뛰도록 처리
+    const nextIdx = blanks.findIndex((b, idx) => idx > currentBlankIdx && !b.correct);
+
+    if (nextIdx !== -1) {
+        setCurrentBlankIdx(nextIdx);
+        localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
         setInputStatus('idle');
         isProcessingRef.current = false;
     } else {
@@ -1088,7 +1101,8 @@ function MainApp() {
       handleUpdateBalance(-10);
       addLog(`❌ 오답! (-10P)`);
 
-      if (currentBlankIdx + 1 < blanks.length) {
+      const nextIdx = blanks.findIndex((b, idx) => idx > currentBlankIdx && !b.correct);
+      if (nextIdx !== -1) {
           setTimeout(forceAdvance, 600); 
       } else {
           isProcessingRef.current = false; 
@@ -1108,7 +1122,8 @@ function MainApp() {
     handleUpdateBalance(-10);
     addLog(`❌ 정답 확인 (-10P)`);
 
-    if (currentBlankIdx + 1 < blanks.length) {
+    const nextIdx = blanks.findIndex((b, idx) => idx > currentBlankIdx && !b.correct);
+    if (nextIdx !== -1) {
         setTimeout(forceAdvance, 800);
     } else {
         isProcessingRef.current = false;
@@ -1277,6 +1292,7 @@ function MainApp() {
 
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-3 z-30 flex flex-col gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
+            {/* 💡 [기능 3] 터치 모드: 4개 고정 보기 (2x2) 및 하단 모름 버튼 */}
             {inputMode === 'touch' && activeTouchCandidates.length > 0 && (
               <div className="flex flex-col gap-2 w-full max-h-[45vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[11px] text-teal-400 mb-1 font-bold flex items-center justify-between">
@@ -1284,6 +1300,7 @@ function MainApp() {
                     <span className="animate-pulse">👆</span> 터치하여 정답을 선택하세요 (1~4 핫키)
                   </div>
                 </div>
+                {/* 2x2 그리드 */}
                 <div className="grid grid-cols-2 gap-2 w-full">
                    {activeTouchCandidates.map((ans, idx) => (
                      <button
@@ -1360,9 +1377,10 @@ function MainApp() {
       saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words])) });
       setTempKey("");
     } else if (dictTab === 'group' && tempKey) {
+      // 💡 로컬이 아닌 백엔드 전역 사전으로 업데이트!
       const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
       if (words.length > 1) {
-          saveDistractorGroups([...distractorGroups, words]);
+          saveGlobalDict({ ...globalDict, groups: [...(globalDict.groups || []), words] });
       } else {
           alert("쉼표로 구분하여 최소 2개 이상의 단어를 입력해주세요.");
       }
@@ -1440,7 +1458,7 @@ function MainApp() {
               }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors">✕</button>
             </div>
         ))}
-        {dictTab === 'group' && distractorGroups.map((group, idx) => (
+        {dictTab === 'group' && (globalDict.groups || []).map((group, idx) => (
             <div key={idx} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-2">
               <div className="flex items-center gap-1.5 flex-wrap">
                 {group.map((w, wIdx) => (
@@ -1448,14 +1466,14 @@ function MainApp() {
                 ))}
               </div>
               <button onClick={() => {
-                const next = [...distractorGroups];
+                const next = [...(globalDict.groups || [])];
                 next.splice(idx, 1);
-                saveDistractorGroups(next);
+                saveGlobalDict({...globalDict, groups: next});
               }} className="text-white/20 hover:text-red-400 text-xs px-2 transition-colors shrink-0">✕</button>
             </div>
         ))}
 
-        {((dictTab === 'abbr' && Object.keys(globalDict.abbrs || {}).length === 0) || (dictTab === 'stop' && (globalDict.stopwords || []).length === 0) || (dictTab === 'include' && (globalDict.inclusions || []).length === 0) || (dictTab === 'group' && distractorGroups.length === 0)) && (
+        {((dictTab === 'abbr' && Object.keys(globalDict.abbrs || {}).length === 0) || (dictTab === 'stop' && (globalDict.stopwords || []).length === 0) || (dictTab === 'include' && (globalDict.inclusions || []).length === 0) || (dictTab === 'group' && (globalDict.groups || []).length === 0)) && (
           <div className="text-center py-8 text-white/20 text-[11px] sm:text-xs">등록된 단어가 없습니다.</div>
         )}
       </div>
@@ -1619,7 +1637,6 @@ function MainApp() {
       {isLoggedIn && (
         <nav className="border-b border-white/5 bg-black/40 py-1.5 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="w-full max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2 px-2 sm:px-4 md:px-8">
-            {/* 💡 탭 이름을 '기록실'로 변경 */}
             {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
             ))}
@@ -1681,7 +1698,6 @@ function MainApp() {
         </div>
       )}
 
-      {/* 모달 렌더링 영역 (RecordTab에서 호출 시에도 동일하게 작동) */}
       {activeCard && (
         <CardModal 
           activeCard={activeCard} 
