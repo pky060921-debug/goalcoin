@@ -265,6 +265,9 @@ def init_golden_db():
         except: pass
         try: conn.execute('ALTER TABLE user_settings ADD COLUMN custom_inclusions TEXT DEFAULT "[]"')
         except: pass
+        # 💡 [추가] 오답 그룹 전역 연동을 위한 컬럼 추가
+        try: conn.execute('ALTER TABLE user_settings ADD COLUMN custom_groups TEXT DEFAULT "[]"')
+        except: pass
             
         conn.commit()
         conn.close()
@@ -1379,65 +1382,57 @@ def get_checkpoint():
 def get_global_dict():
     try:
         wallet_address = request.args.get('wallet_address')
-        if not wallet_address:
-            return jsonify({"stopwords": [], "abbrs": {}, "inclusions": [], "error": "wallet_address 누락"}), 400
+        if not wallet_address: return jsonify({"stopwords": [], "abbrs": {}, "inclusions": [], "groups": [], "error": "wallet_address 누락"}), 400
 
         conn = get_db_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT custom_stopwords, custom_abbrs, custom_inclusions FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+        cursor.execute("SELECT custom_stopwords, custom_abbrs, custom_inclusions, custom_groups FROM user_settings WHERE wallet_address = ?", (wallet_address,))
         row = cursor.fetchone()
         conn.close()
 
         def force_repair_list(val, fallback_key=None):
-            """배열 형태 컬럼 복구. fallback_key: 구형 dict에서 꺼낼 키"""
-            if not val:
-                return []
+            if not val: return []
             try:
                 data = json.loads(val)
-                if isinstance(data, list):
-                    return data
+                if isinstance(data, list): return data
                 if isinstance(data, dict):
-                    if fallback_key and fallback_key in data:
-                        return data[fallback_key]
-                    if 'stop' in data:
-                        return data['stop']
-                    if 'stopwords' in data:
-                        return data['stopwords']
+                    if fallback_key and fallback_key in data: return data[fallback_key]
+                    if 'stop' in data: return data['stop']
+                    if 'stopwords' in data: return data['stopwords']
                 return []
             except Exception:
                 return [val] if isinstance(val, str) and val else []
 
         def force_repair_abbr(val):
-            if not val:
-                return {}
+            if not val: return {}
             try:
                 result = json.loads(val)
                 return result if isinstance(result, dict) else {}
-            except Exception:
-                return {}
+            except Exception: return {}
 
         raw_stopwords  = row[0] if row else None
         raw_abbrs      = row[1] if row else None
         raw_inclusions = row[2] if row else None
+        raw_groups     = row[3] if row and len(row) > 3 else None
 
         stopwords  = force_repair_list(raw_stopwords,  fallback_key='stop')
         inclusions = force_repair_list(raw_inclusions, fallback_key='include')
+        groups     = force_repair_list(raw_groups, fallback_key='groups')
 
         if not inclusions and raw_stopwords:
             try:
                 old = json.loads(raw_stopwords)
-                if isinstance(old, dict) and 'include' in old:
-                    inclusions = old['include']
-            except Exception:
-                pass
+                if isinstance(old, dict) and 'include' in old: inclusions = old['include']
+            except: pass
 
         return jsonify({
             "stopwords":  stopwords,
             "abbrs":      force_repair_abbr(raw_abbrs),
-            "inclusions": inclusions
+            "inclusions": inclusions,
+            "groups":     groups
         })
     except Exception as e:
-        logging.error(f"get_global_dict 오류: {e}")
+        logging.error(f"get_global_dict 오류: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
 @api_bp.route('/update-global-dict', methods=['POST'])
@@ -1448,22 +1443,23 @@ def update_global_dict():
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT 1 FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+        
+        sw = json.dumps(data.get('stopwords', []), ensure_ascii=False)
+        ab = json.dumps(data.get('abbrs', {}), ensure_ascii=False)
+        ic = json.dumps(data.get('inclusions', []), ensure_ascii=False)
+        gp = json.dumps(data.get('groups', []), ensure_ascii=False)
+
         if cursor.fetchone():
-            cursor.execute("UPDATE user_settings SET custom_stopwords = ?, custom_abbrs = ?, custom_inclusions = ? WHERE wallet_address = ?", 
-                (json.dumps(data.get('stopwords', []), ensure_ascii=False), 
-                 json.dumps(data.get('abbrs', {}), ensure_ascii=False),
-                 json.dumps(data.get('inclusions', []), ensure_ascii=False),
-                 wallet_address))
+            cursor.execute("UPDATE user_settings SET custom_stopwords=?, custom_abbrs=?, custom_inclusions=?, custom_groups=? WHERE wallet_address=?", 
+                (sw, ab, ic, gp, wallet_address))
         else:
-            cursor.execute("INSERT INTO user_settings (wallet_address, custom_stopwords, custom_abbrs, custom_inclusions) VALUES (?, ?, ?, ?)", 
-                (wallet_address, 
-                 json.dumps(data.get('stopwords', []), ensure_ascii=False), 
-                 json.dumps(data.get('abbrs', {}), ensure_ascii=False),
-                 json.dumps(data.get('inclusions', []), ensure_ascii=False)))
+            cursor.execute("INSERT INTO user_settings (wallet_address, custom_stopwords, custom_abbrs, custom_inclusions, custom_groups) VALUES (?, ?, ?, ?, ?)", 
+                (wallet_address, sw, ab, ic, gp))
         conn.commit()
         conn.close()
         return jsonify({"message": "전역 사전 DB 업데이트 완료"})
     except Exception as e:
+        logging.error(f"update_global_dict 오류: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
 import pandas as pd
@@ -1866,4 +1862,5 @@ def grade_exam():
         import json
         return jsonify(json.loads(raw_text)), 200
     except Exception as e:
+        logging.error(f"/grade-exam 에러: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
