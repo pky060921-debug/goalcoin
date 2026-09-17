@@ -2,14 +2,13 @@ import React, { useState, useEffect } from 'react';
 
 const BASE_URL = "https://api.blankd.top/api";
 
-// 💡 인코딩이 깨진 찌꺼기 문자와 특수 기호들을 화면에서 완벽히 제거하는 필터 함수
+// 💡 [빌드 에러 해결] 정규식 오타(//g)를 제거하고 안전하게 수정된 필터 함수
 const cleanMojibake = (text: string) => {
   if (!text) return "";
   return text
     .replace(/[\u0080-\u00FF]/g, '') 
     .replace(/[Nn]\s*`\s*/g, '') 
     .replace(//g, '') 
-    .replace(//g, '') 
     .replace(/[\u200B\u202F\uFEFF]/g, '') 
     .replace(/\u00A0/g, ' '); 
 };
@@ -26,7 +25,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [currentQIdx, setCurrentQIdx] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
   
-  // 💡 [핵심] 개별 지문(줄)마다 O / X / ? 를 마킹할 수 있는 스크래치패드 상태
+  // 💡 개별 지문(줄)마다 O / X / ? 를 마킹할 수 있는 스크래치패드 상태
   const [lineMarks, setLineMarks] = useState<Record<number, Record<number, 'O'|'X'|'?'|null>>>({});
 
   const [isGraded, setIsGraded] = useState(false);
@@ -86,7 +85,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       setQuestions(data);
       setSelectedBank(bank);
       setAnswers({});
-      setLineMarks({}); // 💡 새 모의고사 시작 시 마킹 기록 초기화
+      setLineMarks({}); // 새 모의고사 시작 시 마킹 기록 초기화
       setIsGraded(false);
       setCurrentQIdx(0);
       setViewMode('cbt');
@@ -100,7 +99,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setAnswers(prev => ({ ...prev, [qNo]: ans }));
   };
 
-  // 💡 개별 지문 마킹 토글 함수
+  // 개별 지문 마킹 토글 함수
   const toggleLineMark = (qNo: number, lineIdx: number, mark: 'O'|'X'|'?') => {
     setLineMarks(prev => {
       const qMarks = prev[qNo] || {};
@@ -193,7 +192,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                 </span>
                 <div className="text-[14px] sm:text-[16px] leading-loose font-serif w-full">
                   
-                  {/* 💡 문제 지문을 줄 단위로 쪼개서 개별 O/X 마킹 패널 부착 */}
+                  {/* 문제 지문을 줄 단위로 쪼개서 개별 O/X 마킹 패널 부착 */}
                   {cleanMojibake(currentQ.question_text).split('\n').map((line: string, lineIdx: number) => {
                     if (!line.trim()) return <div key={lineIdx} className="h-3"></div>;
                     
@@ -205,7 +204,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                           {line}
                         </span>
                         
-                        {/* 💡 개별 O/X 마킹 버튼 (모바일 호환성을 위해 불투명도 70% 고정 노출) */}
+                        {/* 개별 O/X 마킹 버튼 */}
                         <div className="flex shrink-0 gap-1.5 self-end sm:self-start opacity-70 group-hover:opacity-100 transition-opacity">
                           <button 
                             onClick={() => toggleLineMark(currentQ.question_no, lineIdx, 'O')}
@@ -332,7 +331,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
                   className={`relative w-full aspect-square rounded-sm border font-mono font-bold text-[11px] sm:text-xs flex items-center justify-center transition-all hover:scale-105 ${btnColor} ${isActive ? 'ring-2 ring-white ring-offset-2 ring-offset-black z-10' : ''}`}
                 >
                   {q.question_no}
-                  {/* 채점 완료 시 번호 아래에 내가 마킹한 번호 작게 표시 */}
                   {isGraded && (
                      <span className="absolute bottom-0.5 right-1 text-[8px] opacity-70">
                        {answers[q.question_no] || '-'}
