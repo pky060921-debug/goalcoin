@@ -1,386 +1,277 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Document, Page, pdfjs } from 'react-pdf';
-
-// 💡 Vite 환경에서 pdf.js 워커를 안전하게 불러오기 위한 CDN 설정
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+import React, { useState, useEffect } from 'react';
 
 const BASE_URL = "https://api.blankd.top/api";
 
 export const ExamTab = ({ walletAddress, address }: any) => {
   const safeAddress = walletAddress || address;
-  
-  // 파일 및 상태 관리
-  const [examFile, setExamFile] = useState<File | null>(null);
-  const [answerFile, setAnswerFile] = useState<File | null>(null);
-  const [numPages, setNumPages] = useState<number | null>(null);
-  const [pageNumber, setPageNumber] = useState(1);
-  const [questionCount, setQuestionCount] = useState<number>(40);
-  
-  // 💡 [해결 1] PDF 원본 비율 동기화 상태 (S펜 위치 1:1 매칭용)
-  const [pageDim, setPageDim] = useState({ w: 800, h: 1131 });
 
-  // OMR 및 채점 상태
-  const [userAnswers, setUserAnswers] = useState<Record<number, number>>(() => {
-    try { return JSON.parse(localStorage.getItem(`blankd_omr_${safeAddress}`) || '{}'); } catch { return {}; }
-  });
+  const [viewMode, setViewMode] = useState<'list' | 'cbt'>('list');
+  const [examBanks, setExamBanks] = useState<any[]>([]);
+  const [selectedBank, setSelectedBank] = useState<any>(null);
   
-  const [correctAnswers, setCorrectAnswers] = useState<Record<number, number> | null>(() => {
-    try { return JSON.parse(localStorage.getItem(`blankd_omr_correct_${safeAddress}`) || 'null'); } catch { return null; }
-  });
+  // CBT 상태
+  const [questions, setQuestions] = useState<any[]>([]);
+  const [currentQIdx, setCurrentQIdx] = useState(0);
+  const [answers, setAnswers] = useState<Record<number, string>>({});
+  const [isGraded, setIsGraded] = useState(false);
+  const [score, setScore] = useState({ correct: 0, total: 0 });
+  const [isUploading, setIsUploading] = useState(false);
 
-  const [isGrading, setIsGrading] = useState(false);
-  const [score, setScore] = useState<{ correct: number, total: number } | null>(() => {
-    try { return JSON.parse(localStorage.getItem(`blankd_omr_score_${safeAddress}`) || 'null'); } catch { return null; }
-  });
-  const [systemLog, setSystemLog] = useState<string>("");
-
-  // 필기(Canvas) 관련 상태
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  
-  // 💡 [해결 2] 필기 데이터 로컬 스토리지 연동 (압축 저장)
-  const [lines, setLines] = useState<Record<number, any[]>>(() => {
-    try { return JSON.parse(localStorage.getItem(`blankd_drawings_${safeAddress}`) || '{}'); } catch { return {}; }
-  }); 
-  const currentPathRef = useRef<any[]>([]);
-
-  // 상태 변경 시 로컬 스토리지에 실시간 동기화
-  useEffect(() => { localStorage.setItem(`blankd_omr_${safeAddress}`, JSON.stringify(userAnswers)); }, [userAnswers, safeAddress]);
-  useEffect(() => { localStorage.setItem(`blankd_omr_correct_${safeAddress}`, JSON.stringify(correctAnswers)); }, [correctAnswers, safeAddress]);
-  useEffect(() => { localStorage.setItem(`blankd_omr_score_${safeAddress}`, JSON.stringify(score)); }, [score, safeAddress]);
-  
-  // 💡 데이터 용량 초과 방어 로직 적용
-  useEffect(() => {
+  // 모의고사 목록 불러오기
+  const fetchExamBanks = async () => {
     try {
-        localStorage.setItem(`blankd_drawings_${safeAddress}`, JSON.stringify(lines));
+      const res = await fetch(`${BASE_URL}/get-exam-banks?wallet_address=${safeAddress}`);
+      const data = await res.json();
+      setExamBanks(data);
     } catch (e) {
-        console.warn("용량 초과로 일부 필기가 저장되지 않을 수 있습니다.");
+      console.error("목록 불러오기 실패:", e);
     }
-  }, [lines, safeAddress]);
-
-  // 📄 PDF 로드 및 렌더링 핸들러
-  const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
-    setNumPages(numPages);
-  };
-
-  const onPageLoadSuccess = (page: any) => {
-    // 💡 S펜 좌표 매칭을 위해 PDF 원본 비율을 추출합니다.
-    const vp = page.getViewport({ scale: 1 });
-    setPageDim({ w: vp.width, h: vp.height });
-  };
-
-  // ✍️ 캔버스 렌더링 (리액트가 새로고침되어도 그려줌)
-  const drawLines = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = 'rgba(239, 68, 68, 0.8)'; // 빨간펜
-
-    const pageLines = lines[pageNumber] || [];
-    const allPaths = [...pageLines, currentPathRef.current].filter(p => p.length > 0);
-
-    allPaths.forEach(path => {
-      ctx.beginPath();
-      path.forEach((point, i) => {
-        if (i === 0) ctx.moveTo(point.x, point.y);
-        else ctx.lineTo(point.x, point.y);
-      });
-      ctx.stroke();
-    });
   };
 
   useEffect(() => {
-    drawLines();
-  }, [lines, pageNumber, pageDim]);
+    fetchExamBanks();
+  }, [safeAddress]);
 
-  // 💡 [해결 1] 정밀 좌표 보정 시스템
-  const getScaledCoordinates = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = pageDim.w / rect.width;
-    const scaleY = pageDim.h / rect.height;
-    return {
-      x: Math.round((e.clientX - rect.left) * scaleX),
-      y: Math.round((e.clientY - rect.top) * scaleY)
-    };
-  };
+  // JSON 파일 업로드
+  const handleUploadJson = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    // 손가락 터치(스크롤) 차단, 오직 펜과 마우스만 허용
-    if (e.pointerType !== 'pen' && e.pointerType !== 'mouse') return;
-    
-    const { x, y } = getScaledCoordinates(e);
-    setIsDrawing(true);
-    currentPathRef.current = [{ x, y }];
-    drawLines();
-  };
-
-  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || (e.pointerType !== 'pen' && e.pointerType !== 'mouse')) return;
-    
-    const { x, y } = getScaledCoordinates(e);
-    const path = currentPathRef.current;
-    const lastPoint = path[path.length - 1];
-    
-    // 💡 [해결 2] 너무 미세한 움직임은 무시하여 필기 데이터를 압축 (용량 최적화)
-    if (lastPoint && Math.hypot(lastPoint.x - x, lastPoint.y - y) < 2) return;
-    
-    path.push({ x, y });
-    drawLines();
-  };
-
-  const handlePointerUp = () => {
-    if (!isDrawing) return;
-    setIsDrawing(false);
-    if (currentPathRef.current.length > 0) {
-      setLines(prev => ({
-        ...prev,
-        [pageNumber]: [...(prev[pageNumber] || []), currentPathRef.current]
-      }));
-      currentPathRef.current = [];
-    }
-  };
-
-  const handleAnswerSelect = (qNum: number, ans: number) => {
-    if (score) return; // 채점 완료 후에는 수정 불가
-    setUserAnswers(prev => ({ ...prev, [qNum]: ans }));
-  };
-
-  const handleResetAll = () => {
-    if (window.confirm("모든 필기와 OMR 마킹 기록을 삭제하시겠습니까?")) {
-      setLines({});
-      setUserAnswers({});
-      setCorrectAnswers(null);
-      setScore(null);
-      setPageNumber(1);
-      setSystemLog("🔄 기록이 성공적으로 초기화되었습니다.");
-    }
-  };
-
-  // 🤖 트랙 B: AI 스마트 채점
-  const handleGradeExam = async () => {
-    if (!answerFile) return alert("정답지 PDF 파일을 먼저 업로드해주세요.");
-    
-    setIsGrading(true);
-    setSystemLog("📡 정답지 PDF 텍스트 추출 중...");
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("wallet_address", safeAddress);
 
     try {
-      const formData = new FormData();
-      formData.append("file", answerFile);
-      const extractRes = await fetch(`${BASE_URL}/extract-pdf-text`, { method: "POST", body: formData });
-      const extractData = await extractRes.json();
-      
-      if (!extractData.text) throw new Error("텍스트 추출 실패");
-
-      setSystemLog("🤖 백엔드 서버(Ollama)에서 정답 번호 추출 중...");
-
-      const aiRes = await fetch(`${BASE_URL}/grade-exam`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: extractData.text,
-          question_count: questionCount
-        })
+      const res = await fetch(`${BASE_URL}/upload-exam-json`, {
+        method: 'POST',
+        body: formData
       });
-
-      if (!aiRes.ok) throw new Error("AI 채점 서버 연결 실패");
-
-      const parsedAnswers = await aiRes.json();
-      setCorrectAnswers(parsedAnswers);
-
-      let correctCnt = 0;
-      for (let i = 1; i <= questionCount; i++) {
-        if (userAnswers[i] && parsedAnswers[String(i)] && userAnswers[i] === parseInt(parsedAnswers[String(i)])) {
-          correctCnt++;
-        }
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.message || "성공적으로 업로드되었습니다.");
+        fetchExamBanks();
+      } else {
+        alert(`업로드 실패: ${data.error}`);
       }
-      
-      setScore({ correct: correctCnt, total: questionCount });
-      setSystemLog("✅ 채점이 완료되었습니다!");
-
-    } catch (e: any) {
-      console.error(e);
-      setSystemLog(`❌ 채점 오류: ${e.message}`);
-      alert("서버 연결에 실패했습니다. 백엔드가 정상적으로 작동 중인지 확인해주세요.");
+    } catch (err) {
+      alert("업로드 중 서버 에러가 발생했습니다.");
     } finally {
-      setIsGrading(false);
+      setIsUploading(false);
+      e.target.value = '';
     }
   };
 
-  return (
-    <div className="flex flex-col lg:flex-row gap-6 w-full h-[85vh] max-w-[1800px] mx-auto animate-in fade-in">
-      
-      {/* 📚 좌측: PDF 뷰어 및 펜 필기 영역 */}
-      <div className="flex flex-col flex-[3] bg-[#0a0a0c] border border-white/10 rounded-sm shadow-xl overflow-hidden relative">
-        <div className="flex justify-between items-center p-3 border-b border-white/10 bg-black/40">
-          <div className="flex items-center gap-3">
-            <span className="text-white/80 font-bold text-sm tracking-widest">📝 실전 모의고사 뷰어</span>
-            {systemLog && <span className="text-[10px] text-teal-400 font-mono animate-pulse">{systemLog}</span>}
+  // 모의고사 시작
+  const startExam = async (bank: any) => {
+    try {
+      const res = await fetch(`${BASE_URL}/get-exam-bank-questions-cbt?bank_id=${bank.id}&wallet_address=${safeAddress}`);
+      const data = await res.json();
+      setQuestions(data);
+      setSelectedBank(bank);
+      setAnswers({});
+      setIsGraded(false);
+      setCurrentQIdx(0);
+      setViewMode('cbt');
+    } catch (e) {
+      alert("문제를 불러오는데 실패했습니다.");
+    }
+  };
+
+  const handleAnswerSelect = (qNo: number, ans: string) => {
+    if (isGraded) return;
+    setAnswers(prev => ({ ...prev, [qNo]: ans }));
+  };
+
+  const submitExam = () => {
+    if (!window.confirm("제출하고 채점하시겠습니까?")) return;
+    
+    let correct = 0;
+    questions.forEach(q => {
+      if (answers[q.question_no] === q.correct_answer) correct++;
+    });
+    setScore({ correct, total: questions.length });
+    setIsGraded(true);
+    setCurrentQIdx(0); // 첫 문제로 돌아가서 해설 확인
+  };
+
+  // 📋 1. 목록 화면
+  if (viewMode === 'list') {
+    return (
+      <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in pb-24 w-full">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end border-b border-white/10 pb-4 gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-serif text-indigo-400 tracking-tight mb-2">실전 CBT 모의고사</h1>
+            <p className="text-[11px] sm:text-xs text-white/40 leading-relaxed">
+              통합 JSON 모의고사 파일을 업로드하고, 실제 시험장과 동일한 환경에서 문제를 풀어보세요.
+            </p>
           </div>
-          <div className="flex gap-2 items-center">
-             <label className="cursor-pointer bg-white/10 hover:bg-white/20 text-white text-[10px] px-3 py-1.5 rounded-sm transition-colors border border-white/5">
-               문제지 열기
-               <input type="file" accept=".pdf" className="hidden" onChange={e => setExamFile(e.target.files?.[0] || null)} />
-             </label>
-             <button onClick={handleResetAll} className="bg-red-900/30 hover:bg-red-900/50 text-red-400 border border-red-500/30 text-[10px] px-3 py-1.5 rounded-sm transition-colors">
-               모든 기록 초기화
-             </button>
-          </div>
+          
+          <label className={`cursor-pointer px-4 py-2.5 rounded-sm font-bold text-[11px] sm:text-xs transition-all shadow-lg flex items-center gap-2 ${isUploading ? 'bg-white/5 text-white/30 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-500'}`}>
+            {isUploading ? '⏳ JSON 파일 처리 중...' : '📥 JSON 모의고사 세트 일괄 업로드'}
+            <input type="file" accept=".json" className="hidden" onChange={handleUploadJson} disabled={isUploading} />
+          </label>
         </div>
 
-        <div className="flex-1 overflow-auto bg-[#1a1a1f] relative flex justify-center p-4 custom-scrollbar">
-          {!examFile ? (
-            <div className="flex flex-col items-center justify-center h-full text-white/30 space-y-4">
-              <span className="text-4xl">📄</span>
-              <p className="text-sm font-serif">상단의 버튼을 눌러 문제지 PDF를 불러오세요.</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {examBanks.map(bank => (
+            <div key={bank.id} className="bg-[#0a0a0c] border border-white/10 p-5 rounded-sm shadow-md flex flex-col justify-between gap-4 hover:border-indigo-500/50 transition-colors">
+              <div>
+                <h3 className="font-bold text-white/90 text-sm mb-1">{bank.filename}</h3>
+                <span className="text-xs text-indigo-400 font-mono">총 {bank.total_questions}문항</span>
+              </div>
+              <button 
+                onClick={() => startExam(bank)}
+                className="w-full py-2 bg-indigo-900/30 text-indigo-300 text-xs font-bold rounded border border-indigo-500/30 hover:bg-indigo-900/50 transition-all"
+              >
+                CBT 응시하기 ▶
+              </button>
             </div>
-          ) : (
-            <div className="relative inline-block shadow-2xl">
-              <Document file={examFile} onLoadSuccess={onDocumentLoadSuccess} className="pointer-events-none">
-                <Page 
-                  pageNumber={pageNumber} 
-                  renderTextLayer={false} 
-                  renderAnnotationLayer={false}
-                  width={800} 
-                  onLoadSuccess={onPageLoadSuccess}
-                  onRenderSuccess={drawLines}
-                />
-              </Document>
+          ))}
+          {examBanks.length === 0 && (
+             <div className="col-span-full text-center py-20 text-white/30 text-sm font-serif border border-dashed border-white/10 rounded-sm bg-black/20">
+               우측 상단 버튼을 눌러 모의고사 JSON 파일을 업로드 해주세요.
+             </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
-              <canvas
-                ref={canvasRef}
-                width={pageDim.w} // 💡 추출한 원본 해상도를 Canvas 크기로 지정!
-                height={pageDim.h}
-                onPointerDown={handlePointerDown}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onPointerLeave={handlePointerUp}
-                className="absolute top-0 left-0 w-full h-full cursor-crosshair touch-none"
-                style={{ zIndex: 10 }}
-              />
+  // 📝 2. CBT 시험 응시 화면
+  const currentQ = questions[currentQIdx];
+
+  return (
+    <div className="flex flex-col lg:flex-row gap-6 w-full h-[85vh] max-w-[1600px] mx-auto animate-in fade-in">
+      
+      {/* 좌측: 문제 풀이 영역 (75%) */}
+      <div className="flex flex-col flex-[3] bg-[#0a0a0c] border border-white/10 rounded-sm shadow-xl overflow-hidden relative">
+        <div className="flex justify-between items-center p-4 border-b border-white/10 bg-indigo-950/20">
+          <h2 className="text-indigo-300 font-bold text-sm tracking-widest">{selectedBank.filename}</h2>
+          <button onClick={() => setViewMode('list')} className="text-white/40 hover:text-white text-xs px-3 py-1 bg-white/5 rounded transition-colors">
+            목록으로 나가기 ✕
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 md:p-10 custom-scrollbar">
+          {currentQ && (
+            <div className="animate-in slide-in-from-right-4">
+              <div className="flex gap-4 items-start">
+                <span className="text-2xl font-bold text-indigo-400 font-mono shrink-0 leading-none mt-1">
+                  Q{currentQ.question_no}.
+                </span>
+                <div className="text-[15px] sm:text-[17px] leading-loose text-white/90 font-serif whitespace-pre-wrap">
+                  {currentQ.question_text}
+                </div>
+              </div>
+
+              {/* 1~5번 답안 선택 버튼 */}
+              <div className="mt-10 ml-12 flex gap-3 flex-wrap">
+                {[1, 2, 3, 4, 5].map(opt => {
+                  const isSelected = answers[currentQ.question_no] === String(opt);
+                  const isAnswer = isGraded && currentQ.correct_answer === String(opt);
+                  const isWrongSelected = isGraded && isSelected && !isAnswer;
+
+                  let btnStyle = "bg-black/50 border-white/20 text-white/60 hover:border-indigo-400";
+                  if (isSelected && !isGraded) btnStyle = "bg-indigo-600 border-indigo-400 text-white shadow-[0_0_15px_rgba(79,70,229,0.4)]";
+                  if (isAnswer) btnStyle = "bg-teal-600 border-teal-400 text-white shadow-[0_0_15px_rgba(13,148,136,0.4)]";
+                  if (isWrongSelected) btnStyle = "bg-red-600 border-red-400 text-white";
+
+                  return (
+                    <button
+                      key={opt}
+                      onClick={() => handleAnswerSelect(currentQ.question_no, String(opt))}
+                      className={`w-12 h-12 rounded-full border-2 font-bold text-lg transition-all ${btnStyle}`}
+                    >
+                      {opt}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* 해설 영역 (채점 후 표시) */}
+              {isGraded && currentQ.explanation && (
+                <div className="mt-10 ml-12 bg-indigo-900/20 border border-indigo-500/30 p-5 rounded-sm animate-in slide-in-from-bottom-4">
+                  <div className="text-indigo-400 font-bold mb-3 flex items-center gap-2">
+                    <span className="text-lg">💡</span> 정답 및 해설 (정답: {currentQ.correct_answer}번)
+                  </div>
+                  <div className="text-[13px] text-white/80 leading-relaxed font-serif break-keep">
+                    {currentQ.explanation}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {numPages && (
-          <div className="flex justify-center items-center gap-4 p-3 bg-black/40 border-t border-white/10 shrink-0">
-            <button 
-              onClick={() => setPageNumber(p => Math.max(1, p - 1))} 
-              disabled={pageNumber <= 1}
-              className="px-4 py-1.5 bg-white/10 hover:bg-white/20 disabled:opacity-30 rounded-sm text-xs font-bold"
-            >
-              ◀ 이전 장
-            </button>
-            <span className="text-xs text-white/60 font-mono font-bold tracking-widest">
-              {pageNumber} / {numPages}
-            </span>
-            <button 
-              onClick={() => setPageNumber(p => Math.min(numPages, p + 1))} 
-              disabled={pageNumber >= numPages}
-              className="px-4 py-1.5 bg-white/10 hover:bg-white/20 disabled:opacity-30 rounded-sm text-xs font-bold"
-            >
-              다음 장 ▶
-            </button>
-          </div>
-        )}
+        {/* 이전/다음 버튼 */}
+        <div className="flex justify-between p-4 border-t border-white/10 bg-black/40">
+          <button 
+            onClick={() => setCurrentQIdx(p => Math.max(0, p - 1))}
+            disabled={currentQIdx === 0}
+            className="px-6 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-30 rounded text-xs font-bold transition-colors"
+          >
+            ◀ 이전 문제
+          </button>
+          <button 
+            onClick={() => setCurrentQIdx(p => Math.min(questions.length - 1, p + 1))}
+            disabled={currentQIdx === questions.length - 1}
+            className="px-6 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-30 rounded text-xs font-bold transition-colors"
+          >
+            다음 문제 ▶
+          </button>
+        </div>
       </div>
 
-      {/* 📋 우측: OMR 답안지 영역 */}
+      {/* 우측: OMR 답안지 영역 (25%) */}
       <div className="flex flex-col flex-1 min-w-[280px] bg-[#0a0a0c] border border-white/10 rounded-sm shadow-xl overflow-hidden h-full">
-        <div className="p-4 border-b border-white/10 bg-indigo-950/20">
-          <div className="flex justify-between items-center mb-4">
-             <h2 className="text-base font-bold tracking-widest text-indigo-300">OMR 답안지</h2>
-             <div className="flex items-center gap-2">
-               <span className="text-[10px] text-white/50">문항 수:</span>
-               <select 
-                 value={questionCount} 
-                 onChange={e => setQuestionCount(Number(e.target.value))}
-                 className="bg-black border border-white/20 text-xs text-white p-1 rounded outline-none"
-                 disabled={score !== null}
-               >
-                 <option value={20}>20문제</option>
-                 <option value={40}>40문제</option>
-                 <option value={50}>50문제</option>
-                 <option value={80}>80문제</option>
-                 <option value={100}>100문제</option>
-               </select>
-             </div>
-          </div>
-
-          {score ? (
-            <div className="bg-teal-900/30 border border-teal-500/50 p-4 rounded-sm text-center">
-              <div className="text-[10px] text-teal-400 font-bold mb-1">최종 채점 결과</div>
+        <div className="p-4 border-b border-white/10 bg-black/40">
+          <h2 className="text-sm font-bold tracking-widest text-white/80 mb-4">OMR 답안지</h2>
+          {isGraded ? (
+            <div className="bg-teal-900/20 border border-teal-500/50 p-4 rounded-sm text-center">
+              <div className="text-[10px] text-teal-400 font-bold mb-1">최종 점수</div>
               <div className="text-3xl font-mono font-bold text-white">
                 {score.correct} <span className="text-lg text-white/40">/ {score.total}</span>
               </div>
               <div className="text-xs text-teal-300 mt-2">({Math.round((score.correct / score.total) * 100)}점)</div>
             </div>
           ) : (
-            <div className="flex flex-col gap-2">
-               <label className="cursor-pointer w-full text-center bg-indigo-900/40 hover:bg-indigo-900/60 border border-indigo-500/30 text-indigo-300 text-[11px] font-bold py-2 rounded-sm transition-colors shadow-sm">
-                 {answerFile ? `✅ ${answerFile.name} (채점 준비됨)` : "📥 정답지 PDF 업로드 (채점용)"}
-                 <input type="file" accept=".pdf" className="hidden" onChange={e => setAnswerFile(e.target.files?.[0] || null)} />
-               </label>
-               <button 
-                 onClick={handleGradeExam}
-                 disabled={isGrading || !answerFile}
-                 className={`w-full py-3 text-xs font-bold rounded-sm transition-all shadow-md ${isGrading ? 'bg-white/10 text-white/30' : 'bg-teal-600 text-white hover:bg-teal-500'}`}
-               >
-                 {isGrading ? "AI 자동 채점 진행 중..." : "🚀 자동 채점 시작"}
-               </button>
-            </div>
+            <button 
+              onClick={submitExam}
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-sm shadow-[0_0_15px_rgba(79,70,229,0.3)] transition-all"
+            >
+              제출 및 채점하기
+            </button>
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 bg-black/20">
-          <div className="space-y-2 pb-10">
-            {Array.from({ length: questionCount }).map((_, idx) => {
-              const qNum = idx + 1;
-              const isCorrect = correctAnswers && userAnswers[qNum] === parseInt(correctAnswers[String(qNum)] as any);
-              const isWrong = correctAnswers && userAnswers[qNum] !== parseInt(correctAnswers[String(qNum)] as any);
+        <div className="flex-1 overflow-y-auto p-4 bg-black/20 custom-scrollbar">
+          <div className="grid grid-cols-5 sm:grid-cols-4 md:grid-cols-5 gap-2 pb-10">
+            {questions.map((q, idx) => {
+              const isAnswered = !!answers[q.question_no];
+              const isCorrect = isGraded && answers[q.question_no] === q.correct_answer;
+              const isWrong = isGraded && answers[q.question_no] !== q.correct_answer;
+              const isActive = currentQIdx === idx;
+
+              let btnColor = "bg-black/50 border-white/10 text-white/40"; // 기본
+              if (isAnswered && !isGraded) btnColor = "bg-indigo-900/60 border-indigo-500/50 text-indigo-200"; // 마킹됨
+              if (isCorrect) btnColor = "bg-teal-900/80 border-teal-500 text-teal-300 shadow-[0_0_8px_rgba(13,148,136,0.3)]"; // 정답
+              if (isWrong) btnColor = "bg-red-900/80 border-red-500 text-red-300 shadow-[0_0_8px_rgba(239,68,68,0.3)]"; // 오답
 
               return (
-                <div key={qNum} className={`flex items-center gap-3 p-2 rounded-sm border ${isCorrect ? 'bg-teal-950/20 border-teal-500/30' : isWrong ? 'bg-red-950/20 border-red-500/30' : 'bg-white/5 border-transparent hover:border-white/10'}`}>
-                  <div className="w-6 text-right font-mono text-[11px] font-bold text-white/60 shrink-0">
-                    {String(qNum).padStart(2, '0')}.
-                  </div>
-                  
-                  <div className="flex gap-1.5 flex-1 justify-center">
-                    {[1, 2, 3, 4, 5].map(opt => (
-                      <button
-                        key={opt}
-                        onClick={() => handleAnswerSelect(qNum, opt)}
-                        className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full text-[10px] font-bold border transition-all flex items-center justify-center shrink-0 ${
-                          userAnswers[qNum] === opt 
-                            ? 'bg-indigo-500 border-indigo-400 text-white shadow-[0_0_8px_rgba(99,102,241,0.6)]' 
-                            : 'bg-black/50 border-white/20 text-white/40 hover:border-indigo-500/50'
-                        }`}
-                      >
-                        {opt}
-                      </button>
-                    ))}
-                  </div>
-
-                  {correctAnswers && (
-                    <div className="w-10 flex items-center justify-center shrink-0 border-l border-white/10 pl-2">
-                      {isCorrect ? (
-                        <span className="text-teal-400 font-bold text-sm">✅</span>
-                      ) : (
-                        <div className="flex flex-col items-center">
-                          <span className="text-red-400 font-bold text-[10px]">❌</span>
-                          <span className="text-[9px] text-white/60 font-mono mt-0.5">답:{correctAnswers[String(qNum)] || '?'}</span>
-                        </div>
-                      )}
-                    </div>
+                <button
+                  key={q.id}
+                  onClick={() => setCurrentQIdx(idx)}
+                  className={`relative w-full aspect-square rounded-sm border font-mono font-bold text-[11px] sm:text-xs flex items-center justify-center transition-all hover:scale-105 ${btnColor} ${isActive ? 'ring-2 ring-white ring-offset-2 ring-offset-black z-10' : ''}`}
+                >
+                  {q.question_no}
+                  {/* 채점 완료 시 번호 아래에 내가 마킹한 번호 작게 표시 */}
+                  {isGraded && (
+                     <span className="absolute bottom-0.5 right-1 text-[8px] opacity-70">
+                       {answers[q.question_no] || '-'}
+                     </span>
                   )}
-                </div>
+                </button>
               );
             })}
           </div>
