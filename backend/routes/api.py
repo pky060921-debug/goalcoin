@@ -1864,3 +1864,90 @@ def grade_exam():
     except Exception as e:
         logging.error(f"/grade-exam 에러: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
+
+# ==========================================
+# 💡 [트랙 A] JSON 모의고사 업로드 및 파싱 API
+# ==========================================
+@api_bp.route('/upload-exam-json', methods=['POST'])
+def upload_exam_json():
+    try:
+        wallet_address = request.form.get('wallet_address')
+        json_file = request.files.get('file')
+        if not json_file or not wallet_address:
+            return jsonify({"error": "파일이나 지갑 주소가 없습니다."}), 400
+        
+        data = json.load(json_file)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 💡 해설(explanation)을 저장하기 위해 DB 컬럼 안전하게 추가
+        try: cursor.execute('ALTER TABLE question_bank ADD COLUMN explanation TEXT DEFAULT ""')
+        except: pass
+        
+        inserted_sets = 0
+        # JSON의 "sets" 배열 순회
+        for exam_set in data.get('sets', []):
+            title = exam_set.get('title', f"모의고사 세트 {exam_set.get('set_number')}")
+            items = exam_set.get('items', [])
+            
+            # 1. 모의고사 세트(exam_banks) 생성
+            cursor.execute(
+                "INSERT INTO exam_banks (wallet_address, filename, total_questions, processed_count, status) VALUES (?, ?, ?, ?, 'completed')",
+                (wallet_address, title, len(items), len(items))
+            )
+            bank_id = cursor.lastrowid
+            
+            # 2. 개별 문항(question_bank) 저장
+            for item in items:
+                q_no = item.get('number', 0)
+                q_text = item.get('question', '')
+                ans = str(item.get('answer', '')).strip()
+                expl = item.get('explanation', '')
+                
+                # 원문자(①)를 숫자(1)로 변환
+                ans_map = {'①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5', '1': '1', '2': '2', '3': '3', '4': '4', '5': '5'}
+                ans_val = ans_map.get(ans, ans)
+                
+                cursor.execute(
+                    "INSERT INTO question_bank (bank_id, wallet_address, question_no, question_text, correct_answer, explanation) VALUES (?, ?, ?, ?, ?, ?)",
+                    (bank_id, wallet_address, q_no, q_text, ans_val, expl)
+                )
+            inserted_sets += 1
+            
+        conn.commit()
+        conn.close()
+        return jsonify({"message": f"{inserted_sets}개의 모의고사 세트가 성공적으로 DB에 저장되었습니다!"}), 200
+    except Exception as e:
+        logging.error(f"/upload-exam-json 에러: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+# ==========================================
+# 💡 [업그레이드] 모의고사 문항 호출 시 해설(explanation) 포함
+# ==========================================
+@api_bp.route('/get-exam-bank-questions-cbt', methods=['GET'])
+def get_exam_bank_questions_cbt():
+    try:
+        bank_id = request.args.get('bank_id')
+        wallet_address = request.args.get('wallet_address')
+        conn = get_db_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT id, question_no, question_text, correct_answer, explanation FROM question_bank WHERE bank_id = ? AND wallet_address = ? ORDER BY question_no ASC, id ASC", (bank_id, wallet_address))
+        rows = cursor.fetchall()
+        
+        results = []
+        for r in rows:
+            results.append({
+                "id": r['id'],
+                "question_no": r['question_no'],
+                "question_text": r['question_text'],
+                "correct_answer": r['correct_answer'],
+                "explanation": r['explanation'] if 'explanation' in r.keys() else ""
+            })
+            
+        conn.close()
+        return jsonify(results)
+    except Exception as e:
+        logging.error(f"/get-exam-bank-questions-cbt 에러: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
