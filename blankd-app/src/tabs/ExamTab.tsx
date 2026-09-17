@@ -2,6 +2,18 @@ import React, { useState, useEffect } from 'react';
 
 const BASE_URL = "https://api.blankd.top/api";
 
+// 💡 인코딩이 깨진 찌꺼기 문자와 특수 기호들을 화면에서 완벽히 제거하는 필터 함수
+const cleanMojibake = (text: string) => {
+  if (!text) return "";
+  return text
+    .replace(/[\u0080-\u00FF]/g, '') 
+    .replace(/[Nn]\s*`\s*/g, '') 
+    .replace(//g, '') 
+    .replace(//g, '') 
+    .replace(/[\u200B\u202F\uFEFF]/g, '') 
+    .replace(/\u00A0/g, ' '); 
+};
+
 export const ExamTab = ({ walletAddress, address }: any) => {
   const safeAddress = walletAddress || address;
 
@@ -13,6 +25,10 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [questions, setQuestions] = useState<any[]>([]);
   const [currentQIdx, setCurrentQIdx] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
+  
+  // 💡 [핵심] 개별 지문(줄)마다 O / X / ? 를 마킹할 수 있는 스크래치패드 상태
+  const [lineMarks, setLineMarks] = useState<Record<number, Record<number, 'O'|'X'|'?'|null>>>({});
+
   const [isGraded, setIsGraded] = useState(false);
   const [score, setScore] = useState({ correct: 0, total: 0 });
   const [isUploading, setIsUploading] = useState(false);
@@ -70,6 +86,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       setQuestions(data);
       setSelectedBank(bank);
       setAnswers({});
+      setLineMarks({}); // 💡 새 모의고사 시작 시 마킹 기록 초기화
       setIsGraded(false);
       setCurrentQIdx(0);
       setViewMode('cbt');
@@ -81,6 +98,20 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const handleAnswerSelect = (qNo: number, ans: string) => {
     if (isGraded) return;
     setAnswers(prev => ({ ...prev, [qNo]: ans }));
+  };
+
+  // 💡 개별 지문 마킹 토글 함수
+  const toggleLineMark = (qNo: number, lineIdx: number, mark: 'O'|'X'|'?') => {
+    setLineMarks(prev => {
+      const qMarks = prev[qNo] || {};
+      return {
+        ...prev,
+        [qNo]: {
+          ...qMarks,
+          [lineIdx]: qMarks[lineIdx] === mark ? null : mark
+        }
+      };
+    });
   };
 
   const submitExam = () => {
@@ -117,7 +148,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
           {examBanks.map(bank => (
             <div key={bank.id} className="bg-[#0a0a0c] border border-white/10 p-5 rounded-sm shadow-md flex flex-col justify-between gap-4 hover:border-indigo-500/50 transition-colors">
               <div>
-                <h3 className="font-bold text-white/90 text-sm mb-1">{bank.filename}</h3>
+                <h3 className="font-bold text-white/90 text-sm mb-1">{cleanMojibake(bank.filename)}</h3>
                 <span className="text-xs text-indigo-400 font-mono">총 {bank.total_questions}문항</span>
               </div>
               <button 
@@ -147,26 +178,62 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       {/* 좌측: 문제 풀이 영역 (75%) */}
       <div className="flex flex-col flex-[3] bg-[#0a0a0c] border border-white/10 rounded-sm shadow-xl overflow-hidden relative">
         <div className="flex justify-between items-center p-4 border-b border-white/10 bg-indigo-950/20">
-          <h2 className="text-indigo-300 font-bold text-sm tracking-widest">{selectedBank.filename}</h2>
+          <h2 className="text-indigo-300 font-bold text-sm tracking-widest">{cleanMojibake(selectedBank.filename)}</h2>
           <button onClick={() => setViewMode('list')} className="text-white/40 hover:text-white text-xs px-3 py-1 bg-white/5 rounded transition-colors">
             목록으로 나가기 ✕
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 md:p-10 custom-scrollbar">
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 custom-scrollbar">
           {currentQ && (
             <div className="animate-in slide-in-from-right-4">
-              <div className="flex gap-4 items-start">
-                <span className="text-2xl font-bold text-indigo-400 font-mono shrink-0 leading-none mt-1">
+              <div className="flex gap-3 sm:gap-4 items-start">
+                <span className="text-xl sm:text-2xl font-bold text-indigo-400 font-mono shrink-0 leading-none mt-2">
                   Q{currentQ.question_no}.
                 </span>
-                <div className="text-[15px] sm:text-[17px] leading-loose text-white/90 font-serif whitespace-pre-wrap">
-                  {currentQ.question_text}
+                <div className="text-[14px] sm:text-[16px] leading-loose font-serif w-full">
+                  
+                  {/* 💡 문제 지문을 줄 단위로 쪼개서 개별 O/X 마킹 패널 부착 */}
+                  {cleanMojibake(currentQ.question_text).split('\n').map((line: string, lineIdx: number) => {
+                    if (!line.trim()) return <div key={lineIdx} className="h-3"></div>;
+                    
+                    const mark = lineMarks[currentQ.question_no]?.[lineIdx];
+
+                    return (
+                      <div key={lineIdx} className={`flex flex-col sm:flex-row sm:items-start justify-between gap-2 p-2.5 -mx-2 mb-1 rounded transition-colors group ${mark === 'O' ? 'bg-teal-900/20' : mark === 'X' ? 'bg-red-900/20' : mark === '?' ? 'bg-amber-900/20' : 'hover:bg-white/5'}`}>
+                        <span className={`flex-1 break-keep ${mark === 'O' ? 'text-teal-200 font-bold' : mark === 'X' ? 'text-red-300 font-bold line-through decoration-red-500/50' : mark === '?' ? 'text-amber-300 font-bold' : 'text-white/90'}`}>
+                          {line}
+                        </span>
+                        
+                        {/* 💡 개별 O/X 마킹 버튼 (모바일 호환성을 위해 불투명도 70% 고정 노출) */}
+                        <div className="flex shrink-0 gap-1.5 self-end sm:self-start opacity-70 group-hover:opacity-100 transition-opacity">
+                          <button 
+                            onClick={() => toggleLineMark(currentQ.question_no, lineIdx, 'O')}
+                            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full font-bold text-[11px] sm:text-[13px] flex items-center justify-center transition-all ${mark === 'O' ? 'bg-teal-600 text-white shadow-lg opacity-100 scale-110' : 'bg-black/50 border border-white/20 text-teal-400/50 hover:bg-teal-900/40 hover:text-teal-300'}`}
+                          >
+                            O
+                          </button>
+                          <button 
+                            onClick={() => toggleLineMark(currentQ.question_no, lineIdx, 'X')}
+                            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full font-bold text-[11px] sm:text-[13px] flex items-center justify-center transition-all ${mark === 'X' ? 'bg-red-600 text-white shadow-lg opacity-100 scale-110' : 'bg-black/50 border border-white/20 text-red-400/50 hover:bg-red-900/40 hover:text-red-300'}`}
+                          >
+                            X
+                          </button>
+                          <button 
+                            onClick={() => toggleLineMark(currentQ.question_no, lineIdx, '?')}
+                            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full font-bold text-[11px] sm:text-[13px] flex items-center justify-center transition-all ${mark === '?' ? 'bg-amber-600 text-white shadow-lg opacity-100 scale-110' : 'bg-black/50 border border-white/20 text-amber-400/50 hover:bg-amber-900/40 hover:text-amber-300'}`}
+                          >
+                            ?
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
               {/* 1~5번 답안 선택 버튼 */}
-              <div className="mt-10 ml-12 flex gap-3 flex-wrap">
+              <div className="mt-8 ml-2 sm:ml-12 flex gap-3 flex-wrap">
                 {[1, 2, 3, 4, 5].map(opt => {
                   const isSelected = answers[currentQ.question_no] === String(opt);
                   const isAnswer = isGraded && currentQ.correct_answer === String(opt);
@@ -191,12 +258,12 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
               {/* 해설 영역 (채점 후 표시) */}
               {isGraded && currentQ.explanation && (
-                <div className="mt-10 ml-12 bg-indigo-900/20 border border-indigo-500/30 p-5 rounded-sm animate-in slide-in-from-bottom-4">
+                <div className="mt-10 ml-2 sm:ml-12 bg-indigo-900/20 border border-indigo-500/30 p-5 rounded-sm animate-in slide-in-from-bottom-4">
                   <div className="text-indigo-400 font-bold mb-3 flex items-center gap-2">
                     <span className="text-lg">💡</span> 정답 및 해설 (정답: {currentQ.correct_answer}번)
                   </div>
-                  <div className="text-[13px] text-white/80 leading-relaxed font-serif break-keep">
-                    {currentQ.explanation}
+                  <div className="text-[13px] text-white/80 leading-relaxed font-serif break-keep whitespace-pre-wrap">
+                    {cleanMojibake(currentQ.explanation)}
                   </div>
                 </div>
               )}
