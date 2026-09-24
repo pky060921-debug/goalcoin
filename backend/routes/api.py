@@ -2148,3 +2148,66 @@ def buy_market_card():
         return jsonify({"message": "구매가 완료되어 내 카드함에 추가되었습니다."}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/market/buy-batch', methods=['POST'])
+def buy_market_card_batch():
+    try:
+        data = request.json
+        buyer_wallet = data.get('wallet_address')
+        market_ids = data.get('market_ids', [])
+
+        if not market_ids:
+            return jsonify({"error": "선택된 상품이 없습니다."}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 1. 마켓 카드 정보 일괄 조회
+        placeholders = ','.join('?' for _ in market_ids)
+        cursor.execute(f"SELECT id, seller_wallet, card_content, answer_text, folder_name, price FROM market_cards WHERE id IN ({placeholders})", tuple(market_ids))
+        market_cards = cursor.fetchall()
+        
+        if not market_cards:
+            return jsonify({"error": "유효한 상품을 찾을 수 없습니다."}), 404
+            
+        total_price = sum(card[5] for card in market_cards)
+        
+        # 자신의 카드가 포함되어 있는지 확인
+        for card in market_cards:
+            if card[1] == buyer_wallet:
+                return jsonify({"error": "자신의 카드는 구매할 수 없습니다. 선택을 해제해 주세요."}), 400
+
+        # 2. 구매자 잔액 확인
+        cursor.execute("SELECT goal_balance FROM user_settings WHERE wallet_address = ?", (buyer_wallet,))
+        buyer_row = cursor.fetchone()
+        buyer_balance = buyer_row[0] if buyer_row and buyer_row[0] else 0
+        
+        if buyer_balance < total_price:
+            return jsonify({"error": f"포인트가 부족합니다. (필요: {total_price}P)"}), 400
+            
+        # 3. 구매자 포인트 일괄 차감
+        cursor.execute("UPDATE user_settings SET goal_balance = goal_balance - ? WHERE wallet_address = ?", (total_price, buyer_wallet))
+        
+        # 4. 판매자 포인트 증가 및 구매자에게 카드 복사
+        from services.parser import get_next_review_time
+        inserted = 0
+        for card in market_cards:
+            m_id, seller_wallet, content, answer_text, folder_name, price = card
+            
+            # 판매자 포인트 증가
+            cursor.execute("UPDATE user_settings SET goal_balance = goal_balance + ? WHERE wallet_address = ?", (price, seller_wallet))
+            
+            # 카드 복사
+            cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, folder_name, memo) 
+                              VALUES (?, 0, ?, ?, '[]', 0, ?, 'OWNED', ?, '{}')''', 
+                              (buyer_wallet, content, answer_text, get_next_review_time(0), f"[마켓] {folder_name}"))
+            
+            # 다운로드 수 증가
+            cursor.execute("UPDATE market_cards SET downloads = downloads + 1 WHERE id = ?", (m_id,))
+            inserted += 1
+        
+        conn.commit()
+        conn.close()
+        return jsonify({"message": f"총 {inserted}개의 조항 구매가 완료되었습니다. 내 카드함에서 확인하세요!"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
