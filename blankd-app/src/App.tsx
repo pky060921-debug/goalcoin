@@ -409,7 +409,7 @@ function MainApp() {
 
     const handleOffline = () => {
       setIsOffline(true);
-      addLog("⚠️ [시스템] 통신 단절 감지. 안전한 오프라인 모드로 자동 전환됩니다.");
+      addLog("⚠️ [시스템] 통 단절 감지. 안전한 오프라인 모드로 자동 전환됩니다.");
     };
     
     window.addEventListener('online', handleOnline);
@@ -1364,6 +1364,32 @@ function MainApp() {
     }
   };
 
+  const handleTxtFileUploadForGroups = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !safeAddress) return;
+
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("wallet_address", safeAddress);
+
+    addLog("▶️ 대량 오답쌍 텍스트 파일 업로드 중...");
+    try {
+      const res = await fetch("https://api.blankd.top/api/upload-wrong-answers", {
+        method: "POST",
+        body: fd
+      });
+      if (res.ok) {
+        addLog("✅ 대량 오답쌍 추가 완료! 데이터를 서버에서 동기화합니다.");
+        await loadAllData(true);
+        setTempKey(""); 
+      } else {
+        addLog("🚨 업로드 처리 중 문제가 발생했습니다.");
+      }
+    } catch (err) {
+      addLog("🚨 네트워크 에러로 업로드에 실패했습니다.");
+    }
+  };
+
   const handleAddDictItem = () => {
     if (dictTab === 'abbr' && tempKey && tempValue) {
       const k = tempKey.trim(); const v = tempValue.trim();
@@ -1435,6 +1461,16 @@ function MainApp() {
         )}
         <button onClick={handleAddDictItem} className="px-3 sm:px-4 bg-white/5 text-white/80 border border-white/10 text-xs font-bold rounded-sm hover:bg-white/10 transition-colors shrink-0">등록</button>
       </div>
+
+      {/* 추가된 오답쌍 텍스트 파일 대량 업로드 UI */}
+      {dictTab === 'group' && (
+        <div className="flex items-center gap-2 mb-4 shrink-0">
+          <label className="flex-1 cursor-pointer bg-rose-900/30 border border-rose-500/50 text-rose-300 px-3 py-2 text-[11px] sm:text-xs font-bold rounded-sm hover:bg-rose-900/50 transition-colors text-center shadow-inner">
+            📄 텍스트 파일(.txt)로 오답쌍 대량 추가하기
+            <input type="file" accept=".txt" className="hidden" onChange={handleTxtFileUploadForGroups} />
+          </label>
+        </div>
+      )}
       
       <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2 min-h-[160px]">
         {dictTab === 'abbr' && Object.entries(globalDict.abbrs || {}).map(([k, v]) => {
