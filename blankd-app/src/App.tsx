@@ -55,7 +55,6 @@ const getChosung = (str: string) => {
   return '기타';
 };
 
-// 💡 [초성 기능] 전체 문자열을 초성으로 변환하는 함수
 const getFullChosung = (str: string) => {
   if (!str) return '';
   let res = '';
@@ -171,7 +170,6 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
 
   const validAnswers = useMemo(() => {
       const expectedClean = expected.replace(/\s+/g, '').toLowerCase();
-      // 💡 [초성 기능] 원래 단어와 초성만 뽑은 단어 모두 정답으로 인정
       const answers = [expectedClean, getFullChosung(expectedClean)];
       
       if (abbrDict) {
@@ -182,7 +180,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
               const short = strK.length < strV.length ? strK : strV;
               if (expectedClean === orig) {
                   answers.push(short);
-                  answers.push(getFullChosung(short)); // 약어의 초성도 추가
+                  answers.push(getFullChosung(short)); 
               }
           });
       }
@@ -266,10 +264,14 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
          prevProps.hintLetter === nextProps.hintLetter;
 });
 
-// 💡 [신규/확장] 마켓 거래용 탭 컴포넌트 (내 조항 판매하기 전용 UI 추가)
+// 💡 [개선된 마켓 탭] - 폴더 및 다중(롱터치) 선택 판매 기능 추가
 const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData, savedCards }: any) => {
   const [marketItems, setMarketItems] = useState<any[]>([]);
   const [sellMode, setSellMode] = useState(false);
+  
+  const [selectedCards, setSelectedCards] = useState<Set<number>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const pressTimer = useRef<any>(null);
 
   useEffect(() => {
     fetch("https://api.blankd.top/api/market/list")
@@ -295,8 +297,65 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     }
   };
 
-  const handleSell = async (card: any) => {
-    const priceStr = prompt(`'${card.content.split('\n')[0].substring(0,20)}...' 조항을 얼마(P)에 판매하시겠습니까?`, "100");
+  // 폴더별로 카드 묶기
+  const groupedCards = useMemo(() => {
+    const groups: Record<string, any[]> = {};
+    savedCards.forEach((c: any) => {
+      const folder = c.folder_name || '기본 폴더';
+      if (!groups[folder]) groups[folder] = [];
+      groups[folder].push(c);
+    });
+    return groups;
+  }, [savedCards]);
+
+  const toggleSelection = (id: number) => {
+    const newSet = new Set(selectedCards);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setSelectedCards(newSet);
+    if (newSet.size === 0) setSelectionMode(false);
+  };
+
+  // 💡 롱 탭(길게 누르기) 로직
+  const handlePressStart = (id: number) => {
+    if (selectionMode) return; // 이미 선택 모드면 무시
+    pressTimer.current = setTimeout(() => {
+       setSelectionMode(true);
+       toggleSelection(id);
+       if ('vibrate' in navigator) navigator.vibrate(50);
+    }, 500);
+  };
+
+  const handlePressEnd = () => {
+    if (pressTimer.current) clearTimeout(pressTimer.current);
+  };
+
+  const handleClickCard = (card: any) => {
+    if (selectionMode) {
+      toggleSelection(card.id);
+    } else {
+      handleSellSingle(card);
+    }
+  };
+
+  const handleSelectFolder = (folderName: string) => {
+    const folderCardIds = groupedCards[folderName].map((c: any) => c.id);
+    const newSet = new Set(selectedCards);
+    const allSelected = folderCardIds.every((id: number) => newSet.has(id));
+    
+    if (allSelected) {
+      folderCardIds.forEach((id: number) => newSet.delete(id));
+    } else {
+      folderCardIds.forEach((id: number) => newSet.add(id));
+      setSelectionMode(true);
+    }
+    
+    setSelectedCards(newSet);
+    if (newSet.size === 0) setSelectionMode(false);
+  };
+
+  const handleSellSingle = async (card: any) => {
+    const priceStr = prompt(`'${card.content.split('\n')[0].substring(0,20)}...' 조항을 얼마(P)에 판매하시겠습니까?\n\n(여러 개를 팔려면 카드를 길게 꾹 누르거나 폴더 전체 선택을 이용하세요!)`, "100");
     if (!priceStr) return;
     const price = parseInt(priceStr, 10);
     if (price > 0) {
@@ -306,15 +365,34 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
           body: JSON.stringify({ wallet_address: safeAddress, card_id: card.id, price })
         });
         const data = await res.json();
-        if (res.ok) {
-            alert("마켓에 성공적으로 등록되었습니다!");
-            setSellMode(false); 
-        } else {
-            alert(data.error);
-        }
-      } catch(e) {
-        alert("마켓 등록 중 오류가 발생했습니다.");
-      }
+        if (res.ok) alert("마켓에 성공적으로 등록되었습니다!");
+        else alert(data.error);
+      } catch(e) { alert("오류 발생"); }
+    }
+  };
+
+  const handleBatchSell = async () => {
+    if (selectedCards.size === 0) return;
+    const priceStr = prompt(`선택한 ${selectedCards.size}개의 조항을 각각 얼마(P)에 판매하시겠습니까?`, "100");
+    if (!priceStr) return;
+    const price = parseInt(priceStr, 10);
+    
+    if (price > 0) {
+       try {
+         const res = await fetch("https://api.blankd.top/api/market/register-batch", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet_address: safeAddress, card_ids: Array.from(selectedCards), price })
+         });
+         const data = await res.json();
+         if (res.ok) {
+             alert(data.message);
+             setSelectedCards(new Set());
+             setSelectionMode(false);
+             setSellMode(false); // 판매 완료 후 스토어로 자동 복귀
+         } else {
+             alert(data.error);
+         }
+       } catch (e) { alert("일괄 등록 오류가 발생했습니다."); }
     }
   };
 
@@ -322,31 +400,61 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     <div className="p-4 space-y-4">
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-bold text-teal-400">오픈 스토어</h2>
-        <button onClick={() => setSellMode(!sellMode)} className="px-3 py-1.5 bg-amber-900/50 text-amber-300 border border-amber-500/50 text-xs font-bold rounded hover:bg-amber-900 transition-all shadow-md">
+        <button onClick={() => { setSellMode(!sellMode); setSelectionMode(false); setSelectedCards(new Set()); }} className="px-3 py-1.5 bg-amber-900/50 text-amber-300 border border-amber-500/50 text-xs font-bold rounded hover:bg-amber-900 transition-all shadow-md">
            {sellMode ? '◀ 스토어 구경하기' : '💰 내 조항 판매하기'}
         </button>
       </div>
       <p className="text-sm text-white/50 mb-6">
-        {sellMode ? '내가 만든 고품질 빈칸 카드를 올려 포인트를 벌어보세요.' : '다른 사용자가 만든 고품질 빈칸 카드를 포인트로 구매하세요.'}
+        {sellMode ? '카드를 길게 꾹 누르거나 [폴더 전체 선택]을 눌러 일괄 판매가 가능합니다.' : '다른 사용자가 만든 고품질 빈칸 카드를 포인트로 구매하세요.'}
       </p>
       
       {sellMode ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-           {savedCards.map((card: any) => {
-              const title = card.content.split('\n')[0].substring(0, 40);
-              return (
-                <div key={card.id} className="bg-white/5 border border-white/10 p-4 rounded flex flex-col justify-between h-32 hover:border-amber-500/30 transition-all">
-                  <div>
-                    <h3 className="font-bold text-sm truncate">{title}</h3>
-                    <p className="text-xs text-white/40 mt-1">폴더: {card.folder_name}</p>
-                  </div>
-                  <button onClick={() => handleSell(card)} className="w-full mt-3 bg-amber-900/50 hover:bg-amber-600 border border-amber-500 text-amber-300 py-1.5 rounded text-xs font-bold transition-all shadow-md">
-                    판매 등록하기
-                  </button>
-                </div>
-              )
-           })}
-           {savedCards.length === 0 && <div className="col-span-full py-10 text-center text-white/30 text-sm">보유 중인 카드가 없습니다.</div>}
+        <div className="space-y-8 pb-20">
+           {Object.keys(groupedCards).length === 0 && <div className="text-center py-10 text-white/30 text-sm">보유 중인 카드가 없습니다.</div>}
+           
+           {Object.entries(groupedCards).map(([folderName, cards]) => (
+             <div key={folderName} className="space-y-3">
+               <div className="flex justify-between items-center border-b border-white/10 pb-2">
+                 <h3 className="font-bold text-amber-400 text-sm">📁 {folderName} <span className="text-white/40 text-xs">({cards.length})</span></h3>
+                 <button onClick={() => handleSelectFolder(folderName)} className="text-xs text-amber-200 bg-amber-900/40 px-2 py-1 rounded border border-amber-500/30 hover:bg-amber-900/60 transition-colors">
+                   폴더 전체 선택
+                 </button>
+               </div>
+               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                 {cards.map(card => {
+                    const isSelected = selectedCards.has(card.id);
+                    return (
+                      <div 
+                        key={card.id}
+                        onPointerDown={() => handlePressStart(card.id)}
+                        onPointerUp={handlePressEnd}
+                        onPointerLeave={handlePressEnd}
+                        onClick={() => handleClickCard(card)}
+                        className={`relative p-3 rounded flex flex-col justify-between h-28 cursor-pointer transition-all border select-none ${isSelected ? 'bg-amber-900/40 border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]' : 'bg-white/5 border-white/10 hover:border-white/30'}`}
+                      >
+                         {selectionMode && (
+                           <div className={`absolute top-2 right-2 w-4 h-4 rounded-full border ${isSelected ? 'bg-amber-500 border-amber-500' : 'border-white/30'} flex items-center justify-center`}>
+                             {isSelected && <span className="text-black text-[10px] font-bold leading-none -mt-[1px]">✓</span>}
+                           </div>
+                         )}
+                         <h4 className={`font-bold text-xs truncate leading-tight ${selectionMode ? 'pr-5' : ''}`}>{card.content.split('\n')[0].substring(0, 30)}</h4>
+                         <p className="text-[10px] text-white/40 line-clamp-3 mt-1 flex-1">{card.content.split('\n').slice(1).join(' ')}</p>
+                      </div>
+                    )
+                 })}
+               </div>
+             </div>
+           ))}
+           
+           {/* 일괄 판매 플로팅 바 */}
+           {selectionMode && selectedCards.size > 0 && (
+             <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-amber-950 border border-amber-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
+               <span className="text-amber-100 font-bold text-sm">{selectedCards.size}개 조항 선택됨</span>
+               <button onClick={handleBatchSell} className="bg-amber-500 text-black px-4 py-1.5 rounded-full text-xs font-bold hover:bg-amber-400 transition-colors shadow-lg active:scale-95">
+                 일괄 판매하기
+               </button>
+             </div>
+           )}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -418,10 +526,8 @@ function MainApp() {
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
   
-  // 💡 [모드 확장] flash 모드 추가
   const [inputMode, setInputMode] = useState<'typing'|'touch'|'flash'>('typing'); 
   
-  // 💡 [플래시 모드 전용] 타이머 및 인덱스 상태
   const [flashIdx, setFlashIdx] = useState(0);
   const flashIdxRef = useRef(0);
 
@@ -505,13 +611,11 @@ function MainApp() {
 
   }, [currentBlankIdx, blanks, touchCandidates, globalDict.groups]); 
 
-  // 💡 빈칸이 바뀔 때 플래시 인덱스 리셋
   useEffect(() => {
     setFlashIdx(0);
     flashIdxRef.current = 0;
   }, [currentBlankIdx]);
 
-  // 💡 [플래시 모드 수정] 타이머 1초(1000ms) 간격으로 변경
   useEffect(() => {
     let timer: any;
     if (inputMode === 'flash' && inputStatus === 'idle' && activeTouchCandidates.length > 0) {
@@ -526,7 +630,6 @@ function MainApp() {
     return () => clearInterval(timer);
   }, [inputMode, inputStatus, activeTouchCandidates.length]);
 
-  // 💡 글로벌 키다운 핸들러
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (!activeCard) return;
@@ -1238,7 +1341,6 @@ function MainApp() {
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
     
-    // 💡 [초성 기능] 비교할 때 초성도 맞는지 함께 검사
     let isCorrect = (expected === actual) || (getFullChosung(expected) === actual);
 
     if (!isCorrect && globalDict.abbrs) {
@@ -1420,7 +1522,7 @@ function MainApp() {
                        (activeTouchCandidates[flashIdx] || '?')}
                     </span>
                   );
-              } else { // touch 모드
+              } else {
                   contentToRender.push(
                     <span id="active-blank" key="active-blank-input-fixed" className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 'bg-amber-900/30 text-amber-400 border-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.3)]'}`}>
                       {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '?'}
@@ -1471,7 +1573,6 @@ function MainApp() {
 
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-3 z-30 flex flex-col gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
-            {/* 💡 [기능 3] 터치 모드 및 플래시 모드 하단 UI */}
             {(inputMode === 'touch' || inputMode === 'flash') && activeTouchCandidates.length > 0 && (
               <div className="flex flex-col gap-2 w-full max-h-[45vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[11px] text-teal-400 mb-1 font-bold flex items-center justify-between">
@@ -1481,7 +1582,6 @@ function MainApp() {
                   </div>
                 </div>
                 
-                {/* 터치 모드용 2x2 그리드 */}
                 {inputMode === 'touch' && (
                   <div className="grid grid-cols-2 gap-2 w-full">
                      {activeTouchCandidates.map((ans, idx) => (
@@ -1497,7 +1597,6 @@ function MainApp() {
                   </div>
                 )}
                 
-                {/* 플래시 모드용 모바일 친화적 버튼 */}
                 {inputMode === 'flash' && (
                   <button
                      onClick={() => handleSequentialInput(activeTouchCandidates[flashIdxRef.current])}
