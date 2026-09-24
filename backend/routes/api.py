@@ -1951,3 +1951,56 @@ def get_exam_bank_questions_cbt():
     except Exception as e:
         logging.error(f"/get-exam-bank-questions-cbt 에러: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/upload-wrong-answers', methods=['POST'])
+def upload_wrong_answers():
+    try:
+        wallet_address = request.form.get('wallet_address')
+        file = request.files.get('file')
+
+        if not file or not wallet_address:
+            return jsonify({"error": "파일 또는 지갑 주소가 누락되었습니다."}), 400
+
+        # 텍스트 파일 읽기 (.txt 파일의 각 줄을 쉼표 기준으로 분리)
+        raw_text = file.read().decode('utf-8', errors='ignore')
+        new_groups = []
+        for line in raw_text.splitlines():
+            words = [w.strip() for w in line.split(',') if w.strip()]
+            if len(words) > 1:
+                new_groups.append(words)
+
+        if not new_groups:
+            return jsonify({"message": "추가할 오답쌍이 없습니다. 쉼표로 구분된 텍스트인지 확인해 주세요."}), 200
+
+        import json
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 기존 오답 그룹 불러오기
+        cursor.execute("SELECT custom_groups FROM user_settings WHERE wallet_address = ?", (wallet_address,))
+        row = cursor.fetchone()
+
+        existing_groups = []
+        if row and row[0]:
+            try:
+                existing_groups = json.loads(row[0])
+            except:
+                pass
+
+        # 기존 오답 그룹과 새 오답 그룹 병합
+        merged_groups = existing_groups + new_groups
+
+        # 데이터베이스 업데이트
+        if row:
+            cursor.execute("UPDATE user_settings SET custom_groups = ? WHERE wallet_address = ?", 
+                           (json.dumps(merged_groups, ensure_ascii=False), wallet_address))
+        else:
+            cursor.execute("INSERT INTO user_settings (wallet_address, custom_groups) VALUES (?, ?)", 
+                           (wallet_address, json.dumps(merged_groups, ensure_ascii=False)))
+
+        conn.commit()
+        conn.close()
+
+        return jsonify({"message": f"총 {len(new_groups)}개의 오답쌍 그룹이 대량 추가되었습니다."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
