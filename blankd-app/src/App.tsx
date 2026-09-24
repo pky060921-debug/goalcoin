@@ -43,6 +43,7 @@ const getKoreanDateString = () => {
 };
 
 const CHO_HANGUL = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'];
+
 const getChosung = (str: string) => {
   if (!str) return '기타';
   const code = str.charCodeAt(0) - 0xAC00;
@@ -52,6 +53,21 @@ const getChosung = (str: string) => {
   if (/[a-zA-Z]/.test(str[0])) return str[0].toUpperCase();
   if (/[0-9]/.test(str[0])) return '숫자';
   return '기타';
+};
+
+// 💡 [초성 기능] 전체 문자열을 초성으로 변환하는 함수
+const getFullChosung = (str: string) => {
+  if (!str) return '';
+  let res = '';
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i) - 0xAC00;
+    if (code > -1 && code < 11172) {
+      res += CHO_HANGUL[Math.floor(code / 588)];
+    } else {
+      res += str[i];
+    }
+  }
+  return res;
 };
 
 const autoApplyDictHelper = (content: string, dict: any) => {
@@ -155,14 +171,19 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
 
   const validAnswers = useMemo(() => {
       const expectedClean = expected.replace(/\s+/g, '').toLowerCase();
-      const answers = [expectedClean];
+      // 💡 [초성 기능] 원래 단어와 초성만 뽑은 단어 모두 정답으로 인정
+      const answers = [expectedClean, getFullChosung(expectedClean)];
+      
       if (abbrDict) {
           Object.entries(abbrDict).forEach(([k, v]) => {
               const strK = k.replace(/\s+/g, '').toLowerCase();
               const strV = v.replace(/\s+/g, '').toLowerCase();
               const orig = strK.length >= strV.length ? strK : strV;
               const short = strK.length < strV.length ? strK : strV;
-              if (expectedClean === orig) answers.push(short);
+              if (expectedClean === orig) {
+                  answers.push(short);
+                  answers.push(getFullChosung(short)); // 약어의 초성도 추가
+              }
           });
       }
       return answers;
@@ -245,6 +266,58 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
          prevProps.hintLetter === nextProps.hintLetter;
 });
 
+const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData }: any) => {
+  const [marketItems, setMarketItems] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetch("https://api.blankd.top/api/market/list")
+      .then(r => r.json())
+      .then(d => setMarketItems(d.items || []));
+  }, []);
+
+  const handleBuy = async (item: any) => {
+    if (goalBalance < item.price) return alert("포인트가 부족합니다.");
+    if (confirm(`'${item.title}' 카드를 ${item.price}P에 구매하시겠습니까?`)) {
+      const res = await fetch("https://api.blankd.top/api/market/buy", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, market_id: item.id })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert("구매 완료! 내 카드함에서 확인하세요.");
+        handleUpdateBalance(-item.price);
+        loadAllData(true);
+      } else {
+        alert(data.error);
+      }
+    }
+  };
+
+  return (
+    <div className="p-4 space-y-4">
+      <h2 className="text-xl font-bold text-teal-400">오픈 스토어</h2>
+      <p className="text-sm text-white/50 mb-6">다른 사용자가 만든 고품질 빈칸 카드를 포인트로 구매하세요.</p>
+      
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        {marketItems.map(item => (
+          <div key={item.id} className="bg-white/5 border border-white/10 p-4 rounded flex flex-col justify-between h-32">
+            <div>
+              <h3 className="font-bold text-sm truncate">{item.title}</h3>
+              <p className="text-xs text-white/40 mt-1">판매자: {item.seller_wallet} | 📥 {item.downloads}회</p>
+            </div>
+            <button onClick={() => handleBuy(item)} className="w-full mt-3 bg-teal-900/50 hover:bg-teal-600 border border-teal-500 text-teal-300 py-1.5 rounded text-xs font-bold transition-all">
+              {item.price}P로 구매하기
+            </button>
+          </div>
+        ))}
+        {marketItems.length === 0 && (
+          <div className="col-span-full py-10 text-center text-white/30 text-sm">등록된 상품이 없습니다.</div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 function MainApp() {
   const enokiFlow = useEnokiFlow();
   const zkLogin = useZkLogin();
@@ -292,9 +365,15 @@ function MainApp() {
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
-  const [inputMode, setInputMode] = useState<'typing'|'touch'>('typing'); 
-  const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   
+  // 💡 [모드 확장] flash 모드 추가
+  const [inputMode, setInputMode] = useState<'typing'|'touch'|'flash'>('typing'); 
+  
+  // 💡 [플래시 모드 전용] 타이머 및 인덱스 상태
+  const [flashIdx, setFlashIdx] = useState(0);
+  const flashIdxRef = useRef(0);
+
+  const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   const isProcessingRef = useRef(false);
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
@@ -307,7 +386,6 @@ function MainApp() {
   const [hintLetter, setHintLetter] = useState<string | null>(null);
   const [isFrozen, setIsFrozen] = useState<boolean>(false);
 
-  // 💡 [핵심] 오답 그룹(groups) 전역 변수 추가
   const [globalDict, setGlobalDict] = useState<{ stopwords: string[], inclusions: string[], abbrs: Record<string, string>, groups: string[][] }>({
     stopwords: [], inclusions: [], abbrs: {}, groups: []
   });
@@ -330,7 +408,6 @@ function MainApp() {
     return groups;
   }, [touchCandidates]);
 
-  // 💡 스마트 터치 4지선다 필터 (전역 오답 그룹 연동)
   const activeTouchCandidates = useMemo(() => {
     if (!blanks[currentBlankIdx]) return [];
     
@@ -376,21 +453,55 @@ function MainApp() {
 
   }, [currentBlankIdx, blanks, touchCandidates, globalDict.groups]); 
 
+  // 💡 빈칸이 바뀔 때 플래시 인덱스 리셋
+  useEffect(() => {
+    setFlashIdx(0);
+    flashIdxRef.current = 0;
+  }, [currentBlankIdx]);
+
+  // 💡 [플래시 모드] 타이머 훅 (0.5초 간격)
+  useEffect(() => {
+    let timer: any;
+    if (inputMode === 'flash' && inputStatus === 'idle' && activeTouchCandidates.length > 0) {
+      timer = setInterval(() => {
+        setFlashIdx(prev => {
+            const next = (prev + 1) % activeTouchCandidates.length;
+            flashIdxRef.current = next;
+            return next;
+        });
+      }, 500);
+    }
+    return () => clearInterval(timer);
+  }, [inputMode, inputStatus, activeTouchCandidates.length]);
+
+  // 💡 글로벌 키다운 핸들러
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (inputMode !== 'touch' || !activeCard) return;
+      if (!activeCard) return;
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
 
-      const keyNum = parseInt(e.key, 10);
-      if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= 4) {
-          e.preventDefault();
-          const idx = keyNum - 1;
-          if (activeTouchCandidates[idx]) {
-             handleSequentialInput(activeTouchCandidates[idx]);
+      if (inputMode === 'flash') {
+          if (e.code === 'Space') {
+              e.preventDefault();
+              if (activeTouchCandidates[flashIdxRef.current]) {
+                 handleSequentialInput(activeTouchCandidates[flashIdxRef.current]);
+              }
+          } else if (e.key === '0' || e.key === 'Escape') {
+              e.preventDefault();
+              handleSequentialInput('모름(강제오답)');
           }
-      } else if (e.key === '0' || e.key === 'Escape') {
-          e.preventDefault();
-          handleSequentialInput('모름(강제오답)');
+      } else if (inputMode === 'touch') {
+          const keyNum = parseInt(e.key, 10);
+          if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= 4) {
+              e.preventDefault();
+              const idx = keyNum - 1;
+              if (activeTouchCandidates[idx]) {
+                 handleSequentialInput(activeTouchCandidates[idx]);
+              }
+          } else if (e.key === '0' || e.key === 'Escape') {
+              e.preventDefault();
+              handleSequentialInput('모름(강제오답)');
+          }
       }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
@@ -409,7 +520,7 @@ function MainApp() {
 
     const handleOffline = () => {
       setIsOffline(true);
-      addLog("⚠️ [시스템] 통 단절 감지. 안전한 오프라인 모드로 자동 전환됩니다.");
+      addLog("⚠️ [시스템] 통신 단절 감지. 안전한 오프라인 모드로 자동 전환됩니다.");
     };
     
     window.addEventListener('online', handleOnline);
@@ -508,7 +619,6 @@ function MainApp() {
         fetchWithDiagnostic(`https://api.blankd.top/api/get-global-dict?wallet_address=${safeAddress}&t=${Date.now()}`, '사전').catch(() => ({ stopwords: [], inclusions: [], abbrs: {}, groups: [] }))
       ]);
 
-
       const serverStopwords = Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [];
       const serverInclusions = Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [];
       let finalAbbrs = (dictRes.abbrs && typeof dictRes.abbrs === 'object' && !Array.isArray(dictRes.abbrs)) ? dictRes.abbrs : {};
@@ -603,12 +713,32 @@ function MainApp() {
     });
   };
 
+  const registerToMarket = async (cardId: number) => {
+    const price = parseInt(prompt("판매할 가격(포인트)을 입력하세요:", "100") || "0", 10);
+    if (price > 0) {
+      try {
+        const res = await fetch("https://api.blankd.top/api/market/register", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: safeAddress, card_id: cardId, price })
+        });
+        const data = await res.json();
+        if (res.ok) alert(data.message);
+        else alert(data.error);
+      } catch(e) {
+        alert("마켓 등록 중 오류가 발생했습니다.");
+      }
+    }
+  };
+
   const saveGlobalDict = async (newDict: any) => {
     setGlobalDict(newDict); 
     localStorage.setItem(`blankd_off_dict_${safeAddress}`, JSON.stringify(newDict));
     
     try {
-      await api.updateGlobalDict(safeAddress, newDict);
+      await fetch("https://api.blankd.top/api/update-global-dict", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, ...newDict })
+      });
     } catch (err) {}
 
     setSavedCards(prevCards => {
@@ -851,14 +981,12 @@ function MainApp() {
       const savedProgress = localStorage.getItem(`blankd_progress_${activeCard.id}`);
       const lastIdx = savedProgress ? parseInt(savedProgress, 10) : 0;
       
-      // 💡 [핵심] 오답 타겟팅 로직 (오답만 빈칸으로 풀기)
       const targetWrong = activeCard._targetWrongWords || null;
       const restoredBlanks = foundBlanks.map((b, i) => {
           let isCorrect = i < lastIdx;
           if (targetWrong) {
               const cleanAns = b.answer.replace(/\s+/g, '');
               const isTarget = targetWrong.some((w: string) => w.replace(/\s+/g, '') === cleanAns);
-              // 타겟 오답이 아니면 이미 맞춘 것으로 강제 통과 처리!
               isCorrect = !isTarget;
           }
           return { ...b, correct: isCorrect };
@@ -866,7 +994,6 @@ function MainApp() {
 
       setBlanks(restoredBlanks); 
 
-      // 💡 첫 번째로 풀어야 할 빈칸으로 쾌속 점프
       const firstIdx = restoredBlanks.findIndex(b => !b.correct);
       setCurrentBlankIdx(firstIdx !== -1 ? firstIdx : 0);
       setInputStatus('idle');
@@ -881,12 +1008,8 @@ function MainApp() {
 
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
-      statsRef.current = { 
-        text: cleanText, 
-        filled: stats.filled, 
-        wrongIndices: new Set(stats.wrongIndices || []) // 💡 저장된 오답 인덱스 복구
-      };
 
+      statsRef.current = { text: cleanText, filled: stats.filled, wrongIndices: new Set(stats.wrongIndices || []) };
       
       const cleanTitle = getStrictTitleOnly(cleanContent);
       localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
@@ -914,7 +1037,6 @@ function MainApp() {
     const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = 0;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     
-    // 오답 모드일 경우 맞은 개수 카운팅 생략
     const isTargetMode = !!activeCard._targetWrongWords;
     const correctCount = isTargetMode ? 0 : Math.max(0, blanks.length - wrongArr.length);
     const isCorrect = wrongArr.length === 0;
@@ -989,7 +1111,6 @@ function MainApp() {
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder);
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
     
-    // 오답 모드가 아니면 다음 카드로 이동, 오답 모드면 종료 후 창 닫기 유도
     const nextCard = isTargetMode ? null : (folderCards[currentIdx + 1] || null);
 
     localStorage.removeItem(`blankd_progress_${currentId}`);
@@ -1059,7 +1180,6 @@ function MainApp() {
       return nb;
     });
     
-    // 오답 모드에서도 틀린 빈칸만 건너뛰도록 처리
     const nextIdx = blanks.findIndex((b, idx) => idx > currentBlankIdx && !b.correct);
 
     if (nextIdx !== -1) {
@@ -1082,7 +1202,9 @@ function MainApp() {
 
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
-    let isCorrect = (expected === actual);
+    
+    // 💡 [초성 기능] 비교할 때 초성도 맞는지 함께 검사
+    let isCorrect = (expected === actual) || (getFullChosung(expected) === actual);
 
     if (!isCorrect && globalDict.abbrs) {
       Object.entries(globalDict.abbrs).forEach(([k, v]) => {
@@ -1090,7 +1212,9 @@ function MainApp() {
         const strV = (v as string).replace(/\s+/g, '').toLowerCase();
         const orig = strK.length >= strV.length ? strK : strV;
         const short = strK.length < strV.length ? strK : strV;
-        if (expected === orig && actual === short) { isCorrect = true; }
+        if (expected === orig && (actual === short || actual === getFullChosung(short))) { 
+            isCorrect = true; 
+        }
       });
     }
 
@@ -1241,13 +1365,28 @@ function MainApp() {
                 <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
               );
             } else if (isCurrent) {
+              // 💡 입력 모드에 따른 렌더링 변경
               if (inputMode === 'typing') {
                   contentToRender.push(
                     <span id="active-blank" key="active-blank-input-fixed">
                       <InlineBlankInput inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
                     </span>
                   );
-              } else {
+              } else if (inputMode === 'flash') {
+                  contentToRender.push(
+                    <span id="active-blank" key="active-blank-input-fixed" 
+                          onClick={() => { if(inputStatus === 'idle') handleSequentialInput(activeTouchCandidates[flashIdx]); }}
+                          className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] cursor-pointer ${
+                            inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
+                            inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 
+                            'bg-indigo-900/80 text-indigo-200 border-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.5)]'
+                          }`}>
+                      {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : 
+                       inputStatus === 'correct' ? '✅' : 
+                       (activeTouchCandidates[flashIdx] || '?')}
+                    </span>
+                  );
+              } else { // touch 모드
                   contentToRender.push(
                     <span id="active-blank" key="active-blank-input-fixed" className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 'bg-amber-900/30 text-amber-400 border-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.3)]'}`}>
                       {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '?'}
@@ -1276,6 +1415,7 @@ function MainApp() {
                      <span className="text-[10px] sm:text-[11px] font-mono text-white/80 w-3 text-center">{fontSizeLevel}</span>
                      <button onClick={() => setFontSizeLevel(p => Math.min(5, p + 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
                   </div>
+                  <button onClick={() => registerToMarket(activeCard.id)} className="px-2 py-1 bg-teal-900/40 text-teal-400 text-[10px] rounded border border-teal-500/30 hover:bg-teal-900/60 transition-colors hidden sm:inline-block">마켓 판매</button>
                   <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
                 </div>
             </div>
@@ -1298,27 +1438,41 @@ function MainApp() {
 
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-3 z-30 flex flex-col gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
-            {/* 💡 [기능 3] 터치 모드: 4개 고정 보기 (2x2) 및 하단 모름 버튼 */}
-            {inputMode === 'touch' && activeTouchCandidates.length > 0 && (
+            {/* 💡 [기능 3] 터치 모드 및 플래시 모드 하단 UI */}
+            {(inputMode === 'touch' || inputMode === 'flash') && activeTouchCandidates.length > 0 && (
               <div className="flex flex-col gap-2 w-full max-h-[45vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[11px] text-teal-400 mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
-                    <span className="animate-pulse">👆</span> 터치하여 정답을 선택하세요 (1~4 핫키)
+                    <span className="animate-pulse">{inputMode === 'flash' ? '⚡' : '👆'}</span> 
+                    {inputMode === 'flash' ? '정답이 보일 때 스페이스바(또는 단어 터치)' : '터치하여 정답을 선택하세요 (1~4 핫키)'}
                   </div>
                 </div>
-                {/* 2x2 그리드 */}
-                <div className="grid grid-cols-2 gap-2 w-full">
-                   {activeTouchCandidates.map((ans, idx) => (
-                     <button
-                       key={idx}
-                       onClick={() => handleSequentialInput(ans)}
-                       className="relative px-2 py-4 sm:py-5 bg-black/40 border border-white/20 rounded text-[13px] sm:text-[15px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex items-center justify-center break-keep"
-                     >
-                       {idx < 4 && <span className="absolute top-1 left-1.5 text-[10px] text-teal-500/60 font-mono">[{idx+1}]</span>}
-                       {ans}
-                     </button>
-                   ))}
-                </div>
+                
+                {/* 터치 모드용 2x2 그리드 */}
+                {inputMode === 'touch' && (
+                  <div className="grid grid-cols-2 gap-2 w-full">
+                     {activeTouchCandidates.map((ans, idx) => (
+                       <button
+                         key={idx}
+                         onClick={() => handleSequentialInput(ans)}
+                         className="relative px-2 py-4 sm:py-5 bg-black/40 border border-white/20 rounded text-[13px] sm:text-[15px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex items-center justify-center break-keep"
+                       >
+                         {idx < 4 && <span className="absolute top-1 left-1.5 text-[10px] text-teal-500/60 font-mono">[{idx+1}]</span>}
+                         {ans}
+                       </button>
+                     ))}
+                  </div>
+                )}
+                
+                {/* 플래시 모드용 모바일 친화적 버튼 */}
+                {inputMode === 'flash' && (
+                  <button
+                     onClick={() => handleSequentialInput(activeTouchCandidates[flashIdxRef.current])}
+                     className="w-full py-6 bg-indigo-900/30 border border-indigo-500/50 rounded text-indigo-300 font-bold text-[15px] active:scale-95 shadow-[0_0_15px_rgba(99,102,241,0.2)] animate-pulse"
+                  >
+                     (스페이스바를 누르거나 이 버튼을 터치하세요)
+                  </button>
+                )}
 
                 <button 
                   onClick={() => handleSequentialInput('모름(강제오답)')} 
@@ -1343,8 +1497,12 @@ function MainApp() {
               </button>
             ) : (
               <div className="flex justify-between items-center w-full gap-2 flex-wrap">
-                <button onClick={() => setInputMode(prev => prev === 'typing' ? 'touch' : 'typing')} className="px-3 py-2.5 bg-zinc-900/80 text-zinc-300 border border-zinc-500/50 rounded text-[11px] sm:text-xs font-bold flex-1 hover:bg-zinc-800 transition-all shadow-md flex items-center justify-center gap-2">
-                  {inputMode === 'typing' ? '👆 터치 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
+                {/* 💡 입력 모드 변경 토글 버튼 로직 수정 */}
+                <button 
+                  onClick={() => setInputMode(prev => prev === 'typing' ? 'touch' : prev === 'touch' ? 'flash' : 'typing')} 
+                  className="px-3 py-2.5 bg-zinc-900/80 text-zinc-300 border border-zinc-500/50 rounded text-[11px] sm:text-xs font-bold flex-1 hover:bg-zinc-800 transition-all shadow-md flex items-center justify-center gap-2"
+                >
+                  {inputMode === 'typing' ? '👆 터치 모드로 전환' : inputMode === 'touch' ? '⚡ 플래시 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
                 </button>
                 <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-2.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
                   {isMemoOpen ? '닫기 ✕' : '메모 열기'}
@@ -1357,7 +1515,7 @@ function MainApp() {
         </div>
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, touchCandidates, fontSizeLevel, activeTouchCandidates]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, flashIdx, touchCandidates, fontSizeLevel, activeTouchCandidates]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
@@ -1409,7 +1567,6 @@ function MainApp() {
       saveGlobalDict({ ...globalDict, [dictTab === 'stop' ? 'stopwords' : 'inclusions']: Array.from(new Set([...targetArray, ...words])) });
       setTempKey("");
     } else if (dictTab === 'group' && tempKey) {
-      // 💡 로컬이 아닌 백엔드 전역 사전으로 업데이트!
       const words = tempKey.split(',').map(w => w.trim()).filter(Boolean);
       if (words.length > 1) {
           saveGlobalDict({ ...globalDict, groups: [...(globalDict.groups || []), words] });
@@ -1433,8 +1590,10 @@ function MainApp() {
           <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
         </div>
         <div className={activeTab === 'record' ? 'block' : 'hidden'}>
-          {/* 💡 RecordTab에 setActiveCard 전달하여 탭 전환 없이 바로 채우기 모달 호출 가능하게 함 */}
           <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} colCount={colCount} setActiveCard={setActiveCard} />
+        </div>
+        <div className={activeTab === 'market' ? 'block' : 'hidden'}>
+          <MarketTab safeAddress={safeAddress} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} />
         </div>
         <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
           <ExamTab walletAddress={safeAddress} address={safeAddress} />
@@ -1468,7 +1627,6 @@ function MainApp() {
         <button onClick={handleAddDictItem} className="px-3 sm:px-4 bg-white/5 text-white/80 border border-white/10 text-xs font-bold rounded-sm hover:bg-white/10 transition-colors shrink-0">등록</button>
       </div>
 
-      {/* 추가된 오답쌍 텍스트 파일 대량 업로드 UI */}
       {dictTab === 'group' && (
         <div className="flex items-center gap-2 mb-4 shrink-0">
           <label className="flex-1 cursor-pointer bg-rose-900/30 border border-rose-500/50 text-rose-300 px-3 py-2 text-[11px] sm:text-xs font-bold rounded-sm hover:bg-rose-900/50 transition-colors text-center shadow-inner">
@@ -1679,7 +1837,7 @@ function MainApp() {
       {isLoggedIn && (
         <nav className="border-b border-white/5 bg-black/40 py-1.5 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="w-full max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2 px-2 sm:px-4 md:px-8">
-            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
+            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'market', label: '마켓' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
             ))}
           </div>
