@@ -880,7 +880,12 @@ function MainApp() {
 
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
-      statsRef.current = { text: cleanText, filled: stats.filled, wrongIndices: new Set() };
+      statsRef.current = { 
+        text: cleanText, 
+        filled: stats.filled, 
+        wrongIndices: new Set(stats.wrongIndices || []) // 💡 저장된 오답 인덱스 복구
+      };
+
       
       const cleanTitle = getStrictTitleOnly(cleanContent);
       localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
