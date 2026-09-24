@@ -266,14 +266,16 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
          prevProps.hintLetter === nextProps.hintLetter;
 });
 
-const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData }: any) => {
+// 💡 [신규/확장] 마켓 거래용 탭 컴포넌트 (내 조항 판매하기 전용 UI 추가)
+const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData, savedCards }: any) => {
   const [marketItems, setMarketItems] = useState<any[]>([]);
+  const [sellMode, setSellMode] = useState(false);
 
   useEffect(() => {
     fetch("https://api.blankd.top/api/market/list")
       .then(r => r.json())
       .then(d => setMarketItems(d.items || []));
-  }, []);
+  }, [sellMode]);
 
   const handleBuy = async (item: any) => {
     if (goalBalance < item.price) return alert("포인트가 부족합니다.");
@@ -293,27 +295,77 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData 
     }
   };
 
+  const handleSell = async (card: any) => {
+    const priceStr = prompt(`'${card.content.split('\n')[0].substring(0,20)}...' 조항을 얼마(P)에 판매하시겠습니까?`, "100");
+    if (!priceStr) return;
+    const price = parseInt(priceStr, 10);
+    if (price > 0) {
+      try {
+        const res = await fetch("https://api.blankd.top/api/market/register", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: safeAddress, card_id: card.id, price })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            alert("마켓에 성공적으로 등록되었습니다!");
+            setSellMode(false); 
+        } else {
+            alert(data.error);
+        }
+      } catch(e) {
+        alert("마켓 등록 중 오류가 발생했습니다.");
+      }
+    }
+  };
+
   return (
     <div className="p-4 space-y-4">
-      <h2 className="text-xl font-bold text-teal-400">오픈 스토어</h2>
-      <p className="text-sm text-white/50 mb-6">다른 사용자가 만든 고품질 빈칸 카드를 포인트로 구매하세요.</p>
-      
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {marketItems.map(item => (
-          <div key={item.id} className="bg-white/5 border border-white/10 p-4 rounded flex flex-col justify-between h-32">
-            <div>
-              <h3 className="font-bold text-sm truncate">{item.title}</h3>
-              <p className="text-xs text-white/40 mt-1">판매자: {item.seller_wallet} | 📥 {item.downloads}회</p>
-            </div>
-            <button onClick={() => handleBuy(item)} className="w-full mt-3 bg-teal-900/50 hover:bg-teal-600 border border-teal-500 text-teal-300 py-1.5 rounded text-xs font-bold transition-all">
-              {item.price}P로 구매하기
-            </button>
-          </div>
-        ))}
-        {marketItems.length === 0 && (
-          <div className="col-span-full py-10 text-center text-white/30 text-sm">등록된 상품이 없습니다.</div>
-        )}
+      <div className="flex justify-between items-center">
+        <h2 className="text-xl font-bold text-teal-400">오픈 스토어</h2>
+        <button onClick={() => setSellMode(!sellMode)} className="px-3 py-1.5 bg-amber-900/50 text-amber-300 border border-amber-500/50 text-xs font-bold rounded hover:bg-amber-900 transition-all shadow-md">
+           {sellMode ? '◀ 스토어 구경하기' : '💰 내 조항 판매하기'}
+        </button>
       </div>
+      <p className="text-sm text-white/50 mb-6">
+        {sellMode ? '내가 만든 고품질 빈칸 카드를 올려 포인트를 벌어보세요.' : '다른 사용자가 만든 고품질 빈칸 카드를 포인트로 구매하세요.'}
+      </p>
+      
+      {sellMode ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+           {savedCards.map((card: any) => {
+              const title = card.content.split('\n')[0].substring(0, 40);
+              return (
+                <div key={card.id} className="bg-white/5 border border-white/10 p-4 rounded flex flex-col justify-between h-32 hover:border-amber-500/30 transition-all">
+                  <div>
+                    <h3 className="font-bold text-sm truncate">{title}</h3>
+                    <p className="text-xs text-white/40 mt-1">폴더: {card.folder_name}</p>
+                  </div>
+                  <button onClick={() => handleSell(card)} className="w-full mt-3 bg-amber-900/50 hover:bg-amber-600 border border-amber-500 text-amber-300 py-1.5 rounded text-xs font-bold transition-all shadow-md">
+                    판매 등록하기
+                  </button>
+                </div>
+              )
+           })}
+           {savedCards.length === 0 && <div className="col-span-full py-10 text-center text-white/30 text-sm">보유 중인 카드가 없습니다.</div>}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {marketItems.map(item => (
+            <div key={item.id} className="bg-white/5 border border-white/10 p-4 rounded flex flex-col justify-between h-32 hover:border-teal-500/30 transition-all">
+              <div>
+                <h3 className="font-bold text-sm truncate">{item.title}</h3>
+                <p className="text-xs text-white/40 mt-1">판매자: {item.seller_wallet} | 📥 {item.downloads}회</p>
+              </div>
+              <button onClick={() => handleBuy(item)} className="w-full mt-3 bg-teal-900/50 hover:bg-teal-600 border border-teal-500 text-teal-300 py-1.5 rounded text-xs font-bold transition-all shadow-md">
+                {item.price}P로 구매하기
+              </button>
+            </div>
+          ))}
+          {marketItems.length === 0 && (
+            <div className="col-span-full py-10 text-center text-white/30 text-sm">등록된 상품이 없습니다.</div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -459,7 +511,7 @@ function MainApp() {
     flashIdxRef.current = 0;
   }, [currentBlankIdx]);
 
-  // 💡 [플래시 모드] 타이머 훅 (0.5초 간격)
+  // 💡 [플래시 모드 수정] 타이머 1초(1000ms) 간격으로 변경
   useEffect(() => {
     let timer: any;
     if (inputMode === 'flash' && inputStatus === 'idle' && activeTouchCandidates.length > 0) {
@@ -469,7 +521,7 @@ function MainApp() {
             flashIdxRef.current = next;
             return next;
         });
-      }, 500);
+      }, 1000); 
     }
     return () => clearInterval(timer);
   }, [inputMode, inputStatus, activeTouchCandidates.length]);
@@ -711,23 +763,6 @@ function MainApp() {
       }
       return newBalance;
     });
-  };
-
-  const registerToMarket = async (cardId: number) => {
-    const price = parseInt(prompt("판매할 가격(포인트)을 입력하세요:", "100") || "0", 10);
-    if (price > 0) {
-      try {
-        const res = await fetch("https://api.blankd.top/api/market/register", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet_address: safeAddress, card_id: cardId, price })
-        });
-        const data = await res.json();
-        if (res.ok) alert(data.message);
-        else alert(data.error);
-      } catch(e) {
-        alert("마켓 등록 중 오류가 발생했습니다.");
-      }
-    }
   };
 
   const saveGlobalDict = async (newDict: any) => {
@@ -1365,7 +1400,6 @@ function MainApp() {
                 <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
               );
             } else if (isCurrent) {
-              // 💡 입력 모드에 따른 렌더링 변경
               if (inputMode === 'typing') {
                   contentToRender.push(
                     <span id="active-blank" key="active-blank-input-fixed">
@@ -1415,7 +1449,6 @@ function MainApp() {
                      <span className="text-[10px] sm:text-[11px] font-mono text-white/80 w-3 text-center">{fontSizeLevel}</span>
                      <button onClick={() => setFontSizeLevel(p => Math.min(5, p + 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
                   </div>
-                  <button onClick={() => registerToMarket(activeCard.id)} className="px-2 py-1 bg-teal-900/40 text-teal-400 text-[10px] rounded border border-teal-500/30 hover:bg-teal-900/60 transition-colors hidden sm:inline-block">마켓 판매</button>
                   <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
                 </div>
             </div>
@@ -1497,7 +1530,6 @@ function MainApp() {
               </button>
             ) : (
               <div className="flex justify-between items-center w-full gap-2 flex-wrap">
-                {/* 💡 입력 모드 변경 토글 버튼 로직 수정 */}
                 <button 
                   onClick={() => setInputMode(prev => prev === 'typing' ? 'touch' : prev === 'touch' ? 'flash' : 'typing')} 
                   className="px-3 py-2.5 bg-zinc-900/80 text-zinc-300 border border-zinc-500/50 rounded text-[11px] sm:text-xs font-bold flex-1 hover:bg-zinc-800 transition-all shadow-md flex items-center justify-center gap-2"
@@ -1593,7 +1625,7 @@ function MainApp() {
           <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} colCount={colCount} setActiveCard={setActiveCard} />
         </div>
         <div className={activeTab === 'market' ? 'block' : 'hidden'}>
-          <MarketTab safeAddress={safeAddress} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} />
+          <MarketTab safeAddress={safeAddress} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} savedCards={savedCards} />
         </div>
         <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
           <ExamTab walletAddress={safeAddress} address={safeAddress} />
@@ -1911,7 +1943,6 @@ function MainApp() {
   );
 }
 
-// 💡 시스템 최상단에 에러 추적기를 씌워서 앱 뻗음 현상을 완벽히 통제합니다.
 export default function App() { 
   return (
     <GlobalErrorBoundary>
