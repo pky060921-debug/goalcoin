@@ -240,6 +240,21 @@ def init_golden_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''')
         
+        # 💡 [추가] 마켓 테이블 생성
+        try: 
+            conn.execute('''CREATE TABLE IF NOT EXISTS market_cards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                seller_wallet TEXT,
+                title TEXT,
+                card_content TEXT,
+                answer_text TEXT,
+                folder_name TEXT,
+                price INTEGER DEFAULT 100,
+                downloads INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )''')
+        except: pass
+
         try: conn.execute('ALTER TABLE categories ADD COLUMN sort_order INTEGER DEFAULT 999999')
         except: pass
         try: conn.execute('ALTER TABLE cards ADD COLUMN sort_order INTEGER DEFAULT 999999')
@@ -1731,7 +1746,7 @@ def parse_exam_to_ox():
 또한 각 보기가 어떤 법령 조항에 해당하는지 추정하여 제목과 폴더명을 분류하세요.
 
 [응답 규칙]
-1. 반드시 마크다운(```json)이나 다른 인사말 없이 순수한 JSON 배열 형식으로만 응답할 것.
+1. 반드시 마크다운(```json)이나 다른 인사말 없이 순수한 JSON 배열 형식으로만 응답할 단.
 2. 각 보기는 하나의 독립 문장으로 완성할 것.
 
 [응답 JSON 배열 구조 예시]
@@ -2002,5 +2017,99 @@ def upload_wrong_answers():
         conn.close()
 
         return jsonify({"message": f"총 {len(new_groups)}개의 오답쌍 그룹이 대량 추가되었습니다."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ==========================================
+# 💡 마켓(스토어) 거래 라우터
+# ==========================================
+@api_bp.route('/market/register', methods=['POST'])
+def register_market_card():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        card_id = data.get('card_id')
+        price = data.get('price', 100)
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 내 카드 정보 가져오기
+        cursor.execute("SELECT card_content, answer_text, folder_name FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
+        card = cursor.fetchone()
+        
+        if not card:
+            return jsonify({"error": "카드를 찾을 수 없습니다."}), 404
+            
+        content = card[0]
+        title = content.split('\n')[0][:50] if content else "제목 없음"
+        
+        # 마켓에 등록
+        cursor.execute('''INSERT INTO market_cards (seller_wallet, title, card_content, answer_text, folder_name, price) 
+                          VALUES (?, ?, ?, ?, ?, ?)''', 
+                          (wallet_address, title, content, card[1], card[2], price))
+        conn.commit()
+        conn.close()
+        return jsonify({"message": f"마켓에 {price}P로 등록되었습니다."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/market/list', methods=['GET'])
+def get_market_list():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, seller_wallet, title, price, downloads, created_at FROM market_cards ORDER BY id DESC")
+        items = [{"id": r[0], "seller_wallet": r[1][:8] + "...", "title": r[2], "price": r[3], "downloads": r[4], "created_at": r[5]} for r in cursor.fetchall()]
+        conn.close()
+        return jsonify({"items": items}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/market/buy', methods=['POST'])
+def buy_market_card():
+    try:
+        data = request.json
+        buyer_wallet = data.get('wallet_address')
+        market_id = data.get('market_id')
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # 1. 마켓 카드 정보 조회
+        cursor.execute("SELECT seller_wallet, card_content, answer_text, folder_name, price FROM market_cards WHERE id = ?", (market_id,))
+        market_card = cursor.fetchone()
+        if not market_card:
+            return jsonify({"error": "존재하지 않는 상품입니다."}), 404
+            
+        seller_wallet, content, answer_text, folder_name, price = market_card
+        
+        if buyer_wallet == seller_wallet:
+            return jsonify({"error": "자신의 카드는 구매할 수 없습니다."}), 400
+
+        # 2. 구매자 잔액 확인
+        cursor.execute("SELECT goal_balance FROM user_settings WHERE wallet_address = ?", (buyer_wallet,))
+        buyer_row = cursor.fetchone()
+        buyer_balance = buyer_row[0] if buyer_row and buyer_row[0] else 0
+        
+        if buyer_balance < price:
+            return jsonify({"error": "포인트가 부족합니다."}), 400
+            
+        # 3. 포인트 이동 (구매자 차감, 판매자 증가)
+        cursor.execute("UPDATE user_settings SET goal_balance = goal_balance - ? WHERE wallet_address = ?", (price, buyer_wallet))
+        cursor.execute("UPDATE user_settings SET goal_balance = goal_balance + ? WHERE wallet_address = ?", (price, seller_wallet))
+        
+        # 4. 구매자 카드 목록에 복사본 추가
+        from services.parser import get_next_review_time
+        cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, folder_name, memo) 
+                          VALUES (?, 0, ?, ?, '[]', 0, ?, 'OWNED', ?, '{}')''', 
+                          (buyer_wallet, content, answer_text, get_next_review_time(0), f"[마켓] {folder_name}"))
+        
+        # 5. 다운로드 수 증가
+        cursor.execute("UPDATE market_cards SET downloads = downloads + 1 WHERE id = ?", (market_id,))
+        
+        conn.commit()
+        conn.close()
+        return jsonify({"message": "구매가 완료되어 내 카드함에 추가되었습니다."}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
