@@ -264,7 +264,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
          prevProps.hintLetter === nextProps.hintLetter;
 });
 
-// 💡 [개선된 마켓 탭] - 폴더 및 다중(롱터치) 선택 판매 기능 추가
+// 💡 [마켓 탭] - 일괄 구매(buy-batch) 및 일괄 판매 기능 통합
 const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData, savedCards }: any) => {
   const [marketItems, setMarketItems] = useState<any[]>([]);
   const [sellMode, setSellMode] = useState(false);
@@ -279,35 +279,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
       .then(d => setMarketItems(d.items || []));
   }, [sellMode]);
 
-  const handleBuy = async (item: any) => {
-    if (goalBalance < item.price) return alert("포인트가 부족합니다.");
-    if (confirm(`'${item.title}' 카드를 ${item.price}P에 구매하시겠습니까?`)) {
-      const res = await fetch("https://api.blankd.top/api/market/buy", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet_address: safeAddress, market_id: item.id })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        alert("구매 완료! 내 카드함에서 확인하세요.");
-        handleUpdateBalance(-item.price);
-        loadAllData(true);
-      } else {
-        alert(data.error);
-      }
-    }
-  };
-
-  // 폴더별로 카드 묶기
-  const groupedCards = useMemo(() => {
-    const groups: Record<string, any[]> = {};
-    savedCards.forEach((c: any) => {
-      const folder = c.folder_name || '기본 폴더';
-      if (!groups[folder]) groups[folder] = [];
-      groups[folder].push(c);
-    });
-    return groups;
-  }, [savedCards]);
-
   const toggleSelection = (id: number) => {
     const newSet = new Set(selectedCards);
     if (newSet.has(id)) newSet.delete(id);
@@ -316,9 +287,8 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     if (newSet.size === 0) setSelectionMode(false);
   };
 
-  // 💡 롱 탭(길게 누르기) 로직
   const handlePressStart = (id: number) => {
-    if (selectionMode) return; // 이미 선택 모드면 무시
+    if (selectionMode) return; 
     pressTimer.current = setTimeout(() => {
        setSelectionMode(true);
        toggleSelection(id);
@@ -330,13 +300,25 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     if (pressTimer.current) clearTimeout(pressTimer.current);
   };
 
-  const handleClickCard = (card: any) => {
+  const handleClickCard = (item: any, isMarketItem: boolean) => {
     if (selectionMode) {
-      toggleSelection(card.id);
+      toggleSelection(item.id);
     } else {
-      handleSellSingle(card);
+      if (isMarketItem) handleBuySingle(item);
+      else handleSellSingle(item);
     }
   };
+
+  // 폴더별로 내 카드 묶기
+  const groupedCards = useMemo(() => {
+    const groups: Record<string, any[]> = {};
+    savedCards.forEach((c: any) => {
+      const folder = c.folder_name || '기본 폴더';
+      if (!groups[folder]) groups[folder] = [];
+      groups[folder].push(c);
+    });
+    return groups;
+  }, [savedCards]);
 
   const handleSelectFolder = (folderName: string) => {
     const folderCardIds = groupedCards[folderName].map((c: any) => c.id);
@@ -354,6 +336,7 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     if (newSet.size === 0) setSelectionMode(false);
   };
 
+  // 단일 판매 처리
   const handleSellSingle = async (card: any) => {
     const priceStr = prompt(`'${card.content.split('\n')[0].substring(0,20)}...' 조항을 얼마(P)에 판매하시겠습니까?\n\n(여러 개를 팔려면 카드를 길게 꾹 누르거나 폴더 전체 선택을 이용하세요!)`, "100");
     if (!priceStr) return;
@@ -371,6 +354,27 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     }
   };
 
+  // 단일 구매 처리
+  const handleBuySingle = async (item: any) => {
+    if (item.seller_wallet === safeAddress) return alert("자신의 카드는 구매할 수 없습니다.");
+    if (goalBalance < item.price) return alert("포인트가 부족합니다.");
+    if (confirm(`'${item.title}' 카드를 ${item.price}P에 구매하시겠습니까?\n\n(여러 개를 구매하려면 카드를 길게 꾹 누르세요!)`)) {
+      const res = await fetch("https://api.blankd.top/api/market/buy", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet_address: safeAddress, market_id: item.id })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert("구매 완료! 내 카드함에서 확인하세요.");
+        handleUpdateBalance(-item.price);
+        loadAllData(true);
+      } else {
+        alert(data.error);
+      }
+    }
+  };
+
+  // 일괄 판매 처리
   const handleBatchSell = async () => {
     if (selectedCards.size === 0) return;
     const priceStr = prompt(`선택한 ${selectedCards.size}개의 조항을 각각 얼마(P)에 판매하시겠습니까?`, "100");
@@ -388,11 +392,44 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
              alert(data.message);
              setSelectedCards(new Set());
              setSelectionMode(false);
-             setSellMode(false); // 판매 완료 후 스토어로 자동 복귀
+             setSellMode(false); 
          } else {
              alert(data.error);
          }
        } catch (e) { alert("일괄 등록 오류가 발생했습니다."); }
+    }
+  };
+
+  // 일괄 구매 처리
+  const handleBatchBuy = async () => {
+    if (selectedCards.size === 0) return;
+    
+    const itemsToBuy = marketItems.filter(item => selectedCards.has(item.id));
+    const totalPrice = itemsToBuy.reduce((sum, item) => sum + item.price, 0);
+
+    if (goalBalance < totalPrice) {
+      return alert(`포인트가 부족합니다. (필요: ${totalPrice}P, 보유: ${goalBalance}P)`);
+    }
+
+    if (confirm(`선택한 ${selectedCards.size}개의 카드를 총 ${totalPrice}P에 구매하시겠습니까?`)) {
+      try {
+        const res = await fetch("https://api.blankd.top/api/market/buy-batch", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: safeAddress, market_ids: Array.from(selectedCards) })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert(data.message);
+          handleUpdateBalance(-totalPrice);
+          setSelectedCards(new Set());
+          setSelectionMode(false);
+          loadAllData(true);
+        } else {
+          alert(data.error);
+        }
+      } catch (e) {
+        alert("일괄 구매 중 오류가 발생했습니다.");
+      }
     }
   };
 
@@ -405,7 +442,7 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
         </button>
       </div>
       <p className="text-sm text-white/50 mb-6">
-        {sellMode ? '카드를 길게 꾹 누르거나 [폴더 전체 선택]을 눌러 일괄 판매가 가능합니다.' : '다른 사용자가 만든 고품질 빈칸 카드를 포인트로 구매하세요.'}
+        {sellMode ? '카드를 길게 꾹 누르거나 [폴더 전체 선택]을 눌러 일괄 판매가 가능합니다.' : '카드를 길게 꾹 눌러 다중 선택 후 일괄 구매를 진행해보세요.'}
       </p>
       
       {sellMode ? (
@@ -429,7 +466,7 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
                         onPointerDown={() => handlePressStart(card.id)}
                         onPointerUp={handlePressEnd}
                         onPointerLeave={handlePressEnd}
-                        onClick={() => handleClickCard(card)}
+                        onClick={() => handleClickCard(card, false)}
                         className={`relative p-3 rounded flex flex-col justify-between h-28 cursor-pointer transition-all border select-none ${isSelected ? 'bg-amber-900/40 border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]' : 'bg-white/5 border-white/10 hover:border-white/30'}`}
                       >
                          {selectionMode && (
@@ -446,7 +483,7 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
              </div>
            ))}
            
-           {/* 일괄 판매 플로팅 바 */}
+           {/* 판매 모드 플로팅 바 */}
            {selectionMode && selectedCards.size > 0 && (
              <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-amber-950 border border-amber-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
                <span className="text-amber-100 font-bold text-sm">{selectedCards.size}개 조항 선택됨</span>
@@ -457,20 +494,49 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
            )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {marketItems.map(item => (
-            <div key={item.id} className="bg-white/5 border border-white/10 p-4 rounded flex flex-col justify-between h-32 hover:border-teal-500/30 transition-all">
-              <div>
-                <h3 className="font-bold text-sm truncate">{item.title}</h3>
-                <p className="text-xs text-white/40 mt-1">판매자: {item.seller_wallet} | 📥 {item.downloads}회</p>
-              </div>
-              <button onClick={() => handleBuy(item)} className="w-full mt-3 bg-teal-900/50 hover:bg-teal-600 border border-teal-500 text-teal-300 py-1.5 rounded text-xs font-bold transition-all shadow-md">
-                {item.price}P로 구매하기
+        <div className="pb-20">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {marketItems.map(item => {
+              const isSelected = selectedCards.has(item.id);
+              return (
+                <div 
+                  key={item.id}
+                  onPointerDown={() => handlePressStart(item.id)}
+                  onPointerUp={handlePressEnd}
+                  onPointerLeave={handlePressEnd}
+                  onClick={() => handleClickCard(item, true)}
+                  className={`relative p-3 rounded flex flex-col justify-between h-28 cursor-pointer transition-all border select-none ${isSelected ? 'bg-teal-900/40 border-teal-500 shadow-[0_0_10px_rgba(20,184,166,0.3)]' : 'bg-white/5 border-white/10 hover:border-teal-500/30'}`}
+                >
+                  {selectionMode && (
+                     <div className={`absolute top-2 right-2 w-4 h-4 rounded-full border ${isSelected ? 'bg-teal-500 border-teal-500' : 'border-white/30'} flex items-center justify-center`}>
+                       {isSelected && <span className="text-black text-[10px] font-bold leading-none -mt-[1px]">✓</span>}
+                     </div>
+                  )}
+                  <div>
+                    <h3 className={`font-bold text-xs truncate leading-tight ${selectionMode ? 'pr-5' : ''}`}>{item.title}</h3>
+                    <p className="text-[10px] text-white/40 mt-1">판매자: {item.seller_wallet}<br/>📥 {item.downloads}회</p>
+                  </div>
+                  {!selectionMode && (
+                    <div className="mt-2 text-teal-300 text-xs font-bold bg-teal-900/50 py-1 rounded text-center">
+                      {item.price}P 구매
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {marketItems.length === 0 && (
+              <div className="col-span-full py-10 text-center text-white/30 text-sm">등록된 상품이 없습니다.</div>
+            )}
+          </div>
+          
+          {/* 구매 모드 플로팅 바 */}
+          {selectionMode && selectedCards.size > 0 && (
+            <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-teal-950 border border-teal-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
+              <span className="text-teal-100 font-bold text-sm">총 {selectedCards.size}개 일괄 구매</span>
+              <button onClick={handleBatchBuy} className="bg-teal-500 text-black px-4 py-1.5 rounded-full text-xs font-bold hover:bg-teal-400 transition-colors shadow-lg active:scale-95">
+                결제하기
               </button>
             </div>
-          ))}
-          {marketItems.length === 0 && (
-            <div className="col-span-full py-10 text-center text-white/30 text-sm">등록된 상품이 없습니다.</div>
           )}
         </div>
       )}
