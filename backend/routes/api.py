@@ -2054,6 +2054,41 @@ def register_market_card():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@api_bp.route('/market/register-batch', methods=['POST'])
+def register_market_card_batch():
+    try:
+        data = request.json
+        wallet_address = data.get('wallet_address')
+        card_ids = data.get('card_ids', [])
+        price = data.get('price', 100)
+
+        if not card_ids:
+            return jsonify({"error": "선택된 조항이 없습니다."}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        inserted = 0
+        for cid in card_ids:
+            cursor.execute("SELECT card_content, answer_text, folder_name FROM cards WHERE id = ? AND wallet_address = ?", (cid, wallet_address))
+            card = cursor.fetchone()
+            
+            if card:
+                content = card[0]
+                title = content.split('\n')[0][:50] if content else "제목 없음"
+                
+                # 마켓에 일괄 등록
+                cursor.execute('''INSERT INTO market_cards (seller_wallet, title, card_content, answer_text, folder_name, price) 
+                                  VALUES (?, ?, ?, ?, ?, ?)''', 
+                                  (wallet_address, title, content, card[1], card[2], price))
+                inserted += 1
+                
+        conn.commit()
+        conn.close()
+        return jsonify({"message": f"총 {inserted}개의 조항이 마켓에 {price}P로 일괄 등록되었습니다."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @api_bp.route('/market/list', methods=['GET'])
 def get_market_list():
     try:
