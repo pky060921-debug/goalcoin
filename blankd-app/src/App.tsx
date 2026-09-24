@@ -505,8 +505,9 @@ function MainApp() {
         fetchWithDiagnostic(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`, '카테고리'),
         fetchWithDiagnostic(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`, '카드'),
         fetch(`https://api.blankd.top/api/get-balance?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()).catch(() => ({ balance: 0, activity_log: {}, claimed_rewards: {} })),
-        api.getGlobalDict(safeAddress).catch(() => ({ stopwords: [], inclusions: [], abbrs: {}, groups: [] }))
+        fetchWithDiagnostic(`https://api.blankd.top/api/get-global-dict?wallet_address=${safeAddress}&t=${Date.now()}`, '사전').catch(() => ({ stopwords: [], inclusions: [], abbrs: {}, groups: [] }))
       ]);
+
 
       const serverStopwords = Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [];
       const serverInclusions = Array.isArray(dictRes.inclusions) ? dictRes.inclusions : [];
