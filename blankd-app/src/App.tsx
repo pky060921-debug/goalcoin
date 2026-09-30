@@ -264,7 +264,6 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
          prevProps.hintLetter === nextProps.hintLetter;
 });
 
-// 💡 [마켓 탭] - 일괄 구매(buy-batch) 및 일괄 판매 기능 통합
 const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData, savedCards }: any) => {
   const [marketItems, setMarketItems] = useState<any[]>([]);
   const [sellMode, setSellMode] = useState(false);
@@ -309,7 +308,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     }
   };
 
-  // 폴더별로 내 카드 묶기
   const groupedCards = useMemo(() => {
     const groups: Record<string, any[]> = {};
     savedCards.forEach((c: any) => {
@@ -336,7 +334,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     if (newSet.size === 0) setSelectionMode(false);
   };
 
-  // 단일 판매 처리
   const handleSellSingle = async (card: any) => {
     const priceStr = prompt(`'${card.content.split('\n')[0].substring(0,20)}...' 조항을 얼마(P)에 판매하시겠습니까?\n\n(여러 개를 팔려면 카드를 길게 꾹 누르거나 폴더 전체 선택을 이용하세요!)`, "100");
     if (!priceStr) return;
@@ -354,7 +351,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     }
   };
 
-  // 단일 구매 처리
   const handleBuySingle = async (item: any) => {
     if (item.seller_wallet === safeAddress) return alert("자신의 카드는 구매할 수 없습니다.");
     if (goalBalance < item.price) return alert("포인트가 부족합니다.");
@@ -374,7 +370,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     }
   };
 
-  // 일괄 판매 처리
   const handleBatchSell = async () => {
     if (selectedCards.size === 0) return;
     const priceStr = prompt(`선택한 ${selectedCards.size}개의 조항을 각각 얼마(P)에 판매하시겠습니까?`, "100");
@@ -400,7 +395,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     }
   };
 
-  // 일괄 구매 처리
   const handleBatchBuy = async () => {
     if (selectedCards.size === 0) return;
     
@@ -483,7 +477,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
              </div>
            ))}
            
-           {/* 판매 모드 플로팅 바 */}
            {selectionMode && selectedCards.size > 0 && (
              <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-amber-950 border border-amber-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
                <span className="text-amber-100 font-bold text-sm">{selectedCards.size}개 조항 선택됨</span>
@@ -529,7 +522,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
             )}
           </div>
           
-          {/* 구매 모드 플로팅 바 */}
           {selectionMode && selectedCards.size > 0 && (
             <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-teal-950 border border-teal-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
               <span className="text-teal-100 font-bold text-sm">총 {selectedCards.size}개 일괄 구매</span>
@@ -932,6 +924,23 @@ function MainApp() {
       }
       return newBalance;
     });
+  };
+
+  const registerToMarket = async (cardId: number) => {
+    const price = parseInt(prompt("판매할 가격(포인트)을 입력하세요:", "100") || "0", 10);
+    if (price > 0) {
+      try {
+        const res = await fetch("https://api.blankd.top/api/market/register", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: safeAddress, card_id: cardId, price })
+        });
+        const data = await res.json();
+        if (res.ok) alert(data.message);
+        else alert(data.error);
+      } catch(e) {
+        alert("마켓 등록 중 오류가 발생했습니다.");
+      }
+    }
   };
 
   const saveGlobalDict = async (newDict: any) => {
@@ -1521,6 +1530,7 @@ function MainApp() {
     return { nextCatToCraft: craftTarget, nextStudyCard: studyTarget };
   }, [isLoggedIn, categories, savedCards]);
 
+  // 💡 [수정] 카드 모달 렌더링 부분을 모바일에서 얇게 수정
   const memoizedCardContent = useMemo(() => {
     if (!activeCard) return null;
     const cleanContent = activeCard.content; 
@@ -1603,10 +1613,11 @@ function MainApp() {
       } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
     });
     
+    // 💡 변경됨: 모달창의 높이를 더 크게 열고, 모바일 환경에서 패딩과 마진을 최소화
     return (
-      <div className="flex flex-col w-full h-[65vh] sm:h-[75vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
-        <div className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar px-3 py-4 md:px-5 pb-12">
-            <div className="flex justify-between items-center border-b border-white/10 pb-2 w-full gap-3 overflow-hidden mb-4 sticky top-0 bg-[#0a0a0c] z-20 pt-1">
+      <div className="flex flex-col w-full h-[75vh] sm:h-[80vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
+        <div className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar px-3 py-2 sm:py-4 md:px-5 pb-4 sm:pb-12">
+            <div className="flex justify-between items-center border-b border-white/10 pb-1 sm:pb-2 w-full gap-2 sm:gap-3 overflow-hidden mb-2 sm:mb-4 sticky top-0 bg-[#0a0a0c] z-20 pt-1">
                 <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
                   {displayTitle}
                 </div>
@@ -1637,24 +1648,26 @@ function MainApp() {
             )}
         </div>
 
-        <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-3 z-30 flex flex-col gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
+        {/* 💡 변경됨: 하단 컨트롤 패널 패딩과 갭 최소화 */}
+        <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-1.5 sm:p-3 z-30 flex flex-col gap-1.5 sm:gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
             {(inputMode === 'touch' || inputMode === 'flash') && activeTouchCandidates.length > 0 && (
-              <div className="flex flex-col gap-2 w-full max-h-[45vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
-                <div className="w-full text-[11px] text-teal-400 mb-1 font-bold flex items-center justify-between">
+              <div className="flex flex-col gap-1.5 sm:gap-2 w-full max-h-[50vh] overflow-y-auto custom-scrollbar p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
+                <div className="w-full text-[10px] sm:text-[11px] text-teal-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
                     <span className="animate-pulse">{inputMode === 'flash' ? '⚡' : '👆'}</span> 
-                    {inputMode === 'flash' ? '정답이 보일 때 스페이스바(또는 단어 터치)' : '터치하여 정답을 선택하세요 (1~4 핫키)'}
+                    {inputMode === 'flash' ? '정답이 보일 때 스페이스바(또는 터치)' : '터치하여 정답을 선택하세요'}
                   </div>
                 </div>
                 
+                {/* 💡 변경됨: 모바일에서 버튼 상하 높이(py) 및 간격 축소 */}
                 {inputMode === 'touch' && (
-                  <div className="grid grid-cols-2 gap-2 w-full">
+                  <div className="grid grid-cols-2 gap-1.5 sm:gap-2 w-full">
                      {activeTouchCandidates.map((ans, idx) => (
                        <button
                          key={idx}
                          onClick={() => handleSequentialInput(ans)}
-                         className="relative px-2 py-4 sm:py-5 bg-black/40 border border-white/20 rounded text-[13px] sm:text-[15px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex items-center justify-center break-keep"
+                         className="relative px-2 py-2 sm:py-5 bg-black/40 border border-white/20 rounded text-[11px] sm:text-[15px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex items-center justify-center break-keep leading-tight"
                        >
                          {idx < 4 && <span className="absolute top-1 left-1.5 text-[10px] text-teal-500/60 font-mono">[{idx+1}]</span>}
                          {ans}
@@ -1663,18 +1676,20 @@ function MainApp() {
                   </div>
                 )}
                 
+                {/* 💡 변경됨: 플래시 모드 버튼 높이 축소 */}
                 {inputMode === 'flash' && (
                   <button
                      onClick={() => handleSequentialInput(activeTouchCandidates[flashIdxRef.current])}
-                     className="w-full py-6 bg-indigo-900/30 border border-indigo-500/50 rounded text-indigo-300 font-bold text-[15px] active:scale-95 shadow-[0_0_15px_rgba(99,102,241,0.2)] animate-pulse"
+                     className="w-full py-2.5 sm:py-6 bg-indigo-900/30 border border-indigo-500/50 rounded text-indigo-300 font-bold text-[12px] sm:text-[15px] active:scale-95 shadow-[0_0_15px_rgba(99,102,241,0.2)] animate-pulse"
                   >
-                     (스페이스바를 누르거나 이 버튼을 터치하세요)
+                     (스페이스바 또는 이 버튼 터치)
                   </button>
                 )}
 
+                {/* 💡 변경됨: 모름 버튼 높이 및 텍스트 축소 */}
                 <button 
                   onClick={() => handleSequentialInput('모름(강제오답)')} 
-                  className="w-full mt-1 py-3 bg-red-900/40 hover:bg-red-900/60 border border-red-500/30 text-red-400 text-[13px] font-bold rounded-sm shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
+                  className="w-full mt-0.5 sm:mt-1 py-1.5 sm:py-3 bg-red-900/40 hover:bg-red-900/60 border border-red-500/30 text-red-400 text-[11px] sm:text-[13px] font-bold rounded-sm shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
                 >
                   🤔 모름 (오답 처리 후 다음 빈칸으로 넘어가기) <span className="text-[10px] text-red-500/60 font-mono ml-1">[0]</span>
                 </button>
@@ -1689,22 +1704,22 @@ function MainApp() {
                      forceAdvance();
                   }
                 }} 
-                className="w-full py-3 bg-red-600/80 hover:bg-red-500 text-white text-[13px] sm:text-[15px] font-bold rounded shadow-[0_0_15px_rgba(220,38,38,0.5)] animate-pulse border border-red-400 flex justify-center items-center gap-2"
+                className="w-full py-2 sm:py-3 bg-red-600/80 hover:bg-red-500 text-white text-[12px] sm:text-[15px] font-bold rounded shadow-[0_0_15px_rgba(220,38,38,0.5)] animate-pulse border border-red-400 flex justify-center items-center gap-2"
               >
                 <span>다음 조항으로 넘어가기 ▶</span>
               </button>
             ) : (
-              <div className="flex justify-between items-center w-full gap-2 flex-wrap">
+              <div className="flex justify-between items-center w-full gap-1.5 sm:gap-2 flex-wrap">
                 <button 
                   onClick={() => setInputMode(prev => prev === 'typing' ? 'touch' : prev === 'touch' ? 'flash' : 'typing')} 
-                  className="px-3 py-2.5 bg-zinc-900/80 text-zinc-300 border border-zinc-500/50 rounded text-[11px] sm:text-xs font-bold flex-1 hover:bg-zinc-800 transition-all shadow-md flex items-center justify-center gap-2"
+                  className="px-2 sm:px-3 py-1.5 sm:py-2.5 bg-zinc-900/80 text-zinc-300 border border-zinc-500/50 rounded text-[10px] sm:text-xs font-bold flex-1 hover:bg-zinc-800 transition-all shadow-md flex items-center justify-center gap-2"
                 >
                   {inputMode === 'typing' ? '👆 터치 모드로 전환' : inputMode === 'touch' ? '⚡ 플래시 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
                 </button>
-                <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-2.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
+                <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-2 sm:px-3 py-1.5 sm:py-2.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
                   {isMemoOpen ? '닫기 ✕' : '메모 열기'}
                 </button>
-                <button onClick={handleShowAnswer} className="px-3 py-2.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
+                <button onClick={handleShowAnswer} className="px-2 sm:px-3 py-1.5 sm:py-2.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
                   정답 보기(스킵)
                 </button>
               </div>
