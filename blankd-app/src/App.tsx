@@ -264,7 +264,6 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
          prevProps.hintLetter === nextProps.hintLetter;
 });
 
-// 💡 [마켓 탭] - 일괄 구매(buy-batch) 및 일괄 판매 기능 통합
 const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData, savedCards }: any) => {
   const [marketItems, setMarketItems] = useState<any[]>([]);
   const [sellMode, setSellMode] = useState(false);
@@ -309,7 +308,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     }
   };
 
-  // 폴더별로 내 카드 묶기
   const groupedCards = useMemo(() => {
     const groups: Record<string, any[]> = {};
     savedCards.forEach((c: any) => {
@@ -336,7 +334,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     if (newSet.size === 0) setSelectionMode(false);
   };
 
-  // 단일 판매 처리
   const handleSellSingle = async (card: any) => {
     const priceStr = prompt(`'${card.content.split('\n')[0].substring(0,20)}...' 조항을 얼마(P)에 판매하시겠습니까?\n\n(여러 개를 팔려면 카드를 길게 꾹 누르거나 폴더 전체 선택을 이용하세요!)`, "100");
     if (!priceStr) return;
@@ -354,7 +351,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     }
   };
 
-  // 단일 구매 처리
   const handleBuySingle = async (item: any) => {
     if (item.seller_wallet === safeAddress) return alert("자신의 카드는 구매할 수 없습니다.");
     if (goalBalance < item.price) return alert("포인트가 부족합니다.");
@@ -374,7 +370,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     }
   };
 
-  // 일괄 판매 처리
   const handleBatchSell = async () => {
     if (selectedCards.size === 0) return;
     const priceStr = prompt(`선택한 ${selectedCards.size}개의 조항을 각각 얼마(P)에 판매하시겠습니까?`, "100");
@@ -400,7 +395,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     }
   };
 
-  // 일괄 구매 처리
   const handleBatchBuy = async () => {
     if (selectedCards.size === 0) return;
     
@@ -483,7 +477,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
              </div>
            ))}
            
-           {/* 판매 모드 플로팅 바 */}
            {selectionMode && selectedCards.size > 0 && (
              <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-amber-950 border border-amber-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
                <span className="text-amber-100 font-bold text-sm">{selectedCards.size}개 조항 선택됨</span>
@@ -529,7 +522,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
             )}
           </div>
           
-          {/* 구매 모드 플로팅 바 */}
           {selectionMode && selectedCards.size > 0 && (
             <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-teal-950 border border-teal-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
               <span className="text-teal-100 font-bold text-sm">총 {selectedCards.size}개 일괄 구매</span>
@@ -932,6 +924,23 @@ function MainApp() {
       }
       return newBalance;
     });
+  };
+
+  const registerToMarket = async (cardId: number) => {
+    const price = parseInt(prompt("판매할 가격(포인트)을 입력하세요:", "100") || "0", 10);
+    if (price > 0) {
+      try {
+        const res = await fetch("https://api.blankd.top/api/market/register", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: safeAddress, card_id: cardId, price })
+        });
+        const data = await res.json();
+        if (res.ok) alert(data.message);
+        else alert(data.error);
+      } catch(e) {
+        alert("마켓 등록 중 오류가 발생했습니다.");
+      }
+    }
   };
 
   const saveGlobalDict = async (newDict: any) => {
@@ -1617,14 +1626,18 @@ function MainApp() {
                      <span className="text-[10px] sm:text-[11px] font-mono text-white/80 w-3 text-center">{fontSizeLevel}</span>
                      <button onClick={() => setFontSizeLevel(p => Math.min(5, p + 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
                   </div>
+                  {/* 💡 메모 버튼이 헤더로 이동됨 */}
+                  <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
+                    {isMemoOpen ? '닫기 ✕' : '📝 메모'}
+                  </button>
+                  <button onClick={() => registerToMarket(activeCard.id)} className="px-2 py-1 bg-amber-900/40 text-amber-400 text-[10px] rounded border border-amber-500/30 hover:bg-amber-900/60 transition-colors hidden sm:inline-block whitespace-nowrap">마켓 판매</button>
                   <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
                 </div>
             </div>
-            <div className={`whitespace-pre-wrap leading-relaxed ${bodyClass} font-serif break-all break-words w-full max-w-full text-white/90`}>
-                {contentToRender}
-            </div>
+            
+            {/* 💡 메모 입력창이 화면 상단으로 이동됨 */}
             {isMemoOpen && (
-              <div className="mt-6 pt-4 border-t border-white/10 w-full animate-in slide-in-from-top-2">
+              <div className="mb-4 pb-4 border-b border-white/10 w-full animate-in slide-in-from-top-2">
                  <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { 
                      statsRef.current.text = e.target.value; 
                      const exStats = getExtendedStats(activeCard.memo);
@@ -1635,6 +1648,10 @@ function MainApp() {
                  }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all shadow-inner" autoFocus/>
               </div>
             )}
+
+            <div className={`whitespace-pre-wrap leading-relaxed ${bodyClass} font-serif break-all break-words w-full max-w-full text-white/90`}>
+                {contentToRender}
+            </div>
         </div>
 
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-3 z-30 flex flex-col gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
@@ -1701,9 +1718,7 @@ function MainApp() {
                 >
                   {inputMode === 'typing' ? '👆 터치 모드로 전환' : inputMode === 'touch' ? '⚡ 플래시 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
                 </button>
-                <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-3 py-2.5 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
-                  {isMemoOpen ? '닫기 ✕' : '메모 열기'}
-                </button>
+                {/* 💡 메모 버튼이 있던 자리를 제거하여 하단 공간 절약 */}
                 <button onClick={handleShowAnswer} className="px-3 py-2.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
                   정답 보기(스킵)
                 </button>
