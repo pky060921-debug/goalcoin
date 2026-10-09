@@ -584,7 +584,7 @@ function MainApp() {
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
 
-  const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
+  const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0 });
   
   const [inputMode, setInputMode] = useState<'typing'|'touch'|'flash'>('typing'); 
   
@@ -1196,22 +1196,17 @@ function MainApp() {
       const savedProgress = localStorage.getItem(`blankd_progress_${activeCard.id}`);
       const lastIdx = savedProgress ? parseInt(savedProgress, 10) : 0;
       
-      const stats = getExtendedStats(activeCard.memo); 
-      
-      // 💡 [핵심] 기록실(RecordTab)에서 열었고, 이전에 틀린 기록이 있다면 오답만 빈칸으로 뚫기
-      const isRecordTab = activeTab === 'record';
-      const lastWrongIndices = Array.from(stats.wrongIndices || []);
-      
-      const targetWrongWords = activeCard._targetWrongWords || null;
+      const targetWrong = activeCard._targetWrongWords || null;
       const targetWrongIndices = activeCard._targetWrongIndices || null;
+      const isTargetMode = !!targetWrong || !!activeCard._isTargetMode;
 
       const restoredBlanks = foundBlanks.map((b, i) => {
           let isCorrect = i < lastIdx;
           if (targetWrongIndices) {
               isCorrect = !targetWrongIndices.includes(i); 
-          } else if (targetWrongWords) {
+          } else if (targetWrong) {
               const cleanAns = b.answer.replace(/\s+/g, '');
-              const isTarget = targetWrongWords.some((w: string) => w.replace(/\s+/g, '') === cleanAns);
+              const isTarget = targetWrong.some((w: string) => w.replace(/\s+/g, '') === cleanAns);
               isCorrect = !isTarget;
           }
           return { ...b, correct: isCorrect };
@@ -1226,13 +1221,21 @@ function MainApp() {
       const uniqueAnswers = Array.from(new Set(foundBlanks.map(b => b.answer)));
       setTouchCandidates(uniqueAnswers.sort((a, b) => a.localeCompare(b, 'ko')));
 
+      const stats = getExtendedStats(activeCard.memo); 
+      
       setIsMemoOpen(false);
       setIsFrozen(false); setHintLetter(null); 
 
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
 
-      statsRef.current = { text: cleanText, filled: stats.filled, wrongIndices: new Set(stats.wrongIndices || []) };
+      // 💡 [수정] 일반 모드일 경우 오답 목록을 새롭게 초기화 (가장 최근 오답만 기록하기 위해)
+      statsRef.current = { 
+          text: cleanText, 
+          filled: stats.filled, 
+          wrongIndices: isTargetMode ? new Set(stats.wrongIndices || []) : new Set(),
+          sessionCorrect: 0 // 💡 포인트 및 맞춘 개수 산정용 초기화
+      };
       
       const cleanTitle = getStrictTitleOnly(cleanContent);
       localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
@@ -1260,8 +1263,9 @@ function MainApp() {
     const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = 0;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     
+    // 💡 [수정] 오답 모드에서도 실제로 맞춘 개수만큼 포인트를 지급하도록 변경
+    const correctCount = statsRef.current.sessionCorrect || 0;
     const isTargetMode = !!activeCard._targetWrongWords || !!activeCard._isTargetMode;
-    const correctCount = isTargetMode ? 0 : Math.max(0, blanks.length - wrongArr.length);
     const isCorrect = wrongArr.length === 0;
 
     const exStats = getExtendedStats(activeCard.memo);
@@ -1270,12 +1274,13 @@ function MainApp() {
     exStats.wrongIndices = wrongArr;
     
     const nowTimeStr = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('T', ' ').substring(0, 19);
-    if (!exStats.history) exStats.history = [];
-    exStats.history.push({
+    
+    // 💡 [수정] 히스토리가 무한 누적되지 않고 가장 최근 오답 정보 하나만 기록되도록 덮어쓰기
+    exStats.history = [{
       date: nowTimeStr,
       wrongCount: wrongArr.length,
       wrongWords: wrongArr.map(idx => blanks[idx]?.answer).filter(Boolean)
-    });
+    }];
     
     exStats.totalCorrect += correctCount;
     exStats.totalWrong += wrongArr.length;
@@ -1443,7 +1448,11 @@ function MainApp() {
     if (isCorrect) {
       isProcessingRef.current = true; 
       setInputStatus('correct');
-      statsRef.current.wrongIndices.delete(currentBlankIdx);
+      // 💡 [수정] 맞췄을 때 이전 오답 리스트에서 제거하고 세션 맞춘 개수 증가
+      if (statsRef.current.wrongIndices.has(currentBlankIdx)) {
+          statsRef.current.wrongIndices.delete(currentBlankIdx);
+      }
+      statsRef.current.sessionCorrect = (statsRef.current.sessionCorrect || 0) + 1;
       setTimeout(forceAdvance, 150); 
     } else { 
       isProcessingRef.current = true; 
@@ -1820,7 +1829,6 @@ function MainApp() {
                 if (!card) return setActiveCard(null);
                 const stats = getExtendedStats(card.memo);
                 const lastWrong = Array.from(stats.wrongIndices || []);
-                // 기록실에서는 무조건(또는 오답이 있을 때) 오답 채우기 모드로 진입
                 if (mode !== 'all' && lastWrong.length > 0) {
                     setActiveCard({ ...card, _targetWrongIndices: lastWrong, _isTargetMode: true });
                 } else {
