@@ -477,6 +477,7 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
              </div>
            ))}
            
+           {/* 판매 모드 플로팅 바 */}
            {selectionMode && selectedCards.size > 0 && (
              <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-amber-950 border border-amber-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
                <span className="text-amber-100 font-bold text-sm">{selectedCards.size}개 조항 선택됨</span>
@@ -522,6 +523,7 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
             )}
           </div>
           
+          {/* 구매 모드 플로팅 바 */}
           {selectionMode && selectedCards.size > 0 && (
             <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-teal-950 border border-teal-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
               <span className="text-teal-100 font-bold text-sm">총 {selectedCards.size}개 일괄 구매</span>
@@ -1194,12 +1196,22 @@ function MainApp() {
       const savedProgress = localStorage.getItem(`blankd_progress_${activeCard.id}`);
       const lastIdx = savedProgress ? parseInt(savedProgress, 10) : 0;
       
-      const targetWrong = activeCard._targetWrongWords || null;
+      const stats = getExtendedStats(activeCard.memo); 
+      
+      // 💡 [핵심] 기록실(RecordTab)에서 열었고, 이전에 틀린 기록이 있다면 오답만 빈칸으로 뚫기
+      const isRecordTab = activeTab === 'record';
+      const lastWrongIndices = Array.from(stats.wrongIndices || []);
+      
+      const targetWrongWords = activeCard._targetWrongWords || null;
+      const targetWrongIndices = activeCard._targetWrongIndices || null;
+
       const restoredBlanks = foundBlanks.map((b, i) => {
           let isCorrect = i < lastIdx;
-          if (targetWrong) {
+          if (targetWrongIndices) {
+              isCorrect = !targetWrongIndices.includes(i); 
+          } else if (targetWrongWords) {
               const cleanAns = b.answer.replace(/\s+/g, '');
-              const isTarget = targetWrong.some((w: string) => w.replace(/\s+/g, '') === cleanAns);
+              const isTarget = targetWrongWords.some((w: string) => w.replace(/\s+/g, '') === cleanAns);
               isCorrect = !isTarget;
           }
           return { ...b, correct: isCorrect };
@@ -1214,8 +1226,6 @@ function MainApp() {
       const uniqueAnswers = Array.from(new Set(foundBlanks.map(b => b.answer)));
       setTouchCandidates(uniqueAnswers.sort((a, b) => a.localeCompare(b, 'ko')));
 
-      const stats = getExtendedStats(activeCard.memo); 
-      
       setIsMemoOpen(false);
       setIsFrozen(false); setHintLetter(null); 
 
@@ -1250,7 +1260,7 @@ function MainApp() {
     const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = 0;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     
-    const isTargetMode = !!activeCard._targetWrongWords;
+    const isTargetMode = !!activeCard._targetWrongWords || !!activeCard._isTargetMode;
     const correctCount = isTargetMode ? 0 : Math.max(0, blanks.length - wrongArr.length);
     const isCorrect = wrongArr.length === 0;
 
@@ -1594,7 +1604,7 @@ function MainApp() {
                           }`}>
                       {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : 
                        inputStatus === 'correct' ? '✅' : 
-                       (activeTouchCandidates[flashIdx] || '?')}
+                       (activeTouchCandidates[flashIdx] ? getFullChosung(activeTouchCandidates[flashIdx]) : '?')}
                     </span>
                   );
               } else {
@@ -1613,9 +1623,9 @@ function MainApp() {
     });
     
     return (
-      <div className="flex flex-col w-full h-[65vh] sm:h-[75vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
-        <div className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar px-3 py-4 md:px-5 pb-12">
-            <div className="flex justify-between items-center border-b border-white/10 pb-2 w-full gap-3 overflow-hidden mb-4 sticky top-0 bg-[#0a0a0c] z-20 pt-1">
+      <div className="flex flex-col w-full h-[75vh] sm:h-[80vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
+        <div className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar px-3 py-2 sm:py-4 md:px-5 pb-4 sm:pb-12">
+            <div className="flex justify-between items-center border-b border-white/10 pb-1 sm:pb-2 w-full gap-2 sm:gap-3 overflow-hidden mb-2 sm:mb-4 sticky top-0 bg-[#0a0a0c] z-20 pt-1">
                 <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
                   {displayTitle}
                 </div>
@@ -1626,7 +1636,6 @@ function MainApp() {
                      <span className="text-[10px] sm:text-[11px] font-mono text-white/80 w-3 text-center">{fontSizeLevel}</span>
                      <button onClick={() => setFontSizeLevel(p => Math.min(5, p + 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
                   </div>
-                  {/* 💡 메모 버튼이 헤더로 이동됨 */}
                   <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
                     {isMemoOpen ? '닫기 ✕' : '📝 메모'}
                   </button>
@@ -1635,7 +1644,6 @@ function MainApp() {
                 </div>
             </div>
             
-            {/* 💡 메모 입력창이 화면 상단으로 이동됨 */}
             {isMemoOpen && (
               <div className="mb-4 pb-4 border-b border-white/10 w-full animate-in slide-in-from-top-2">
                  <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { 
@@ -1654,27 +1662,27 @@ function MainApp() {
             </div>
         </div>
 
-        <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-3 z-30 flex flex-col gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
+        <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-1.5 sm:p-3 z-30 flex flex-col gap-1.5 sm:gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
             {(inputMode === 'touch' || inputMode === 'flash') && activeTouchCandidates.length > 0 && (
-              <div className="flex flex-col gap-2 w-full max-h-[45vh] overflow-y-auto custom-scrollbar p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
-                <div className="w-full text-[11px] text-teal-400 mb-1 font-bold flex items-center justify-between">
+              <div className="flex flex-col gap-1.5 sm:gap-2 w-full max-h-[50vh] overflow-y-auto custom-scrollbar p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
+                <div className="w-full text-[10px] sm:text-[11px] text-teal-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
                     <span className="animate-pulse">{inputMode === 'flash' ? '⚡' : '👆'}</span> 
-                    {inputMode === 'flash' ? '정답이 보일 때 스페이스바(또는 단어 터치)' : '터치하여 정답을 선택하세요 (1~4 핫키)'}
+                    {inputMode === 'flash' ? '정답이 보일 때 스페이스바(또는 터치)' : '터치하여 정답을 선택하세요'}
                   </div>
                 </div>
                 
                 {inputMode === 'touch' && (
-                  <div className="grid grid-cols-2 gap-2 w-full">
+                  <div className="grid grid-cols-2 gap-1.5 sm:gap-2 w-full">
                      {activeTouchCandidates.map((ans, idx) => (
                        <button
                          key={idx}
                          onClick={() => handleSequentialInput(ans)}
-                         className="relative px-2 py-4 sm:py-5 bg-black/40 border border-white/20 rounded text-[13px] sm:text-[15px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex items-center justify-center break-keep"
+                         className="relative px-2 py-2 sm:py-5 bg-black/40 border border-white/20 rounded text-[11px] sm:text-[15px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex items-center justify-center break-keep leading-tight"
                        >
                          {idx < 4 && <span className="absolute top-1 left-1.5 text-[10px] text-teal-500/60 font-mono">[{idx+1}]</span>}
-                         {ans}
+                         {getFullChosung(ans)}
                        </button>
                      ))}
                   </div>
@@ -1683,15 +1691,15 @@ function MainApp() {
                 {inputMode === 'flash' && (
                   <button
                      onClick={() => handleSequentialInput(activeTouchCandidates[flashIdxRef.current])}
-                     className="w-full py-6 bg-indigo-900/30 border border-indigo-500/50 rounded text-indigo-300 font-bold text-[15px] active:scale-95 shadow-[0_0_15px_rgba(99,102,241,0.2)] animate-pulse"
+                     className="w-full py-2.5 sm:py-6 bg-indigo-900/30 border border-indigo-500/50 rounded text-indigo-300 font-bold text-[12px] sm:text-[15px] active:scale-95 shadow-[0_0_15px_rgba(99,102,241,0.2)] animate-pulse"
                   >
-                     (스페이스바를 누르거나 이 버튼을 터치하세요)
+                     (스페이스바 또는 이 버튼 터치)
                   </button>
                 )}
 
                 <button 
                   onClick={() => handleSequentialInput('모름(강제오답)')} 
-                  className="w-full mt-1 py-3 bg-red-900/40 hover:bg-red-900/60 border border-red-500/30 text-red-400 text-[13px] font-bold rounded-sm shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
+                  className="w-full mt-0.5 sm:mt-1 py-1.5 sm:py-3 bg-red-900/40 hover:bg-red-900/60 border border-red-500/30 text-red-400 text-[11px] sm:text-[13px] font-bold rounded-sm shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
                 >
                   🤔 모름 (오답 처리 후 다음 빈칸으로 넘어가기) <span className="text-[10px] text-red-500/60 font-mono ml-1">[0]</span>
                 </button>
@@ -1706,20 +1714,19 @@ function MainApp() {
                      forceAdvance();
                   }
                 }} 
-                className="w-full py-3 bg-red-600/80 hover:bg-red-500 text-white text-[13px] sm:text-[15px] font-bold rounded shadow-[0_0_15px_rgba(220,38,38,0.5)] animate-pulse border border-red-400 flex justify-center items-center gap-2"
+                className="w-full py-2 sm:py-3 bg-red-600/80 hover:bg-red-500 text-white text-[12px] sm:text-[15px] font-bold rounded shadow-[0_0_15px_rgba(220,38,38,0.5)] animate-pulse border border-red-400 flex justify-center items-center gap-2"
               >
                 <span>다음 조항으로 넘어가기 ▶</span>
               </button>
             ) : (
-              <div className="flex justify-between items-center w-full gap-2 flex-wrap">
+              <div className="flex justify-between items-center w-full gap-1.5 sm:gap-2 flex-wrap">
                 <button 
                   onClick={() => setInputMode(prev => prev === 'typing' ? 'touch' : prev === 'touch' ? 'flash' : 'typing')} 
-                  className="px-3 py-2.5 bg-zinc-900/80 text-zinc-300 border border-zinc-500/50 rounded text-[11px] sm:text-xs font-bold flex-1 hover:bg-zinc-800 transition-all shadow-md flex items-center justify-center gap-2"
+                  className="px-2 sm:px-3 py-1.5 sm:py-2.5 bg-zinc-900/80 text-zinc-300 border border-zinc-500/50 rounded text-[10px] sm:text-xs font-bold flex-1 hover:bg-zinc-800 transition-all shadow-md flex items-center justify-center gap-2"
                 >
                   {inputMode === 'typing' ? '👆 터치 모드로 전환' : inputMode === 'touch' ? '⚡ 플래시 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
                 </button>
-                {/* 💡 메모 버튼이 있던 자리를 제거하여 하단 공간 절약 */}
-                <button onClick={handleShowAnswer} className="px-3 py-2.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
+                <button onClick={handleShowAnswer} className="px-2 sm:px-3 py-1.5 sm:py-2.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
                   정답 보기(스킵)
                 </button>
               </div>
@@ -1802,7 +1809,25 @@ function MainApp() {
           <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
         </div>
         <div className={activeTab === 'record' ? 'block' : 'hidden'}>
-          <RecordTab savedCards={savedCards} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} safeAddress={safeAddress} colCount={colCount} setActiveCard={setActiveCard} />
+          <RecordTab 
+            savedCards={savedCards} 
+            goalBalance={goalBalance} 
+            handleUpdateBalance={handleUpdateBalance} 
+            loadAllData={loadAllData} 
+            safeAddress={safeAddress} 
+            colCount={colCount} 
+            setActiveCard={(card: any, mode?: string) => {
+                if (!card) return setActiveCard(null);
+                const stats = getExtendedStats(card.memo);
+                const lastWrong = Array.from(stats.wrongIndices || []);
+                // 기록실에서는 무조건(또는 오답이 있을 때) 오답 채우기 모드로 진입
+                if (mode !== 'all' && lastWrong.length > 0) {
+                    setActiveCard({ ...card, _targetWrongIndices: lastWrong, _isTargetMode: true });
+                } else {
+                    setActiveCard(card);
+                }
+             }} 
+          />
         </div>
         <div className={activeTab === 'market' ? 'block' : 'hidden'}>
           <MarketTab safeAddress={safeAddress} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} savedCards={savedCards} />
