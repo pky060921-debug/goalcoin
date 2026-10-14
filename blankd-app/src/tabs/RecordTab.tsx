@@ -45,32 +45,17 @@ export const RecordTab = ({ savedCards, safeAddress, setActiveCard }: any) => {
   };
 
   const renderBlankCard = (card: any) => {
-     const stats = getExtendedStats(card.memo);
-     const wrongWords = Array.from(new Set(stats.history.flatMap((h: any) => h.wrongWords || []))) as string[];
      const title = card.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim() || '제목 없음';
 
      return (
-       <div key={card.id} className="relative w-full perspective-1000 mb-2 animate-in fade-in">
+       <div key={card.id} className="relative w-full perspective-1000 mb-2 animate-in fade-in h-full">
          <div 
-           onClick={() => setActiveCard(card)} // 💡 클릭 시 앱 메인의 CardModal(채우기 탭과 동일)을 띄움
-           className="w-full text-left p-3 sm:p-4 rounded-sm transition-all duration-300 shadow-md border cursor-pointer flex flex-col justify-between items-start gap-2 bg-red-950/20 border-red-500/30 hover:bg-red-900/30"
+           onClick={() => setActiveCard(card)} 
+           className="w-full h-full text-left p-4 sm:p-5 rounded transition-all duration-300 shadow-md border cursor-pointer flex flex-col justify-center items-center bg-red-950/20 border-red-500/30 hover:bg-red-900/40 hover:border-red-400"
+           style={{ minHeight: '5.5rem' }}
          >
-           <div className="flex justify-between items-center w-full gap-2">
-              <div className="font-bold text-[11px] sm:text-[13px] tracking-tight leading-snug line-clamp-2 text-red-100">
-                 {title}
-              </div>
-              <span className="shrink-0 bg-red-600 text-white text-[9px] sm:text-[10px] px-2 py-1 rounded-sm font-bold shadow-[0_0_10px_rgba(220,38,38,0.5)] animate-pulse">
-                터치하여 복습 ▶
-              </span>
-           </div>
-           
-           <div className="flex flex-wrap gap-1 mt-2 w-full">
-              <span className="text-[10px] text-red-400 font-bold w-full mb-0.5">틀렸던 빈칸:</span>
-              {wrongWords.map(w => (
-                 <span key={w} className="bg-red-900/50 text-red-200 border border-red-500/40 px-2 py-0.5 rounded-sm text-[10px] font-bold">
-                    {w}
-                 </span>
-              ))}
+           <div className="font-bold text-[12px] sm:text-[14px] text-center tracking-tight leading-snug line-clamp-3 text-red-100">
+              {title}
            </div>
          </div>
        </div>
@@ -134,7 +119,6 @@ export const RecordTab = ({ savedCards, safeAddress, setActiveCard }: any) => {
           </p>
         </div>
         
-        {/* 💡 서브 탭 토글 버튼 */}
         <div className="flex bg-black/40 border border-white/10 p-1 rounded-sm shrink-0">
            <button 
              onClick={() => setSubTab('blank')}
@@ -167,7 +151,7 @@ export const RecordTab = ({ savedCards, safeAddress, setActiveCard }: any) => {
               return (
                 <div key={folder} className="mb-10 sm:mb-12 border-l-2 border-red-500/30 pl-2 sm:pl-4 bg-red-950/5 p-4 rounded-r-md">
                   <div className="text-sm sm:text-base text-red-300 mb-4 border-b border-red-500/20 pb-2 font-bold tracking-widest">{folder}</div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 items-start w-full">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 items-start w-full">
                     <div className="flex flex-col gap-2.5 w-full">
                       <div className="text-xs text-white/50 font-bold mb-1 text-center tracking-widest border-b border-white/5 pb-2">법 / 정관</div>
                       {col1Cards.map(c => renderBlankCard(c))}
