@@ -240,7 +240,6 @@ def init_golden_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )''')
         
-        # 💡 [추가] 마켓 테이블 생성
         try: 
             conn.execute('''CREATE TABLE IF NOT EXISTS market_cards (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -280,7 +279,6 @@ def init_golden_db():
         except: pass
         try: conn.execute('ALTER TABLE user_settings ADD COLUMN custom_inclusions TEXT DEFAULT "[]"')
         except: pass
-        # 💡 [추가] 오답 그룹 전역 연동을 위한 컬럼 추가
         try: conn.execute('ALTER TABLE user_settings ADD COLUMN custom_groups TEXT DEFAULT "[]"')
         except: pass
             
@@ -367,7 +365,7 @@ def update_category_text():
         data = request.json or {}
         wallet_address = data.get('wallet_address')
         cat_id = data.get('id')
-        content = data.get('content') # 필드명을 DB 컬럼과 맞춰 content로 수신
+        content = data.get('content') 
         
         if not wallet_address or not cat_id:
             return jsonify({"error": "필수 정보가 누락되었습니다."}), 400
@@ -375,7 +373,6 @@ def update_category_text():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # 데이터베이스의 categories 테이블 내 content 컬럼을 업데이트합니다.
         cursor.execute(
             "UPDATE categories SET content = ? WHERE id = ? AND wallet_address = ?",
             (content, cat_id, wallet_address)
@@ -441,26 +438,21 @@ def extract_exam_text_with_color(file_obj, is_answer=False):
         return file_obj.read().decode('utf-8', errors='ignore')
 
 def parse_answers_from_text(text: str, question_count: int) -> list:
-    """정답 파싱: 인라인 번호-정답(최우선) → 빨간색 마킹 → 연속 기호 묶음(표) 순으로 시도."""
     num_map = {'①': '1', '②': '2', '③': '3', '④': '4', '⑤': '5'}
     ans_dict = {}
 
-    # 1. 인라인 "1.③" "1)②" "1번:③" "1-③" 형태 — 번호가 명시되어 가장 신뢰도 높음
     inline_matches = re.findall(r'(\d{1,3})\s*(?:번)?\s*[.)\:\-]\s*([①②③④⑤])', text)
     for num, ans in inline_matches:
         n = int(num)
         if 1 <= n <= question_count:
             ans_dict[n] = num_map[ans]
 
-    # 2. 빨간색 마킹 (단일 기호만) — 70% 이상 채워질 때만 신뢰
     if len(ans_dict) < question_count * 0.7:
         red_matches = re.findall(r'\[🔴\s*([①②③④⑤])\s*\]', text)
         if len(red_matches) >= question_count * 0.7:
             for i, ans in enumerate(red_matches[:question_count]):
                 ans_dict.setdefault(i + 1, num_map[ans])
 
-    # 3. 연속 기호 묶음 — "문항/정답" 표처럼 기호 3개 이상이 연달아 나오는 구간 탐지
-    #    (문제 본문의 보기는 한 줄에 기호 1개 + 긴 설명문이라 이 패턴에 안 걸림)
     if len(ans_dict) < question_count * 0.7:
         runs = re.findall(r'(?:[①②③④⑤]\s*){3,}', text)
         if runs:
@@ -494,7 +486,6 @@ def delete_pending_exam():
 # ==========================================
 
 def _rough_split_questions(exam_text: str) -> list:
-    """1차 거친 분리: 문제 단위로만 자른다. 정밀 정제는 AI가 담당."""
     exam_text = re.sub(r'-\s*\d+\s*-', '', exam_text)
     exam_text = re.sub(r'【[^】]+】', '', exam_text)
     exam_text = re.split(r'[\*＊]?\s*단\s*답\s*형', exam_text)[0]
@@ -506,9 +497,7 @@ def _rough_split_questions(exam_text: str) -> list:
     ]
     return valid_chunks
 
-
 def _ai_parse_question_batch(raw_chunks: list, answer_context: str) -> list:
-    """원본 문제 조각들을 AI에게 보내 정제된 JSON 문제 배열로 변환."""
     joined = "\n\n---\n\n".join(raw_chunks)
     ref_block = f"\n[정답 참고자료 - 있으면 최우선으로 사용]\n{answer_context[:1500]}\n" if answer_context else ""
 
@@ -544,7 +533,6 @@ def _ai_parse_question_batch(raw_chunks: list, answer_context: str) -> list:
     if isinstance(parsed, dict):
         parsed = parsed.get("questions") or list(parsed.values())[0] if parsed else []
     return parsed if isinstance(parsed, list) else []
-
 
 @api_bp.route('/upload-exam-ai', methods=['POST'])
 def upload_exam_ai():
@@ -637,7 +625,6 @@ def upload_exam_ai():
         print(f"[업로드 오류] {traceback.format_exc()}", file=sys.stderr)
         return jsonify({"error": str(e)}), 500
 
-
 @api_bp.route('/get-exam-banks', methods=['GET'])
 def get_exam_banks():
     try:
@@ -660,7 +647,6 @@ def get_exam_banks():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 @api_bp.route('/get-exam-bank-questions', methods=['GET'])
 def get_exam_bank_questions():
     try:
@@ -680,7 +666,6 @@ def get_exam_bank_questions():
         return jsonify(results)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 @api_bp.route('/delete-exam-bank', methods=['POST'])
 def delete_exam_bank():
@@ -1106,7 +1091,6 @@ def save_card():
         cursor = conn.cursor()
         
         if card_id:
-            print(f"DEBUG: 카드 수정 시도 - ID: {card_id}, wallet: {wallet_address}")
             cursor.execute("SELECT memo FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
             row = cursor.fetchone()
             final_memo_str = memo
@@ -1120,13 +1104,8 @@ def save_card():
                     client_memo['filled'] = max(int(db_memo.get('filled', 0)), int(client_memo.get('filled', 0)))
                     client_memo['totalCorrect'] = max(int(db_memo.get('totalCorrect', 0)), int(client_memo.get('totalCorrect', 0)))
                     
-                    # 💡 [추가] 학습 일자 및 오답 히스토리 누적 병합 (날짜/시간 기준 중복 제거)
-                    db_history = db_memo.get('history', [])
-                    client_history = client_memo.get('history', [])
-                    merged_history = {str(item.get('date', '')): item for item in db_history + client_history if item.get('date')}
-                    
-                    # 시간순 정렬하여 최신순으로 다시 배열에 넣기
-                    client_memo['history'] = sorted(list(merged_history.values()), key=lambda x: x['date'])
+                    # 💡 [수정] 무한 누적되던 히스토리 병합 로직 제거. 
+                    # 프론트엔드에서 보낸 가장 최근 오답 기록(1건)만 유지하도록 그대로 덮어씁니다.
                     
                     final_memo_str = json.dumps(client_memo, ensure_ascii=False)
                 except Exception:
@@ -1135,9 +1114,7 @@ def save_card():
             cursor.execute('''UPDATE cards SET card_content=?, answer_text=?, folder_name=?, memo=? 
                               WHERE id=? AND wallet_address=?''', 
                               (card_content, answer_text, folder_name, final_memo_str, card_id, wallet_address))
-            print(f"DEBUG: 수정된 행의 수: {cursor.rowcount}")
         else:
-            print("DEBUG: 카드 신규 생성 시도")
             cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo) 
                               VALUES (?, 0, ?, ?, '[]', 0, ?, 'OWNED', NULL, ?, ?)''', 
                               (wallet_address, card_content, answer_text, get_next_review_time(0), folder_name, memo))
@@ -1242,13 +1219,7 @@ def sync_batch():
                     client_memo['filled'] = max(int(db_memo.get('filled', 0)), int(client_memo.get('filled', 0)))
                     client_memo['totalCorrect'] = max(int(db_memo.get('totalCorrect', 0)), int(client_memo.get('totalCorrect', 0)))
                     
-                    # 💡 2. [추가] 학습 일자 및 오답 히스토리 누적 병합 (날짜/시간 기준 중복 제거)
-                    db_history = db_memo.get('history', [])
-                    client_history = client_memo.get('history', [])
-                    merged_history = {str(item.get('date', '')): item for item in db_history + client_history if item.get('date')}
-                    
-                    # 시간순 정렬하여 최신순으로 다시 배열에 넣기
-                    client_memo['history'] = sorted(list(merged_history.values()), key=lambda x: x['date'])
+                    # 💡 2. [수정] 무한 누적되던 오답 히스토리 병합 로직 제거. (최신 1건만 덮어쓰기)
                     
                     final_memo_str = json.dumps(client_memo, ensure_ascii=False)
                 except Exception:
