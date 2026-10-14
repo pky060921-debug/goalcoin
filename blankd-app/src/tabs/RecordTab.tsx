@@ -15,7 +15,16 @@ const getExtendedStats = (memoStr: string) => {
   return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [], ox_quiz: null };
 };
 
-export const RecordTab = ({ savedCards, safeAddress, setActiveCard }: any) => {
+const getGridClass = (cols: number) => {
+  if(cols === 1) return "md:grid-cols-1";
+  if(cols === 2) return "md:grid-cols-2";
+  if(cols === 3) return "md:grid-cols-3";
+  if(cols === 4) return "md:grid-cols-4";
+  if(cols === 5) return "md:grid-cols-5";
+  return "md:grid-cols-3";
+};
+
+export const RecordTab = ({ savedCards, safeAddress, setActiveCard, colCount }: any) => {
   const [localCards, setLocalCards] = useState<any[]>([]);
   const [subTab, setSubTab] = useState<'blank' | 'exam'>('blank');
   const [expandedExamId, setExpandedExamId] = useState<string | number | null>(null);
@@ -31,7 +40,7 @@ export const RecordTab = ({ savedCards, safeAddress, setActiveCard }: any) => {
   });
 
   const getBlankFolders = () => {
-     return Array.from(new Set(blankCards.map(c => c.folder_name))).filter(Boolean).sort();
+     return Array.from(new Set(blankCards.map(c => c.folder_name))).filter(f => f && f !== '기본 폴더').sort();
   };
 
   // --- 모의고사 오답 ---
@@ -41,26 +50,11 @@ export const RecordTab = ({ savedCards, safeAddress, setActiveCard }: any) => {
   });
 
   const getExamFolders = () => {
-     return Array.from(new Set(examCards.map(c => c.folder_name))).filter(Boolean).sort();
+     return Array.from(new Set(examCards.map(c => c.folder_name))).filter(f => f && f !== '기본 폴더').sort();
   };
 
-  const renderBlankCard = (card: any) => {
-     const title = card.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim() || '제목 없음';
-
-     return (
-       <div key={card.id} className="relative w-full perspective-1000 mb-2 animate-in fade-in h-full">
-         <div 
-           onClick={() => setActiveCard(card)} 
-           className="w-full h-full text-left p-4 sm:p-5 rounded transition-all duration-300 shadow-md border cursor-pointer flex flex-col justify-center items-center bg-red-950/20 border-red-500/30 hover:bg-red-900/40 hover:border-red-400"
-           style={{ minHeight: '5.5rem' }}
-         >
-           <div className="font-bold text-[12px] sm:text-[14px] text-center tracking-tight leading-snug line-clamp-3 text-red-100">
-              {title}
-           </div>
-         </div>
-       </div>
-     );
-  };
+  const blankFoldersList = ['기본 폴더', ...getBlankFolders()].filter(f => blankCards.some(c => (c.folder_name || '기본 폴더') === f));
+  const examFoldersList = ['기본 폴더', ...getExamFolders()].filter(f => examCards.some(c => (c.folder_name || '기본 폴더') === f));
 
   const renderExamCard = (card: any) => {
      const stats = getExtendedStats(card.memo);
@@ -137,33 +131,80 @@ export const RecordTab = ({ savedCards, safeAddress, setActiveCard }: any) => {
 
       {subTab === 'blank' && (
         <div className="space-y-6 sm:space-y-8 w-full animate-in fade-in">
-          {getBlankFolders().length === 0 ? (
+          {blankFoldersList.length === 0 ? (
             <div className="text-center py-20 text-teal-400/50 text-sm font-serif">현재 틀린 빈칸 문제가 없습니다! 완벽합니다.</div>
           ) : (
-            getBlankFolders().map((folder: any) => {
-              const folderCards = blankCards.filter(c => c.folder_name === folder);
+            blankFoldersList.map((folder: string) => {
+              const folderCards = blankCards.filter(c => (c.folder_name || '기본 폴더') === folder);
               if (folderCards.length === 0) return null;
-              
-              const col1Cards = folderCards.filter((c:any) => { const f = c.content.split('\n')[0]||""; return !f.includes('[령]') && !f.includes('[칙]') && !f.includes('[규]') && !f.includes('[규정]'); });
-              const col2Cards = folderCards.filter((c:any) => { const f = c.content.split('\n')[0]||""; return f.includes('[령]'); });
-              const col3Cards = folderCards.filter((c:any) => { const f = c.content.split('\n')[0]||""; return f.includes('[칙]') || f.includes('[규]') || f.includes('[규정]'); });
 
               return (
-                <div key={folder} className="mb-10 sm:mb-12 border-l-2 border-red-500/30 pl-2 sm:pl-4 bg-red-950/5 p-4 rounded-r-md">
-                  <div className="text-sm sm:text-base text-red-300 mb-4 border-b border-red-500/20 pb-2 font-bold tracking-widest">{folder}</div>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6 items-start w-full">
-                    <div className="flex flex-col gap-2.5 w-full">
-                      <div className="text-xs text-white/50 font-bold mb-1 text-center tracking-widest border-b border-white/5 pb-2">법 / 정관</div>
-                      {col1Cards.map(c => renderBlankCard(c))}
-                    </div>
-                    <div className="flex flex-col gap-2.5 w-full">
-                      <div className="text-xs text-white/50 font-bold mb-1 text-center tracking-widest border-b border-white/5 pb-2">시행령</div>
-                      {col2Cards.map(c => renderBlankCard(c))}
-                    </div>
-                    <div className="flex flex-col gap-2.5 w-full">
-                      <div className="text-xs text-white/50 font-bold mb-1 text-center tracking-widest border-b border-white/5 pb-2">시행규칙</div>
-                      {col3Cards.map(c => renderBlankCard(c))}
-                    </div>
+                <div key={folder} className="mb-6 sm:mb-8 border-l rounded-l-sm pl-3 sm:pl-4 transition-all border-red-500/50">
+                  <div className="text-xs sm:text-sm mb-2 sm:mb-3 border-b pb-1.5 sm:pb-2 font-bold transition-all text-red-400 border-red-500/30">
+                    📁 {folder}
+                  </div>
+
+                  <div className={`grid grid-cols-1 ${getGridClass(colCount)} gap-3 sm:gap-4 items-start`}>
+                    {folderCards.map(card => {
+                        const cleanContent = card.content.replace(/\s*\[\[?ORIG_ID:\d+\]?\]?/g, '');
+                        const lines = cleanContent.split('\n');
+                        const firstLine = lines[0] || "";
+                        
+                        let displayTitle = firstLine
+                          .replace(/\[(법\vert{}령\vert{}칙\vert{}규\vert{}정관\vert{}규정)\]/g, '')
+                          .replace(/\(\s*내용\s*\)/g, '')
+                          .replace(/내용/g, '')
+                          .trim();
+                        if (!displayTitle) displayTitle = "제목 없음";
+
+                        let colClass = "md:col-start-1 md:col-span-1"; 
+                        let titleColor = "text-red-500";
+                        
+                        if (firstLine.includes('[정관]')) {
+                          colClass = "md:col-start-1 md:col-span-1";
+                          titleColor = "text-yellow-500";
+                        } else if (firstLine.includes('[칙]') || firstLine.includes('[규]') || firstLine.includes('[규정]')) { 
+                          colClass = "md:col-start-3 md:col-span-1";
+                          titleColor = "text-green-500";
+                        } else if (firstLine.includes('[령]')) { 
+                          colClass = "md:col-start-2 md:col-span-1";
+                          titleColor = "text-blue-400";
+                        } else {
+                          colClass = "md:col-start-1 md:col-span-1";
+                          titleColor = "text-red-500";
+                        }
+
+                        const bodyOnlyForStats = lines.slice(1).join('\n');
+                        const totalBlanks = (bodyOnlyForStats.match(/\[\s*(.*?)\s*\]/g) || []).length;
+                        const stats = getExtendedStats(card.memo);
+                        const wrongWords = Array.from(new Set(stats.history.flatMap((h: any) => h.wrongWords || []))) as string[];
+
+                        const titleLen = displayTitle.length;
+                        const titleSizing = titleLen > 25 ? 'text-[10px] sm:text-[11px] tracking-[calc(-0.06em)]' : 
+                                            titleLen > 15 ? 'text-[11px] sm:text-[12px] tracking-tighter' : 
+                                            'text-[12px] sm:text-[13px] tracking-tight';
+
+                        return (
+                          <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
+                            <div 
+                              onClick={(e) => { e.stopPropagation(); setActiveCard(card); }} 
+                              className="w-full p-2 sm:p-2.5 rounded-sm border flex flex-col justify-center cursor-pointer text-left border-red-500/40 bg-red-900/20 hover:bg-red-900/40 shadow-sm transition-all duration-200"
+                            >
+                              <div className="flex flex-row items-center justify-between w-full gap-2 overflow-hidden">
+                                <div className={`${titleColor} font-bold ${titleSizing} text-left truncate leading-tight flex-1`} title={displayTitle}>
+                                  {displayTitle}
+                                </div>
+                                <div className="flex flex-row items-center gap-1.5 shrink-0">
+                                  <div className="flex flex-nowrap gap-0.5">
+                                    <span className="text-[7px] sm:text-[8px] text-indigo-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">빈칸:{totalBlanks}</span>
+                                    <span className="text-[7px] sm:text-[8px] text-white bg-red-600 font-bold px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center shadow-sm animate-pulse">오답:{wrongWords.length}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                    })}
                   </div>
                 </div>
               );
@@ -174,11 +215,11 @@ export const RecordTab = ({ savedCards, safeAddress, setActiveCard }: any) => {
 
       {subTab === 'exam' && (
         <div className="space-y-6 sm:space-y-8 w-full animate-in fade-in">
-          {getExamFolders().length === 0 ? (
+          {examFoldersList.length === 0 ? (
             <div className="text-center py-20 text-white/30 text-sm font-serif">저장된 모의고사 오답이 없습니다.</div>
           ) : (
-            getExamFolders().map((folder: any) => {
-              const folderCards = examCards.filter(c => c.folder_name === folder);
+            examFoldersList.map((folder: string) => {
+              const folderCards = examCards.filter(c => (c.folder_name || '기본 폴더') === folder);
               if (folderCards.length === 0) return null;
               
               return (
