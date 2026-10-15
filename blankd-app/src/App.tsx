@@ -1229,10 +1229,11 @@ function MainApp() {
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
 
+      // 💡 일반 모드로 진입 시 과거 오답 덮어쓰기 로직 복구
       statsRef.current = { 
           text: cleanText, 
           filled: stats.filled, 
-          wrongIndices: isTargetMode ? new Set(stats.wrongIndices || []) : new Set(),
+          wrongIndices: new Set(stats.wrongIndices || []),
           sessionCorrect: 0
       };
       
@@ -1336,7 +1337,6 @@ function MainApp() {
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder);
     const currentIdx = folderCards.findIndex(c => c.id === currentId);
     
-    // 💡 [수정] 오답 모드이면, 같은 폴더 내에 있는 "다음 오답 카드"를 순차적으로 탐색하여 자동 연계함
     let nextCard = null;
     if (isTargetMode) {
        for (let i = currentIdx + 1; i < folderCards.length; i++) {
