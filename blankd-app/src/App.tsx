@@ -690,12 +690,41 @@ function MainApp() {
 
   const activeCardIdx = activeFolderCards.findIndex(c => c.id === activeCard?.id);
 
+  const saveCurrentProgress = (card: any) => {
+    if (!card) return;
+    const exStats = getExtendedStats(card.memo);
+    exStats.text = statsRef.current.text;
+    exStats.filled = statsRef.current.filled;
+    exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+    const newMemo = JSON.stringify(exStats);
+    
+    setSavedCards(prev => {
+        const next = prev.map(c => c.id === card.id ? { ...c, memo: newMemo } : c);
+        localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
+        return next;
+    });
+    pushToQueue('MEMO', { id: card.id, memo: newMemo });
+    
+    if (navigator.onLine) {
+        fetch("https://api.blankd.top/api/save-card", {
+            method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: card.answer_text || "", folder_name: card.folder_name, memo: newMemo })
+        }).catch(()=>{});
+    }
+  };
+
   const goPrevCard = () => {
-      if (activeCardIdx > 0) setActiveCard(activeFolderCards[activeCardIdx - 1]);
+      if (activeCardIdx > 0) {
+          saveCurrentProgress(activeCard);
+          setActiveCard(activeFolderCards[activeCardIdx - 1]);
+      }
   };
 
   const goNextCard = () => {
-      if (activeCardIdx < activeFolderCards.length - 1) setActiveCard(activeFolderCards[activeCardIdx + 1]);
+      if (activeCardIdx < activeFolderCards.length - 1) {
+          saveCurrentProgress(activeCard);
+          setActiveCard(activeFolderCards[activeCardIdx + 1]);
+      }
   };
 
   useEffect(() => {
@@ -1196,6 +1225,8 @@ function MainApp() {
         if (speedWrongs.has(i)) {
             newWrongs.add(i);
         } else {
+            // 💡 [수정] 스피드 모드에서 정답으로 체크된 경우 기존 오답 리스트에서도 깔끔하게 제거
+            if (newWrongs.has(i)) newWrongs.delete(i);
             newlyCorrect++;
         }
     }
@@ -1285,11 +1316,11 @@ function MainApp() {
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
 
+      // 💡 [핵심 해결] 무조건 DB에 남아있는 최종 과거 오답 기록을 불러와서 유지 (열었다 닫을 때 텅 빈 상태로 덮어쓰여 초기화되는 현상 방지)
       statsRef.current = { 
           text: cleanText, 
           filled: stats.filled, 
-          // 💡 [수정] 이어서 푸는 중(lastIdx > 0)이거나 오답 모드일 경우 기존 오답 유지! 처음부터 풀 때만 초기화
-          wrongIndices: (isTargetMode || lastIdx > 0) ? new Set(stats.wrongIndices || []) : new Set(),
+          wrongIndices: new Set(stats.wrongIndices || []),
           sessionCorrect: 0
       };
       
@@ -1301,7 +1332,7 @@ function MainApp() {
         recognitionRef.current.onend = null; recognitionRef.current.stop(); recognitionRef.current = null; setIsListening(false);
       }
     }
-  }, [activeCard]);
+  }, [activeCard, activeTab]);
 
   useEffect(() => {
       if (activeCard && inputStatus === 'idle' && inputMode !== 'speed') {
@@ -1319,7 +1350,7 @@ function MainApp() {
     const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = 0;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     
-    const isTargetMode = !!activeCard._targetWrongWords || !!activeCard._isTargetMode;
+    const isTargetMode = !!activeCard._targetWrongWords || !!activeCard._isTargetMode || activeTab === 'record';
     const correctCount = statsRef.current.sessionCorrect || 0;
     const isCorrect = wrongArr.length === 0;
 
@@ -1513,11 +1544,8 @@ function MainApp() {
         const strV = (v as string).replace(/\s+/g, '').toLowerCase();
         const orig = strK.length >= strV.length ? strK : strV;
         const short = strK.length < strV.length ? strK : strV;
-        if (expected === orig) {
-            const shortCho = getFullChosung(short);
-            if (actual === short || actual === shortCho || actual === composeChosung(shortCho)) { 
-                isCorrect = true; 
-            }
+        if (expected === orig && (actual === short || actual === getFullChosung(short) || actual === composeChosung(getFullChosung(short)))) { 
+            isCorrect = true; 
         }
       });
     }
@@ -1525,6 +1553,7 @@ function MainApp() {
     if (isCorrect) {
       isProcessingRef.current = true; 
       setInputStatus('correct');
+      // 💡 [수정] 맞췄을 때 이전 오답 리스트에서 제거하고 세션 맞춘 개수 증가
       if (statsRef.current.wrongIndices.has(currentBlankIdx)) {
           statsRef.current.wrongIndices.delete(currentBlankIdx);
       }
@@ -1699,7 +1728,7 @@ function MainApp() {
                     <span id="active-blank" key="active-blank-input-fixed" className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${
                         inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
                         inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 
-                        'bg-gray-500/20 text-white/90 border-gray-500/50 animate-pulse shadow-[0_0_8px_rgba(156,163,175,0.2)]'
+                        'bg-gray-500/20 text-white border-gray-500/50 animate-pulse shadow-[0_0_8px_rgba(156,163,175,0.2)]'
                     }`}>
                       {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '\u00A0'}
                     </span>
