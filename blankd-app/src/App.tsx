@@ -69,6 +69,16 @@ const getFullChosung = (str: string) => {
   return res;
 };
 
+// 💡 [추가] 쌍자음 변환 함수 (ㄱㄱ -> ㄲ)
+const composeChosung = (str: string) => {
+  if (!str) return '';
+  return str.replace(/ㄱㄱ/g, 'ㄲ')
+            .replace(/ㄷㄷ/g, 'ㄸ')
+            .replace(/ㅂㅂ/g, 'ㅃ')
+            .replace(/ㅅㅅ/g, 'ㅆ')
+            .replace(/ㅈㅈ/g, 'ㅉ');
+};
+
 const autoApplyDictHelper = (content: string, dict: any) => {
   try {
     if (!dict) return content;
@@ -170,7 +180,9 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
 
   const validAnswers = useMemo(() => {
       const expectedClean = expected.replace(/\s+/g, '').toLowerCase();
-      const answers = [expectedClean, getFullChosung(expectedClean)];
+      const cho = getFullChosung(expectedClean);
+      // 💡 [수정] 자음 합침(ㄲ, ㄸ 등) 패턴도 정답 배열에 미리 포함시킴
+      const answers = [expectedClean, cho, composeChosung(cho)];
       
       if (abbrDict) {
           Object.entries(abbrDict).forEach(([k, v]) => {
@@ -179,8 +191,10 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
               const orig = strK.length >= strV.length ? strK : strV;
               const short = strK.length < strV.length ? strK : strV;
               if (expectedClean === orig) {
+                  const shortCho = getFullChosung(short);
                   answers.push(short);
-                  answers.push(getFullChosung(short)); 
+                  answers.push(shortCho); 
+                  answers.push(composeChosung(shortCho)); 
               }
           });
       }
@@ -477,7 +491,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
              </div>
            ))}
            
-           {/* 판매 모드 플로팅 바 */}
            {selectionMode && selectedCards.size > 0 && (
              <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-amber-950 border border-amber-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
                <span className="text-amber-100 font-bold text-sm">{selectedCards.size}개 조항 선택됨</span>
@@ -523,7 +536,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
             )}
           </div>
           
-          {/* 구매 모드 플로팅 바 */}
           {selectionMode && selectedCards.size > 0 && (
             <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-teal-950 border border-teal-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
               <span className="text-teal-100 font-bold text-sm">총 {selectedCards.size}개 일괄 구매</span>
@@ -1491,7 +1503,8 @@ function MainApp() {
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
     
-    let isCorrect = (expected === actual) || (getFullChosung(expected) === actual);
+    const expectedCho = getFullChosung(expected);
+    let isCorrect = (expected === actual) || (expectedCho === actual) || (composeChosung(expectedCho) === actual);
 
     if (!isCorrect && globalDict.abbrs) {
       Object.entries(globalDict.abbrs).forEach(([k, v]) => {
@@ -1499,8 +1512,11 @@ function MainApp() {
         const strV = (v as string).replace(/\s+/g, '').toLowerCase();
         const orig = strK.length >= strV.length ? strK : strV;
         const short = strK.length < strV.length ? strK : strV;
-        if (expected === orig && (actual === short || actual === getFullChosung(short))) { 
-            isCorrect = true; 
+        if (expected === orig) {
+            const shortCho = getFullChosung(short);
+            if (actual === short || actual === shortCho || actual === composeChosung(shortCho)) { 
+                isCorrect = true; 
+            }
         }
       });
     }
@@ -1665,7 +1681,7 @@ function MainApp() {
                 <span key={i} onClick={() => toggleSpeedWrong(bIdx)}
                       className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] cursor-pointer select-none ${
                           isSpeedMarkedWrong ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
-                          'bg-gray-500/20 text-white/90 border-gray-500/50 hover:bg-gray-500/40'
+                          'bg-gray-500/20 text-white border-gray-500/50 hover:bg-gray-500/40'
                       }`}>
                     {isSpeedMarkedWrong ? '🤔 모름' : '\u00A0'}
                 </span>
@@ -1682,7 +1698,7 @@ function MainApp() {
                     <span id="active-blank" key="active-blank-input-fixed" className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${
                         inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
                         inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 
-                        'bg-gray-500/20 text-white/90 border-gray-500/50 animate-pulse shadow-[0_0_8px_rgba(156,163,175,0.2)]'
+                        'bg-gray-500/20 text-white border-gray-500/50 animate-pulse shadow-[0_0_8px_rgba(156,163,175,0.2)]'
                     }`}>
                       {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '\u00A0'}
                     </span>
