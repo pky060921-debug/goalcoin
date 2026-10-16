@@ -477,7 +477,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
              </div>
            ))}
            
-           {/* 판매 모드 플로팅 바 */}
            {selectionMode && selectedCards.size > 0 && (
              <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-amber-950 border border-amber-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
                <span className="text-amber-100 font-bold text-sm">{selectedCards.size}개 조항 선택됨</span>
@@ -523,7 +522,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
             )}
           </div>
           
-          {/* 구매 모드 플로팅 바 */}
           {selectionMode && selectedCards.size > 0 && (
             <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-teal-950 border border-teal-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
               <span className="text-teal-100 font-bold text-sm">총 {selectedCards.size}개 일괄 구매</span>
@@ -586,13 +584,15 @@ function MainApp() {
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0 });
   
-  const [inputMode, setInputMode] = useState<'typing'|'touch'|'flash'>('typing'); 
-  
-  const [flashIdx, setFlashIdx] = useState(0);
-  const flashIdxRef = useRef(0);
+  // 💡 [수정] 스피드 모드로 명칭 변경
+  const [inputMode, setInputMode] = useState<'typing'|'touch'|'speed'>('typing'); 
+  const [speedWrongs, setSpeedWrongs] = useState<Set<number>>(new Set());
 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   const isProcessingRef = useRef(false);
+
+  // 💡 [추가] 세션 보존 상태 (다시 돌아왔을 때 결과 유지용)
+  const sessionCompletedCards = useRef<Record<string, { blanks: any[], wrongIndices: Set<number>, sessionCorrect: number }>>({});
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
   const [activityLog, setActivityLog] = useState<Record<string, number>>({});
@@ -671,41 +671,28 @@ function MainApp() {
 
   }, [currentBlankIdx, blanks, touchCandidates, globalDict.groups]); 
 
-  useEffect(() => {
-    setFlashIdx(0);
-    flashIdxRef.current = 0;
-  }, [currentBlankIdx]);
+  // 💡 [추가] 이전/다음 네비게이션을 위한 폴더 카드 목록 계산
+  const activeFolderCards = useMemo(() => {
+    if (!activeCard) return [];
+    return savedCards.filter(c => c.folder_name === activeCard.folder_name).sort((a,b) => (a.sort_order || 999999) - (b.sort_order || 999999) || parseInt(a.id) - parseInt(b.id)); 
+  }, [activeCard, savedCards]);
 
-  useEffect(() => {
-    let timer: any;
-    if (inputMode === 'flash' && inputStatus === 'idle' && activeTouchCandidates.length > 0) {
-      timer = setInterval(() => {
-        setFlashIdx(prev => {
-            const next = (prev + 1) % activeTouchCandidates.length;
-            flashIdxRef.current = next;
-            return next;
-        });
-      }, 1000); 
-    }
-    return () => clearInterval(timer);
-  }, [inputMode, inputStatus, activeTouchCandidates.length]);
+  const activeCardIdx = activeFolderCards.findIndex(c => c.id === activeCard?.id);
+
+  const goPrevCard = () => {
+      if (activeCardIdx > 0) setActiveCard(activeFolderCards[activeCardIdx - 1]);
+  };
+
+  const goNextCard = () => {
+      if (activeCardIdx < activeFolderCards.length - 1) setActiveCard(activeFolderCards[activeCardIdx + 1]);
+  };
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (!activeCard) return;
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
 
-      if (inputMode === 'flash') {
-          if (e.code === 'Space') {
-              e.preventDefault();
-              if (activeTouchCandidates[flashIdxRef.current]) {
-                 handleSequentialInput(activeTouchCandidates[flashIdxRef.current]);
-              }
-          } else if (e.key === '0' || e.key === 'Escape') {
-              e.preventDefault();
-              handleSequentialInput('모름(강제오답)');
-          }
-      } else if (inputMode === 'touch') {
+      if (inputMode === 'touch') {
           const keyNum = parseInt(e.key, 10);
           if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= 4) {
               e.preventDefault();
@@ -1178,9 +1165,68 @@ function MainApp() {
     }
   };
 
+  const toggleSpeedWrong = (idx: number) => {
+    setSpeedWrongs(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  // 💡 [추가] 스피드 모드 일괄 채점 로직
+  const handleSpeedSubmit = () => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    
+    const newWrongs = new Set(statsRef.current.wrongIndices);
+    let newlyCorrect = 0;
+
+    for(let i = currentBlankIdx; i < blanks.length; i++) {
+        if (speedWrongs.has(i)) {
+            newWrongs.add(i);
+        } else {
+            newlyCorrect++;
+        }
+    }
+
+    statsRef.current.wrongIndices = newWrongs;
+    statsRef.current.sessionCorrect = (statsRef.current.sessionCorrect || 0) + newlyCorrect;
+    
+    setBlanks(prev => prev.map((b, i) => i >= currentBlankIdx ? { ...b, correct: !speedWrongs.has(i) } : b));
+    setCurrentBlankIdx(blanks.length);
+    
+    setTimeout(() => {
+        isProcessingRef.current = false;
+        finishCard();
+    }, 300);
+  };
+
   useEffect(() => {
     if (activeCard) {
       isClosingRef.current = false;
+
+      // 💡 [수정] 이전에 푼 결과를 세션에서 복구 (이전/다음 클릭 시 유지)
+      if (sessionCompletedCards.current[activeCard.id]) {
+          const savedSession = sessionCompletedCards.current[activeCard.id];
+          setBlanks(savedSession.blanks);
+          setCurrentBlankIdx(savedSession.blanks.length);
+          setInputStatus('idle');
+          statsRef.current = {
+              text: getExtendedStats(activeCard.memo).text,
+              filled: getExtendedStats(activeCard.memo).filled,
+              wrongIndices: new Set(savedSession.wrongIndices),
+              sessionCorrect: savedSession.sessionCorrect
+          };
+          setSpeedWrongs(new Set());
+          
+          const cleanTitle = getStrictTitleOnly(activeCard.content);
+          localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
+          localStorage.setItem('blankd_last_enhanced_title', cleanTitle || "이름 없는 카드");
+          setIsMemoOpen(false);
+          return;
+      }
+
       const cleanContent = activeCard.content;
       const lines = cleanContent.split('\n');
       const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
@@ -1217,6 +1263,7 @@ function MainApp() {
       const firstIdx = restoredBlanks.findIndex(b => !b.correct);
       setCurrentBlankIdx(firstIdx !== -1 ? firstIdx : 0);
       setInputStatus('idle');
+      setSpeedWrongs(new Set());
 
       const uniqueAnswers = Array.from(new Set(foundBlanks.map(b => b.answer)));
       setTouchCandidates(uniqueAnswers.sort((a, b) => a.localeCompare(b, 'ko')));
@@ -1229,11 +1276,10 @@ function MainApp() {
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
 
-      // 💡 일반 모드로 진입 시 과거 오답 덮어쓰기 로직 복구
       statsRef.current = { 
           text: cleanText, 
           filled: stats.filled, 
-          wrongIndices: new Set(stats.wrongIndices || []),
+          wrongIndices: isTargetMode ? new Set(stats.wrongIndices || []) : new Set(),
           sessionCorrect: 0
       };
       
@@ -1248,7 +1294,7 @@ function MainApp() {
   }, [activeCard]);
 
   useEffect(() => {
-      if (activeCard && inputStatus === 'idle') {
+      if (activeCard && inputStatus === 'idle' && inputMode !== 'speed') {
           const timer = setTimeout(() => {
               const el = document.getElementById('active-blank');
               if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1287,6 +1333,13 @@ function MainApp() {
 
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
+
+    // 💡 [추가] 세션 보존 리스트에 결과 저장
+    sessionCompletedCards.current[currentId] = {
+        blanks: blanks.map((b, i) => ({ ...b, correct: !wrongArr.includes(i) })),
+        wrongIndices: new Set(wrongArr),
+        sessionCorrect: correctCount
+    };
 
     const todayStr = getKoreanDateString();
     setActivityLog(prev => {
@@ -1594,16 +1647,32 @@ function MainApp() {
     }
 
     let renderPage = 0; let bIdx = 0; const contentToRender: any[] = [];
+    const isSessionCompleted = !!sessionCompletedCards.current[activeCard.id] || currentBlankIdx >= blanks.length;
+
     parts.forEach((part: string, i: number) => {
       if (part === '##PAGE_BREAK##') { renderPage++; return; }
       if (renderPage === displayPage) {
           if (part.startsWith('[') && part.endsWith(']')) {
             const isCorrect = blanks[bIdx]?.correct; 
-            const isCurrent = bIdx === currentBlankIdx; 
+            const isCurrent = bIdx === currentBlankIdx && !isSessionCompleted; 
             const isWrong = statsRef.current.wrongIndices.has(bIdx); 
-            if (isCorrect) {
+            
+            if (isSessionCompleted || bIdx < currentBlankIdx) {
               contentToRender.push(
-                <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
+                <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>
+                  {part.replace(/\[|\]/g, '')}
+                </span>
+              );
+            } else if (inputMode === 'speed' && bIdx >= currentBlankIdx) {
+              const isSpeedMarkedWrong = speedWrongs.has(bIdx);
+              contentToRender.push(
+                <span key={i} onClick={() => toggleSpeedWrong(bIdx)}
+                      className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] cursor-pointer select-none ${
+                          isSpeedMarkedWrong ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
+                          'bg-zinc-800 text-zinc-300 border-zinc-500 hover:bg-zinc-700'
+                      }`}>
+                    {isSpeedMarkedWrong ? '🤔 모름' : '?'}
+                </span>
               );
             } else if (isCurrent) {
               if (inputMode === 'typing') {
@@ -1612,21 +1681,7 @@ function MainApp() {
                       <InlineBlankInput inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
                     </span>
                   );
-              } else if (inputMode === 'flash') {
-                  contentToRender.push(
-                    <span id="active-blank" key="active-blank-input-fixed" 
-                          onClick={() => { if(inputStatus === 'idle') handleSequentialInput(activeTouchCandidates[flashIdx]); }}
-                          className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] cursor-pointer ${
-                            inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
-                            inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 
-                            'bg-indigo-900/80 text-indigo-200 border-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.5)]'
-                          }`}>
-                      {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : 
-                       inputStatus === 'correct' ? '✅' : 
-                       (activeTouchCandidates[flashIdx] ? getFullChosung(activeTouchCandidates[flashIdx]) : '?')}
-                    </span>
-                  );
-              } else {
+              } else if (inputMode === 'touch') {
                   contentToRender.push(
                     <span id="active-blank" key="active-blank-input-fixed" className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 'bg-amber-900/30 text-amber-400 border-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.3)]'}`}>
                       {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '?'}
@@ -1649,6 +1704,12 @@ function MainApp() {
                   {displayTitle}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {/* 💡 [추가] 이전/다음 네비게이션 버튼 (글꼴 크기 제어 옆) */}
+                  <div className="flex items-center gap-1 bg-white/5 px-2 py-1 rounded-sm border border-white/10">
+                     <button onClick={goPrevCard} disabled={activeCardIdx <= 0} className="px-1.5 py-0.5 hover:bg-white/10 rounded transition-colors disabled:opacity-30">◀</button>
+                     <span className="text-[10px] sm:text-[11px] font-mono text-white/80 mx-1">{activeCardIdx + 1} / {activeFolderCards.length}</span>
+                     <button onClick={goNextCard} disabled={activeCardIdx >= activeFolderCards.length - 1} className="px-1.5 py-0.5 hover:bg-white/10 rounded transition-colors disabled:opacity-30">▶</button>
+                  </div>
                   <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
                      <span className="text-[9px] sm:text-[10px] text-white/40 font-bold">크기</span>
                      <button onClick={() => setFontSizeLevel(p => Math.max(1, p - 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">-</button>
@@ -1683,17 +1744,32 @@ function MainApp() {
 
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-1.5 sm:p-3 z-30 flex flex-col gap-1.5 sm:gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
-            {(inputMode === 'touch' || inputMode === 'flash') && activeTouchCandidates.length > 0 && (
+            {/* 💡 [수정] 스피드 모드 하단 전용 UI */}
+            {inputMode === 'speed' && currentBlankIdx < blanks.length && (
+              <div className="flex flex-col gap-1.5 sm:gap-2 w-full p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
+                <div className="w-full text-[10px] sm:text-[11px] text-amber-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
+                  <div className="flex items-center gap-1">
+                    <span className="animate-pulse">⚡</span> 
+                    모르는 빈칸(🤔)만 터치하고 제출을 누르면 나머지는 모두 정답 처리됩니다.
+                  </div>
+                </div>
+                <button 
+                  onClick={handleSpeedSubmit} 
+                  className="w-full mt-0.5 sm:mt-1 py-2 sm:py-4 bg-amber-600 hover:bg-amber-500 border border-amber-400 text-white text-[12px] sm:text-[15px] font-bold rounded shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
+                >
+                  제출 및 다음으로 넘어가기 ▶
+                </button>
+              </div>
+            )}
+
+            {inputMode === 'touch' && activeTouchCandidates.length > 0 && (
               <div className="flex flex-col gap-1.5 sm:gap-2 w-full max-h-[50vh] overflow-y-auto custom-scrollbar p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[10px] sm:text-[11px] text-teal-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
-                    <span className="animate-pulse">{inputMode === 'flash' ? '⚡' : '👆'}</span> 
-                    {inputMode === 'flash' ? '정답이 보일 때 스페이스바(또는 터치)' : '터치하여 정답을 선택하세요'}
+                    <span className="animate-pulse">👆</span> 터치하여 정답을 선택하세요
                   </div>
                 </div>
-                
-                {inputMode === 'touch' && (
-                  <div className="grid grid-cols-2 gap-1.5 sm:gap-2 w-full">
+                <div className="grid grid-cols-2 gap-1.5 sm:gap-2 w-full">
                      {activeTouchCandidates.map((ans, idx) => (
                        <button
                          key={idx}
@@ -1704,18 +1780,7 @@ function MainApp() {
                          {getFullChosung(ans)}
                        </button>
                      ))}
-                  </div>
-                )}
-                
-                {inputMode === 'flash' && (
-                  <button
-                     onClick={() => handleSequentialInput(activeTouchCandidates[flashIdxRef.current])}
-                     className="w-full py-2.5 sm:py-6 bg-indigo-900/30 border border-indigo-500/50 rounded text-indigo-300 font-bold text-[12px] sm:text-[15px] active:scale-95 shadow-[0_0_15px_rgba(99,102,241,0.2)] animate-pulse"
-                  >
-                     (스페이스바 또는 이 버튼 터치)
-                  </button>
-                )}
-
+                </div>
                 <button 
                   onClick={() => handleSequentialInput('모름(강제오답)')} 
                   className="w-full mt-0.5 sm:mt-1 py-1.5 sm:py-3 bg-red-900/40 hover:bg-red-900/60 border border-red-500/30 text-red-400 text-[11px] sm:text-[13px] font-bold rounded-sm shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
@@ -1725,7 +1790,7 @@ function MainApp() {
               </div>
             )}
             
-            {inputStatus === 'wrong' && currentBlankIdx === blanks.length - 1 ? (
+            {inputStatus === 'wrong' && currentBlankIdx === blanks.length - 1 && inputMode !== 'speed' ? (
               <button 
                 onClick={() => {
                   if (!isProcessingRef.current) {
@@ -1740,10 +1805,10 @@ function MainApp() {
             ) : (
               <div className="flex justify-between items-center w-full gap-1.5 sm:gap-2 flex-wrap">
                 <button 
-                  onClick={() => setInputMode(prev => prev === 'typing' ? 'touch' : prev === 'touch' ? 'flash' : 'typing')} 
+                  onClick={() => setInputMode(prev => prev === 'typing' ? 'touch' : prev === 'touch' ? 'speed' : 'typing')} 
                   className="px-2 sm:px-3 py-1.5 sm:py-2.5 bg-zinc-900/80 text-zinc-300 border border-zinc-500/50 rounded text-[10px] sm:text-xs font-bold flex-1 hover:bg-zinc-800 transition-all shadow-md flex items-center justify-center gap-2"
                 >
-                  {inputMode === 'typing' ? '👆 터치 모드로 전환' : inputMode === 'touch' ? '⚡ 플래시 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
+                  {inputMode === 'typing' ? '👆 터치 모드로 전환' : inputMode === 'touch' ? '⚡ 스피드 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
                 </button>
                 <button onClick={handleShowAnswer} className="px-2 sm:px-3 py-1.5 sm:py-2.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
                   정답 보기(스킵)
@@ -1753,7 +1818,7 @@ function MainApp() {
         </div>
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, flashIdx, touchCandidates, fontSizeLevel, activeTouchCandidates]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, speedWrongs, touchCandidates, fontSizeLevel, activeTouchCandidates, activeCardIdx, activeFolderCards.length]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
