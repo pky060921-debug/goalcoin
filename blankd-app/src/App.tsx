@@ -251,8 +251,8 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
       className={`inline-block mx-1 px-1.5 py-0.5 text-center font-bold border-b-2 outline-none transition-all ${
         inputStatus === 'wrong' ? 'bg-red-900/40 text-red-300 border-red-500 placeholder-red-400' :
         inputStatus === 'correct' ? 'bg-teal-900/40 text-teal-300 border-teal-500' :
-        hintLetter ? 'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
-        'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400'
+        hintLetter ? 'bg-gray-400/20 text-amber-300 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
+        'bg-gray-400/20 text-gray-200 border-gray-400/50 focus:border-gray-400'
       }`}
       style={{ width: '4.5em', maxWidth: '100%' }}
     />
@@ -477,6 +477,7 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
              </div>
            ))}
            
+           {/* 판매 모드 플로팅 바 */}
            {selectionMode && selectedCards.size > 0 && (
              <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-amber-950 border border-amber-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
                <span className="text-amber-100 font-bold text-sm">{selectedCards.size}개 조항 선택됨</span>
@@ -522,6 +523,7 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
             )}
           </div>
           
+          {/* 구매 모드 플로팅 바 */}
           {selectionMode && selectedCards.size > 0 && (
             <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-teal-950 border border-teal-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
               <span className="text-teal-100 font-bold text-sm">총 {selectedCards.size}개 일괄 구매</span>
@@ -584,14 +586,12 @@ function MainApp() {
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0 });
   
-  // 💡 [수정] 스피드 모드로 명칭 변경
   const [inputMode, setInputMode] = useState<'typing'|'touch'|'speed'>('typing'); 
   const [speedWrongs, setSpeedWrongs] = useState<Set<number>>(new Set());
 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   const isProcessingRef = useRef(false);
 
-  // 💡 [추가] 세션 보존 상태 (다시 돌아왔을 때 결과 유지용)
   const sessionCompletedCards = useRef<Record<string, { blanks: any[], wrongIndices: Set<number>, sessionCorrect: number }>>({});
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
@@ -671,7 +671,6 @@ function MainApp() {
 
   }, [currentBlankIdx, blanks, touchCandidates, globalDict.groups]); 
 
-  // 💡 [추가] 이전/다음 네비게이션을 위한 폴더 카드 목록 계산
   const activeFolderCards = useMemo(() => {
     if (!activeCard) return [];
     return savedCards.filter(c => c.folder_name === activeCard.folder_name).sort((a,b) => (a.sort_order || 999999) - (b.sort_order || 999999) || parseInt(a.id) - parseInt(b.id)); 
@@ -1174,7 +1173,6 @@ function MainApp() {
     });
   };
 
-  // 💡 [추가] 스피드 모드 일괄 채점 로직
   const handleSpeedSubmit = () => {
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
@@ -1206,7 +1204,6 @@ function MainApp() {
     if (activeCard) {
       isClosingRef.current = false;
 
-      // 💡 [수정] 이전에 푼 결과를 세션에서 복구 (이전/다음 클릭 시 유지)
       if (sessionCompletedCards.current[activeCard.id]) {
           const savedSession = sessionCompletedCards.current[activeCard.id];
           setBlanks(savedSession.blanks);
@@ -1334,7 +1331,6 @@ function MainApp() {
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
 
-    // 💡 [추가] 세션 보존 리스트에 결과 저장
     sessionCompletedCards.current[currentId] = {
         blanks: blanks.map((b, i) => ({ ...b, correct: !wrongArr.includes(i) })),
         wrongIndices: new Set(wrongArr),
@@ -1669,9 +1665,9 @@ function MainApp() {
                 <span key={i} onClick={() => toggleSpeedWrong(bIdx)}
                       className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] cursor-pointer select-none ${
                           isSpeedMarkedWrong ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
-                          'bg-zinc-800 text-zinc-300 border-zinc-500 hover:bg-zinc-700'
+                          'bg-gray-400/20 text-gray-200 border-gray-400 hover:bg-gray-400/40'
                       }`}>
-                    {isSpeedMarkedWrong ? '🤔 모름' : '?'}
+                    {isSpeedMarkedWrong ? '🤔 모름' : '\u00A0'}
                 </span>
               );
             } else if (isCurrent) {
@@ -1683,8 +1679,12 @@ function MainApp() {
                   );
               } else if (inputMode === 'touch') {
                   contentToRender.push(
-                    <span id="active-blank" key="active-blank-input-fixed" className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 'bg-amber-900/30 text-amber-400 border-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.3)]'}`}>
-                      {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '?'}
+                    <span id="active-blank" key="active-blank-input-fixed" className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${
+                        inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
+                        inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 
+                        'bg-gray-400/20 text-gray-200 border-gray-400 animate-pulse shadow-[0_0_8px_rgba(156,163,175,0.3)]'
+                    }`}>
+                      {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '\u00A0'}
                     </span>
                   );
               }
@@ -1704,7 +1704,6 @@ function MainApp() {
                   {displayTitle}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {/* 💡 [추가] 이전/다음 네비게이션 버튼 (글꼴 크기 제어 옆) */}
                   <div className="flex items-center gap-1 bg-white/5 px-2 py-1 rounded-sm border border-white/10">
                      <button onClick={goPrevCard} disabled={activeCardIdx <= 0} className="px-1.5 py-0.5 hover:bg-white/10 rounded transition-colors disabled:opacity-30">◀</button>
                      <span className="text-[10px] sm:text-[11px] font-mono text-white/80 mx-1">{activeCardIdx + 1} / {activeFolderCards.length}</span>
@@ -1744,7 +1743,6 @@ function MainApp() {
 
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-1.5 sm:p-3 z-30 flex flex-col gap-1.5 sm:gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
-            {/* 💡 [수정] 스피드 모드 하단 전용 UI */}
             {inputMode === 'speed' && currentBlankIdx < blanks.length && (
               <div className="flex flex-col gap-1.5 sm:gap-2 w-full p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[10px] sm:text-[11px] text-amber-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
