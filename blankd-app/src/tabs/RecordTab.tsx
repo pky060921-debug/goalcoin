@@ -35,8 +35,9 @@ export const RecordTab = ({ savedCards, safeAddress, setActiveCard, colCount }: 
   const blankCards = localCards.filter(c => {
      const stats = getExtendedStats(c.memo);
      if (stats.ox_quiz) return false;
-     const wWords = new Set(stats.history.flatMap((h: any) => h.wrongWords || []));
-     return wWords.size > 0;
+     // 💡 [수정] 누적 히스토리가 아닌 '현재 남아있는 오답 인덱스' 기준으로 필터링
+     // 오답을 다 맞추면 기록실 목록에서 자동으로 사라집니다.
+     return stats.wrongIndices && stats.wrongIndices.length > 0;
   });
 
   const getBlankFolders = () => {
@@ -177,7 +178,9 @@ export const RecordTab = ({ savedCards, safeAddress, setActiveCard, colCount }: 
                         const bodyOnlyForStats = lines.slice(1).join('\n');
                         const totalBlanks = (bodyOnlyForStats.match(/\[\s*(.*?)\s*\]/g) || []).length;
                         const stats = getExtendedStats(card.memo);
-                        const wrongWords = Array.from(new Set(stats.history.flatMap((h: any) => h.wrongWords || []))) as string[];
+                        
+                        // 💡 [수정] 현재 남아있는 오답의 개수만 실시간으로 카운팅
+                        const currentWrongCount = stats.wrongIndices ? stats.wrongIndices.length : 0;
 
                         const titleLen = displayTitle.length;
                         const titleSizing = titleLen > 25 ? 'text-[10px] sm:text-[11px] tracking-[calc(-0.06em)]' : 
@@ -197,7 +200,7 @@ export const RecordTab = ({ savedCards, safeAddress, setActiveCard, colCount }: 
                                 <div className="flex flex-row items-center gap-1.5 shrink-0">
                                   <div className="flex flex-nowrap gap-0.5">
                                     <span className="text-[7px] sm:text-[8px] text-indigo-300 px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center">빈칸:{totalBlanks}</span>
-                                    <span className="text-[7px] sm:text-[8px] text-white bg-red-600 font-bold px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center shadow-sm animate-pulse">오답:{wrongWords.length}</span>
+                                    <span className="text-[7px] sm:text-[8px] text-white bg-red-600 font-bold px-1 py-[1px] rounded font-mono whitespace-nowrap leading-none flex items-center shadow-sm animate-pulse">오답:{currentWrongCount}</span>
                                   </div>
                                 </div>
                               </div>
