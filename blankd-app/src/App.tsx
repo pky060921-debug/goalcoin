@@ -251,8 +251,8 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
       className={`inline-block mx-1 px-1.5 py-0.5 text-center font-bold border-b-2 outline-none transition-all ${
         inputStatus === 'wrong' ? 'bg-red-900/40 text-red-300 border-red-500 placeholder-red-400' :
         inputStatus === 'correct' ? 'bg-teal-900/40 text-teal-300 border-teal-500' :
-        hintLetter ? 'bg-gray-400/20 text-amber-300 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
-        'bg-gray-400/20 text-gray-200 border-gray-400/50 focus:border-gray-400'
+        hintLetter ? 'bg-gray-500/20 text-amber-400 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
+        'bg-gray-500/20 text-white border-gray-500/50 focus:border-gray-400'
       }`}
       style={{ width: '4.5em', maxWidth: '100%' }}
     />
@@ -1665,7 +1665,7 @@ function MainApp() {
                 <span key={i} onClick={() => toggleSpeedWrong(bIdx)}
                       className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] cursor-pointer select-none ${
                           isSpeedMarkedWrong ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
-                          'bg-gray-400/20 text-gray-200 border-gray-400 hover:bg-gray-400/40'
+                          'bg-gray-500/20 text-white/90 border-gray-500/50 hover:bg-gray-500/40'
                       }`}>
                     {isSpeedMarkedWrong ? '🤔 모름' : '\u00A0'}
                 </span>
@@ -1682,7 +1682,7 @@ function MainApp() {
                     <span id="active-blank" key="active-blank-input-fixed" className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${
                         inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
                         inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 
-                        'bg-gray-400/20 text-gray-200 border-gray-400 animate-pulse shadow-[0_0_8px_rgba(156,163,175,0.3)]'
+                        'bg-gray-500/20 text-white/90 border-gray-500/50 animate-pulse shadow-[0_0_8px_rgba(156,163,175,0.2)]'
                     }`}>
                       {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '\u00A0'}
                     </span>
