@@ -1225,7 +1225,6 @@ function MainApp() {
         if (speedWrongs.has(i)) {
             newWrongs.add(i);
         } else {
-            // 💡 [수정] 스피드 모드에서 정답으로 체크된 경우 기존 오답 리스트에서도 깔끔하게 제거
             if (newWrongs.has(i)) newWrongs.delete(i);
             newlyCorrect++;
         }
@@ -1316,11 +1315,10 @@ function MainApp() {
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
 
-      // 💡 [핵심 해결] 무조건 DB에 남아있는 최종 과거 오답 기록을 불러와서 유지 (열었다 닫을 때 텅 빈 상태로 덮어쓰여 초기화되는 현상 방지)
       statsRef.current = { 
           text: cleanText, 
           filled: stats.filled, 
-          wrongIndices: new Set(stats.wrongIndices || []),
+          wrongIndices: (isTargetMode || lastIdx > 0) ? new Set(stats.wrongIndices || []) : new Set(),
           sessionCorrect: 0
       };
       
@@ -1553,7 +1551,6 @@ function MainApp() {
     if (isCorrect) {
       isProcessingRef.current = true; 
       setInputStatus('correct');
-      // 💡 [수정] 맞췄을 때 이전 오답 리스트에서 제거하고 세션 맞춘 개수 증가
       if (statsRef.current.wrongIndices.has(currentBlankIdx)) {
           statsRef.current.wrongIndices.delete(currentBlankIdx);
       }
@@ -1728,7 +1725,7 @@ function MainApp() {
                     <span id="active-blank" key="active-blank-input-fixed" className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${
                         inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
                         inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 
-                        'bg-gray-500/20 text-white border-gray-500/50 animate-pulse shadow-[0_0_8px_rgba(156,163,175,0.2)]'
+                        'bg-gray-500/20 text-white/90 border-gray-500/50 animate-pulse shadow-[0_0_8px_rgba(156,163,175,0.2)]'
                     }`}>
                       {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '\u00A0'}
                     </span>
