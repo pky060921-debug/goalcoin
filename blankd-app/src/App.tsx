@@ -48,6 +48,63 @@ const getChosung = (str: string) => {
   if (!str) return '기타';
   const code = str.charCodeAt(0) - 0xAC00;
   if (code > -1 && code < 11172) {
+    return CHO모달창(CardModal) 내부에 있는 헤더("학습 진행 중", 힌트 버튼 등)의 높이와 기기의 브라우저 상하단 UI 높이가 합쳐지면서, 내부 콘텐츠의 세로 길이(`vh`)가 화면 밖으로 넘치게 되어 하단이 잘리는 현상입니다.
+
+**본문 영역의 전체 높이를 화면 크기에서 모달창 헤더와 여백만큼(약 240px) 강제로 빼도록(`calc(100vh - 240px)`) 유동적 레이아웃으로 변경**하고, 내부의 터치 보기 버튼 상자도 일정 높이(`25vh`) 이상 커지지 않게 제한을 두어 하단 버튼이 절대 잘리지 않도록 구조를 단단하게 고정했습니다.
+
+아래 코드를 복사하여 **`App.tsx`** 파일에 완전히 덮어씌워 주세요.
+
+```tsx
+import React, { useState, useEffect, Component, ReactNode, useRef, useMemo } from "react";
+import { useCurrentAccount } from "@mysten/dapp-kit";
+import { useEnokiFlow, useZkLogin } from "@mysten/enoki/react";
+import { api } from "./services/api";
+import { SPLIT_REGEX, formatCardText, parseCardStats, stringifyCardStats, getStrictTitleOnly } from "./utils/constants";
+import { CardModal } from "./components/CardModal";
+import { DashboardTab } from "./tabs/DashboardTab";
+import { CraftTab } from "./tabs/CraftTab";
+import { EnhanceTab } from "./tabs/EnhanceTab";
+import { ExamTab } from "./tabs/ExamTab";
+import { MypageTab } from "./tabs/MypageTab";
+import { RecordTab } from "./tabs/RecordTab";
+
+class GlobalErrorBoundary extends Component<{children: ReactNode}, {hasError: boolean, error: any, errorInfo: any}> {
+  constructor(props: any) { 
+    super(props); 
+    this.state = { hasError: false, error: null, errorInfo: null }; 
+  }
+  static getDerivedStateFromError(error: any) { 
+    return { hasError: true, error }; 
+  }
+  componentDidCatch(error: any, errorInfo: any) { 
+    this.setState({ errorInfo });
+    console.error("🚨 글로벌 에러 포착:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) return (
+      <div className="p-6 bg-red-950 text-white min-h-screen">
+        <h1 className="text-xl font-bold mb-4 text-red-400">🚨 치명적 렌더링 오류 발생 (White Screen 차단)</h1>
+        <p className="mb-4 text-sm opacity-80">아래 에러 메시지를 복사해서 개발자에게 전달해 주세요.</p>
+        <pre className="text-xs bg-black p-4 overflow-auto border border-red-500/30 text-red-200">{String(this.state.error)}</pre>
+        <pre className="text-xs bg-black p-4 mt-4 overflow-auto border border-red-500/30 text-white/60">{this.state.errorInfo?.componentStack}</pre>
+        <button onClick={() => { localStorage.clear(); window.location.reload(); }} className="mt-6 px-4 py-2 bg-white text-black font-bold rounded">캐시 초기화 및 새로고침</button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
+const getKoreanDateString = () => {
+  const kstTime = Date.now() + (9 * 60 * 60 * 1000);
+  return new Date(kstTime).toISOString().split('T')[0];
+};
+
+const CHO_HANGUL = ['ㄱ', 'ㄲ', 'ㄴ', 'ㄷ', 'ㄸ', 'ㄹ', 'ㅁ', 'ㅂ', 'ㅃ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅉ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'];
+
+const getChosung = (str: string) => {
+  if (!str) return '기타';
+  const code = str.charCodeAt(0) - 0xAC00;
+  if (code > -1 && code < 11172) {
     return CHO_HANGUL[Math.floor(code / 588)];
   }
   if (/[a-zA-Z]/.test(str[0])) return str[0].toUpperCase();
@@ -263,8 +320,8 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
       className={`inline-block mx-1 px-1.5 py-0.5 text-center font-bold border-b-2 outline-none transition-all ${
         inputStatus === 'wrong' ? 'bg-red-900/40 text-red-300 border-red-500 placeholder-red-400' :
         inputStatus === 'correct' ? 'bg-teal-900/40 text-teal-300 border-teal-500' :
-        hintLetter ? 'bg-gray-500/20 text-amber-400 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
-        'bg-gray-500/20 text-white border-gray-500/50 focus:border-gray-400'
+        hintLetter ? 'bg-white/10 text-amber-400 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
+        'bg-white/10 text-current border-white/20 focus:border-white/50'
       }`}
       style={{ width: '4.5em', maxWidth: '100%' }}
     />
@@ -285,7 +342,7 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
   const pressTimer = useRef<any>(null);
 
   useEffect(() => {
-    fetch("https://api.blankd.top/api/market/list")
+    fetch("[https://api.blankd.top/api/market/list](https://api.blankd.top/api/market/list)")
       .then(r => r.json())
       .then(d => setMarketItems(d.items || []));
   }, [sellMode]);
@@ -352,7 +409,7 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     const price = parseInt(priceStr, 10);
     if (price > 0) {
       try {
-        const res = await fetch("https://api.blankd.top/api/market/register", {
+        const res = await fetch("[https://api.blankd.top/api/market/register](https://api.blankd.top/api/market/register)", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: card.id, price })
         });
@@ -367,7 +424,7 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     if (item.seller_wallet === safeAddress) return alert("자신의 카드는 구매할 수 없습니다.");
     if (goalBalance < item.price) return alert("포인트가 부족합니다.");
     if (confirm(`'${item.title}' 카드를 ${item.price}P에 구매하시겠습니까?\n\n(여러 개를 구매하려면 카드를 길게 꾹 누르세요!)`)) {
-      const res = await fetch("https://api.blankd.top/api/market/buy", {
+      const res = await fetch("[https://api.blankd.top/api/market/buy](https://api.blankd.top/api/market/buy)", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ wallet_address: safeAddress, market_id: item.id })
       });
@@ -390,7 +447,7 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
     
     if (price > 0) {
        try {
-         const res = await fetch("https://api.blankd.top/api/market/register-batch", {
+         const res = await fetch("[https://api.blankd.top/api/market/register-batch](https://api.blankd.top/api/market/register-batch)", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ wallet_address: safeAddress, card_ids: Array.from(selectedCards), price })
          });
@@ -419,7 +476,7 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
 
     if (confirm(`선택한 ${selectedCards.size}개의 카드를 총 ${totalPrice}P에 구매하시겠습니까?`)) {
       try {
-        const res = await fetch("https://api.blankd.top/api/market/buy-batch", {
+        const res = await fetch("[https://api.blankd.top/api/market/buy-batch](https://api.blankd.top/api/market/buy-batch)", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, market_ids: Array.from(selectedCards) })
         });
@@ -588,7 +645,7 @@ function MainApp() {
   const [fontSizeLevel, setFontSizeLevel] = useState<number>(() => parseInt(localStorage.getItem('blankd_font_size') || '3'));
   useEffect(() => { localStorage.setItem('blankd_font_size', fontSizeLevel.toString()); }, [fontSizeLevel]);
   
-  const [lawFile, setLawFile] = useState<File | null>(null);
+  const [lawFile, setLawFile] = useState<File null |>(null);
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [isMemoOpen, setIsMemoOpen] = useState(false);
@@ -604,7 +661,7 @@ function MainApp() {
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   const isProcessingRef = useRef(false);
 
-  const sessionCompletedCards = useRef<Record<string, { blanks: any[], wrongIndices: Set<number>, sessionCorrect: number }>>({});
+  const sessionCompletedCards = useRef<Record<string, Set<number any[], blanks: wrongIndices: {>, sessionCorrect: number }>>({});
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
   const [activityLog, setActivityLog] = useState<Record<string, number>>({});
@@ -706,7 +763,7 @@ function MainApp() {
     pushToQueue('MEMO', { id: card.id, memo: newMemo });
     
     if (navigator.onLine) {
-        fetch("https://api.blankd.top/api/save-card", {
+        fetch("[https://api.blankd.top/api/save-card](https://api.blankd.top/api/save-card)", {
             method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: card.answer_text || "", folder_name: card.folder_name, memo: newMemo })
         }).catch(()=>{});
@@ -798,7 +855,7 @@ function MainApp() {
           .map((c: any) => ({ id: c.id, memo: c.memo }));
           
       if (memosToSync.length > 0) {
-          await fetch("https://api.blankd.top/api/sync-batch", {
+          await fetch("[https://api.blankd.top/api/sync-batch](https://api.blankd.top/api/sync-batch)", {
               method: "POST", 
               keepalive: true, 
               headers: { "Content-Type": "application/json" },
@@ -820,7 +877,7 @@ function MainApp() {
       q.answers = q.answers.filter((a:any) => a.card_id && !String(a.card_id).startsWith('temp_') && !isNaN(parseInt(a.card_id)));
 
       if (q.memos.length > 0 || q.answers.length > 0) {
-          const res = await fetch("https://api.blankd.top/api/sync-batch", {
+          const res = await fetch("[https://api.blankd.top/api/sync-batch](https://api.blankd.top/api/sync-batch)", {
             method: "POST", 
             keepalive: true, 
             headers: { "Content-Type": "application/json" },
@@ -855,10 +912,10 @@ function MainApp() {
       };
 
       const [catRes, cardRes, userData, dictRes] = await Promise.all([
-        fetchWithDiagnostic(`https://api.blankd.top/api/get-categories?wallet_address=${safeAddress}&t=${Date.now()}`, '카테고리'),
-        fetchWithDiagnostic(`https://api.blankd.top/api/my-cards?wallet_address=${safeAddress}&t=${Date.now()}`, '카드'),
-        fetch(`https://api.blankd.top/api/get-balance?wallet_address=${safeAddress}&t=${Date.now()}`).then(r => r.json()).catch(() => ({ balance: 0, activity_log: {}, claimed_rewards: {} })),
-        fetchWithDiagnostic(`https://api.blankd.top/api/get-global-dict?wallet_address=${safeAddress}&t=${Date.now()}`, '사전').catch(() => ({ stopwords: [], inclusions: [], abbrs: {}, groups: [] }))
+        fetchWithDiagnostic(`[https://api.blankd.top/api/get-categories?wallet_address=$](https://api.blankd.top/api/get-categories?wallet_address=$){safeAddress}&t=${Date.now()}`, '카테고리'),
+        fetchWithDiagnostic(`[https://api.blankd.top/api/my-cards?wallet_address=$](https://api.blankd.top/api/my-cards?wallet_address=$){safeAddress}&t=${Date.now()}`, '카드'),
+        fetch(`[https://api.blankd.top/api/get-balance?wallet_address=$](https://api.blankd.top/api/get-balance?wallet_address=$){safeAddress}&t=${Date.now()}`).then(r => r.json()).catch(() => ({ balance: 0, activity_log: {}, claimed_rewards: {} })),
+        fetchWithDiagnostic(`[https://api.blankd.top/api/get-global-dict?wallet_address=$](https://api.blankd.top/api/get-global-dict?wallet_address=$){safeAddress}&t=${Date.now()}`, '사전').catch(() => ({ stopwords: [], inclusions: [], abbrs: {}, groups: [] }))
       ]);
 
       const serverStopwords = Array.isArray(dictRes.stopwords) ? dictRes.stopwords : [];
@@ -899,7 +956,7 @@ function MainApp() {
 
       if (actualBalance > serverBalance || JSON.stringify(mergedActivity) !== JSON.stringify(serverActivityLog) || !isOffline) {
         try {
-          fetch("https://api.blankd.top/api/update-balance", {
+          fetch("[https://api.blankd.top/api/update-balance](https://api.blankd.top/api/update-balance)", {
             method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ wallet_address: safeAddress, balance: actualBalance, activity_log: mergedActivity, claimed_rewards: mergedClaims })
           }).catch(()=>{});
@@ -946,7 +1003,7 @@ function MainApp() {
       const newBalance = prev + changeAmount;
       localStorage.setItem(`blankd_off_bal_${safeAddress}`, newBalance.toString());
       if (!isOffline && safeAddress && navigator.onLine) {
-        fetch("https://api.blankd.top/api/update-balance", {
+        fetch("[https://api.blankd.top/api/update-balance](https://api.blankd.top/api/update-balance)", {
           method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, balance: newBalance })
         }).catch(e => console.error("포인트 동기화 실패:", e));
@@ -959,7 +1016,7 @@ function MainApp() {
     const price = parseInt(prompt("판매할 가격(포인트)을 입력하세요:", "100") || "0", 10);
     if (price > 0) {
       try {
-        const res = await fetch("https://api.blankd.top/api/market/register", {
+        const res = await fetch("[https://api.blankd.top/api/market/register](https://api.blankd.top/api/market/register)", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: cardId, price })
         });
@@ -977,7 +1034,7 @@ function MainApp() {
     localStorage.setItem(`blankd_off_dict_${safeAddress}`, JSON.stringify(newDict));
     
     try {
-      await fetch("https://api.blankd.top/api/update-global-dict", {
+      await fetch("[https://api.blankd.top/api/update-global-dict](https://api.blankd.top/api/update-global-dict)", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ wallet_address: safeAddress, ...newDict })
       });
@@ -1003,7 +1060,7 @@ function MainApp() {
               .filter(Boolean)
               .join(", ");
            
-           fetch("https://api.blankd.top/api/save-card", {
+           fetch("[https://api.blankd.top/api/save-card](https://api.blankd.top/api/save-card)", {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                   wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: newAnswers, folder_name: card.folder_name, memo: card.memo
@@ -1054,7 +1111,7 @@ function MainApp() {
           exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
           
           if (navigator.onLine) {
-            fetch("https://api.blankd.top/api/save-card", {
+            fetch("[https://api.blankd.top/api/save-card](https://api.blankd.top/api/save-card)", {
               method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ wallet_address: safeAddress, card_id: currentCard.id, card_content: currentCard.content, answer_text: currentCard.answer_text || "", folder_name: currentCard.folder_name, memo: JSON.stringify(exStats) })
             }).catch(()=>{});
@@ -1072,7 +1129,7 @@ function MainApp() {
     if (!lawFile) return alert("파일을 선택해주세요.");
     addLog("▶️ 법령 텍스트 분석 업로드 시작...");
     const fd = new FormData(); fd.append("file", lawFile); fd.append("wallet_address", safeAddress);
-    const res = await fetch(`https://api.blankd.top/api/upload-pdf`, { method: "POST", body: fd });
+    const res = await fetch(`[https://api.blankd.top/api/upload-pdf](https://api.blankd.top/api/upload-pdf)`, { method: "POST", body: fd });
     if (res.ok) { 
       setLawFile(null);
       addLog("✅ 업로드 완료. AI 아카이빙 중..."); 
@@ -1082,7 +1139,7 @@ function MainApp() {
 
   const handleSplitCategory = async (cat: any, text1: string, text2: string, title1: string, title2: string) => {
     try {
-        const res = await fetch("https://api.blankd.top/api/split-category", {
+        const res = await fetch("[https://api.blankd.top/api/split-category](https://api.blankd.top/api/split-category)", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ wallet_address: safeAddress, id: cat.id, text1, text2, title1, title2, folder_name: cat.folder_name })
         });
@@ -1140,7 +1197,7 @@ function MainApp() {
       const exStats = getExtendedStats(memo);
       const initialMemo = JSON.stringify(exStats);
       
-      const res = await fetch("https://api.blankd.top/api/save-card", { 
+      const res = await fetch("[https://api.blankd.top/api/save-card](https://api.blankd.top/api/save-card)", { 
         method: "POST", headers: { "Content-Type": "application/json" }, 
         body: JSON.stringify({ 
             wallet_address: safeAddress, card_id: targetCardId, card_content: finalCardContent, answer_text: answerText, folder_name: cat.folder_name, memo: initialMemo 
@@ -1169,7 +1226,7 @@ function MainApp() {
     if (navigator.onLine) {
       const target = savedCards.find((c:any) => c.id === id);
       if (target) {
-        fetch("https://api.blankd.top/api/save-card", {
+        fetch("[https://api.blankd.top/api/save-card](https://api.blankd.top/api/save-card)", {
           method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: id, card_content: target.content, answer_text: target.answer_text || "", folder_name: target.folder_name, memo })
         }).catch(() => {});
@@ -1285,13 +1342,23 @@ function MainApp() {
       const targetWrongIndices = activeCard._targetWrongIndices || null;
       const isTargetMode = !!targetWrong || !!targetWrongIndices || !!activeCard._isTargetMode;
 
+      // 💡 기록실 연계 방어
+      if (activeTab === 'record' && !isTargetMode) {
+          const stats = getExtendedStats(activeCard.memo);
+          const lastWrong = Array.from(stats.wrongIndices || []);
+          if (lastWrong.length > 0) {
+              activeCard._targetWrongIndices = lastWrong;
+              activeCard._isTargetMode = true;
+          }
+      }
+
       const restoredBlanks = foundBlanks.map((b, i) => {
           let isCorrect = i < lastIdx;
-          if (targetWrongIndices) {
-              isCorrect = !targetWrongIndices.includes(i); 
-          } else if (targetWrong) {
+          if (activeCard._targetWrongIndices) {
+              isCorrect = !activeCard._targetWrongIndices.includes(i); 
+          } else if (activeCard._targetWrongWords) {
               const cleanAns = b.answer.replace(/\s+/g, '');
-              const isTarget = targetWrong.some((w: string) => w.replace(/\s+/g, '') === cleanAns);
+              const isTarget = activeCard._targetWrongWords.some((w: string) => w.replace(/\s+/g, '') === cleanAns);
               isCorrect = !isTarget;
           }
           return { ...b, correct: isCorrect };
@@ -1318,7 +1385,7 @@ function MainApp() {
       statsRef.current = { 
           text: cleanText, 
           filled: stats.filled, 
-          wrongIndices: (isTargetMode || lastIdx > 0) ? new Set(stats.wrongIndices || []) : new Set(),
+          wrongIndices: (activeCard._isTargetMode || lastIdx > 0) ? new Set(stats.wrongIndices || []) : new Set(),
           sessionCorrect: 0
       };
       
@@ -1386,7 +1453,7 @@ function MainApp() {
       localStorage.setItem(`blankd_activity_log_${safeAddress}`, JSON.stringify(next));
       
       if (navigator.onLine) {
-        fetch("https://api.blankd.top/api/update-balance", {
+        fetch("[https://api.blankd.top/api/update-balance](https://api.blankd.top/api/update-balance)", {
            method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
            body: JSON.stringify({ wallet_address: safeAddress, activity_log: next })
         }).catch(()=>{});
@@ -1460,7 +1527,7 @@ function MainApp() {
     } else {
       addLog(`🎉 완료! 기록 갱신 됨. +${earnedPoints} Point`);
       try {
-        await fetch("https://api.blankd.top/api/save-card", {
+        await fetch("[https://api.blankd.top/api/save-card](https://api.blankd.top/api/save-card)", {
           method: "POST", 
           keepalive: true, 
           headers: { "Content-Type": "application/json" },
@@ -1494,7 +1561,7 @@ function MainApp() {
     
     if (navigator.onLine) {
       try {
-        await fetch("https://api.blankd.top/api/save-card", {
+        await fetch("[https://api.blankd.top/api/save-card](https://api.blankd.top/api/save-card)", {
           method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
         });
@@ -1708,7 +1775,8 @@ function MainApp() {
                 <span key={i} onClick={() => toggleSpeedWrong(bIdx)}
                       className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] cursor-pointer select-none ${
                           isSpeedMarkedWrong ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
-                          'bg-gray-500/20 text-white/90 border-gray-500/50 hover:bg-gray-500/40'
+                          // 💡 연한 회색 유지
+                          'bg-white/10 text-current border-white/20 hover:bg-white/20'
                       }`}>
                     {isSpeedMarkedWrong ? '🤔 모름' : '\u00A0'}
                 </span>
@@ -1717,7 +1785,7 @@ function MainApp() {
               if (inputMode === 'typing') {
                   contentToRender.push(
                     <span id="active-blank" key="active-blank-input-fixed">
-                      <InlineBlankInput inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
+                      <InlineBlankInput ""} abbrDict="{globalDict.abbrs}" expected="{blanks[currentBlankIdx]?.answer" hintLetter="{hintLetter}" inputStatus="{inputStatus}" onSubmit="{handleSequentialInput}" ||/>
                     </span>
                   );
               } else if (inputMode === 'touch') {
@@ -1725,7 +1793,8 @@ function MainApp() {
                     <span id="active-blank" key="active-blank-input-fixed" className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${
                         inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
                         inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 
-                        'bg-gray-500/20 text-white/90 border-gray-500/50 animate-pulse shadow-[0_0_8px_rgba(156,163,175,0.2)]'
+                        // 💡 연한 회색 유지
+                        'bg-white/10 text-current border-white/20 animate-pulse shadow-[0_0_8px_rgba(255,255,255,0.1)]'
                     }`}>
                       {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '\u00A0'}
                     </span>
@@ -1739,8 +1808,9 @@ function MainApp() {
       } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
     });
     
+    // 💡 [핵심] 높이를 calc로 강제하여 절대 밖으로 밀려나지 않게 보호
     return (
-      <div className="flex flex-col w-full h-[75vh] sm:h-[80vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
+      <div className="flex flex-col w-full max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl" style={{ height: 'calc(100vh - 240px)', minHeight: '350px' }}>
         <div className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar px-3 py-2 sm:py-4 md:px-5 pb-4 sm:pb-12">
             <div className="flex justify-between items-center border-b border-white/10 pb-1 sm:pb-2 w-full gap-2 sm:gap-3 overflow-hidden mb-2 sm:mb-4 sticky top-0 bg-[#0a0a0c] z-20 pt-1">
                 <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
@@ -1787,7 +1857,7 @@ function MainApp() {
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-1.5 sm:p-3 z-30 flex flex-col gap-1.5 sm:gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
             {inputMode === 'speed' && currentBlankIdx < blanks.length && (
-              <div className="flex flex-col gap-1.5 sm:gap-2 w-full p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
+              <div className="flex flex-col gap-1.5 sm:gap-2 w-full overflow-y-auto custom-scrollbar p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner" style={{ maxHeight: '25vh' }}>
                 <div className="w-full text-[10px] sm:text-[11px] text-amber-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
                     <span className="animate-pulse">⚡</span> 
@@ -1804,7 +1874,7 @@ function MainApp() {
             )}
 
             {inputMode === 'touch' && activeTouchCandidates.length > 0 && (
-              <div className="flex flex-col gap-1.5 sm:gap-2 w-full max-h-[50vh] overflow-y-auto custom-scrollbar p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
+              <div className="flex flex-col gap-1.5 sm:gap-2 w-full overflow-y-auto custom-scrollbar p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner" style={{ maxHeight: '25vh' }}>
                 <div className="w-full text-[10px] sm:text-[11px] text-teal-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
                     <span className="animate-pulse">👆</span> 터치하여 정답을 선택하세요
@@ -1882,7 +1952,7 @@ function MainApp() {
 
     addLog("▶️ 대량 오답쌍 텍스트 파일 업로드 중...");
     try {
-      const res = await fetch("https://api.blankd.top/api/upload-wrong-answers", {
+      const res = await fetch("[https://api.blankd.top/api/upload-wrong-answers](https://api.blankd.top/api/upload-wrong-answers)", {
         method: "POST",
         body: fd
       });
@@ -1925,23 +1995,16 @@ function MainApp() {
     return (
       <>
         <div className={activeTab === 'progress' ? 'block' : 'hidden'}>
-          <DashboardTab categories={categories} savedCards={savedCards} setActiveTab={setActiveTab} setExpandedId={setExpandedId} setActiveCard={setActiveCard} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} activityLog={activityLog} claimedRewards={claimedRewards} setClaimedRewards={setClaimedRewards} safeAddress={safeAddress} loadAllData={loadAllData} isOffline={isOffline} />
+          <DashboardTab activityLog="{activityLog}" categories="{categories}" claimedRewards="{claimedRewards}" goalBalance="{goalBalance}" handleUpdateBalance="{handleUpdateBalance}" isOffline="{isOffline}" loadAllData="{loadAllData}" safeAddress="{safeAddress}" savedCards="{savedCards}" setActiveCard="{setActiveCard}" setActiveTab="{setActiveTab}" setClaimedRewards="{setClaimedRewards}" setExpandedId="{setExpandedId}"/>
         </div>
         <div className={activeTab === 'create' ? 'block' : 'hidden'}>
-          <CraftTab categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} useAiRecommend={useAiRecommend} safeAddress={safeAddress} lawFile={lawFile} setLawFile={setLawFile} uploadLaw={uploadLaw} handleMakeBlankCard={handleMakeBlankCard} handleSplitCategory={handleSplitCategory} addLog={addLog} expandedId={expandedId} setExpandedId={setExpandedId} handleDeleteCategory={async (id: number) => { if(confirm('삭제하시겠습니까?')){ await fetch("https://api.blankd.top/api/delete-category", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} globalDict={globalDict} saveGlobalDict={saveGlobalDict} />
+          <CraftTab (id: addLog="{addLog}" categories="{categories}" colCount="{colCount}" expandedId="{expandedId}" handleDeleteCategory="{async" handleMakeBlankCard="{handleMakeBlankCard}" handleSplitCategory="{handleSplitCategory}" lawFile="{lawFile}" safeAddress="{safeAddress}" savedCards="{savedCards}" setExpandedId="{setExpandedId}" setLawFile="{setLawFile}" uploadLaw="{uploadLaw}" useAiRecommend="{useAiRecommend}" viewMode="{viewMode}"> { if(confirm('삭제하시겠습니까?')){ await fetch("[https://api.blankd.top/api/delete-category](https://api.blankd.top/api/delete-category)", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wallet_address: safeAddress, id }) }); loadAllData(); } }} globalDict={globalDict} saveGlobalDict={saveGlobalDict} />
         </div>
         <div className={activeTab === 'enhance' ? 'block' : 'hidden'}>
-          <EnhanceTab safeAddress={safeAddress} loadAllData={loadAllData} categories={categories} savedCards={savedCards} colCount={colCount} viewMode={viewMode} setActiveCard={setActiveCard} setActiveTab={setActiveTab} setExpandedId={setExpandedId} globalDict={globalDict} />
+          <EnhanceTab categories="{categories}" colCount="{colCount}" globalDict="{globalDict}" loadAllData="{loadAllData}" safeAddress="{safeAddress}" savedCards="{savedCards}" setActiveCard="{setActiveCard}" setActiveTab="{setActiveTab}" setExpandedId="{setExpandedId}" viewMode="{viewMode}"/>
         </div>
         <div className={activeTab === 'record' ? 'block' : 'hidden'}>
-          <RecordTab 
-            savedCards={savedCards} 
-            goalBalance={goalBalance} 
-            handleUpdateBalance={handleUpdateBalance} 
-            loadAllData={loadAllData} 
-            safeAddress={safeAddress} 
-            colCount={colCount} 
-            setActiveCard={(card: any, mode?: string) => {
+          <RecordTab any, colCount="{colCount}" goalBalance="{goalBalance}" handleUpdateBalance="{handleUpdateBalance}" loadAllData="{loadAllData}" mode?: safeAddress="{safeAddress}" savedCards="{savedCards}" setActiveCard="{(card:"> {
                 if (!card) return setActiveCard(null);
                 const stats = getExtendedStats(card.memo);
                 const lastWrong = Array.from(stats.wrongIndices || []);
@@ -1954,13 +2017,13 @@ function MainApp() {
           />
         </div>
         <div className={activeTab === 'market' ? 'block' : 'hidden'}>
-          <MarketTab safeAddress={safeAddress} goalBalance={goalBalance} handleUpdateBalance={handleUpdateBalance} loadAllData={loadAllData} savedCards={savedCards} />
+          <MarketTab goalBalance="{goalBalance}" handleUpdateBalance="{handleUpdateBalance}" loadAllData="{loadAllData}" safeAddress="{safeAddress}" savedCards="{savedCards}"/>
         </div>
         <div className={activeTab === 'exam' ? 'block' : 'hidden'}>
-          <ExamTab walletAddress={safeAddress} address={safeAddress} />
+          <ExamTab address="{safeAddress}" walletAddress="{safeAddress}"/>
         </div>
         <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
-          <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} zkLogin={zkLogin} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} globalDict={globalDict} saveGlobalDict={saveGlobalDict} loadAllData={loadAllData} theme={theme} setTheme={setTheme}/>
+          <MypageTab enokiFlow="{enokiFlow}" globalDict="{globalDict}" loadAllData="{loadAllData}" safeAddress="{safeAddress}" saveGlobalDict="{saveGlobalDict}" setStudyMode="{setStudyMode}" setTheme="{setTheme}" setUseAiRecommend="{setUseAiRecommend}" studyMode="{studyMode}" theme="{theme}" useAiRecommend="{useAiRecommend}" zkLogin="{zkLogin}"/>
         </div>
       </>
     );
@@ -2179,7 +2242,7 @@ function MainApp() {
                     const offBal = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
                     const offActivityLog = JSON.parse(localStorage.getItem(`blankd_activity_log_${safeAddress}`) || '{}');
                     const offClaimedRewards = JSON.parse(localStorage.getItem(`blankd_claimed_rewards_${safeAddress}`) || '{}');
-                    await fetch("https://api.blankd.top/api/update-balance", {
+                    await fetch("[https://api.blankd.top/api/update-balance](https://api.blankd.top/api/update-balance)", {
                       method: "POST", headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ wallet_address: safeAddress, balance: offBal, activity_log: offActivityLog, claimed_rewards: offClaimedRewards })
                     });
@@ -2260,13 +2323,7 @@ function MainApp() {
       )}
 
       {activeCard && (
-        <CardModal 
-          activeCard={activeCard} 
-          renderContent={renderContent} 
-          onClose={handleCloseModal} 
-          goalBalance={goalBalance}
-          handleUseItem={handleUseItem}
-        />
+        <CardModal activeCard="{activeCard}" goalBalance="{goalBalance}" handleUseItem="{handleUseItem}" onClose="{handleCloseModal}" renderContent="{renderContent}"/>
       )}
     </div>
   );
@@ -2275,7 +2332,7 @@ function MainApp() {
 export default function App() { 
   return (
     <GlobalErrorBoundary>
-      <MainApp />
+      <MainApp/>
     </GlobalErrorBoundary>
   ); 
 }
