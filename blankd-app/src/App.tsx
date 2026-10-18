@@ -604,7 +604,6 @@ function MainApp() {
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   const isProcessingRef = useRef(false);
 
-  // 💡 [수정] 누락되었던 sessionCompletedCards 선언 복구
   const sessionCompletedCards = useRef<Record<string, { blanks: any[], wrongIndices: Set<number>, sessionCorrect: number }>>({});
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
@@ -1220,16 +1219,19 @@ function MainApp() {
     isProcessingRef.current = true;
     
     const newWrongs = new Set(statsRef.current.wrongIndices);
+    let newlyCorrect = 0;
 
     for(let i = currentBlankIdx; i < blanks.length; i++) {
         if (speedWrongs.has(i)) {
             newWrongs.add(i);
         } else {
             if (newWrongs.has(i)) newWrongs.delete(i);
+            newlyCorrect++;
         }
     }
 
     statsRef.current.wrongIndices = newWrongs;
+    statsRef.current.sessionCorrect = (statsRef.current.sessionCorrect || 0) + newlyCorrect;
     
     setBlanks(prev => prev.map((b, i) => i >= currentBlankIdx ? { ...b, correct: !speedWrongs.has(i) } : b));
     setCurrentBlankIdx(blanks.length);
@@ -1243,6 +1245,27 @@ function MainApp() {
   useEffect(() => {
     if (activeCard) {
       isClosingRef.current = false;
+
+      if (sessionCompletedCards.current[activeCard.id]) {
+          const savedSession = sessionCompletedCards.current[activeCard.id];
+          setBlanks(savedSession.blanks);
+          setCurrentBlankIdx(savedSession.blanks.length);
+          setInputStatus('idle');
+          statsRef.current = {
+              text: getExtendedStats(activeCard.memo).text,
+              filled: getExtendedStats(activeCard.memo).filled,
+              wrongIndices: new Set(savedSession.wrongIndices),
+              sessionCorrect: savedSession.sessionCorrect
+          };
+          setSpeedWrongs(new Set());
+          
+          const cleanTitle = getStrictTitleOnly(activeCard.content);
+          localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
+          localStorage.setItem('blankd_last_enhanced_title', cleanTitle || "이름 없는 카드");
+          setIsMemoOpen(false);
+          return;
+      }
+
       const cleanContent = activeCard.content;
       const lines = cleanContent.split('\n');
       const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
@@ -1358,6 +1381,12 @@ function MainApp() {
 
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
+
+    sessionCompletedCards.current[currentId] = {
+        blanks: blanks.map((b, i) => ({ ...b, correct: !wrongArr.includes(i) })),
+        wrongIndices: new Set(wrongArr),
+        sessionCorrect: correctCount
+    };
 
     const todayStr = getKoreanDateString();
     setActivityLog(prev => {
@@ -1513,7 +1542,8 @@ function MainApp() {
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
     
-    let isCorrect = (expected === actual) || (getFullChosung(expected) === actual);
+    const expectedCho = getFullChosung(expected);
+    let isCorrect = (expected === actual) || (expectedCho === actual) || (composeChosung(expectedCho) === actual);
 
     if (!isCorrect && globalDict.abbrs) {
       Object.entries(globalDict.abbrs).forEach(([k, v]) => {
@@ -1521,7 +1551,7 @@ function MainApp() {
         const strV = (v as string).replace(/\s+/g, '').toLowerCase();
         const orig = strK.length >= strV.length ? strK : strV;
         const short = strK.length < strV.length ? strK : strV;
-        if (expected === orig && (actual === short || actual === getFullChosung(short))) { 
+        if (expected === orig && (actual === short || actual === getFullChosung(short) || actual === composeChosung(getFullChosung(short)))) { 
             isCorrect = true; 
         }
       });
@@ -1533,6 +1563,7 @@ function MainApp() {
       if (statsRef.current.wrongIndices.has(currentBlankIdx)) {
           statsRef.current.wrongIndices.delete(currentBlankIdx);
       }
+      statsRef.current.sessionCorrect = (statsRef.current.sessionCorrect || 0) + 1;
       setTimeout(forceAdvance, 150); 
     } else { 
       isProcessingRef.current = true; 
@@ -1717,16 +1748,16 @@ function MainApp() {
       } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
     });
     
+    // 💡 레이아웃을 완전히 고정하고 본문만 스크롤되도록 분리
     return (
-      <div className="flex flex-col w-full h-full max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md shadow-xl">
-        
+      <div className="flex flex-col w-full h-full bg-[#0a0a0c]">
         {/* 상단 고정 메뉴 (스크롤 제외 구역) */}
         <div className="shrink-0 flex justify-between items-center border-b border-white/10 px-3 py-2 sm:px-5 sm:py-3 w-full gap-2 sm:gap-3 bg-[#0a0a0c] z-20">
             <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
               {displayTitle}
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
+              <div className="flex items-center gap-1 bg-white/5 px-2 py-1 rounded-sm border border-white/10">
                  <button onClick={(e) => { e.currentTarget.blur(); goPrevCard(); }} disabled={activeCardIdx <= 0} className="px-1.5 py-0.5 hover:bg-white/10 rounded transition-colors disabled:opacity-30">◀</button>
                  <span className="text-[10px] sm:text-[11px] font-mono text-white/80 mx-1">{activeCardIdx + 1} / {activeFolderCards.length}</span>
                  <button onClick={(e) => { e.currentTarget.blur(); goNextCard(); }} disabled={activeCardIdx >= activeFolderCards.length - 1} className="px-1.5 py-0.5 hover:bg-white/10 rounded transition-colors disabled:opacity-30">▶</button>
@@ -1745,8 +1776,8 @@ function MainApp() {
             </div>
         </div>
         
-        {/* 본문 스크롤 영역 (이 부분만 단독으로 스크롤 됨) */}
-        <div className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar px-3 py-3 sm:py-4 md:px-5 pb-8 bg-[#0a0a0c]">
+        {/* 본문 스크롤 영역 (이 부분만 단독으로 스크롤 됨, 스크롤바 명시) */}
+        <div className="flex-1 min-h-0 overflow-y-scroll custom-scrollbar px-3 py-3 sm:py-4 md:px-5 pb-8 bg-[#0a0a0c]">
             {isMemoOpen && (
               <div className="mb-4 pb-4 border-b border-white/10 w-full animate-in slide-in-from-top-2">
                  <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { 
@@ -1766,7 +1797,7 @@ function MainApp() {
         </div>
 
         {/* 하단 고정 메뉴 (스크롤 제외 구역) */}
-        <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-1.5 sm:p-3 z-30 flex flex-col gap-1.5 sm:gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
+        <div className="shrink-0 w-full bg-[#0d0d0f] border-t border-white/10 p-2 sm:p-3 z-30">
             
             {inputMode === 'speed' && currentBlankIdx < blanks.length && (
               <div className="flex flex-col gap-1.5 sm:gap-2 w-full p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
