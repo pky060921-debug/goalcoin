@@ -1641,28 +1641,32 @@ function MainApp() {
       } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
     });
     
+    // 💡 [핵심 수정] 3단 분리: 상단 고정 컨테이너 / 가운데 독립 스크롤 본문 / 하단 고정 컨테이너
     return (
-      <div className="flex flex-col w-full h-[75vh] sm:h-[80vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
-        <div className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar px-3 py-2 sm:py-4 md:px-5 pb-4 sm:pb-12">
-            <div className="flex justify-between items-center border-b border-white/10 pb-1 sm:pb-2 w-full gap-2 sm:gap-3 overflow-hidden mb-2 sm:mb-4 sticky top-0 bg-[#0a0a0c] z-20 pt-1">
-                <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
-                  {displayTitle}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
-                     <span className="text-[9px] sm:text-[10px] text-white/40 font-bold">크기</span>
-                     <button onClick={() => setFontSizeLevel(p => Math.max(1, p - 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">-</button>
-                     <span className="text-[10px] sm:text-[11px] font-mono text-white/80 w-3 text-center">{fontSizeLevel}</span>
-                     <button onClick={() => setFontSizeLevel(p => Math.min(5, p + 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
-                  </div>
-                  <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
-                    {isMemoOpen ? '닫기 ✕' : '📝 메모'}
-                  </button>
-                  <button onClick={() => registerToMarket(activeCard.id)} className="px-2 py-1 bg-amber-900/40 text-amber-400 text-[10px] rounded border border-amber-500/30 hover:bg-amber-900/60 transition-colors hidden sm:inline-block whitespace-nowrap">마켓 판매</button>
-                  <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
-                </div>
+      <div className="flex flex-col w-full h-[62vh] sm:h-[68vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
+        
+        {/* 1. 상단 고정 컨테이너 (스크롤 제외) */}
+        <div className="shrink-0 flex justify-between items-center border-b border-white/10 px-3 py-2 sm:px-5 sm:py-3 w-full gap-2 sm:gap-3 bg-[#0a0a0c] z-20">
+            <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
+              {displayTitle}
             </div>
-            
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
+                 <span className="text-[9px] sm:text-[10px] text-white/40 font-bold">크기</span>
+                 <button onClick={() => setFontSizeLevel(p => Math.max(1, p - 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">-</button>
+                 <span className="text-[10px] sm:text-[11px] font-mono text-white/80 w-3 text-center">{fontSizeLevel}</span>
+                 <button onClick={() => setFontSizeLevel(p => Math.min(5, p + 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
+              </div>
+              <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
+                {isMemoOpen ? '닫기 ✕' : '📝 메모'}
+              </button>
+              <button onClick={() => registerToMarket(activeCard.id)} className="px-2 py-1 bg-amber-900/40 text-amber-400 text-[10px] rounded border border-amber-500/30 hover:bg-amber-900/60 transition-colors hidden sm:inline-block whitespace-nowrap">마켓 판매</button>
+              <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
+            </div>
+        </div>
+
+        {/* 2. 가운데 본문 컨테이너 (우측 스크롤바 상시 노출 및 단독 스크롤) */}
+        <div className="flex-1 min-h-0 overflow-y-scroll scroll-smooth custom-scrollbar px-3 py-3 sm:py-4 md:px-5 pb-8 bg-[#0a0a0c]">
             {isMemoOpen && (
               <div className="mb-4 pb-4 border-b border-white/10 w-full animate-in slide-in-from-top-2">
                  <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { 
@@ -1681,10 +1685,11 @@ function MainApp() {
             </div>
         </div>
 
-        <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-1.5 sm:p-3 z-30 flex flex-col gap-1.5 sm:gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
+        {/* 3. 하단 별도 고정 컨테이너 (스크롤 제외) */}
+        <div className="shrink-0 w-full bg-[#0d0d0f] border-t border-white/10 p-2 sm:p-3 z-30 flex flex-col gap-1.5 sm:gap-3 shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
             {(inputMode === 'touch' || inputMode === 'flash') && activeTouchCandidates.length > 0 && (
-              <div className="flex flex-col gap-1.5 sm:gap-2 w-full max-h-[50vh] overflow-y-auto custom-scrollbar p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
+              <div className="flex flex-col gap-1.5 sm:gap-2 w-full max-h-[22vh] overflow-y-auto custom-scrollbar p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[10px] sm:text-[11px] text-teal-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
                     <span className="animate-pulse">{inputMode === 'flash' ? '⚡' : '👆'}</span> 
@@ -1698,7 +1703,7 @@ function MainApp() {
                        <button
                          key={idx}
                          onClick={() => handleSequentialInput(ans)}
-                         className="relative px-2 py-2 sm:py-5 bg-black/40 border border-white/20 rounded text-[11px] sm:text-[15px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex items-center justify-center break-keep leading-tight"
+                         className="relative px-2 py-2 sm:py-4 bg-black/40 border border-white/20 rounded text-[11px] sm:text-[15px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex items-center justify-center break-keep leading-tight"
                        >
                          {idx < 4 && <span className="absolute top-1 left-1.5 text-[10px] text-teal-500/60 font-mono">[{idx+1}]</span>}
                          {getFullChosung(ans)}
@@ -1710,7 +1715,7 @@ function MainApp() {
                 {inputMode === 'flash' && (
                   <button
                      onClick={() => handleSequentialInput(activeTouchCandidates[flashIdxRef.current])}
-                     className="w-full py-2.5 sm:py-6 bg-indigo-900/30 border border-indigo-500/50 rounded text-indigo-300 font-bold text-[12px] sm:text-[15px] active:scale-95 shadow-[0_0_15px_rgba(99,102,241,0.2)] animate-pulse"
+                     className="w-full py-2.5 sm:py-4 bg-indigo-900/30 border border-indigo-500/50 rounded text-indigo-300 font-bold text-[12px] sm:text-[15px] active:scale-95 shadow-[0_0_15px_rgba(99,102,241,0.2)] animate-pulse"
                   >
                      (스페이스바 또는 이 버튼 터치)
                   </button>
@@ -1718,7 +1723,7 @@ function MainApp() {
 
                 <button 
                   onClick={() => handleSequentialInput('모름(강제오답)')} 
-                  className="w-full mt-0.5 sm:mt-1 py-1.5 sm:py-3 bg-red-900/40 hover:bg-red-900/60 border border-red-500/30 text-red-400 text-[11px] sm:text-[13px] font-bold rounded-sm shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
+                  className="w-full mt-0.5 sm:mt-1 py-1.5 sm:py-2.5 bg-red-900/40 hover:bg-red-900/60 border border-red-500/30 text-red-400 text-[11px] sm:text-[13px] font-bold rounded-sm shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
                 >
                   🤔 모름 (오답 처리 후 다음 빈칸으로 넘어가기) <span className="text-[10px] text-red-500/60 font-mono ml-1">[0]</span>
                 </button>
