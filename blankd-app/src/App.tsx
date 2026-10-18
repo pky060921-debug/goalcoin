@@ -69,15 +69,6 @@ const getFullChosung = (str: string) => {
   return res;
 };
 
-const composeChosung = (str: string) => {
-  if (!str) return '';
-  return str.replace(/ㄱㄱ/g, 'ㄲ')
-            .replace(/ㄷㄷ/g, 'ㄸ')
-            .replace(/ㅂㅂ/g, 'ㅃ')
-            .replace(/ㅅㅅ/g, 'ㅆ')
-            .replace(/ㅈㅈ/g, 'ㅉ');
-};
-
 const autoApplyDictHelper = (content: string, dict: any) => {
   try {
     if (!dict) return content;
@@ -179,8 +170,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
 
   const validAnswers = useMemo(() => {
       const expectedClean = expected.replace(/\s+/g, '').toLowerCase();
-      const cho = getFullChosung(expectedClean);
-      const answers = [expectedClean, cho, composeChosung(cho)];
+      const answers = [expectedClean, getFullChosung(expectedClean)];
       
       if (abbrDict) {
           Object.entries(abbrDict).forEach(([k, v]) => {
@@ -189,10 +179,8 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
               const orig = strK.length >= strV.length ? strK : strV;
               const short = strK.length < strV.length ? strK : strV;
               if (expectedClean === orig) {
-                  const shortCho = getFullChosung(short);
                   answers.push(short);
-                  answers.push(shortCho); 
-                  answers.push(composeChosung(shortCho)); 
+                  answers.push(getFullChosung(short)); 
               }
           });
       }
@@ -263,8 +251,8 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
       className={`inline-block mx-1 px-1.5 py-0.5 text-center font-bold border-b-2 outline-none transition-all ${
         inputStatus === 'wrong' ? 'bg-red-900/40 text-red-300 border-red-500 placeholder-red-400' :
         inputStatus === 'correct' ? 'bg-teal-900/40 text-teal-300 border-teal-500' :
-        hintLetter ? 'bg-white/10 text-amber-400 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
-        'bg-white/10 text-current border-white/20 focus:border-white/50'
+        hintLetter ? 'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
+        'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400'
       }`}
       style={{ width: '4.5em', maxWidth: '100%' }}
     />
@@ -598,13 +586,13 @@ function MainApp() {
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0 });
   
-  const [inputMode, setInputMode] = useState<'typing'|'touch'|'speed'>('typing'); 
-  const [speedWrongs, setSpeedWrongs] = useState<Set<number>>(new Set());
+  const [inputMode, setInputMode] = useState<'typing'|'touch'|'flash'>('typing'); 
+  
+  const [flashIdx, setFlashIdx] = useState(0);
+  const flashIdxRef = useRef(0);
 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   const isProcessingRef = useRef(false);
-
-  const sessionCompletedCards = useRef<Record<string, { blanks: any[], wrongIndices: Set<number>, sessionCorrect: number }>>({});
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
   const [activityLog, setActivityLog] = useState<Record<string, number>>({});
@@ -683,56 +671,41 @@ function MainApp() {
 
   }, [currentBlankIdx, blanks, touchCandidates, globalDict.groups]); 
 
-  const activeFolderCards = useMemo(() => {
-    if (!activeCard) return [];
-    return savedCards.filter(c => c.folder_name === activeCard.folder_name).sort((a,b) => (a.sort_order || 999999) - (b.sort_order || 999999) || parseInt(a.id) - parseInt(b.id)); 
-  }, [activeCard, savedCards]);
+  useEffect(() => {
+    setFlashIdx(0);
+    flashIdxRef.current = 0;
+  }, [currentBlankIdx]);
 
-  const activeCardIdx = activeFolderCards.findIndex(c => c.id === activeCard?.id);
-
-  const saveCurrentProgress = (card: any) => {
-    if (!card) return;
-    const exStats = getExtendedStats(card.memo);
-    exStats.text = statsRef.current.text;
-    exStats.filled = statsRef.current.filled;
-    exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
-    const newMemo = JSON.stringify(exStats);
-    
-    setSavedCards(prev => {
-        const next = prev.map(c => c.id === card.id ? { ...c, memo: newMemo } : c);
-        localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
-        return next;
-    });
-    pushToQueue('MEMO', { id: card.id, memo: newMemo });
-    
-    if (navigator.onLine) {
-        fetch("https://api.blankd.top/api/save-card", {
-            method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: card.answer_text || "", folder_name: card.folder_name, memo: newMemo })
-        }).catch(()=>{});
+  useEffect(() => {
+    let timer: any;
+    if (inputMode === 'flash' && inputStatus === 'idle' && activeTouchCandidates.length > 0) {
+      timer = setInterval(() => {
+        setFlashIdx(prev => {
+            const next = (prev + 1) % activeTouchCandidates.length;
+            flashIdxRef.current = next;
+            return next;
+        });
+      }, 1000); 
     }
-  };
-
-  const goPrevCard = () => {
-      if (activeCardIdx > 0) {
-          saveCurrentProgress(activeCard);
-          setActiveCard(activeFolderCards[activeCardIdx - 1]);
-      }
-  };
-
-  const goNextCard = () => {
-      if (activeCardIdx < activeFolderCards.length - 1) {
-          saveCurrentProgress(activeCard);
-          setActiveCard(activeFolderCards[activeCardIdx + 1]);
-      }
-  };
+    return () => clearInterval(timer);
+  }, [inputMode, inputStatus, activeTouchCandidates.length]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (!activeCard) return;
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
 
-      if (inputMode === 'touch') {
+      if (inputMode === 'flash') {
+          if (e.code === 'Space') {
+              e.preventDefault();
+              if (activeTouchCandidates[flashIdxRef.current]) {
+                 handleSequentialInput(activeTouchCandidates[flashIdxRef.current]);
+              }
+          } else if (e.key === '0' || e.key === 'Escape') {
+              e.preventDefault();
+              handleSequentialInput('모름(강제오답)');
+          }
+      } else if (inputMode === 'touch') {
           const keyNum = parseInt(e.key, 10);
           if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= 4) {
               e.preventDefault();
@@ -1205,67 +1178,9 @@ function MainApp() {
     }
   };
 
-  const toggleSpeedWrong = (idx: number) => {
-    setSpeedWrongs(prev => {
-      const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx);
-      else next.add(idx);
-      return next;
-    });
-  };
-
-  const handleSpeedSubmit = () => {
-    if (isProcessingRef.current) return;
-    isProcessingRef.current = true;
-    
-    const newWrongs = new Set(statsRef.current.wrongIndices);
-    let newlyCorrect = 0;
-
-    for(let i = currentBlankIdx; i < blanks.length; i++) {
-        if (speedWrongs.has(i)) {
-            newWrongs.add(i);
-        } else {
-            if (newWrongs.has(i)) newWrongs.delete(i);
-            newlyCorrect++;
-        }
-    }
-
-    statsRef.current.wrongIndices = newWrongs;
-    statsRef.current.sessionCorrect = (statsRef.current.sessionCorrect || 0) + newlyCorrect;
-    
-    setBlanks(prev => prev.map((b, i) => i >= currentBlankIdx ? { ...b, correct: !speedWrongs.has(i) } : b));
-    setCurrentBlankIdx(blanks.length);
-    
-    setTimeout(() => {
-        isProcessingRef.current = false;
-        finishCard();
-    }, 300);
-  };
-
   useEffect(() => {
     if (activeCard) {
       isClosingRef.current = false;
-
-      if (sessionCompletedCards.current[activeCard.id]) {
-          const savedSession = sessionCompletedCards.current[activeCard.id];
-          setBlanks(savedSession.blanks);
-          setCurrentBlankIdx(savedSession.blanks.length);
-          setInputStatus('idle');
-          statsRef.current = {
-              text: getExtendedStats(activeCard.memo).text,
-              filled: getExtendedStats(activeCard.memo).filled,
-              wrongIndices: new Set(savedSession.wrongIndices),
-              sessionCorrect: savedSession.sessionCorrect
-          };
-          setSpeedWrongs(new Set());
-          
-          const cleanTitle = getStrictTitleOnly(activeCard.content);
-          localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
-          localStorage.setItem('blankd_last_enhanced_title', cleanTitle || "이름 없는 카드");
-          setIsMemoOpen(false);
-          return;
-      }
-
       const cleanContent = activeCard.content;
       const lines = cleanContent.split('\n');
       const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
@@ -1285,22 +1200,13 @@ function MainApp() {
       const targetWrongIndices = activeCard._targetWrongIndices || null;
       const isTargetMode = !!targetWrong || !!targetWrongIndices || !!activeCard._isTargetMode;
 
-      if (activeTab === 'record' && !isTargetMode) {
-          const stats = getExtendedStats(activeCard.memo);
-          const lastWrong = Array.from(stats.wrongIndices || []);
-          if (lastWrong.length > 0) {
-              activeCard._targetWrongIndices = lastWrong;
-              activeCard._isTargetMode = true;
-          }
-      }
-
       const restoredBlanks = foundBlanks.map((b, i) => {
           let isCorrect = i < lastIdx;
-          if (activeCard._targetWrongIndices) {
-              isCorrect = !activeCard._targetWrongIndices.includes(i); 
-          } else if (activeCard._targetWrongWords) {
+          if (targetWrongIndices) {
+              isCorrect = !targetWrongIndices.includes(i); 
+          } else if (targetWrong) {
               const cleanAns = b.answer.replace(/\s+/g, '');
-              const isTarget = activeCard._targetWrongWords.some((w: string) => w.replace(/\s+/g, '') === cleanAns);
+              const isTarget = targetWrong.some((w: string) => w.replace(/\s+/g, '') === cleanAns);
               isCorrect = !isTarget;
           }
           return { ...b, correct: isCorrect };
@@ -1311,7 +1217,6 @@ function MainApp() {
       const firstIdx = restoredBlanks.findIndex(b => !b.correct);
       setCurrentBlankIdx(firstIdx !== -1 ? firstIdx : 0);
       setInputStatus('idle');
-      setSpeedWrongs(new Set());
 
       const uniqueAnswers = Array.from(new Set(foundBlanks.map(b => b.answer)));
       setTouchCandidates(uniqueAnswers.sort((a, b) => a.localeCompare(b, 'ko')));
@@ -1324,10 +1229,11 @@ function MainApp() {
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
 
+      // 💡 일반 모드로 진입 시 과거 오답 덮어쓰기 로직 복구
       statsRef.current = { 
           text: cleanText, 
           filled: stats.filled, 
-          wrongIndices: (activeCard._isTargetMode || lastIdx > 0) ? new Set(stats.wrongIndices || []) : new Set(),
+          wrongIndices: new Set(stats.wrongIndices || []),
           sessionCorrect: 0
       };
       
@@ -1339,10 +1245,10 @@ function MainApp() {
         recognitionRef.current.onend = null; recognitionRef.current.stop(); recognitionRef.current = null; setIsListening(false);
       }
     }
-  }, [activeCard, activeTab]);
+  }, [activeCard]);
 
   useEffect(() => {
-      if (activeCard && inputStatus === 'idle' && inputMode !== 'speed') {
+      if (activeCard && inputStatus === 'idle') {
           const timer = setTimeout(() => {
               const el = document.getElementById('active-blank');
               if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1357,7 +1263,7 @@ function MainApp() {
     const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = 0;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     
-    const isTargetMode = !!activeCard._targetWrongWords || !!activeCard._isTargetMode || activeTab === 'record';
+    const isTargetMode = !!activeCard._targetWrongWords || !!activeCard._isTargetMode;
     const correctCount = statsRef.current.sessionCorrect || 0;
     const isCorrect = wrongArr.length === 0;
 
@@ -1381,12 +1287,6 @@ function MainApp() {
 
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
-
-    sessionCompletedCards.current[currentId] = {
-        blanks: blanks.map((b, i) => ({ ...b, correct: !wrongArr.includes(i) })),
-        wrongIndices: new Set(wrongArr),
-        sessionCorrect: correctCount
-    };
 
     const todayStr = getKoreanDateString();
     setActivityLog(prev => {
@@ -1542,8 +1442,7 @@ function MainApp() {
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
     
-    const expectedCho = getFullChosung(expected);
-    let isCorrect = (expected === actual) || (expectedCho === actual) || (composeChosung(expectedCho) === actual);
+    let isCorrect = (expected === actual) || (getFullChosung(expected) === actual);
 
     if (!isCorrect && globalDict.abbrs) {
       Object.entries(globalDict.abbrs).forEach(([k, v]) => {
@@ -1551,7 +1450,7 @@ function MainApp() {
         const strV = (v as string).replace(/\s+/g, '').toLowerCase();
         const orig = strK.length >= strV.length ? strK : strV;
         const short = strK.length < strV.length ? strK : strV;
-        if (expected === orig && (actual === short || actual === getFullChosung(short) || actual === composeChosung(getFullChosung(short)))) { 
+        if (expected === orig && (actual === short || actual === getFullChosung(short))) { 
             isCorrect = true; 
         }
       });
@@ -1695,32 +1594,16 @@ function MainApp() {
     }
 
     let renderPage = 0; let bIdx = 0; const contentToRender: any[] = [];
-    const isSessionCompleted = !!sessionCompletedCards.current[activeCard.id] || currentBlankIdx >= blanks.length;
-
     parts.forEach((part: string, i: number) => {
       if (part === '##PAGE_BREAK##') { renderPage++; return; }
       if (renderPage === displayPage) {
           if (part.startsWith('[') && part.endsWith(']')) {
             const isCorrect = blanks[bIdx]?.correct; 
-            const isCurrent = bIdx === currentBlankIdx && !isSessionCompleted; 
+            const isCurrent = bIdx === currentBlankIdx; 
             const isWrong = statsRef.current.wrongIndices.has(bIdx); 
-            
-            if (isSessionCompleted || bIdx < currentBlankIdx) {
+            if (isCorrect) {
               contentToRender.push(
-                <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>
-                  {part.replace(/\[|\]/g, '')}
-                </span>
-              );
-            } else if (inputMode === 'speed' && bIdx >= currentBlankIdx) {
-              const isSpeedMarkedWrong = speedWrongs.has(bIdx);
-              contentToRender.push(
-                <span key={i} onClick={() => toggleSpeedWrong(bIdx)}
-                      className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] cursor-pointer select-none ${
-                          isSpeedMarkedWrong ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
-                          'bg-white/10 text-current border border-white/20 hover:bg-white/20'
-                      }`}>
-                    {isSpeedMarkedWrong ? '🤔 모름' : '\u00A0'}
-                </span>
+                <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
               );
             } else if (isCurrent) {
               if (inputMode === 'typing') {
@@ -1729,14 +1612,24 @@ function MainApp() {
                       <InlineBlankInput inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
                     </span>
                   );
-              } else if (inputMode === 'touch') {
+              } else if (inputMode === 'flash') {
                   contentToRender.push(
-                    <span id="active-blank" key="active-blank-input-fixed" className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${
-                        inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
-                        inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 
-                        'bg-white/10 text-current border border-white/20 animate-pulse shadow-[0_0_8px_rgba(255,255,255,0.1)]'
-                    }`}>
-                      {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '\u00A0'}
+                    <span id="active-blank" key="active-blank-input-fixed" 
+                          onClick={() => { if(inputStatus === 'idle') handleSequentialInput(activeTouchCandidates[flashIdx]); }}
+                          className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] cursor-pointer ${
+                            inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
+                            inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 
+                            'bg-indigo-900/80 text-indigo-200 border-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.5)]'
+                          }`}>
+                      {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : 
+                       inputStatus === 'correct' ? '✅' : 
+                       (activeTouchCandidates[flashIdx] ? getFullChosung(activeTouchCandidates[flashIdx]) : '?')}
+                    </span>
+                  );
+              } else {
+                  contentToRender.push(
+                    <span id="active-blank" key="active-blank-input-fixed" className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 'bg-amber-900/30 text-amber-400 border-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.3)]'}`}>
+                      {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '?'}
                     </span>
                   );
               }
@@ -1748,36 +1641,28 @@ function MainApp() {
       } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
     });
     
-    // 💡 레이아웃을 완전히 고정하고 본문만 스크롤되도록 분리
     return (
-      <div className="flex flex-col w-full h-full bg-[#0a0a0c]">
-        {/* 상단 고정 메뉴 (스크롤 제외 구역) */}
-        <div className="shrink-0 flex justify-between items-center border-b border-white/10 px-3 py-2 sm:px-5 sm:py-3 w-full gap-2 sm:gap-3 bg-[#0a0a0c] z-20">
-            <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
-              {displayTitle}
+      <div className="flex flex-col w-full h-[75vh] sm:h-[80vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
+        <div className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar px-3 py-2 sm:py-4 md:px-5 pb-4 sm:pb-12">
+            <div className="flex justify-between items-center border-b border-white/10 pb-1 sm:pb-2 w-full gap-2 sm:gap-3 overflow-hidden mb-2 sm:mb-4 sticky top-0 bg-[#0a0a0c] z-20 pt-1">
+                <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
+                  {displayTitle}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
+                     <span className="text-[9px] sm:text-[10px] text-white/40 font-bold">크기</span>
+                     <button onClick={() => setFontSizeLevel(p => Math.max(1, p - 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">-</button>
+                     <span className="text-[10px] sm:text-[11px] font-mono text-white/80 w-3 text-center">{fontSizeLevel}</span>
+                     <button onClick={() => setFontSizeLevel(p => Math.min(5, p + 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
+                  </div>
+                  <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
+                    {isMemoOpen ? '닫기 ✕' : '📝 메모'}
+                  </button>
+                  <button onClick={() => registerToMarket(activeCard.id)} className="px-2 py-1 bg-amber-900/40 text-amber-400 text-[10px] rounded border border-amber-500/30 hover:bg-amber-900/60 transition-colors hidden sm:inline-block whitespace-nowrap">마켓 판매</button>
+                  <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
+                </div>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="flex items-center gap-1 bg-white/5 px-2 py-1 rounded-sm border border-white/10">
-                 <button onClick={(e) => { e.currentTarget.blur(); goPrevCard(); }} disabled={activeCardIdx <= 0} className="px-1.5 py-0.5 hover:bg-white/10 rounded transition-colors disabled:opacity-30">◀</button>
-                 <span className="text-[10px] sm:text-[11px] font-mono text-white/80 mx-1">{activeCardIdx + 1} / {activeFolderCards.length}</span>
-                 <button onClick={(e) => { e.currentTarget.blur(); goNextCard(); }} disabled={activeCardIdx >= activeFolderCards.length - 1} className="px-1.5 py-0.5 hover:bg-white/10 rounded transition-colors disabled:opacity-30">▶</button>
-              </div>
-              <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
-                 <span className="text-[9px] sm:text-[10px] text-white/40 font-bold">크기</span>
-                 <button onClick={(e) => { e.currentTarget.blur(); setFontSizeLevel(p => Math.max(1, p - 1)); }} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">-</button>
-                 <span className="text-[10px] sm:text-[11px] font-mono text-white/80 w-3 text-center">{fontSizeLevel}</span>
-                 <button onClick={(e) => { e.currentTarget.blur(); setFontSizeLevel(p => Math.min(5, p + 1)); }} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
-              </div>
-              <button onClick={(e) => { e.currentTarget.blur(); setIsMemoOpen(!isMemoOpen); }} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
-                {isMemoOpen ? '닫기 ✕' : '📝 메모'}
-              </button>
-              <button onClick={(e) => { e.currentTarget.blur(); registerToMarket(activeCard.id); }} className="px-2 py-1 bg-amber-900/40 text-amber-400 text-[10px] rounded border border-amber-500/30 hover:bg-amber-900/60 transition-colors hidden sm:inline-block whitespace-nowrap">마켓 판매</button>
-              <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
-            </div>
-        </div>
-        
-        {/* 본문 스크롤 영역 (이 부분만 단독으로 스크롤 됨, 스크롤바 명시) */}
-        <div className="flex-1 min-h-0 overflow-y-scroll custom-scrollbar px-3 py-3 sm:py-4 md:px-5 pb-8 bg-[#0a0a0c]">
+            
             {isMemoOpen && (
               <div className="mb-4 pb-4 border-b border-white/10 w-full animate-in slide-in-from-top-2">
                  <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { 
@@ -1796,56 +1681,43 @@ function MainApp() {
             </div>
         </div>
 
-        {/* 하단 고정 메뉴 (스크롤 제외 구역) */}
-        <div className="shrink-0 w-full bg-[#0d0d0f] border-t border-white/10 p-2 sm:p-3 z-30">
+        <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-1.5 sm:p-3 z-30 flex flex-col gap-1.5 sm:gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
-            {inputMode === 'speed' && currentBlankIdx < blanks.length && (
-              <div className="flex flex-col gap-1.5 sm:gap-2 w-full p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
-                <div className="w-full text-[10px] sm:text-[11px] text-amber-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
-                  <div className="flex items-center gap-1">
-                    <span className="animate-pulse">⚡</span> 
-                    모르는 빈칸(🤔)만 터치하고 제출을 누르면 나머지는 모두 정답 처리됩니다.
-                  </div>
-                </div>
-                <button 
-                  onClick={(e) => {
-                     e.currentTarget.blur();
-                     handleSpeedSubmit();
-                  }} 
-                  className="w-full mt-0.5 sm:mt-1 py-2 sm:py-4 bg-amber-600 hover:bg-amber-500 border border-amber-400 text-white text-[12px] sm:text-[15px] font-bold rounded shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
-                >
-                  제출 및 다음으로 넘어가기 ▶
-                </button>
-              </div>
-            )}
-
-            {inputMode === 'touch' && activeTouchCandidates.length > 0 && (
-              <div className="flex flex-col gap-1.5 sm:gap-2 w-full overflow-y-auto custom-scrollbar p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner" style={{ maxHeight: '25vh' }}>
+            {(inputMode === 'touch' || inputMode === 'flash') && activeTouchCandidates.length > 0 && (
+              <div className="flex flex-col gap-1.5 sm:gap-2 w-full max-h-[50vh] overflow-y-auto custom-scrollbar p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[10px] sm:text-[11px] text-teal-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
-                    <span className="animate-pulse">👆</span> 터치하여 정답을 선택하세요
+                    <span className="animate-pulse">{inputMode === 'flash' ? '⚡' : '👆'}</span> 
+                    {inputMode === 'flash' ? '정답이 보일 때 스페이스바(또는 터치)' : '터치하여 정답을 선택하세요'}
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-1.5 sm:gap-2 w-full">
+                
+                {inputMode === 'touch' && (
+                  <div className="grid grid-cols-2 gap-1.5 sm:gap-2 w-full">
                      {activeTouchCandidates.map((ans, idx) => (
                        <button
                          key={idx}
-                         onClick={(e) => {
-                            e.currentTarget.blur();
-                            handleSequentialInput(ans);
-                         }}
+                         onClick={() => handleSequentialInput(ans)}
                          className="relative px-2 py-2 sm:py-5 bg-black/40 border border-white/20 rounded text-[11px] sm:text-[15px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex items-center justify-center break-keep leading-tight"
                        >
                          {idx < 4 && <span className="absolute top-1 left-1.5 text-[10px] text-teal-500/60 font-mono">[{idx+1}]</span>}
                          {getFullChosung(ans)}
                        </button>
                      ))}
-                </div>
+                  </div>
+                )}
+                
+                {inputMode === 'flash' && (
+                  <button
+                     onClick={() => handleSequentialInput(activeTouchCandidates[flashIdxRef.current])}
+                     className="w-full py-2.5 sm:py-6 bg-indigo-900/30 border border-indigo-500/50 rounded text-indigo-300 font-bold text-[12px] sm:text-[15px] active:scale-95 shadow-[0_0_15px_rgba(99,102,241,0.2)] animate-pulse"
+                  >
+                     (스페이스바 또는 이 버튼 터치)
+                  </button>
+                )}
+
                 <button 
-                  onClick={(e) => {
-                     e.currentTarget.blur();
-                     handleSequentialInput('모름(강제오답)');
-                  }} 
+                  onClick={() => handleSequentialInput('모름(강제오답)')} 
                   className="w-full mt-0.5 sm:mt-1 py-1.5 sm:py-3 bg-red-900/40 hover:bg-red-900/60 border border-red-500/30 text-red-400 text-[11px] sm:text-[13px] font-bold rounded-sm shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
                 >
                   🤔 모름 (오답 처리 후 다음 빈칸으로 넘어가기) <span className="text-[10px] text-red-500/60 font-mono ml-1">[0]</span>
@@ -1853,10 +1725,9 @@ function MainApp() {
               </div>
             )}
             
-            {inputStatus === 'wrong' && currentBlankIdx === blanks.length - 1 && inputMode !== 'speed' ? (
+            {inputStatus === 'wrong' && currentBlankIdx === blanks.length - 1 ? (
               <button 
-                onClick={(e) => {
-                  e.currentTarget.blur();
+                onClick={() => {
                   if (!isProcessingRef.current) {
                      isProcessingRef.current = true;
                      forceAdvance();
@@ -1869,22 +1740,12 @@ function MainApp() {
             ) : (
               <div className="flex justify-between items-center w-full gap-1.5 sm:gap-2 flex-wrap">
                 <button 
-                  onClick={(e) => {
-                     e.currentTarget.blur();
-                     setInputMode(prev => prev === 'typing' ? 'touch' : prev === 'touch' ? 'speed' : 'typing');
-                  }} 
+                  onClick={() => setInputMode(prev => prev === 'typing' ? 'touch' : prev === 'touch' ? 'flash' : 'typing')} 
                   className="px-2 sm:px-3 py-1.5 sm:py-2.5 bg-zinc-900/80 text-zinc-300 border border-zinc-500/50 rounded text-[10px] sm:text-xs font-bold flex-1 hover:bg-zinc-800 transition-all shadow-md flex items-center justify-center gap-2"
                 >
-                  {inputMode === 'typing' ? '👆 터치 모드로 전환' : inputMode === 'touch' ? '⚡ 스피드 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
+                  {inputMode === 'typing' ? '👆 터치 모드로 전환' : inputMode === 'touch' ? '⚡ 플래시 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
                 </button>
-                <button 
-                  id="show-answer-btn"
-                  onClick={(e) => {
-                     e.currentTarget.blur();
-                     handleShowAnswer();
-                  }} 
-                  className="px-2 sm:px-3 py-1.5 sm:py-2.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md"
-                >
+                <button onClick={handleShowAnswer} className="px-2 sm:px-3 py-1.5 sm:py-2.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
                   정답 보기(스킵)
                 </button>
               </div>
@@ -1892,7 +1753,7 @@ function MainApp() {
         </div>
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, speedWrongs, touchCandidates, fontSizeLevel, activeTouchCandidates, activeCardIdx, activeFolderCards.length]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, flashIdx, touchCandidates, fontSizeLevel, activeTouchCandidates]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
