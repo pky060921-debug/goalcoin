@@ -586,7 +586,6 @@ function MainApp() {
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0 });
   
-  // 💡 [수정] 플래시 모드 제거 및 스키밍(skimming) 모드 추가
   const [inputMode, setInputMode] = useState<'typing'|'touch'|'skimming'>('typing'); 
   const [skimmingWrongs, setSkimmingWrongs] = useState<Set<number>>(new Set());
 
@@ -1148,7 +1147,6 @@ function MainApp() {
     }
   };
 
-  // 💡 [추가] 스키밍 모드 토글 및 일괄 제출 핸들러
   const toggleSkimmingWrong = (idx: number) => {
     setSkimmingWrongs(prev => {
       const next = new Set(prev);
@@ -1158,14 +1156,15 @@ function MainApp() {
     });
   };
 
-  const handleSkimmingSubmit = () => {
+  // 💡 [수정] 현재 보고 있는 페이지의 빈칸만 정확하게 채점하여 넘기도록 보강
+  const handleSkimmingSubmit = (pageEndIdx: number) => {
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
     
     const newWrongs = new Set(statsRef.current.wrongIndices);
     let newlyCorrect = 0;
 
-    for (let i = currentBlankIdx; i < blanks.length; i++) {
+    for (let i = currentBlankIdx; i <= pageEndIdx; i++) {
         if (skimmingWrongs.has(i)) {
             newWrongs.add(i);
         } else {
@@ -1177,13 +1176,24 @@ function MainApp() {
     statsRef.current.wrongIndices = newWrongs;
     statsRef.current.sessionCorrect = (statsRef.current.sessionCorrect || 0) + newlyCorrect;
     
-    setBlanks(prev => prev.map((b, i) => i >= currentBlankIdx ? { ...b, correct: true } : b));
-    setCurrentBlankIdx(blanks.length);
+    setBlanks(prev => prev.map((b, i) => (i >= currentBlankIdx && i <= pageEndIdx) ? { ...b, correct: true } : b));
     
-    setTimeout(() => {
+    const nextIdx = blanks.findIndex((b, idx) => idx > pageEndIdx && !b.correct);
+    
+    if (nextIdx !== -1) {
+        setCurrentBlankIdx(nextIdx);
+        localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
+        setInputStatus('idle');
         isProcessingRef.current = false;
-        finishCard();
-    }, 200);
+    } else {
+        setCurrentBlankIdx(blanks.length);
+        localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+        setInputStatus('idle');
+        setTimeout(() => {
+            isProcessingRef.current = false;
+            finishCard();
+        }, 200);
+    }
   };
 
   useEffect(() => {
@@ -1601,22 +1611,35 @@ function MainApp() {
         }
     }
 
-    let renderPage = 0; let bIdx = 0; const contentToRender: any[] = [];
+    let renderPage = 0; 
+    let bIdx = 0; 
+    let lastBlankIdxOnPage = currentBlankIdx;
+    const contentToRender: any[] = [];
+
     parts.forEach((part: string, i: number) => {
       if (part === '##PAGE_BREAK##') { renderPage++; return; }
       if (renderPage === displayPage) {
           if (part.startsWith('[') && part.endsWith(']')) {
-            const isCorrect = blanks[bIdx]?.correct; 
-            const isCurrent = bIdx === currentBlankIdx; 
-            const isWrong = statsRef.current.wrongIndices.has(bIdx); 
+            // 💡 [핵심 버그 수정] 클로저 문제를 방지하기 위해 현재 빈칸의 인덱스를 상수로 고정!
+            const targetBlankIdx = bIdx;
+            lastBlankIdxOnPage = targetBlankIdx;
+
+            const isCorrect = blanks[targetBlankIdx]?.correct; 
+            const isCurrent = targetBlankIdx === currentBlankIdx; 
+            const isWrong = statsRef.current.wrongIndices.has(targetBlankIdx); 
+
             if (isCorrect) {
               contentToRender.push(
                 <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
               );
-            } else if (inputMode === 'skimming' && bIdx >= currentBlankIdx) {
-              const isSkimmingMarkedWrong = skimmingWrongs.has(bIdx);
+            } else if (inputMode === 'skimming' && targetBlankIdx >= currentBlankIdx) {
+              const isSkimmingMarkedWrong = skimmingWrongs.has(targetBlankIdx);
               contentToRender.push(
-                <span key={i} onClick={() => toggleSkimmingWrong(bIdx)}
+                <span key={i} 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleSkimmingWrong(targetBlankIdx);
+                      }}
                       className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] cursor-pointer select-none ${
                           isSkimmingMarkedWrong ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
                           'bg-white/10 text-current border-white/20 hover:bg-white/20'
@@ -1646,7 +1669,6 @@ function MainApp() {
       } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
     });
     
-    // 💡 3단 분리: 상단 고정 컨테이너 / 가운데 독립 스크롤 본문 / 하단 고정 컨테이너
     return (
       <div className="flex flex-col w-full h-[62vh] sm:h-[68vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
         
@@ -1704,7 +1726,7 @@ function MainApp() {
                 <button 
                   onClick={(e) => {
                      e.currentTarget.blur();
-                     handleSkimmingSubmit();
+                     handleSkimmingSubmit(lastBlankIdxOnPage);
                   }} 
                   className="w-full mt-0.5 sm:mt-1 py-2 sm:py-3.5 bg-amber-600 hover:bg-amber-500 border border-amber-400 text-white text-[12px] sm:text-[15px] font-bold rounded shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
                 >
