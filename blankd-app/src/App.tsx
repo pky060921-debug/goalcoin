@@ -586,10 +586,9 @@ function MainApp() {
 
   const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0 });
   
-  const [inputMode, setInputMode] = useState<'typing'|'touch'|'flash'>('typing'); 
-  
-  const [flashIdx, setFlashIdx] = useState(0);
-  const flashIdxRef = useRef(0);
+  // 💡 [수정] 플래시 모드 제거 및 스키밍(skimming) 모드 추가
+  const [inputMode, setInputMode] = useState<'typing'|'touch'|'skimming'>('typing'); 
+  const [skimmingWrongs, setSkimmingWrongs] = useState<Set<number>>(new Set());
 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   const isProcessingRef = useRef(false);
@@ -672,40 +671,11 @@ function MainApp() {
   }, [currentBlankIdx, blanks, touchCandidates, globalDict.groups]); 
 
   useEffect(() => {
-    setFlashIdx(0);
-    flashIdxRef.current = 0;
-  }, [currentBlankIdx]);
-
-  useEffect(() => {
-    let timer: any;
-    if (inputMode === 'flash' && inputStatus === 'idle' && activeTouchCandidates.length > 0) {
-      timer = setInterval(() => {
-        setFlashIdx(prev => {
-            const next = (prev + 1) % activeTouchCandidates.length;
-            flashIdxRef.current = next;
-            return next;
-        });
-      }, 1000); 
-    }
-    return () => clearInterval(timer);
-  }, [inputMode, inputStatus, activeTouchCandidates.length]);
-
-  useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (!activeCard) return;
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
 
-      if (inputMode === 'flash') {
-          if (e.code === 'Space') {
-              e.preventDefault();
-              if (activeTouchCandidates[flashIdxRef.current]) {
-                 handleSequentialInput(activeTouchCandidates[flashIdxRef.current]);
-              }
-          } else if (e.key === '0' || e.key === 'Escape') {
-              e.preventDefault();
-              handleSequentialInput('모름(강제오답)');
-          }
-      } else if (inputMode === 'touch') {
+      if (inputMode === 'touch') {
           const keyNum = parseInt(e.key, 10);
           if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= 4) {
               e.preventDefault();
@@ -1178,6 +1148,44 @@ function MainApp() {
     }
   };
 
+  // 💡 [추가] 스키밍 모드 토글 및 일괄 제출 핸들러
+  const toggleSkimmingWrong = (idx: number) => {
+    setSkimmingWrongs(prev => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  const handleSkimmingSubmit = () => {
+    if (isProcessingRef.current) return;
+    isProcessingRef.current = true;
+    
+    const newWrongs = new Set(statsRef.current.wrongIndices);
+    let newlyCorrect = 0;
+
+    for (let i = currentBlankIdx; i < blanks.length; i++) {
+        if (skimmingWrongs.has(i)) {
+            newWrongs.add(i);
+        } else {
+            if (newWrongs.has(i)) newWrongs.delete(i);
+            newlyCorrect++;
+        }
+    }
+
+    statsRef.current.wrongIndices = newWrongs;
+    statsRef.current.sessionCorrect = (statsRef.current.sessionCorrect || 0) + newlyCorrect;
+    
+    setBlanks(prev => prev.map((b, i) => i >= currentBlankIdx ? { ...b, correct: true } : b));
+    setCurrentBlankIdx(blanks.length);
+    
+    setTimeout(() => {
+        isProcessingRef.current = false;
+        finishCard();
+    }, 200);
+  };
+
   useEffect(() => {
     if (activeCard) {
       isClosingRef.current = false;
@@ -1217,6 +1225,7 @@ function MainApp() {
       const firstIdx = restoredBlanks.findIndex(b => !b.correct);
       setCurrentBlankIdx(firstIdx !== -1 ? firstIdx : 0);
       setInputStatus('idle');
+      setSkimmingWrongs(new Set());
 
       const uniqueAnswers = Array.from(new Set(foundBlanks.map(b => b.answer)));
       setTouchCandidates(uniqueAnswers.sort((a, b) => a.localeCompare(b, 'ko')));
@@ -1229,7 +1238,6 @@ function MainApp() {
       let cleanText = stats.text;
       if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
 
-      // 💡 일반 모드로 진입 시 과거 오답 덮어쓰기 로직 복구
       statsRef.current = { 
           text: cleanText, 
           filled: stats.filled, 
@@ -1248,7 +1256,7 @@ function MainApp() {
   }, [activeCard]);
 
   useEffect(() => {
-      if (activeCard && inputStatus === 'idle') {
+      if (activeCard && inputStatus === 'idle' && inputMode !== 'skimming') {
           const timer = setTimeout(() => {
               const el = document.getElementById('active-blank');
               if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1605,25 +1613,22 @@ function MainApp() {
               contentToRender.push(
                 <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
               );
+            } else if (inputMode === 'skimming' && bIdx >= currentBlankIdx) {
+              const isSkimmingMarkedWrong = skimmingWrongs.has(bIdx);
+              contentToRender.push(
+                <span key={i} onClick={() => toggleSkimmingWrong(bIdx)}
+                      className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] cursor-pointer select-none ${
+                          isSkimmingMarkedWrong ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
+                          'bg-white/10 text-current border-white/20 hover:bg-white/20'
+                      }`}>
+                    {isSkimmingMarkedWrong ? '🤔 모름' : '\u00A0'}
+                </span>
+              );
             } else if (isCurrent) {
               if (inputMode === 'typing') {
                   contentToRender.push(
                     <span id="active-blank" key="active-blank-input-fixed">
                       <InlineBlankInput inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
-                    </span>
-                  );
-              } else if (inputMode === 'flash') {
-                  contentToRender.push(
-                    <span id="active-blank" key="active-blank-input-fixed" 
-                          onClick={() => { if(inputStatus === 'idle') handleSequentialInput(activeTouchCandidates[flashIdx]); }}
-                          className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] cursor-pointer ${
-                            inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
-                            inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 
-                            'bg-indigo-900/80 text-indigo-200 border-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.5)]'
-                          }`}>
-                      {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : 
-                       inputStatus === 'correct' ? '✅' : 
-                       (activeTouchCandidates[flashIdx] ? getFullChosung(activeTouchCandidates[flashIdx]) : '?')}
                     </span>
                   );
               } else {
@@ -1641,7 +1646,7 @@ function MainApp() {
       } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
     });
     
-    // 💡 [핵심 수정] 3단 분리: 상단 고정 컨테이너 / 가운데 독립 스크롤 본문 / 하단 고정 컨테이너
+    // 💡 3단 분리: 상단 고정 컨테이너 / 가운데 독립 스크롤 본문 / 하단 고정 컨테이너
     return (
       <div className="flex flex-col w-full h-[62vh] sm:h-[68vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
         
@@ -1688,41 +1693,55 @@ function MainApp() {
         {/* 3. 하단 별도 고정 컨테이너 (스크롤 제외) */}
         <div className="shrink-0 w-full bg-[#0d0d0f] border-t border-white/10 p-2 sm:p-3 z-30 flex flex-col gap-1.5 sm:gap-3 shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
-            {(inputMode === 'touch' || inputMode === 'flash') && activeTouchCandidates.length > 0 && (
+            {inputMode === 'skimming' && currentBlankIdx < blanks.length && (
+              <div className="flex flex-col gap-1.5 sm:gap-2 w-full p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
+                <div className="w-full text-[10px] sm:text-[11px] text-amber-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
+                  <div className="flex items-center gap-1">
+                    <span className="animate-pulse">⚡</span> 
+                    모르는 빈칸(🤔)만 터치하고 제출을 누르면 나머지는 모두 정답 처리됩니다.
+                  </div>
+                </div>
+                <button 
+                  onClick={(e) => {
+                     e.currentTarget.blur();
+                     handleSkimmingSubmit();
+                  }} 
+                  className="w-full mt-0.5 sm:mt-1 py-2 sm:py-3.5 bg-amber-600 hover:bg-amber-500 border border-amber-400 text-white text-[12px] sm:text-[15px] font-bold rounded shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
+                >
+                  제출 및 다음으로 넘어가기 ▶
+                </button>
+              </div>
+            )}
+
+            {inputMode === 'touch' && activeTouchCandidates.length > 0 && (
               <div className="flex flex-col gap-1.5 sm:gap-2 w-full max-h-[22vh] overflow-y-auto custom-scrollbar p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[10px] sm:text-[11px] text-teal-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
-                    <span className="animate-pulse">{inputMode === 'flash' ? '⚡' : '👆'}</span> 
-                    {inputMode === 'flash' ? '정답이 보일 때 스페이스바(또는 터치)' : '터치하여 정답을 선택하세요'}
+                    <span className="animate-pulse">👆</span> 터치하여 정답을 선택하세요
                   </div>
                 </div>
                 
-                {inputMode === 'touch' && (
-                  <div className="grid grid-cols-2 gap-1.5 sm:gap-2 w-full">
-                     {activeTouchCandidates.map((ans, idx) => (
-                       <button
-                         key={idx}
-                         onClick={() => handleSequentialInput(ans)}
-                         className="relative px-2 py-2 sm:py-4 bg-black/40 border border-white/20 rounded text-[11px] sm:text-[15px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex items-center justify-center break-keep leading-tight"
-                       >
-                         {idx < 4 && <span className="absolute top-1 left-1.5 text-[10px] text-teal-500/60 font-mono">[{idx+1}]</span>}
-                         {getFullChosung(ans)}
-                       </button>
-                     ))}
-                  </div>
-                )}
-                
-                {inputMode === 'flash' && (
-                  <button
-                     onClick={() => handleSequentialInput(activeTouchCandidates[flashIdxRef.current])}
-                     className="w-full py-2.5 sm:py-4 bg-indigo-900/30 border border-indigo-500/50 rounded text-indigo-300 font-bold text-[12px] sm:text-[15px] active:scale-95 shadow-[0_0_15px_rgba(99,102,241,0.2)] animate-pulse"
-                  >
-                     (스페이스바 또는 이 버튼 터치)
-                  </button>
-                )}
+                <div className="grid grid-cols-2 gap-1.5 sm:gap-2 w-full">
+                   {activeTouchCandidates.map((ans, idx) => (
+                     <button
+                       key={idx}
+                       onClick={(e) => {
+                          e.currentTarget.blur();
+                          handleSequentialInput(ans);
+                       }}
+                       className="relative px-2 py-2 sm:py-4 bg-black/40 border border-white/20 rounded text-[11px] sm:text-[15px] font-bold text-white/90 hover:bg-teal-900/40 hover:border-teal-500 hover:text-teal-300 transition-all active:scale-95 shadow-md flex items-center justify-center break-keep leading-tight"
+                     >
+                       {idx < 4 && <span className="absolute top-1 left-1.5 text-[10px] text-teal-500/60 font-mono">[{idx+1}]</span>}
+                       {getFullChosung(ans)}
+                     </button>
+                   ))}
+                </div>
 
                 <button 
-                  onClick={() => handleSequentialInput('모름(강제오답)')} 
+                  onClick={(e) => {
+                     e.currentTarget.blur();
+                     handleSequentialInput('모름(강제오답)');
+                  }} 
                   className="w-full mt-0.5 sm:mt-1 py-1.5 sm:py-2.5 bg-red-900/40 hover:bg-red-900/60 border border-red-500/30 text-red-400 text-[11px] sm:text-[13px] font-bold rounded-sm shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
                 >
                   🤔 모름 (오답 처리 후 다음 빈칸으로 넘어가기) <span className="text-[10px] text-red-500/60 font-mono ml-1">[0]</span>
@@ -1730,9 +1749,10 @@ function MainApp() {
               </div>
             )}
             
-            {inputStatus === 'wrong' && currentBlankIdx === blanks.length - 1 ? (
+            {inputStatus === 'wrong' && currentBlankIdx === blanks.length - 1 && inputMode !== 'skimming' ? (
               <button 
-                onClick={() => {
+                onClick={(e) => {
+                  e.currentTarget.blur();
                   if (!isProcessingRef.current) {
                      isProcessingRef.current = true;
                      forceAdvance();
@@ -1745,12 +1765,22 @@ function MainApp() {
             ) : (
               <div className="flex justify-between items-center w-full gap-1.5 sm:gap-2 flex-wrap">
                 <button 
-                  onClick={() => setInputMode(prev => prev === 'typing' ? 'touch' : prev === 'touch' ? 'flash' : 'typing')} 
+                  onClick={(e) => {
+                     e.currentTarget.blur();
+                     setInputMode(prev => prev === 'typing' ? 'touch' : prev === 'touch' ? 'skimming' : 'typing');
+                  }} 
                   className="px-2 sm:px-3 py-1.5 sm:py-2.5 bg-zinc-900/80 text-zinc-300 border border-zinc-500/50 rounded text-[10px] sm:text-xs font-bold flex-1 hover:bg-zinc-800 transition-all shadow-md flex items-center justify-center gap-2"
                 >
-                  {inputMode === 'typing' ? '👆 터치 모드로 전환' : inputMode === 'touch' ? '⚡ 플래시 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
+                  {inputMode === 'typing' ? '👆 터치 모드로 전환' : inputMode === 'touch' ? '⚡ 스키밍 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
                 </button>
-                <button onClick={handleShowAnswer} className="px-2 sm:px-3 py-1.5 sm:py-2.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md">
+                <button 
+                  id="show-answer-btn"
+                  onClick={(e) => {
+                     e.currentTarget.blur();
+                     handleShowAnswer();
+                  }} 
+                  className="px-2 sm:px-3 py-1.5 sm:py-2.5 bg-red-900/30 text-red-400 border border-red-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-red-900/50 transition-all shadow-md"
+                >
                   정답 보기(스킵)
                 </button>
               </div>
@@ -1758,7 +1788,7 @@ function MainApp() {
         </div>
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, flashIdx, touchCandidates, fontSizeLevel, activeTouchCandidates]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, skimmingWrongs, touchCandidates, fontSizeLevel, activeTouchCandidates]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
