@@ -69,15 +69,6 @@ const getFullChosung = (str: string) => {
   return res;
 };
 
-const composeChosung = (str: string) => {
-  if (!str) return '';
-  return str.replace(/ㄱㄱ/g, 'ㄲ')
-            .replace(/ㄷㄷ/g, 'ㄸ')
-            .replace(/ㅂㅂ/g, 'ㅃ')
-            .replace(/ㅅㅅ/g, 'ㅆ')
-            .replace(/ㅈㅈ/g, 'ㅉ');
-};
-
 const autoApplyDictHelper = (content: string, dict: any) => {
   try {
     if (!dict) return content;
@@ -179,8 +170,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
 
   const validAnswers = useMemo(() => {
       const expectedClean = expected.replace(/\s+/g, '').toLowerCase();
-      const cho = getFullChosung(expectedClean);
-      const answers = [expectedClean, cho, composeChosung(cho)];
+      const answers = [expectedClean, getFullChosung(expectedClean)];
       
       if (abbrDict) {
           Object.entries(abbrDict).forEach(([k, v]) => {
@@ -189,10 +179,8 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
               const orig = strK.length >= strV.length ? strK : strV;
               const short = strK.length < strV.length ? strK : strV;
               if (expectedClean === orig) {
-                  const shortCho = getFullChosung(short);
                   answers.push(short);
-                  answers.push(shortCho); 
-                  answers.push(composeChosung(shortCho)); 
+                  answers.push(getFullChosung(short)); 
               }
           });
       }
@@ -263,8 +251,8 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
       className={`inline-block mx-1 px-1.5 py-0.5 text-center font-bold border-b-2 outline-none transition-all ${
         inputStatus === 'wrong' ? 'bg-red-900/40 text-red-300 border-red-500 placeholder-red-400' :
         inputStatus === 'correct' ? 'bg-teal-900/40 text-teal-300 border-teal-500' :
-        hintLetter ? 'bg-white/10 text-amber-400 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
-        'bg-white/10 text-current border-white/20 focus:border-white/50'
+        hintLetter ? 'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
+        'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400'
       }`}
       style={{ width: '4.5em', maxWidth: '100%' }}
     />
@@ -680,6 +668,50 @@ function MainApp() {
     return finalCandidates.sort((a, b) => a.localeCompare(b, 'ko'));
 
   }, [currentBlankIdx, blanks, touchCandidates, globalDict.groups]); 
+
+  const activeFolderCards = useMemo(() => {
+    if (!activeCard) return [];
+    return savedCards.filter(c => c.folder_name === activeCard.folder_name).sort((a,b) => (a.sort_order || 999999) - (b.sort_order || 999999) || parseInt(a.id) - parseInt(b.id)); 
+  }, [activeCard, savedCards]);
+
+  const activeCardIdx = activeFolderCards.findIndex(c => c.id === activeCard?.id);
+
+  const saveCurrentProgress = (card: any) => {
+    if (!card) return;
+    const exStats = getExtendedStats(card.memo);
+    exStats.text = statsRef.current.text;
+    exStats.filled = statsRef.current.filled;
+    exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+    const newMemo = JSON.stringify(exStats);
+    
+    setSavedCards(prev => {
+        const next = prev.map(c => c.id === card.id ? { ...c, memo: newMemo } : c);
+        localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
+        return next;
+    });
+    pushToQueue('MEMO', { id: card.id, memo: newMemo });
+    
+    if (navigator.onLine) {
+        fetch("https://api.blankd.top/api/save-card", {
+            method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet_address: safeAddress, card_id: card.id, card_content: card.content, answer_text: card.answer_text || "", folder_name: card.folder_name, memo: newMemo })
+        }).catch(()=>{});
+    }
+  };
+
+  const goPrevCard = () => {
+      if (activeCardIdx > 0) {
+          saveCurrentProgress(activeCard);
+          setActiveCard(activeFolderCards[activeCardIdx - 1]);
+      }
+  };
+
+  const goNextCard = () => {
+      if (activeCardIdx < activeFolderCards.length - 1) {
+          saveCurrentProgress(activeCard);
+          setActiveCard(activeFolderCards[activeCardIdx + 1]);
+      }
+  };
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -1215,13 +1247,22 @@ function MainApp() {
       const targetWrongIndices = activeCard._targetWrongIndices || null;
       const isTargetMode = !!targetWrong || !!targetWrongIndices || !!activeCard._isTargetMode;
 
+      if (activeTab === 'record' && !isTargetMode) {
+          const stats = getExtendedStats(activeCard.memo);
+          const lastWrong = Array.from(stats.wrongIndices || []);
+          if (lastWrong.length > 0) {
+              activeCard._targetWrongIndices = lastWrong;
+              activeCard._isTargetMode = true;
+          }
+      }
+
       const restoredBlanks = foundBlanks.map((b, i) => {
           let isCorrect = i < lastIdx;
-          if (targetWrongIndices) {
-              isCorrect = !targetWrongIndices.includes(i); 
-          } else if (targetWrong) {
+          if (activeCard._targetWrongIndices) {
+              isCorrect = !activeCard._targetWrongIndices.includes(i); 
+          } else if (activeCard._targetWrongWords) {
               const cleanAns = b.answer.replace(/\s+/g, '');
-              const isTarget = targetWrong.some((w: string) => w.replace(/\s+/g, '') === cleanAns);
+              const isTarget = activeCard._targetWrongWords.some((w: string) => w.replace(/\s+/g, '') === cleanAns);
               isCorrect = !isTarget;
           }
           return { ...b, correct: isCorrect };
@@ -1248,7 +1289,7 @@ function MainApp() {
       statsRef.current = { 
           text: cleanText, 
           filled: stats.filled, 
-          wrongIndices: (isTargetMode || lastIdx > 0) ? new Set(stats.wrongIndices || []) : new Set(),
+          wrongIndices: (activeCard._isTargetMode || lastIdx > 0) ? new Set(stats.wrongIndices || []) : new Set(),
           sessionCorrect: 0
       };
       
@@ -1260,7 +1301,7 @@ function MainApp() {
         recognitionRef.current.onend = null; recognitionRef.current.stop(); recognitionRef.current = null; setIsListening(false);
       }
     }
-  }, [activeCard]);
+  }, [activeCard, activeTab]);
 
   useEffect(() => {
       if (activeCard && inputStatus === 'idle' && inputMode !== 'speed') {
@@ -1278,8 +1319,8 @@ function MainApp() {
     const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = 0;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     
-    const isTargetMode = !!activeCard._targetWrongWords || !!activeCard._isTargetMode;
-    const correctCount = Math.max(0, blanks.length - wrongArr.length);
+    const isTargetMode = !!activeCard._targetWrongWords || !!activeCard._isTargetMode || activeTab === 'record';
+    const correctCount = statsRef.current.sessionCorrect || 0;
     const isCorrect = wrongArr.length === 0;
 
     const exStats = getExtendedStats(activeCard.memo);
@@ -1609,16 +1650,21 @@ function MainApp() {
     }
 
     let renderPage = 0; let bIdx = 0; const contentToRender: any[] = [];
+    const isSessionCompleted = !!sessionCompletedCards.current[activeCard.id] || currentBlankIdx >= blanks.length;
+
     parts.forEach((part: string, i: number) => {
       if (part === '##PAGE_BREAK##') { renderPage++; return; }
       if (renderPage === displayPage) {
           if (part.startsWith('[') && part.endsWith(']')) {
             const isCorrect = blanks[bIdx]?.correct; 
-            const isCurrent = bIdx === currentBlankIdx; 
+            const isCurrent = bIdx === currentBlankIdx && !isSessionCompleted; 
             const isWrong = statsRef.current.wrongIndices.has(bIdx); 
-            if (isCorrect) {
+            
+            if (isSessionCompleted || bIdx < currentBlankIdx) {
               contentToRender.push(
-                <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
+                <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>
+                  {part.replace(/\[|\]/g, '')}
+                </span>
               );
             } else if (inputMode === 'speed' && bIdx >= currentBlankIdx) {
               const isSpeedMarkedWrong = speedWrongs.has(bIdx);
@@ -1626,7 +1672,7 @@ function MainApp() {
                 <span key={i} onClick={() => toggleSpeedWrong(bIdx)}
                       className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] cursor-pointer select-none ${
                           isSpeedMarkedWrong ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
-                          'bg-white/10 text-current border-white/20 hover:bg-white/20'
+                          'bg-white/10 text-current border border-white/20 hover:bg-white/20'
                       }`}>
                     {isSpeedMarkedWrong ? '🤔 모름' : '\u00A0'}
                 </span>
@@ -1643,7 +1689,7 @@ function MainApp() {
                     <span id="active-blank" key="active-blank-input-fixed" className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${
                         inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
                         inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 
-                        'bg-white/10 text-current border-white/20 animate-pulse shadow-[0_0_8px_rgba(255,255,255,0.1)]'
+                        'bg-white/10 text-current border border-white/20 animate-pulse shadow-[0_0_8px_rgba(255,255,255,0.1)]'
                     }`}>
                       {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '\u00A0'}
                     </span>
@@ -1658,27 +1704,35 @@ function MainApp() {
     });
     
     return (
-      <div className="flex flex-col w-full h-full max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
-        <div className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar px-3 py-2 sm:py-4 md:px-5 pb-4 sm:pb-12">
-            <div className="flex justify-between items-center border-b border-white/10 pb-1 sm:pb-2 w-full gap-2 sm:gap-3 overflow-hidden mb-2 sm:mb-4 sticky top-0 bg-[#0a0a0c] z-20 pt-1">
-                <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
-                  {displayTitle}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
-                     <span className="text-[9px] sm:text-[10px] text-white/40 font-bold">크기</span>
-                     <button onClick={() => setFontSizeLevel(p => Math.max(1, p - 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">-</button>
-                     <span className="text-[10px] sm:text-[11px] font-mono text-white/80 w-3 text-center">{fontSizeLevel}</span>
-                     <button onClick={() => setFontSizeLevel(p => Math.min(5, p + 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
-                  </div>
-                  <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
-                    {isMemoOpen ? '닫기 ✕' : '📝 메모'}
-                  </button>
-                  <button onClick={() => registerToMarket(activeCard.id)} className="px-2 py-1 bg-amber-900/40 text-amber-400 text-[10px] rounded border border-amber-500/30 hover:bg-amber-900/60 transition-colors hidden sm:inline-block whitespace-nowrap">마켓 판매</button>
-                  <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
-                </div>
+      <div className="flex flex-col w-full h-full max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md shadow-xl">
+        
+        {/* 상단 고정 메뉴 (스크롤 제외 구역) */}
+        <div className="shrink-0 flex justify-between items-center border-b border-white/10 px-3 py-2 sm:px-5 sm:py-3 w-full gap-2 sm:gap-3 bg-[#0a0a0c] z-20">
+            <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
+              {displayTitle}
             </div>
-            
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
+                 <button onClick={(e) => { e.currentTarget.blur(); goPrevCard(); }} disabled={activeCardIdx <= 0} className="px-1.5 py-0.5 hover:bg-white/10 rounded transition-colors disabled:opacity-30">◀</button>
+                 <span className="text-[10px] sm:text-[11px] font-mono text-white/80 mx-1">{activeCardIdx + 1} / {activeFolderCards.length}</span>
+                 <button onClick={(e) => { e.currentTarget.blur(); goNextCard(); }} disabled={activeCardIdx >= activeFolderCards.length - 1} className="px-1.5 py-0.5 hover:bg-white/10 rounded transition-colors disabled:opacity-30">▶</button>
+              </div>
+              <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
+                 <span className="text-[9px] sm:text-[10px] text-white/40 font-bold">크기</span>
+                 <button onClick={(e) => { e.currentTarget.blur(); setFontSizeLevel(p => Math.max(1, p - 1)); }} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">-</button>
+                 <span className="text-[10px] sm:text-[11px] font-mono text-white/80 w-3 text-center">{fontSizeLevel}</span>
+                 <button onClick={(e) => { e.currentTarget.blur(); setFontSizeLevel(p => Math.min(5, p + 1)); }} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
+              </div>
+              <button onClick={(e) => { e.currentTarget.blur(); setIsMemoOpen(!isMemoOpen); }} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
+                {isMemoOpen ? '닫기 ✕' : '📝 메모'}
+              </button>
+              <button onClick={(e) => { e.currentTarget.blur(); registerToMarket(activeCard.id); }} className="px-2 py-1 bg-amber-900/40 text-amber-400 text-[10px] rounded border border-amber-500/30 hover:bg-amber-900/60 transition-colors hidden sm:inline-block whitespace-nowrap">마켓 판매</button>
+              <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
+            </div>
+        </div>
+        
+        {/* 본문 스크롤 영역 (이 부분만 단독으로 스크롤 됨) */}
+        <div className="flex-1 overflow-y-auto scroll-smooth custom-scrollbar px-3 py-3 sm:py-4 md:px-5 pb-8 bg-[#0a0a0c]">
             {isMemoOpen && (
               <div className="mb-4 pb-4 border-b border-white/10 w-full animate-in slide-in-from-top-2">
                  <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { 
@@ -1697,10 +1751,11 @@ function MainApp() {
             </div>
         </div>
 
+        {/* 하단 고정 메뉴 (스크롤 제외 구역) */}
         <div className="shrink-0 bg-[#0d0d0f] border-t border-white/10 p-1.5 sm:p-3 z-30 flex flex-col gap-1.5 sm:gap-3 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
             {inputMode === 'speed' && currentBlankIdx < blanks.length && (
-              <div className="flex flex-col gap-1.5 sm:gap-2 w-full p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner" style={{ maxHeight: '25vh' }}>
+              <div className="flex flex-col gap-1.5 sm:gap-2 w-full p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[10px] sm:text-[11px] text-amber-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
                     <span className="animate-pulse">⚡</span> 
@@ -1792,7 +1847,7 @@ function MainApp() {
         </div>
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, speedWrongs, touchCandidates, fontSizeLevel, activeTouchCandidates]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, speedWrongs, touchCandidates, fontSizeLevel, activeTouchCandidates, activeCardIdx, activeFolderCards.length]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
