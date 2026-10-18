@@ -1156,7 +1156,6 @@ function MainApp() {
     });
   };
 
-  // 💡 [수정] 현재 보고 있는 페이지의 빈칸만 정확하게 채점하여 넘기도록 보강
   const handleSkimmingSubmit = (pageEndIdx: number) => {
     if (isProcessingRef.current) return;
     isProcessingRef.current = true;
@@ -1620,7 +1619,6 @@ function MainApp() {
       if (part === '##PAGE_BREAK##') { renderPage++; return; }
       if (renderPage === displayPage) {
           if (part.startsWith('[') && part.endsWith(']')) {
-            // 💡 [핵심 버그 수정] 클로저 문제를 방지하기 위해 현재 빈칸의 인덱스를 상수로 고정!
             const targetBlankIdx = bIdx;
             lastBlankIdxOnPage = targetBlankIdx;
 
@@ -1644,7 +1642,8 @@ function MainApp() {
                           isSkimmingMarkedWrong ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
                           'bg-white/10 text-current border-white/20 hover:bg-white/20'
                       }`}>
-                    {isSkimmingMarkedWrong ? '🤔 모름' : '\u00A0'}
+                    {/* 💡 [수정] 터치 시 '🤔 모름' 대신 실제 정답이 즉시 표시되도록 변경 */}
+                    {isSkimmingMarkedWrong ? (blanks[targetBlankIdx]?.answer || part.replace(/\[|\]/g, '').trim()) : '\u00A0'}
                 </span>
               );
             } else if (isCurrent) {
@@ -1720,7 +1719,7 @@ function MainApp() {
                 <div className="w-full text-[10px] sm:text-[11px] text-amber-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
                     <span className="animate-pulse">⚡</span> 
-                    모르는 빈칸(🤔)만 터치하고 제출을 누르면 나머지는 모두 정답 처리됩니다.
+                    모르는 빈칸을 터치해 정답을 확인(오답 체크)하고 제출을 누르면 나머지는 모두 정답 처리됩니다.
                   </div>
                 </div>
                 <button 
