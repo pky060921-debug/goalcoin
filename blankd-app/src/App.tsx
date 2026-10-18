@@ -69,6 +69,15 @@ const getFullChosung = (str: string) => {
   return res;
 };
 
+const composeChosung = (str: string) => {
+  if (!str) return '';
+  return str.replace(/ㄱㄱ/g, 'ㄲ')
+            .replace(/ㄷㄷ/g, 'ㄸ')
+            .replace(/ㅂㅂ/g, 'ㅃ')
+            .replace(/ㅅㅅ/g, 'ㅆ')
+            .replace(/ㅈㅈ/g, 'ㅉ');
+};
+
 const autoApplyDictHelper = (content: string, dict: any) => {
   try {
     if (!dict) return content;
@@ -170,7 +179,8 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
 
   const validAnswers = useMemo(() => {
       const expectedClean = expected.replace(/\s+/g, '').toLowerCase();
-      const answers = [expectedClean, getFullChosung(expectedClean)];
+      const cho = getFullChosung(expectedClean);
+      const answers = [expectedClean, cho, composeChosung(cho)];
       
       if (abbrDict) {
           Object.entries(abbrDict).forEach(([k, v]) => {
@@ -179,8 +189,10 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
               const orig = strK.length >= strV.length ? strK : strV;
               const short = strK.length < strV.length ? strK : strV;
               if (expectedClean === orig) {
+                  const shortCho = getFullChosung(short);
                   answers.push(short);
-                  answers.push(getFullChosung(short)); 
+                  answers.push(shortCho); 
+                  answers.push(composeChosung(shortCho)); 
               }
           });
       }
@@ -251,8 +263,8 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
       className={`inline-block mx-1 px-1.5 py-0.5 text-center font-bold border-b-2 outline-none transition-all ${
         inputStatus === 'wrong' ? 'bg-red-900/40 text-red-300 border-red-500 placeholder-red-400' :
         inputStatus === 'correct' ? 'bg-teal-900/40 text-teal-300 border-teal-500' :
-        hintLetter ? 'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
-        'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400'
+        hintLetter ? 'bg-white/10 text-amber-400 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
+        'bg-white/10 text-current border-white/20 focus:border-white/50'
       }`}
       style={{ width: '4.5em', maxWidth: '100%' }}
     />
@@ -584,13 +596,16 @@ function MainApp() {
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
 
-  const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>() });
+  const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0 });
   
   const [inputMode, setInputMode] = useState<'typing'|'touch'|'speed'>('typing'); 
   const [speedWrongs, setSpeedWrongs] = useState<Set<number>>(new Set());
 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   const isProcessingRef = useRef(false);
+
+  // 💡 [수정] 누락되었던 sessionCompletedCards 선언 복구
+  const sessionCompletedCards = useRef<Record<string, { blanks: any[], wrongIndices: Set<number>, sessionCorrect: number }>>({});
 
   const [goalBalance, setGoalBalance] = useState<number>(0);
   const [activityLog, setActivityLog] = useState<Record<string, number>>({});
@@ -1498,8 +1513,7 @@ function MainApp() {
     const expected = blanks[currentBlankIdx].answer.replace(/\s+/g, '').toLowerCase();
     let actual = typeof overrideInput === 'string' ? overrideInput.replace(/\s+/g, '').toLowerCase() : '';
     
-    const expectedCho = getFullChosung(expected);
-    let isCorrect = (expected === actual) || (expectedCho === actual) || (composeChosung(expectedCho) === actual);
+    let isCorrect = (expected === actual) || (getFullChosung(expected) === actual);
 
     if (!isCorrect && globalDict.abbrs) {
       Object.entries(globalDict.abbrs).forEach(([k, v]) => {
@@ -1507,7 +1521,7 @@ function MainApp() {
         const strV = (v as string).replace(/\s+/g, '').toLowerCase();
         const orig = strK.length >= strV.length ? strK : strV;
         const short = strK.length < strV.length ? strK : strV;
-        if (expected === orig && (actual === short || actual === getFullChosung(short) || actual === composeChosung(getFullChosung(short)))) { 
+        if (expected === orig && (actual === short || actual === getFullChosung(short))) { 
             isCorrect = true; 
         }
       });
