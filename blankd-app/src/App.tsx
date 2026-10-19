@@ -224,6 +224,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
         if (e.isComposing) return; 
         if (e.key === 'Enter') {
             e.preventDefault();
+            e.stopPropagation(); // 💡 글로벌 엔터 이벤트와 중복 충돌 방지
             if (inputStatus !== 'idle') return;
             const el = e.target as HTMLInputElement;
             const newVal = el.value;
@@ -1241,11 +1242,11 @@ function MainApp() {
 
       const stats = getExtendedStats(activeCard.memo); 
       
+      // 💡 [핵심 수정] 엔터를 쳤을 때 메모장이 갑자기 튀어나오지 않도록 기본값을 닫힘(false)으로 고정
+      setIsMemoOpen(false);
       setIsFrozen(false); setHintLetter(null); 
 
-      // 💡 저장된 메모가 있으면 자동으로 우측 메모 컨테이너를 열어줌
       let cleanText = stats.text ? stats.text.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim() : "";
-      setIsMemoOpen(cleanText.length > 0);
 
       statsRef.current = { 
           text: cleanText, 
@@ -1666,11 +1667,13 @@ function MainApp() {
           } else { contentToRender.push(<span key={i}>{part}</span>); }
       } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
     });
+
+    const hasSavedMemo = statsRef.current.text && statsRef.current.text.trim().length > 0;
     
     return (
-      <div className="flex flex-col w-full h-[62vh] sm:h-[68vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
+      <div className="flex flex-col w-full h-[65vh] sm:h-[72vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
         
-        {/* 1. 상단 고정 컨테이너 (스크롤 제외) */}
+        {/* 1. 상단 고정 컨테이너 (스크롤 제외) - 모든 버튼에 blur() 추가하여 엔터키 간섭 차단 */}
         <div className="shrink-0 flex justify-between items-center border-b border-white/10 px-3 py-2 sm:px-5 sm:py-3 w-full gap-2 sm:gap-3 bg-[#0a0a0c] z-20">
             <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
               {displayTitle}
@@ -1678,14 +1681,15 @@ function MainApp() {
             <div className="flex items-center gap-2 shrink-0">
               <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
                  <span className="text-[9px] sm:text-[10px] text-white/40 font-bold">크기</span>
-                 <button onClick={() => setFontSizeLevel(p => Math.max(1, p - 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">-</button>
+                 <button onClick={(e) => { e.currentTarget.blur(); setFontSizeLevel(p => Math.max(1, p - 1)); }} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">-</button>
                  <span className="text-[10px] sm:text-[11px] font-mono text-white/80 w-3 text-center">{fontSizeLevel}</span>
-                 <button onClick={() => setFontSizeLevel(p => Math.min(5, p + 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
+                 <button onClick={(e) => { e.currentTarget.blur(); setFontSizeLevel(p => Math.min(5, p + 1)); }} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
               </div>
-              <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
-                {isMemoOpen ? '노트 닫기 ✕' : '📝 암기 노트'}
+              <button onClick={(e) => { e.currentTarget.blur(); setIsMemoOpen(!isMemoOpen); }} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md flex items-center gap-1">
+                <span>{isMemoOpen ? '노트 닫기 ✕' : '📝 암기 노트'}</span>
+                {!isMemoOpen && hasSavedMemo && <span className="text-teal-300 text-[8px] animate-pulse">●</span>}
               </button>
-              <button onClick={() => registerToMarket(activeCard.id)} className="px-2 py-1 bg-amber-900/40 text-amber-400 text-[10px] rounded border border-amber-500/30 hover:bg-amber-900/60 transition-colors hidden sm:inline-block whitespace-nowrap">마켓 판매</button>
+              <button onClick={(e) => { e.currentTarget.blur(); registerToMarket(activeCard.id); }} className="px-2 py-1 bg-amber-900/40 text-amber-400 text-[10px] rounded border border-amber-500/30 hover:bg-amber-900/60 transition-colors hidden sm:inline-block whitespace-nowrap">마켓 판매</button>
               <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
             </div>
         </div>
@@ -1694,7 +1698,7 @@ function MainApp() {
         <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden bg-[#0a0a0c]">
             
             {/* 좌측: 조항 본문 (독립 스크롤) */}
-            <div className="flex-1 min-h-0 overflow-y-scroll scroll-smooth custom-scrollbar px-3 py-3 sm:py-4 md:px-5 pb-8">
+            <div className="flex-1 min-h-0 overflow-y-scroll scroll-smooth custom-scrollbar px-3 py-3 sm:py-4 md:px-6 pb-8">
                 <div className={`whitespace-pre-wrap leading-relaxed ${bodyClass} font-serif break-all break-words w-full max-w-full text-white/90`}>
                     {contentToRender}
                 </div>
@@ -1702,7 +1706,7 @@ function MainApp() {
 
             {/* 우측: 별도 분리된 메모 컨테이너 (토글 시 표시) */}
             {isMemoOpen && (
-              <div className="w-full md:w-72 lg:w-80 h-48 md:h-full shrink-0 border-t md:border-t-0 md:border-l border-teal-500/30 bg-teal-950/10 flex flex-col p-3 animate-in fade-in duration-200">
+              <div className="w-full md:w-80 lg:w-96 h-48 md:h-full shrink-0 border-t md:border-t-0 md:border-l border-teal-500/30 bg-teal-950/10 flex flex-col p-3 sm:p-4 animate-in fade-in duration-200">
                  <div className="flex justify-between items-center mb-2 pb-1.5 border-b border-teal-500/20 shrink-0">
                     <span className="text-xs font-bold text-teal-400 flex items-center gap-1">
                       📌 나만의 암기 노트
@@ -1724,7 +1728,7 @@ function MainApp() {
                         exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
                         handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats)); 
                     }} 
-                    className="flex-1 w-full text-[12px] sm:text-[13px] leading-relaxed text-teal-200 bg-black/40 p-2.5 rounded border border-teal-500/30 outline-none focus:border-teal-400 transition-all resize-none custom-scrollbar shadow-inner font-sans" 
+                    className="flex-1 w-full text-[12px] sm:text-[13px] leading-relaxed text-teal-200 bg-black/40 p-2.5 sm:p-3 rounded border border-teal-500/30 outline-none focus:border-teal-400 transition-all resize-none custom-scrollbar shadow-inner font-sans" 
                  />
               </div>
             )}
