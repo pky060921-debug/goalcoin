@@ -224,7 +224,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
         if (e.isComposing) return; 
         if (e.key === 'Enter') {
             e.preventDefault();
-            e.stopPropagation(); // 💡 글로벌 엔터 이벤트와 중복 충돌 방지
+            e.stopPropagation();
             if (inputStatus !== 'idle') return;
             const el = e.target as HTMLInputElement;
             const newVal = el.value;
@@ -1242,7 +1242,6 @@ function MainApp() {
 
       const stats = getExtendedStats(activeCard.memo); 
       
-      // 💡 [핵심 수정] 엔터를 쳤을 때 메모장이 갑자기 튀어나오지 않도록 기본값을 닫힘(false)으로 고정
       setIsMemoOpen(false);
       setIsFrozen(false); setHintLetter(null); 
 
@@ -1639,11 +1638,12 @@ function MainApp() {
                         e.stopPropagation();
                         toggleSkimmingWrong(targetBlankIdx);
                       }}
-                      className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] cursor-pointer select-none ${
-                          isSkimmingMarkedWrong ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
-                          'bg-white/10 text-current border-white/20 hover:bg-white/20'
+                      className={`inline-block mx-1 text-center font-bold border-b-2 rounded-sm transition-all cursor-pointer select-none align-middle ${
+                          isSkimmingMarkedWrong 
+                            ? 'px-1.5 py-0.5 leading-snug bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' 
+                            : 'min-w-[40px] sm:min-w-[50px] h-4 sm:h-5 leading-none bg-white/10 text-current border-white/20 hover:bg-white/20'
                       }`}>
-                    {isSkimmingMarkedWrong ? (blanks[targetBlankIdx]?.answer || part.replace(/\[|\]/g, '').trim()) : '\u00A0'}
+                    {isSkimmingMarkedWrong ? (blanks[targetBlankIdx]?.answer || part.replace(/\[|\]/g, '').trim()) : ''}
                 </span>
               );
             } else if (isCurrent) {
@@ -1673,7 +1673,7 @@ function MainApp() {
     return (
       <div className="flex flex-col w-full h-[65vh] sm:h-[72vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
         
-        {/* 1. 상단 고정 컨테이너 (스크롤 제외) - 모든 버튼에 blur() 추가하여 엔터키 간섭 차단 */}
+        {/* 1. 상단 고정 컨테이너 (스크롤 제외) */}
         <div className="shrink-0 flex justify-between items-center border-b border-white/10 px-3 py-2 sm:px-5 sm:py-3 w-full gap-2 sm:gap-3 bg-[#0a0a0c] z-20">
             <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
               {displayTitle}
