@@ -1241,11 +1241,11 @@ function MainApp() {
 
       const stats = getExtendedStats(activeCard.memo); 
       
-      setIsMemoOpen(false);
       setIsFrozen(false); setHintLetter(null); 
 
-      let cleanText = stats.text;
-      if (cleanText) { cleanText = cleanText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(); }
+      // 💡 저장된 메모가 있으면 자동으로 우측 메모 컨테이너를 열어줌
+      let cleanText = stats.text ? stats.text.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim() : "";
+      setIsMemoOpen(cleanText.length > 0);
 
       statsRef.current = { 
           text: cleanText, 
@@ -1642,7 +1642,6 @@ function MainApp() {
                           isSkimmingMarkedWrong ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 
                           'bg-white/10 text-current border-white/20 hover:bg-white/20'
                       }`}>
-                    {/* 💡 [수정] 터치 시 '🤔 모름' 대신 실제 정답이 즉시 표시되도록 변경 */}
                     {isSkimmingMarkedWrong ? (blanks[targetBlankIdx]?.answer || part.replace(/\[|\]/g, '').trim()) : '\u00A0'}
                 </span>
               );
@@ -1684,31 +1683,51 @@ function MainApp() {
                  <button onClick={() => setFontSizeLevel(p => Math.min(5, p + 1))} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
               </div>
               <button onClick={() => setIsMemoOpen(!isMemoOpen)} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md">
-                {isMemoOpen ? '닫기 ✕' : '📝 메모'}
+                {isMemoOpen ? '노트 닫기 ✕' : '📝 암기 노트'}
               </button>
               <button onClick={() => registerToMarket(activeCard.id)} className="px-2 py-1 bg-amber-900/40 text-amber-400 text-[10px] rounded border border-amber-500/30 hover:bg-amber-900/60 transition-colors hidden sm:inline-block whitespace-nowrap">마켓 판매</button>
               <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
             </div>
         </div>
 
-        {/* 2. 가운데 본문 컨테이너 (우측 스크롤바 상시 노출 및 단독 스크롤) */}
-        <div className="flex-1 min-h-0 overflow-y-scroll scroll-smooth custom-scrollbar px-3 py-3 sm:py-4 md:px-5 pb-8 bg-[#0a0a0c]">
+        {/* 2. 가운데 영역: 좌측 본문 스크롤 + 우측 메모 컨테이너 */}
+        <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden bg-[#0a0a0c]">
+            
+            {/* 좌측: 조항 본문 (독립 스크롤) */}
+            <div className="flex-1 min-h-0 overflow-y-scroll scroll-smooth custom-scrollbar px-3 py-3 sm:py-4 md:px-5 pb-8">
+                <div className={`whitespace-pre-wrap leading-relaxed ${bodyClass} font-serif break-all break-words w-full max-w-full text-white/90`}>
+                    {contentToRender}
+                </div>
+            </div>
+
+            {/* 우측: 별도 분리된 메모 컨테이너 (토글 시 표시) */}
             {isMemoOpen && (
-              <div className="mb-4 pb-4 border-b border-white/10 w-full animate-in slide-in-from-top-2">
-                 <input defaultValue={statsRef.current.text || ""} placeholder="학습 인사이트 기록..." onBlur={(e) => { 
-                     statsRef.current.text = e.target.value; 
-                     const exStats = getExtendedStats(activeCard.memo);
-                     exStats.text = e.target.value;
-                     exStats.filled = statsRef.current.filled;
-                     exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
-                     handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats)); 
-                 }} className="text-[13px] text-teal-300 bg-teal-950/20 p-3 rounded border border-teal-500/30 w-full outline-none focus:border-teal-400 transition-all shadow-inner" autoFocus/>
+              <div className="w-full md:w-72 lg:w-80 h-48 md:h-full shrink-0 border-t md:border-t-0 md:border-l border-teal-500/30 bg-teal-950/10 flex flex-col p-3 animate-in fade-in duration-200">
+                 <div className="flex justify-between items-center mb-2 pb-1.5 border-b border-teal-500/20 shrink-0">
+                    <span className="text-xs font-bold text-teal-400 flex items-center gap-1">
+                      📌 나만의 암기 노트
+                    </span>
+                    <span className="text-[10px] text-teal-500/70 font-mono">자동 저장됨</span>
+                 </div>
+                 <textarea 
+                    key={`memo-${activeCard.id}`}
+                    defaultValue={statsRef.current.text || ""} 
+                    placeholder="이 조항의 핵심 키워드, 두문자, 헷갈리는 포인트를 자유롭게 기록하세요. (줄바꿈 가능)" 
+                    onChange={(e) => {
+                        statsRef.current.text = e.target.value;
+                    }}
+                    onBlur={(e) => { 
+                        statsRef.current.text = e.target.value; 
+                        const exStats = getExtendedStats(activeCard.memo);
+                        exStats.text = e.target.value;
+                        exStats.filled = statsRef.current.filled;
+                        exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+                        handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats)); 
+                    }} 
+                    className="flex-1 w-full text-[12px] sm:text-[13px] leading-relaxed text-teal-200 bg-black/40 p-2.5 rounded border border-teal-500/30 outline-none focus:border-teal-400 transition-all resize-none custom-scrollbar shadow-inner font-sans" 
+                 />
               </div>
             )}
-
-            <div className={`whitespace-pre-wrap leading-relaxed ${bodyClass} font-serif break-all break-words w-full max-w-full text-white/90`}>
-                {contentToRender}
-            </div>
         </div>
 
         {/* 3. 하단 별도 고정 컨테이너 (스크롤 제외) */}
