@@ -17,7 +17,7 @@ export const CardModal = ({
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Enter') {
         const target = e.target as HTMLElement;
-        if (target.tagName === 'INPUT') {
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
           const inputValue = (target as HTMLInputElement).value.trim();
           if (inputValue !== '') return; 
         }
@@ -32,11 +32,12 @@ export const CardModal = ({
   if (!activeCard) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-[#0a0a0c] border border-white/10 rounded-sm shadow-2xl w-[95vw] max-w-6xl max-h-[85vh] flex flex-col relative overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+      {/* 💡 [수정] max-w-6xl 제한을 해제하고 max-w-[1800px]로 가로 폭을 대폭 확장 */}
+      <div className="bg-[#0a0a0c] border border-white/10 rounded-sm shadow-2xl w-[98vw] sm:w-[95vw] max-w-[1800px] max-h-[90vh] flex flex-col relative overflow-hidden">
         
-        {/* 상단 헤더: 타이머 삭제 및 깔끔한 상태 표시만 남김 */}
-        <div className="flex justify-between items-center border-b border-white/10 p-3 bg-black/40">
+        {/* 상단 헤더 */}
+        <div className="flex justify-between items-center border-b border-white/10 p-3 bg-black/40 shrink-0">
             <div className="flex items-center gap-3 pl-2">
               <span className="text-white/60 text-[13px] font-bold tracking-widest">학습 진행 중 📖</span>
             </div>
@@ -44,7 +45,7 @@ export const CardModal = ({
         </div>
 
         {/* 아이템 사용 및 포인트 표시 영역 */}
-        <div className="flex justify-between items-center bg-indigo-950/30 p-2.5 border-b border-indigo-500/20 px-4">
+        <div className="flex justify-between items-center bg-indigo-950/30 p-2.5 border-b border-indigo-500/20 px-4 shrink-0">
           <div className="flex gap-2">
              <button onClick={() => handleUseItem('hint', 10)} className="px-2 sm:px-3 py-1.5 bg-indigo-900/50 border border-indigo-500/50 text-indigo-300 text-[10px] sm:text-xs rounded-sm hover:bg-indigo-600/50 transition-colors shadow-sm flex items-center gap-1 active:scale-95">
                <span>🔍 첫 글자 힌트 (10P)</span>
