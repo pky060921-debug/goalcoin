@@ -590,8 +590,8 @@ function MainApp() {
   const [inputMode, setInputMode] = useState<'typing'|'touch'|'skimming'>('typing'); 
   const [skimmingWrongs, setSkimmingWrongs] = useState<Set<number>>(new Set());
   const [skimmingFocusIdx, setSkimmingFocusIdx] = useState<number>(0);
-  // 💡 [추가] 스페이스바 연속 두 번 입력(더블 탭) 감지용 타이머
-  const lastSpaceTimeRef = useRef<number>(0);
+  // 💡 [추가] 스키밍 자동 진행 일시정지 상태 관리
+  const [isSkimmingPaused, setIsSkimmingPaused] = useState<boolean>(false);
 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   const isProcessingRef = useRef(false);
@@ -675,7 +675,8 @@ function MainApp() {
 
   useEffect(() => {
     setSkimmingFocusIdx(currentBlankIdx);
-  }, [currentBlankIdx, activeCard]);
+    setIsSkimmingPaused(false);
+  }, [currentBlankIdx, activeCard, inputMode]);
 
   useEffect(() => {
     if (activeCard && inputMode === 'skimming') {
@@ -684,33 +685,52 @@ function MainApp() {
     }
   }, [skimmingFocusIdx, inputMode, activeCard]);
 
-  // 💡 [수정] 스키밍 모드: 마지막 빈칸에서 우측키 이동 시 다음 조항 제출 & 스페이스바 더블 탭 시 오답 전체 해제
+  // 💡 [추가] 스키밍 모드: 1초마다 자동으로 빈칸을 넘기며 정답을 보여주고, 끝나면 다음 조항으로 이동
+  useEffect(() => {
+    if (!activeCard || inputMode !== 'skimming' || isSkimmingPaused || blanks.length === 0) return;
+
+    const timer = setTimeout(() => {
+      if (skimmingFocusIdx < blanks.length - 1) {
+        setSkimmingFocusIdx(prev => prev + 1);
+      } else {
+        handleSkimmingSubmit(blanks.length - 1);
+      }
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [activeCard, inputMode, isSkimmingPaused, skimmingFocusIdx, blanks.length]);
+
+  // 💡 [수정] 스키밍 모드: 스페이스바 첫 입력 시 일시정지+오답체크 / 다시 스페이스바 입력 시 진행 재개
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (!activeCard) return;
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
 
       if (inputMode === 'skimming') {
-          if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+          if (e.code === 'Space' || e.key === ' ') {
               e.preventDefault();
-              if (skimmingFocusIdx >= blanks.length - 1) {
-                  handleSkimmingSubmit(blanks.length - 1);
+              if (!isSkimmingPaused) {
+                  setIsSkimmingPaused(true);
+                  setSkimmingWrongs(prev => {
+                      const next = new Set(prev);
+                      next.add(skimmingFocusIdx);
+                      return next;
+                  });
               } else {
-                  setSkimmingFocusIdx(prev => Math.min(blanks.length - 1, Math.max(currentBlankIdx, prev + 1)));
+                  setIsSkimmingPaused(false);
+                  if (skimmingFocusIdx < blanks.length - 1) {
+                      setSkimmingFocusIdx(prev => prev + 1);
+                  } else {
+                      handleSkimmingSubmit(blanks.length - 1);
+                  }
               }
+          } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+              e.preventDefault();
+              if (skimmingFocusIdx < blanks.length - 1) setSkimmingFocusIdx(prev => prev + 1);
+              else handleSkimmingSubmit(blanks.length - 1);
           } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
               e.preventDefault();
               setSkimmingFocusIdx(prev => Math.max(currentBlankIdx, prev - 1));
-          } else if (e.code === 'Space' || e.key === ' ') {
-              e.preventDefault();
-              const now = Date.now();
-              if (now - lastSpaceTimeRef.current < 350) {
-                  setSkimmingWrongs(new Set());
-                  lastSpaceTimeRef.current = 0;
-              } else {
-                  toggleSkimmingWrong(skimmingFocusIdx);
-                  lastSpaceTimeRef.current = now;
-              }
           }
       } else if (inputMode === 'touch') {
           const keyNum = parseInt(e.key, 10);
@@ -728,7 +748,7 @@ function MainApp() {
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [inputMode, activeCard, activeTouchCandidates, blanks, currentBlankIdx, inputStatus, skimmingFocusIdx, skimmingWrongs]);
+  }, [inputMode, activeCard, activeTouchCandidates, blanks, currentBlankIdx, inputStatus, skimmingFocusIdx, isSkimmingPaused, skimmingWrongs]);
 
 
   useEffect(() => {
@@ -1273,6 +1293,7 @@ function MainApp() {
       setCurrentBlankIdx(firstIdx !== -1 ? firstIdx : 0);
       setInputStatus('idle');
       setSkimmingWrongs(new Set());
+      setIsSkimmingPaused(false);
 
       const uniqueAnswers = Array.from(new Set(foundBlanks.map(b => b.answer)));
       setTouchCandidates(uniqueAnswers.sort((a, b) => a.localeCompare(b, 'ko')));
@@ -1671,20 +1692,30 @@ function MainApp() {
             } else if (inputMode === 'skimming' && targetBlankIdx >= currentBlankIdx) {
               const isSkimmingMarkedWrong = skimmingWrongs.has(targetBlankIdx);
               const isFocused = targetBlankIdx === skimmingFocusIdx;
+              const isRevealed = targetBlankIdx <= skimmingFocusIdx;
+              const answerText = blanks[targetBlankIdx]?.answer || part.replace(/\[|\]/g, '').trim();
+
               contentToRender.push(
                 <span key={i} 
                       id={`skimming-blank-${targetBlankIdx}`}
                       onClick={(e) => {
                         e.stopPropagation();
                         setSkimmingFocusIdx(targetBlankIdx);
-                        toggleSkimmingWrong(targetBlankIdx);
+                        if (!isSkimmingPaused) {
+                          setIsSkimmingPaused(true);
+                          setSkimmingWrongs(prev => new Set(prev).add(targetBlankIdx));
+                        } else {
+                          toggleSkimmingWrong(targetBlankIdx);
+                        }
                       }}
                       className={`inline-block mx-1 text-center font-bold border-b-2 rounded-sm transition-all cursor-pointer select-none align-middle ${
-                          isSkimmingMarkedWrong 
-                            ? `px-1.5 py-0.5 leading-snug bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)] ${isFocused ? 'ring-2 ring-amber-400 scale-105' : ''}` 
-                            : `min-w-[40px] sm:min-w-[50px] h-4 sm:h-5 leading-none ${isFocused ? 'bg-amber-500/30 border-amber-400 ring-2 ring-amber-400/80 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : 'bg-white/10 text-current border-white/20 hover:bg-white/20'}`
+                          !isRevealed 
+                            ? 'min-w-[40px] sm:min-w-[50px] h-4 sm:h-5 leading-none bg-white/5 border-white/20'
+                            : isSkimmingMarkedWrong 
+                              ? `px-1.5 py-0.5 leading-snug bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)] ${isFocused ? 'ring-2 ring-amber-400 scale-105' : ''}` 
+                              : `px-1.5 py-0.5 leading-snug ${isFocused ? 'bg-amber-500/30 text-amber-200 border-amber-400 ring-2 ring-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.5)] scale-105' : 'bg-teal-900/20 text-teal-400 border-teal-500/30'}`
                       }`}>
-                    {isSkimmingMarkedWrong ? (blanks[targetBlankIdx]?.answer || part.replace(/\[|\]/g, '').trim()) : ''}
+                    {isRevealed ? answerText : ''}
                 </span>
               );
             } else if (isCurrent) {
@@ -1781,20 +1812,43 @@ function MainApp() {
             {inputMode === 'skimming' && currentBlankIdx < blanks.length && (
               <div className="flex flex-col gap-1.5 sm:gap-2 w-full p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[10px] sm:text-[11px] text-amber-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
-                  <div className="flex items-center gap-1">
-                    <span className="animate-pulse">⚡</span> 
-                    방향키(◀▶) 이동 / 스페이스바: 정답확인 (2번 연속: 전체해제) / 마지막에서 ▶: 다음 조항
+                  <div className="flex items-center gap-1.5">
+                    <span className={isSkimmingPaused ? "" : "animate-pulse"}>{isSkimmingPaused ? '⏸️ 일시정지됨 (오답 기록됨)' : '▶️ 1초마다 자동 진행 중...'}</span> 
+                    <span className="text-white/60 font-normal hidden sm:inline">| 모르는 부분이 나오면 스페이스바를 누르세요</span>
                   </div>
+                  <span className="text-[10px] font-mono text-white/50">{skimmingFocusIdx + 1} / {blanks.length}</span>
                 </div>
-                <button 
-                  onClick={(e) => {
-                     e.currentTarget.blur();
-                     handleSkimmingSubmit(lastBlankIdxOnPage);
-                  }} 
-                  className="w-full mt-0.5 sm:mt-1 py-2 sm:py-3.5 bg-amber-600 hover:bg-amber-500 border border-amber-400 text-white text-[12px] sm:text-[15px] font-bold rounded shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
-                >
-                  제출 및 다음으로 넘어가기 ▶
-                </button>
+                <div className="flex gap-2 w-full">
+                  <button 
+                    onClick={(e) => {
+                       e.currentTarget.blur();
+                       if (!isSkimmingPaused) {
+                         setIsSkimmingPaused(true);
+                         setSkimmingWrongs(prev => new Set(prev).add(skimmingFocusIdx));
+                       } else {
+                         setIsSkimmingPaused(false);
+                         if (skimmingFocusIdx < blanks.length - 1) setSkimmingFocusIdx(prev => prev + 1);
+                         else handleSkimmingSubmit(blanks.length - 1);
+                       }
+                    }} 
+                    className={`flex-1 py-2 sm:py-3.5 border text-white text-[12px] sm:text-[14px] font-bold rounded shadow-md active:scale-95 transition-all flex items-center justify-center gap-2 ${
+                      isSkimmingPaused 
+                        ? 'bg-teal-600 hover:bg-teal-500 border-teal-400 animate-pulse' 
+                        : 'bg-red-900/60 hover:bg-red-800 border-red-500/50 text-red-200'
+                    }`}
+                  >
+                    {isSkimmingPaused ? '▶️ 다시 진행하기 (Space)' : '⏸️ 모름 체크 및 일시정지 (Space)'}
+                  </button>
+                  <button 
+                    onClick={(e) => {
+                       e.currentTarget.blur();
+                       handleSkimmingSubmit(blanks.length - 1);
+                    }} 
+                    className="px-3 sm:px-4 py-2 sm:py-3.5 bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-white/70 text-[11px] sm:text-[13px] font-bold rounded shadow-md active:scale-95 transition-all shrink-0"
+                  >
+                    조항 스킵 ▶
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1873,7 +1927,7 @@ function MainApp() {
         </div>
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, skimmingWrongs, skimmingFocusIdx, touchCandidates, fontSizeLevel, activeTouchCandidates]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, skimmingWrongs, skimmingFocusIdx, isSkimmingPaused, touchCandidates, fontSizeLevel, activeTouchCandidates]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
