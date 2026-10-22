@@ -589,6 +589,8 @@ function MainApp() {
   
   const [inputMode, setInputMode] = useState<'typing'|'touch'|'skimming'>('typing'); 
   const [skimmingWrongs, setSkimmingWrongs] = useState<Set<number>>(new Set());
+  // 💡 [추가] 스키밍 모드에서 방향키 이동을 위한 포커스 인덱스
+  const [skimmingFocusIdx, setSkimmingFocusIdx] = useState<number>(0);
 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   const isProcessingRef = useRef(false);
@@ -670,12 +672,37 @@ function MainApp() {
 
   }, [currentBlankIdx, blanks, touchCandidates, globalDict.groups]); 
 
+  // 💡 [추가] 현재 빈칸 인덱스가 변경될 때 스키밍 포커스도 동기화
+  useEffect(() => {
+    setSkimmingFocusIdx(currentBlankIdx);
+  }, [currentBlankIdx, activeCard]);
+
+  // 💡 [추가] 스키밍 모드에서 방향키로 포커스 이동 시 자동 스크롤
+  useEffect(() => {
+    if (activeCard && inputMode === 'skimming') {
+      const el = document.getElementById(`skimming-blank-${skimmingFocusIdx}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [skimmingFocusIdx, inputMode, activeCard]);
+
+  // 💡 [수정] 스키밍 모드에서 방향키(이동) 및 스페이스바(오답 확인 토글) 지원
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (!activeCard) return;
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
 
-      if (inputMode === 'touch') {
+      if (inputMode === 'skimming') {
+          if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+              e.preventDefault();
+              setSkimmingFocusIdx(prev => Math.min(blanks.length - 1, Math.max(currentBlankIdx, prev + 1)));
+          } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              setSkimmingFocusIdx(prev => Math.max(currentBlankIdx, prev - 1));
+          } else if (e.code === 'Space' || e.key === ' ') {
+              e.preventDefault();
+              toggleSkimmingWrong(skimmingFocusIdx);
+          }
+      } else if (inputMode === 'touch') {
           const keyNum = parseInt(e.key, 10);
           if (!isNaN(keyNum) && keyNum >= 1 && keyNum <= 4) {
               e.preventDefault();
@@ -691,7 +718,7 @@ function MainApp() {
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [inputMode, activeCard, activeTouchCandidates, blanks, currentBlankIdx, inputStatus]);
+  }, [inputMode, activeCard, activeTouchCandidates, blanks, currentBlankIdx, inputStatus, skimmingFocusIdx]);
 
 
   useEffect(() => {
@@ -1602,10 +1629,11 @@ function MainApp() {
 
     const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter((p: string) => p !== '');
     let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
+    const targetIdxForPage = inputMode === 'skimming' ? skimmingFocusIdx : currentBlankIdx;
     for (let part of parts) {
         if (part === '##PAGE_BREAK##') tempPage++;
         else if (part.startsWith('[') && part.endsWith(']')) {
-            if (tempGlobalBlank === currentBlankIdx) { displayPage = tempPage; break; }
+            if (tempGlobalBlank === targetIdxForPage) { displayPage = tempPage; break; }
             tempGlobalBlank++;
         }
     }
@@ -1632,16 +1660,19 @@ function MainApp() {
               );
             } else if (inputMode === 'skimming' && targetBlankIdx >= currentBlankIdx) {
               const isSkimmingMarkedWrong = skimmingWrongs.has(targetBlankIdx);
+              const isFocused = targetBlankIdx === skimmingFocusIdx;
               contentToRender.push(
                 <span key={i} 
+                      id={`skimming-blank-${targetBlankIdx}`}
                       onClick={(e) => {
                         e.stopPropagation();
+                        setSkimmingFocusIdx(targetBlankIdx);
                         toggleSkimmingWrong(targetBlankIdx);
                       }}
                       className={`inline-block mx-1 text-center font-bold border-b-2 rounded-sm transition-all cursor-pointer select-none align-middle ${
                           isSkimmingMarkedWrong 
-                            ? 'px-1.5 py-0.5 leading-snug bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' 
-                            : 'min-w-[40px] sm:min-w-[50px] h-4 sm:h-5 leading-none bg-white/10 text-current border-white/20 hover:bg-white/20'
+                            ? `px-1.5 py-0.5 leading-snug bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)] ${isFocused ? 'ring-2 ring-amber-400 scale-105' : ''}` 
+                            : `min-w-[40px] sm:min-w-[50px] h-4 sm:h-5 leading-none ${isFocused ? 'bg-amber-500/30 border-amber-400 ring-2 ring-amber-400/80 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : 'bg-white/10 text-current border-white/20 hover:bg-white/20'}`
                       }`}>
                     {isSkimmingMarkedWrong ? (blanks[targetBlankIdx]?.answer || part.replace(/\[|\]/g, '').trim()) : ''}
                 </span>
@@ -1742,7 +1773,7 @@ function MainApp() {
                 <div className="w-full text-[10px] sm:text-[11px] text-amber-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
                     <span className="animate-pulse">⚡</span> 
-                    모르는 빈칸을 터치해 정답을 확인(오답 체크)하고 제출을 누르면 나머지는 모두 정답 처리됩니다.
+                    방향키(◀▶)와 스페이스바(또는 터치)로 모르는 빈칸을 확인하고 제출을 누르세요.
                   </div>
                 </div>
                 <button 
@@ -1832,7 +1863,7 @@ function MainApp() {
         </div>
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, skimmingWrongs, touchCandidates, fontSizeLevel, activeTouchCandidates]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, skimmingWrongs, skimmingFocusIdx, touchCandidates, fontSizeLevel, activeTouchCandidates]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
