@@ -590,7 +590,6 @@ function MainApp() {
   const [inputMode, setInputMode] = useState<'typing'|'touch'|'skimming'>('typing'); 
   const [skimmingWrongs, setSkimmingWrongs] = useState<Set<number>>(new Set());
   const [skimmingFocusIdx, setSkimmingFocusIdx] = useState<number>(0);
-  // 💡 [추가] 스키밍 자동 진행 일시정지 상태 관리
   const [isSkimmingPaused, setIsSkimmingPaused] = useState<boolean>(false);
 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
@@ -685,7 +684,7 @@ function MainApp() {
     }
   }, [skimmingFocusIdx, inputMode, activeCard]);
 
-  // 💡 [추가] 스키밍 모드: 1초마다 자동으로 빈칸을 넘기며 정답을 보여주고, 끝나면 다음 조항으로 이동
+  // 1초마다 자동으로 빈칸을 넘기며 정답을 보여주고, 끝나면 다음 조항으로 이동
   useEffect(() => {
     if (!activeCard || inputMode !== 'skimming' || isSkimmingPaused || blanks.length === 0) return;
 
@@ -700,15 +699,34 @@ function MainApp() {
     return () => clearTimeout(timer);
   }, [activeCard, inputMode, isSkimmingPaused, skimmingFocusIdx, blanks.length]);
 
-  // 💡 [수정] 스키밍 모드: 스페이스바 첫 입력 시 일시정지+오답체크 / 다시 스페이스바 입력 시 진행 재개
+  // 💡 [핵심 수정] 위 화살표(멈춤), 아래 화살표(다시 진행), 좌/우 화살표(수동 이동), 스페이스바(오답 체크 및 멈춤/재개) 분리
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (!activeCard) return;
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
 
       if (inputMode === 'skimming') {
-          if (e.code === 'Space' || e.key === ' ') {
+          if (e.key === 'ArrowUp') {
+              // 위 화살표: 진행 멈춤 (일시정지)
               e.preventDefault();
+              e.stopPropagation();
+              setIsSkimmingPaused(true);
+          } else if (e.key === 'ArrowDown') {
+              // 아래 화살표: 다시 진행 (재개)
+              e.preventDefault();
+              e.stopPropagation();
+              if (isSkimmingPaused) {
+                  setIsSkimmingPaused(false);
+                  if (skimmingFocusIdx < blanks.length - 1) {
+                      setSkimmingFocusIdx(prev => prev + 1);
+                  } else {
+                      handleSkimmingSubmit(blanks.length - 1);
+                  }
+              }
+          } else if (e.code === 'Space' || e.key === ' ') {
+              // 스페이스바: 모름(오답) 체크하며 일시정지 / 정지 상태에서 다시 누르면 재개
+              e.preventDefault();
+              e.stopPropagation();
               if (!isSkimmingPaused) {
                   setIsSkimmingPaused(true);
                   setSkimmingWrongs(prev => {
@@ -724,12 +742,16 @@ function MainApp() {
                       handleSkimmingSubmit(blanks.length - 1);
                   }
               }
-          } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+          } else if (e.key === 'ArrowRight') {
+              // 오른쪽 화살표: 다음 빈칸으로 수동 이동
               e.preventDefault();
+              e.stopPropagation();
               if (skimmingFocusIdx < blanks.length - 1) setSkimmingFocusIdx(prev => prev + 1);
               else handleSkimmingSubmit(blanks.length - 1);
-          } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+          } else if (e.key === 'ArrowLeft') {
+              // 왼쪽 화살표: 이전 빈칸으로 수동 이동
               e.preventDefault();
+              e.stopPropagation();
               setSkimmingFocusIdx(prev => Math.max(currentBlankIdx, prev - 1));
           }
       } else if (inputMode === 'touch') {
@@ -1812,11 +1834,11 @@ function MainApp() {
             {inputMode === 'skimming' && currentBlankIdx < blanks.length && (
               <div className="flex flex-col gap-1.5 sm:gap-2 w-full p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[10px] sm:text-[11px] text-amber-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <span className={isSkimmingPaused ? "" : "animate-pulse"}>{isSkimmingPaused ? '⏸️ 일시정지됨 (오답 기록됨)' : '▶️ 1초마다 자동 진행 중...'}</span> 
-                    <span className="text-white/60 font-normal hidden sm:inline">| 모르는 부분이 나오면 스페이스바를 누르세요</span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className={isSkimmingPaused ? "" : "animate-pulse"}>{isSkimmingPaused ? '⏸️ 일시정지됨' : '▶️ 1초마다 자동 진행 중...'}</span> 
+                    <span className="text-white/60 font-normal hidden sm:inline">| ▲: 멈춤 / ▼: 재개 / Space: 모름(오답)+멈춤</span>
                   </div>
-                  <span className="text-[10px] font-mono text-white/50">{skimmingFocusIdx + 1} / {blanks.length}</span>
+                  <span className="text-[10px] font-mono text-white/50 shrink-0">{skimmingFocusIdx + 1} / {blanks.length}</span>
                 </div>
                 <div className="flex gap-2 w-full">
                   <button 
@@ -1837,7 +1859,7 @@ function MainApp() {
                         : 'bg-red-900/60 hover:bg-red-800 border-red-500/50 text-red-200'
                     }`}
                   >
-                    {isSkimmingPaused ? '▶️ 다시 진행하기 (Space)' : '⏸️ 모름 체크 및 일시정지 (Space)'}
+                    {isSkimmingPaused ? '▶️ 다시 진행하기 (▼ 또는 Space)' : '⏸️ 모름 체크 및 일시정지 (Space)'}
                   </button>
                   <button 
                     onClick={(e) => {
