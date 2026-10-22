@@ -589,8 +589,9 @@ function MainApp() {
   
   const [inputMode, setInputMode] = useState<'typing'|'touch'|'skimming'>('typing'); 
   const [skimmingWrongs, setSkimmingWrongs] = useState<Set<number>>(new Set());
-  // 💡 [추가] 스키밍 모드에서 방향키 이동을 위한 포커스 인덱스
   const [skimmingFocusIdx, setSkimmingFocusIdx] = useState<number>(0);
+  // 💡 [추가] 스페이스바 연속 두 번 입력(더블 탭) 감지용 타이머
+  const lastSpaceTimeRef = useRef<number>(0);
 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   const isProcessingRef = useRef(false);
@@ -672,12 +673,10 @@ function MainApp() {
 
   }, [currentBlankIdx, blanks, touchCandidates, globalDict.groups]); 
 
-  // 💡 [추가] 현재 빈칸 인덱스가 변경될 때 스키밍 포커스도 동기화
   useEffect(() => {
     setSkimmingFocusIdx(currentBlankIdx);
   }, [currentBlankIdx, activeCard]);
 
-  // 💡 [추가] 스키밍 모드에서 방향키로 포커스 이동 시 자동 스크롤
   useEffect(() => {
     if (activeCard && inputMode === 'skimming') {
       const el = document.getElementById(`skimming-blank-${skimmingFocusIdx}`);
@@ -685,7 +684,7 @@ function MainApp() {
     }
   }, [skimmingFocusIdx, inputMode, activeCard]);
 
-  // 💡 [수정] 스키밍 모드에서 방향키(이동) 및 스페이스바(오답 확인 토글) 지원
+  // 💡 [수정] 스키밍 모드: 마지막 빈칸에서 우측키 이동 시 다음 조항 제출 & 스페이스바 더블 탭 시 오답 전체 해제
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (!activeCard) return;
@@ -694,13 +693,24 @@ function MainApp() {
       if (inputMode === 'skimming') {
           if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
               e.preventDefault();
-              setSkimmingFocusIdx(prev => Math.min(blanks.length - 1, Math.max(currentBlankIdx, prev + 1)));
+              if (skimmingFocusIdx >= blanks.length - 1) {
+                  handleSkimmingSubmit(blanks.length - 1);
+              } else {
+                  setSkimmingFocusIdx(prev => Math.min(blanks.length - 1, Math.max(currentBlankIdx, prev + 1)));
+              }
           } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
               e.preventDefault();
               setSkimmingFocusIdx(prev => Math.max(currentBlankIdx, prev - 1));
           } else if (e.code === 'Space' || e.key === ' ') {
               e.preventDefault();
-              toggleSkimmingWrong(skimmingFocusIdx);
+              const now = Date.now();
+              if (now - lastSpaceTimeRef.current < 350) {
+                  setSkimmingWrongs(new Set());
+                  lastSpaceTimeRef.current = 0;
+              } else {
+                  toggleSkimmingWrong(skimmingFocusIdx);
+                  lastSpaceTimeRef.current = now;
+              }
           }
       } else if (inputMode === 'touch') {
           const keyNum = parseInt(e.key, 10);
@@ -718,7 +728,7 @@ function MainApp() {
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [inputMode, activeCard, activeTouchCandidates, blanks, currentBlankIdx, inputStatus, skimmingFocusIdx]);
+  }, [inputMode, activeCard, activeTouchCandidates, blanks, currentBlankIdx, inputStatus, skimmingFocusIdx, skimmingWrongs]);
 
 
   useEffect(() => {
@@ -1773,7 +1783,7 @@ function MainApp() {
                 <div className="w-full text-[10px] sm:text-[11px] text-amber-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
                     <span className="animate-pulse">⚡</span> 
-                    방향키(◀▶)와 스페이스바(또는 터치)로 모르는 빈칸을 확인하고 제출을 누르세요.
+                    방향키(◀▶) 이동 / 스페이스바: 정답확인 (2번 연속: 전체해제) / 마지막에서 ▶: 다음 조항
                   </div>
                 </div>
                 <button 
