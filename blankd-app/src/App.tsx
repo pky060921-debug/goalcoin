@@ -591,6 +591,8 @@ function MainApp() {
   const [skimmingWrongs, setSkimmingWrongs] = useState<Set<number>>(new Set());
   const [skimmingFocusIdx, setSkimmingFocusIdx] = useState<number>(0);
   const [isSkimmingPaused, setIsSkimmingPaused] = useState<boolean>(false);
+  // 💡 [추가] 화살표 두 번 눌림(중복 입력) 원천 차단용 쿨타임 기록
+  const lastKeyTimeRef = useRef<number>(0);
 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
   const isProcessingRef = useRef(false);
@@ -684,49 +686,52 @@ function MainApp() {
     }
   }, [skimmingFocusIdx, inputMode, activeCard]);
 
-  // 1초마다 자동으로 빈칸을 넘기며 정답을 보여주고, 끝나면 다음 조항으로 이동
+  // 💡 [수정] 1초마다 자동으로 다음 미해결(오답) 빈칸으로 넘기며 정답을 보여주고, 끝나면 다음 조항으로 이동
   useEffect(() => {
     if (!activeCard || inputMode !== 'skimming' || isSkimmingPaused || blanks.length === 0) return;
 
     const timer = setTimeout(() => {
-      if (skimmingFocusIdx < blanks.length - 1) {
-        setSkimmingFocusIdx(prev => prev + 1);
+      const nextUnresolvedIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct);
+      if (nextUnresolvedIdx !== -1) {
+        setSkimmingFocusIdx(nextUnresolvedIdx);
       } else {
         handleSkimmingSubmit(blanks.length - 1);
       }
     }, 1000);
 
     return () => clearTimeout(timer);
-  }, [activeCard, inputMode, isSkimmingPaused, skimmingFocusIdx, blanks.length]);
+  }, [activeCard, inputMode, isSkimmingPaused, skimmingFocusIdx, blanks]);
 
-  // 💡 [핵심 수정] 위 화살표(멈춤), 아래 화살표(다시 진행), 좌/우 화살표(수동 이동), 스페이스바(오답 체크 및 멈춤/재개) 분리
+  // 💡 [핵심 수정] 120ms 디바운스 및 캡처링(capture: true)으로 화살표 2칸 점프 현상 완벽 차단
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (!activeCard) return;
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
 
       if (inputMode === 'skimming') {
-          if (e.key === 'ArrowUp') {
-              // 위 화살표: 진행 멈춤 (일시정지)
+          if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key) || e.code === 'Space') {
               e.preventDefault();
               e.stopPropagation();
+              if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+
+              const now = Date.now();
+              if (e.repeat || (now - lastKeyTimeRef.current < 120)) return;
+              lastKeyTimeRef.current = now;
+          }
+
+          if (e.key === 'ArrowUp') {
               setIsSkimmingPaused(true);
           } else if (e.key === 'ArrowDown') {
-              // 아래 화살표: 다시 진행 (재개)
-              e.preventDefault();
-              e.stopPropagation();
               if (isSkimmingPaused) {
                   setIsSkimmingPaused(false);
-                  if (skimmingFocusIdx < blanks.length - 1) {
-                      setSkimmingFocusIdx(prev => prev + 1);
+                  const nextIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct);
+                  if (nextIdx !== -1) {
+                      setSkimmingFocusIdx(nextIdx);
                   } else {
                       handleSkimmingSubmit(blanks.length - 1);
                   }
               }
           } else if (e.code === 'Space' || e.key === ' ') {
-              // 스페이스바: 모름(오답) 체크하며 일시정지 / 정지 상태에서 다시 누르면 재개
-              e.preventDefault();
-              e.stopPropagation();
               if (!isSkimmingPaused) {
                   setIsSkimmingPaused(true);
                   setSkimmingWrongs(prev => {
@@ -736,23 +741,23 @@ function MainApp() {
                   });
               } else {
                   setIsSkimmingPaused(false);
-                  if (skimmingFocusIdx < blanks.length - 1) {
-                      setSkimmingFocusIdx(prev => prev + 1);
+                  const nextIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct);
+                  if (nextIdx !== -1) {
+                      setSkimmingFocusIdx(nextIdx);
                   } else {
                       handleSkimmingSubmit(blanks.length - 1);
                   }
               }
           } else if (e.key === 'ArrowRight') {
-              // 오른쪽 화살표: 다음 빈칸으로 수동 이동
-              e.preventDefault();
-              e.stopPropagation();
-              if (skimmingFocusIdx < blanks.length - 1) setSkimmingFocusIdx(prev => prev + 1);
+              const nextIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct);
+              if (nextIdx !== -1) setSkimmingFocusIdx(nextIdx);
               else handleSkimmingSubmit(blanks.length - 1);
           } else if (e.key === 'ArrowLeft') {
-              // 왼쪽 화살표: 이전 빈칸으로 수동 이동
-              e.preventDefault();
-              e.stopPropagation();
-              setSkimmingFocusIdx(prev => Math.max(currentBlankIdx, prev - 1));
+              let prevIdx = -1;
+              for (let i = skimmingFocusIdx - 1; i >= currentBlankIdx; i--) {
+                  if (!blanks[i]?.correct) { prevIdx = i; break; }
+              }
+              if (prevIdx !== -1) setSkimmingFocusIdx(prevIdx);
           }
       } else if (inputMode === 'touch') {
           const keyNum = parseInt(e.key, 10);
@@ -768,8 +773,8 @@ function MainApp() {
           }
       }
     };
-    window.addEventListener('keydown', handleGlobalKeyDown);
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+    window.addEventListener('keydown', handleGlobalKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true });
   }, [inputMode, activeCard, activeTouchCandidates, blanks, currentBlankIdx, inputStatus, skimmingFocusIdx, isSkimmingPaused, skimmingWrongs]);
 
 
@@ -1244,6 +1249,7 @@ function MainApp() {
     let newlyCorrect = 0;
 
     for (let i = currentBlankIdx; i <= pageEndIdx; i++) {
+        if (blanks[i]?.correct) continue;
         if (skimmingWrongs.has(i)) {
             newWrongs.add(i);
         } else {
@@ -1295,7 +1301,6 @@ function MainApp() {
       
       const targetWrong = activeCard._targetWrongWords || null;
       const targetWrongIndices = activeCard._targetWrongIndices || null;
-      const isTargetMode = !!targetWrong || !!targetWrongIndices || !!activeCard._isTargetMode;
 
       const restoredBlanks = foundBlanks.map((b, i) => {
           let isCorrect = i < lastIdx;
@@ -1849,7 +1854,8 @@ function MainApp() {
                          setSkimmingWrongs(prev => new Set(prev).add(skimmingFocusIdx));
                        } else {
                          setIsSkimmingPaused(false);
-                         if (skimmingFocusIdx < blanks.length - 1) setSkimmingFocusIdx(prev => prev + 1);
+                         const nextIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct);
+                         if (nextIdx !== -1) setSkimmingFocusIdx(nextIdx);
                          else handleSkimmingSubmit(blanks.length - 1);
                        }
                     }} 
