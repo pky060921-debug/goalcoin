@@ -126,16 +126,17 @@ const getExtendedStats = (memoStr: string) => {
       return {
         text: p.text || "", filled: p.filled || 0, wrongIndices: p.wrongIndices || [],
         upgrade: p.upgrade || 0, bestTime: p.bestTime || 0, totalCorrect: p.totalCorrect || 0, totalWrong: p.totalWrong || 0,
-        history: p.history || [] 
+        history: p.history || [],
+        highlights: p.highlights || {}
       };
     }
   } catch(e) {}
   
   try {
     const old = parseCardStats(memoStr);
-    return { text: old.text || "", filled: old.filled || 0, wrongIndices: old.wrongIndices || [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [] };
+    return { text: old.text || "", filled: old.filled || 0, wrongIndices: old.wrongIndices || [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [], highlights: {} };
   } catch(e) {
-    return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [] };
+    return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [], highlights: {} };
   }
 };
 
@@ -478,7 +479,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
              </div>
            ))}
            
-           {/* 판매 모드 플로팅 바 */}
            {selectionMode && selectedCards.size > 0 && (
              <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-amber-950 border border-amber-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
                <span className="text-amber-100 font-bold text-sm">{selectedCards.size}개 조항 선택됨</span>
@@ -524,7 +524,6 @@ const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData,
             )}
           </div>
           
-          {/* 구매 모드 플로팅 바 */}
           {selectionMode && selectedCards.size > 0 && (
             <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-teal-950 border border-teal-500 px-5 py-3 rounded-full shadow-2xl flex items-center gap-4 z-50 backdrop-blur-md animate-in slide-in-from-bottom-5">
               <span className="text-teal-100 font-bold text-sm">총 {selectedCards.size}개 일괄 구매</span>
@@ -585,13 +584,25 @@ function MainApp() {
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
 
-  const statsRef = useRef({ text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0 });
+  const statsRef = useRef<{ text: string, filled: number, wrongIndices: Set<number>, sessionCorrect: number, highlights: Record<string, string> }>({
+    text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0, highlights: {}
+  });
+
+  // 💡 [추가] 3색 형광펜 상태 관리 ('yellow' | 'green' | 'pink' | 'eraser' | null)
+  const [activeHighlighter, setActiveHighlighter] = useState<'yellow' | 'green' | 'pink' | 'eraser' | null>(null);
+  const [cardHighlights, setCardHighlights] = useState<Record<string, string>>({});
+  const isHighlightingDragRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    const handleGlobalPointerUp = () => { isHighlightingDragRef.current = false; };
+    window.addEventListener('pointerup', handleGlobalPointerUp);
+    return () => window.removeEventListener('pointerup', handleGlobalPointerUp);
+  }, []);
   
   const [inputMode, setInputMode] = useState<'typing'|'touch'|'skimming'>('typing'); 
   const [skimmingWrongs, setSkimmingWrongs] = useState<Set<number>>(new Set());
   const [skimmingFocusIdx, setSkimmingFocusIdx] = useState<number>(0);
   const [isSkimmingPaused, setIsSkimmingPaused] = useState<boolean>(false);
-  // 💡 [추가] 화살표 두 번 눌림(중복 입력) 원천 차단용 쿨타임 기록
   const lastKeyTimeRef = useRef<number>(0);
 
   const [touchCandidates, setTouchCandidates] = useState<string[]>([]);
@@ -686,7 +697,6 @@ function MainApp() {
     }
   }, [skimmingFocusIdx, inputMode, activeCard]);
 
-  // 💡 [수정] 1초마다 자동으로 다음 미해결(오답) 빈칸으로 넘기며 정답을 보여주고, 끝나면 다음 조항으로 이동
   useEffect(() => {
     if (!activeCard || inputMode !== 'skimming' || isSkimmingPaused || blanks.length === 0) return;
 
@@ -702,7 +712,6 @@ function MainApp() {
     return () => clearTimeout(timer);
   }, [activeCard, inputMode, isSkimmingPaused, skimmingFocusIdx, blanks]);
 
-  // 💡 [핵심 수정] 120ms 디바운스 및 캡처링(capture: true)으로 화살표 2칸 점프 현상 완벽 차단
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (!activeCard) return;
@@ -1079,6 +1088,7 @@ function MainApp() {
           exStats.text = statsRef.current.text;
           exStats.filled = statsRef.current.filled;
           exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+          exStats.highlights = statsRef.current.highlights;
           
           if (navigator.onLine) {
             fetch("https://api.blankd.top/api/save-card", {
@@ -1202,6 +1212,47 @@ function MainApp() {
         }).catch(() => {});
       }
       flushQueue(); 
+    }
+  };
+
+  // 💡 [추가] 본문 토큰에 3색 형광펜 적용 및 DB 실시간 자동 저장 핸들러
+  const applyHighlightToToken = (tokenKey: string, isDrag = false) => {
+    if (!activeHighlighter || !activeCard) return;
+    setCardHighlights(prev => {
+      const next = { ...prev };
+      if (activeHighlighter === 'eraser') {
+        if (!next[tokenKey]) return prev;
+        delete next[tokenKey];
+      } else {
+        if (!isDrag && next[tokenKey] === activeHighlighter) {
+          delete next[tokenKey];
+        } else {
+          next[tokenKey] = activeHighlighter;
+        }
+      }
+      statsRef.current.highlights = next;
+      const exStats = getExtendedStats(activeCard.memo);
+      exStats.text = statsRef.current.text;
+      exStats.filled = statsRef.current.filled;
+      exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+      exStats.highlights = next;
+      handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats));
+      return next;
+    });
+  };
+
+  const handleClearAllHighlights = () => {
+    if (!activeCard) return;
+    if (Object.keys(cardHighlights).length === 0) return;
+    if (window.confirm("이 조항에 칠해진 모든 형광펜을 지우시겠습니까?")) {
+      setCardHighlights({});
+      statsRef.current.highlights = {};
+      const exStats = getExtendedStats(activeCard.memo);
+      exStats.text = statsRef.current.text;
+      exStats.filled = statsRef.current.filled;
+      exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+      exStats.highlights = {};
+      handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats));
     }
   };
 
@@ -1329,6 +1380,7 @@ function MainApp() {
       
       setIsMemoOpen(false);
       setIsFrozen(false); setHintLetter(null); 
+      setCardHighlights(stats.highlights || {});
 
       let cleanText = stats.text ? stats.text.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim() : "";
 
@@ -1336,7 +1388,8 @@ function MainApp() {
           text: cleanText, 
           filled: stats.filled, 
           wrongIndices: new Set(stats.wrongIndices || []),
-          sessionCorrect: 0
+          sessionCorrect: 0,
+          highlights: stats.highlights || {}
       };
       
       const cleanTitle = getStrictTitleOnly(cleanContent);
@@ -1373,6 +1426,7 @@ function MainApp() {
     exStats.text = statsRef.current.text;
     exStats.filled = exStats.filled + 1; 
     exStats.wrongIndices = wrongArr;
+    exStats.highlights = statsRef.current.highlights;
     
     const nowTimeStr = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('T', ' ').substring(0, 19);
     
@@ -1492,6 +1546,7 @@ function MainApp() {
     exStats.text = statsRef.current.text;
     exStats.filled = statsRef.current.filled;
     exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+    exStats.highlights = statsRef.current.highlights;
     
     const newMemo = JSON.stringify(exStats);
     setActiveCard(null);
@@ -1701,6 +1756,14 @@ function MainApp() {
     let lastBlankIdxOnPage = currentBlankIdx;
     const contentToRender: any[] = [];
 
+    // 💡 3색 형광펜 스타일 클래스 매핑
+    const getHighlightClass = (color?: string) => {
+      if (color === 'yellow') return 'hl-yellow bg-amber-400/35 text-amber-100 border-b-2 border-amber-400/80 rounded-sm px-0.5';
+      if (color === 'green') return 'hl-green bg-emerald-400/35 text-emerald-100 border-b-2 border-emerald-400/80 rounded-sm px-0.5';
+      if (color === 'pink') return 'hl-pink bg-rose-400/35 text-rose-100 border-b-2 border-rose-400/80 rounded-sm px-0.5';
+      return '';
+    };
+
     parts.forEach((part: string, i: number) => {
       if (part === '##PAGE_BREAK##') { renderPage++; return; }
       if (renderPage === displayPage) {
@@ -1763,35 +1826,139 @@ function MainApp() {
               contentToRender.push(<span key={i} className="inline-block min-w-[40px] sm:min-w-[50px] h-4 sm:h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
             }
             bIdx++;
-          } else { contentToRender.push(<span key={i}>{part}</span>); }
+          } else {
+            // 💡 [핵심] 일반 텍스트를 단어/공백 단위로 분해하여 3색 형광펜 터치 및 드래그 색칠 지원
+            const subTokens = part.split(/(\s+)/);
+            contentToRender.push(
+              <React.Fragment key={i}>
+                {subTokens.map((tok, tIdx) => {
+                  if (!tok) return null;
+                  if (/^\s+$/.test(tok)) return <span key={tIdx}>{tok}</span>;
+                  const tokenKey = `${i}-${tIdx}`;
+                  const hlColor = cardHighlights[tokenKey];
+                  const hlClass = getHighlightClass(hlColor);
+
+                  return (
+                    <span
+                      key={tIdx}
+                      onPointerDown={(e) => {
+                        if (!activeHighlighter) return;
+                        e.preventDefault();
+                        isHighlightingDragRef.current = true;
+                        applyHighlightToToken(tokenKey, false);
+                      }}
+                      onPointerEnter={() => {
+                        if (activeHighlighter && isHighlightingDragRef.current) {
+                          applyHighlightToToken(tokenKey, true);
+                        }
+                      }}
+                      className={`transition-colors ${hlClass} ${
+                        activeHighlighter ? 'cursor-pointer select-none hover: ring-1 hover:ring-white/30 rounded-sm' : ''
+                      }`}
+                    >
+                      {tok}
+                    </span>
+                  );
+                })}
+              </React.Fragment>
+            );
+          }
       } else if (part.startsWith('[') && part.endsWith(']')) { bIdx++; }
     });
 
     const hasSavedMemo = statsRef.current.text && statsRef.current.text.trim().length > 0;
+    const hasHighlights = Object.keys(cardHighlights).length > 0;
     
     return (
       <div className="flex flex-col w-full h-[65vh] sm:h-[72vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
         
-        {/* 1. 상단 고정 컨테이너 (스크롤 제외) */}
-        <div className="shrink-0 flex justify-between items-center border-b border-white/10 px-3 py-2 sm:px-5 sm:py-3 w-full gap-2 sm:gap-3 bg-[#0a0a0c] z-20">
-            <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 pb-1`}>
+        {/* 1. 상단 고정 컨테이너 (제목 + 3색 형광펜 툴바 + 글자크기/노트 버튼) */}
+        <div className="shrink-0 flex flex-wrap justify-between items-center border-b border-white/10 px-3 py-2 sm:px-5 sm:py-2.5 w-full gap-2 bg-[#0a0a0c] z-20">
+            <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 min-w-[140px] pb-0.5`}>
               {displayTitle}
             </div>
-            <div className="flex items-center gap-2 shrink-0">
+            
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
+              
+              {/* 🖍️ 3색 형광펜 컨트롤 툴바 */}
+              <div className="flex items-center gap-1 bg-white/5 px-1.5 py-1 rounded-sm border border-white/10">
+                <span className="text-[9px] sm:text-[10px] text-white/40 font-bold mr-0.5 hidden sm:inline">🖍️형광펜</span>
+                <button
+                  title="노란색 형광펜 (터치 또는 드래그)"
+                  onClick={(e) => { e.currentTarget.blur(); setActiveHighlighter(p => p === 'yellow' ? null : 'yellow'); }}
+                  className={`w-5 h-5 rounded-full bg-amber-400 transition-all flex items-center justify-center text-[10px] text-black font-bold ${
+                    activeHighlighter === 'yellow' ? 'ring-2 ring-white scale-110 shadow-[0_0_8px_rgba(251,191,36,0.9)]' : 'opacity-40 hover:opacity-80'
+                  }`}
+                >
+                  {activeHighlighter === 'yellow' ? '✓' : ''}
+                </button>
+                <button
+                  title="초록색 형광펜 (터치 또는 드래그)"
+                  onClick={(e) => { e.currentTarget.blur(); setActiveHighlighter(p => p === 'green' ? null : 'green'); }}
+                  className={`w-5 h-5 rounded-full bg-emerald-400 transition-all flex items-center justify-center text-[10px] text-black font-bold ${
+                    activeHighlighter === 'green' ? 'ring-2 ring-white scale-110 shadow-[0_0_8px_rgba(52,211,153,0.9)]' : 'opacity-40 hover:opacity-80'
+                  }`}
+                >
+                  {activeHighlighter === 'green' ? '✓' : ''}
+                </button>
+                <button
+                  title="분홍색 형광펜 (터치 또는 드래그)"
+                  onClick={(e) => { e.currentTarget.blur(); setActiveHighlighter(p => p === 'pink' ? null : 'pink'); }}
+                  className={`w-5 h-5 rounded-full bg-rose-400 transition-all flex items-center justify-center text-[10px] text-black font-bold ${
+                    activeHighlighter === 'pink' ? 'ring-2 ring-white scale-110 shadow-[0_0_8px_rgba(251,113,133,0.9)]' : 'opacity-40 hover:opacity-80'
+                  }`}
+                >
+                  {activeHighlighter === 'pink' ? '✓' : ''}
+                </button>
+                <button
+                  title="형광펜 부분 지우개"
+                  onClick={(e) => { e.currentTarget.blur(); setActiveHighlighter(p => p === 'eraser' ? null : 'eraser'); }}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all ${
+                    activeHighlighter === 'eraser' ? 'bg-white text-black ring-1 ring-white scale-105' : 'bg-black/40 text-white/60 hover:text-white'
+                  }`}
+                >
+                  지우개
+                </button>
+                {hasHighlights && (
+                  <button
+                    title="형광펜 전체 초기화"
+                    onClick={(e) => { e.currentTarget.blur(); handleClearAllHighlights(); }}
+                    className="px-1 py-0.5 text-[10px] text-red-400 hover:text-red-300 font-bold"
+                  >
+                    🗑️
+                  </button>
+                )}
+              </div>
+
+              {/* 글자 크기 조절 */}
               <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
-                 <span className="text-[9px] sm:text-[10px] text-white/40 font-bold">크기</span>
+                 <span className="text-[9px] sm:text-[10px] text-white/40 font-bold hidden md:inline">크기</span>
                  <button onClick={(e) => { e.currentTarget.blur(); setFontSizeLevel(p => Math.max(1, p - 1)); }} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">-</button>
                  <span className="text-[10px] sm:text-[11px] font-mono text-white/80 w-3 text-center">{fontSizeLevel}</span>
                  <button onClick={(e) => { e.currentTarget.blur(); setFontSizeLevel(p => Math.min(5, p + 1)); }} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
               </div>
+
+              {/* 암기 노트 토글 */}
               <button onClick={(e) => { e.currentTarget.blur(); setIsMemoOpen(!isMemoOpen); }} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md flex items-center gap-1">
                 <span>{isMemoOpen ? '노트 닫기 ✕' : '📝 암기 노트'}</span>
                 {!isMemoOpen && hasSavedMemo && <span className="text-teal-300 text-[8px] animate-pulse">●</span>}
               </button>
-              <button onClick={(e) => { e.currentTarget.blur(); registerToMarket(activeCard.id); }} className="px-2 py-1 bg-amber-900/40 text-amber-400 text-[10px] rounded border border-amber-500/30 hover:bg-amber-900/60 transition-colors hidden sm:inline-block whitespace-nowrap">마켓 판매</button>
-              <span className="text-[12px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden sm:inline">Page {displayPage + 1}</span>
+              <button onClick={(e) => { e.currentTarget.blur(); registerToMarket(activeCard.id); }} className="px-2 py-1 bg-amber-900/40 text-amber-400 text-[10px] rounded border border-amber-500/30 hover:bg-amber-900/60 transition-colors hidden xl:inline-block whitespace-nowrap">마켓 판매</button>
+              <span className="text-[11px] text-white/40 font-mono bg-white/5 px-2 py-1 rounded shadow-sm hidden lg:inline">P.{displayPage + 1}</span>
             </div>
         </div>
+
+        {/* 형광펜 모드 활성화 시 안내 배너 */}
+        {activeHighlighter && (
+          <div className="shrink-0 bg-indigo-950/60 border-b border-indigo-500/30 px-4 py-1 flex justify-between items-center text-[11px] text-indigo-200">
+            <span>
+              🖍️ <b>{activeHighlighter === 'yellow' ? '노란색' : activeHighlighter === 'green' ? '초록색' : activeHighlighter === 'pink' ? '분홍색' : '지우개'}</b> 모드 켜짐 — 본문 단어를 터치하거나 드래그하여 칠하세요. (자동 저장됨)
+            </span>
+            <button onClick={() => setActiveHighlighter(null)} className="text-[10px] bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded font-bold">
+              펜 끄기 ✕
+            </button>
+          </div>
+        )}
 
         {/* 2. 가운데 영역: 좌측 본문 스크롤 + 우측 메모 컨테이너 */}
         <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden bg-[#0a0a0c]">
@@ -1825,6 +1992,7 @@ function MainApp() {
                         exStats.text = e.target.value;
                         exStats.filled = statsRef.current.filled;
                         exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+                        exStats.highlights = statsRef.current.highlights;
                         handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats)); 
                     }} 
                     className="flex-1 w-full text-[12px] sm:text-[13px] leading-relaxed text-teal-200 bg-black/40 p-2.5 sm:p-3 rounded border border-teal-500/30 outline-none focus:border-teal-400 transition-all resize-none custom-scrollbar shadow-inner font-sans" 
@@ -1955,7 +2123,7 @@ function MainApp() {
         </div>
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, skimmingWrongs, skimmingFocusIdx, isSkimmingPaused, touchCandidates, fontSizeLevel, activeTouchCandidates]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, skimmingWrongs, skimmingFocusIdx, isSkimmingPaused, touchCandidates, fontSizeLevel, activeTouchCandidates, activeHighlighter, cardHighlights]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
@@ -2164,6 +2332,11 @@ function MainApp() {
         .border-white\\/5, .border-white\\/10, .border-white\\/20, .border-white\\/30 { 
           border-color: #6b7280 !important; 
         }
+
+        /* 화이트 테마용 3색 형광펜 시인성 최적화 */
+        .hl-yellow { background-color: #fef08a !important; color: #111827 !important; border-bottom-color: #eab308 !important; font-weight: 800 !important; }
+        .hl-green { background-color: #bbf7d0 !important; color: #111827 !important; border-bottom-color: #22c55e !important; font-weight: 800 !important; }
+        .hl-pink { background-color: #fecdd3 !important; color: #111827 !important; border-bottom-color: #f43f5e !important; font-weight: 800 !important; }
 
         .text-amber-100, .text-amber-200 { color: #b45309 !important; font-weight: 800; }
         .text-teal-100, .text-teal-200 { color: #0f766e !important; font-weight: 800; }
