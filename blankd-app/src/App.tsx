@@ -588,8 +588,8 @@ function MainApp() {
     text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0, highlights: {}
   });
 
-  // 💡 [수정] 오답 배경색과 겹치지 않는 3색 밑줄·라인 마커 ('purple' | 'blue' | 'orange' | 'eraser' | null)
-  const [activeHighlighter, setActiveHighlighter] = useState<'purple' | 'blue' | 'orange' | 'eraser' | null>(null);
+  // 💡 [추가] 3색 형광펜 상태 관리 ('yellow' | 'green' | 'pink' | 'eraser' | null)
+  const [activeHighlighter, setActiveHighlighter] = useState<'yellow' | 'green' | 'pink' | 'eraser' | null>(null);
   const [cardHighlights, setCardHighlights] = useState<Record<string, string>>({});
   const isHighlightingDragRef = useRef<boolean>(false);
 
@@ -1215,7 +1215,7 @@ function MainApp() {
     }
   };
 
-  // 💡 [수정] 본문 단어 및 빈칸에 3색 밑줄·테두리 마커 적용 핸들러
+  // 💡 [추가] 본문 토큰에 3색 형광펜 적용 및 DB 실시간 자동 저장 핸들러
   const applyHighlightToToken = (tokenKey: string, isDrag = false) => {
     if (!activeHighlighter || !activeCard) return;
     setCardHighlights(prev => {
@@ -1244,7 +1244,7 @@ function MainApp() {
   const handleClearAllHighlights = () => {
     if (!activeCard) return;
     if (Object.keys(cardHighlights).length === 0) return;
-    if (window.confirm("이 조항에 표시된 모든 밑줄·마커를 지우시겠습니까?")) {
+    if (window.confirm("이 조항에 칠해진 모든 형광펜을 지우시겠습니까?")) {
       setCardHighlights({});
       statsRef.current.highlights = {};
       const exStats = getExtendedStats(activeCard.memo);
@@ -1756,25 +1756,11 @@ function MainApp() {
     let lastBlankIdxOnPage = currentBlankIdx;
     const contentToRender: any[] = [];
 
-    // 💡 오답(빨강)/정답(청록)/포커스(노랑) 배경색과 절대 겹치지 않는 3색 밑줄·윗줄 라인 마커 스타일
-    const getMarkerClass = (color?: string) => {
-      if (color === 'purple' || color === 'yellow') {
-        return 'mk-purple underline decoration-purple-400 decoration-double decoration-2 underline-offset-4 text-purple-200 font-bold';
-      }
-      if (color === 'blue' || color === 'green') {
-        return 'mk-blue underline decoration-sky-400 decoration-[3px] underline-offset-4 text-sky-200 font-bold';
-      }
-      if (color === 'orange' || color === 'pink') {
-        return 'mk-orange underline decoration-orange-400 decoration-wavy decoration-2 underline-offset-4 text-orange-200 font-bold';
-      }
-      return '';
-    };
-
-    // 빈칸 위에 마커가 칠해졌을 때 상단 바/외곽선으로 표시하는 스타일 (배경색과 충돌 없음)
-    const getBlankMarkerClass = (color?: string) => {
-      if (color === 'purple' || color === 'yellow') return 'border-t-2 border-t-purple-400 shadow-[0_-3px_6px_rgba(192,132,252,0.4)]';
-      if (color === 'blue' || color === 'green') return 'border-t-2 border-t-sky-400 shadow-[0_-3px_6px_rgba(56,189,248,0.4)]';
-      if (color === 'orange' || color === 'pink') return 'border-t-2 border-t-orange-400 shadow-[0_-3px_6px_rgba(251,146,60,0.4)]';
+    // 💡 3색 형광펜 스타일 클래스 매핑
+    const getHighlightClass = (color?: string) => {
+      if (color === 'yellow') return 'hl-yellow bg-amber-400/35 text-amber-100 border-b-2 border-amber-400/80 rounded-sm px-0.5';
+      if (color === 'green') return 'hl-green bg-emerald-400/35 text-emerald-100 border-b-2 border-emerald-400/80 rounded-sm px-0.5';
+      if (color === 'pink') return 'hl-pink bg-rose-400/35 text-rose-100 border-b-2 border-rose-400/80 rounded-sm px-0.5';
       return '';
     };
 
@@ -1789,36 +1775,9 @@ function MainApp() {
             const isCurrent = targetBlankIdx === currentBlankIdx; 
             const isWrong = statsRef.current.wrongIndices.has(targetBlankIdx); 
 
-            const blankTokenKey = `blank-${targetBlankIdx}`;
-            const blankMarkerColor = cardHighlights[blankTokenKey];
-            const blankMarkerCls = getBlankMarkerClass(blankMarkerColor);
-
-            // 마커 펜이 켜져 있을 때 빈칸을 터치하면 오답 체크 대신 마커만 칠해지도록 보호
-            const handleBlankPointerDown = (e: React.PointerEvent) => {
-              if (!activeHighlighter) return;
-              e.preventDefault();
-              e.stopPropagation();
-              isHighlightingDragRef.current = true;
-              applyHighlightToToken(blankTokenKey, false);
-            };
-            const handleBlankPointerEnter = () => {
-              if (activeHighlighter && isHighlightingDragRef.current) {
-                applyHighlightToToken(blankTokenKey, true);
-              }
-            };
-
             if (isCorrect) {
               contentToRender.push(
-                <span
-                  key={i}
-                  onPointerDown={handleBlankPointerDown}
-                  onPointerEnter={handleBlankPointerEnter}
-                  className={`font-bold mx-1 px-1 rounded transition-all ${
-                    isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'
-                  } ${blankMarkerCls} ${getMarkerClass(blankMarkerColor)} ${activeHighlighter ? 'cursor-pointer select-none' : ''}`}
-                >
-                  {part.replace(/\[|\]/g, '')}
-                </span>
+                <span key={i} className={`font-bold mx-1 px-1 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'}`}>{part.replace(/\[|\]/g, '')}</span>
               );
             } else if (inputMode === 'skimming' && targetBlankIdx >= currentBlankIdx) {
               const isSkimmingMarkedWrong = skimmingWrongs.has(targetBlankIdx);
@@ -1829,12 +1788,8 @@ function MainApp() {
               contentToRender.push(
                 <span key={i} 
                       id={`skimming-blank-${targetBlankIdx}`}
-                      onPointerDown={handleBlankPointerDown}
-                      onPointerEnter={handleBlankPointerEnter}
                       onClick={(e) => {
                         e.stopPropagation();
-                        // 💡 마커 펜이 켜져 있을 때는 스키밍 오답 토글이 작동하지 않도록 완벽 분리!
-                        if (activeHighlighter) return;
                         setSkimmingFocusIdx(targetBlankIdx);
                         if (!isSkimmingPaused) {
                           setIsSkimmingPaused(true);
@@ -1843,7 +1798,7 @@ function MainApp() {
                           toggleSkimmingWrong(targetBlankIdx);
                         }
                       }}
-                      className={`inline-block mx-1 text-center font-bold border-b-2 rounded-sm transition-all cursor-pointer select-none align-middle ${blankMarkerCls} ${
+                      className={`inline-block mx-1 text-center font-bold border-b-2 rounded-sm transition-all cursor-pointer select-none align-middle ${
                           !isRevealed 
                             ? 'min-w-[40px] sm:min-w-[50px] h-4 sm:h-5 leading-none bg-white/5 border-white/20'
                             : isSkimmingMarkedWrong 
@@ -1856,37 +1811,23 @@ function MainApp() {
             } else if (isCurrent) {
               if (inputMode === 'typing') {
                   contentToRender.push(
-                    <span id="active-blank" key="active-blank-input-fixed" className={blankMarkerCls}>
+                    <span id="active-blank" key="active-blank-input-fixed">
                       <InlineBlankInput inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
                     </span>
                   );
               } else {
                   contentToRender.push(
-                    <span
-                      id="active-blank"
-                      key="active-blank-input-fixed"
-                      onPointerDown={handleBlankPointerDown}
-                      onPointerEnter={handleBlankPointerEnter}
-                      className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${blankMarkerCls} ${
-                        inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 'bg-amber-900/30 text-amber-400 border-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.3)]'
-                      }`}
-                    >
+                    <span id="active-blank" key="active-blank-input-fixed" className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm transition-all min-w-[3em] ${inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 'bg-amber-900/30 text-amber-400 border-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.3)]'}`}>
                       {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '?'}
                     </span>
                   );
               }
             } else {
-              contentToRender.push(
-                <span
-                  key={i}
-                  onPointerDown={handleBlankPointerDown}
-                  onPointerEnter={handleBlankPointerEnter}
-                  className={`inline-block min-w-[40px] sm:min-w-[50px] h-4 sm:h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm ${blankMarkerCls} ${activeHighlighter ? 'cursor-pointer' : ''}`}
-                />
-              );
+              contentToRender.push(<span key={i} className="inline-block min-w-[40px] sm:min-w-[50px] h-4 sm:h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm"></span>);
             }
             bIdx++;
           } else {
+            // 💡 [핵심] 일반 텍스트를 단어/공백 단위로 분해하여 3색 형광펜 터치 및 드래그 색칠 지원
             const subTokens = part.split(/(\s+)/);
             contentToRender.push(
               <React.Fragment key={i}>
@@ -1895,7 +1836,7 @@ function MainApp() {
                   if (/^\s+$/.test(tok)) return <span key={tIdx}>{tok}</span>;
                   const tokenKey = `${i}-${tIdx}`;
                   const hlColor = cardHighlights[tokenKey];
-                  const markerCls = getMarkerClass(hlColor);
+                  const hlClass = getHighlightClass(hlColor);
 
                   return (
                     <span
@@ -1911,8 +1852,8 @@ function MainApp() {
                           applyHighlightToToken(tokenKey, true);
                         }
                       }}
-                      className={`transition-all ${markerCls} ${
-                        activeHighlighter ? 'cursor-pointer select-none hover:opacity-80' : ''
+                      className={`transition-colors ${hlClass} ${
+                        activeHighlighter ? 'cursor-pointer select-none hover: ring-1 hover:ring-white/30 rounded-sm' : ''
                       }`}
                     >
                       {tok}
@@ -1931,7 +1872,7 @@ function MainApp() {
     return (
       <div className="flex flex-col w-full h-[65vh] sm:h-[72vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
         
-        {/* 1. 상단 고정 컨테이너 (제목 + 3색 밑줄 마커 툴바 + 글자크기/노트 버튼) */}
+        {/* 1. 상단 고정 컨테이너 (제목 + 3색 형광펜 툴바 + 글자크기/노트 버튼) */}
         <div className="shrink-0 flex flex-wrap justify-between items-center border-b border-white/10 px-3 py-2 sm:px-5 sm:py-2.5 w-full gap-2 bg-[#0a0a0c] z-20">
             <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 min-w-[140px] pb-0.5`}>
               {displayTitle}
@@ -1939,38 +1880,38 @@ function MainApp() {
             
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
               
-              {/* ✏️ 오답 표시와 절대 겹치지 않는 3색 밑줄(라인) 마커 툴바 */}
+              {/* 🖍️ 3색 형광펜 컨트롤 툴바 */}
               <div className="flex items-center gap-1 bg-white/5 px-1.5 py-1 rounded-sm border border-white/10">
-                <span className="text-[9px] sm:text-[10px] text-white/40 font-bold mr-0.5 hidden sm:inline">✏️밑줄마커</span>
+                <span className="text-[9px] sm:text-[10px] text-white/40 font-bold mr-0.5 hidden sm:inline">🖍️형광펜</span>
                 <button
-                  title="보라색 이중 밑줄 (주체·권한자 강조)"
-                  onClick={(e) => { e.currentTarget.blur(); setActiveHighlighter(p => p === 'purple' ? null : 'purple'); }}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all border-b-2 border-double border-purple-400 ${
-                    activeHighlighter === 'purple' ? 'bg-purple-950/80 text-purple-200 ring-1 ring-purple-400 scale-105' : 'bg-black/40 text-purple-300/60 hover:text-purple-300'
+                  title="노란색 형광펜 (터치 또는 드래그)"
+                  onClick={(e) => { e.currentTarget.blur(); setActiveHighlighter(p => p === 'yellow' ? null : 'yellow'); }}
+                  className={`w-5 h-5 rounded-full bg-amber-400 transition-all flex items-center justify-center text-[10px] text-black font-bold ${
+                    activeHighlighter === 'yellow' ? 'ring-2 ring-white scale-110 shadow-[0_0_8px_rgba(251,191,36,0.9)]' : 'opacity-40 hover:opacity-80'
                   }`}
                 >
-                  🟣보라
+                  {activeHighlighter === 'yellow' ? '✓' : ''}
                 </button>
                 <button
-                  title="파란색 굵은 밑줄 (기한·숫자 강조)"
-                  onClick={(e) => { e.currentTarget.blur(); setActiveHighlighter(p => p === 'blue' ? null : 'blue'); }}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all border-b-2 border-sky-400 ${
-                    activeHighlighter === 'blue' ? 'bg-sky-950/80 text-sky-200 ring-1 ring-sky-400 scale-105' : 'bg-black/40 text-sky-300/60 hover:text-sky-300'
+                  title="초록색 형광펜 (터치 또는 드래그)"
+                  onClick={(e) => { e.currentTarget.blur(); setActiveHighlighter(p => p === 'green' ? null : 'green'); }}
+                  className={`w-5 h-5 rounded-full bg-emerald-400 transition-all flex items-center justify-center text-[10px] text-black font-bold ${
+                    activeHighlighter === 'green' ? 'ring-2 ring-white scale-110 shadow-[0_0_8px_rgba(52,211,153,0.9)]' : 'opacity-40 hover:opacity-80'
                   }`}
                 >
-                  🔵파랑
+                  {activeHighlighter === 'green' ? '✓' : ''}
                 </button>
                 <button
-                  title="주황색 물결 밑줄 (예외·주의 강조)"
-                  onClick={(e) => { e.currentTarget.blur(); setActiveHighlighter(p => p === 'orange' ? null : 'orange'); }}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all border-b-2 border-dashed border-orange-400 ${
-                    activeHighlighter === 'orange' ? 'bg-orange-950/80 text-orange-200 ring-1 ring-orange-400 scale-105' : 'bg-black/40 text-orange-300/60 hover:text-orange-300'
+                  title="분홍색 형광펜 (터치 또는 드래그)"
+                  onClick={(e) => { e.currentTarget.blur(); setActiveHighlighter(p => p === 'pink' ? null : 'pink'); }}
+                  className={`w-5 h-5 rounded-full bg-rose-400 transition-all flex items-center justify-center text-[10px] text-black font-bold ${
+                    activeHighlighter === 'pink' ? 'ring-2 ring-white scale-110 shadow-[0_0_8px_rgba(251,113,133,0.9)]' : 'opacity-40 hover:opacity-80'
                   }`}
                 >
-                  🟠주황
+                  {activeHighlighter === 'pink' ? '✓' : ''}
                 </button>
                 <button
-                  title="마커 부분 지우개"
+                  title="형광펜 부분 지우개"
                   onClick={(e) => { e.currentTarget.blur(); setActiveHighlighter(p => p === 'eraser' ? null : 'eraser'); }}
                   className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all ${
                     activeHighlighter === 'eraser' ? 'bg-white text-black ring-1 ring-white scale-105' : 'bg-black/40 text-white/60 hover:text-white'
@@ -1980,7 +1921,7 @@ function MainApp() {
                 </button>
                 {hasHighlights && (
                   <button
-                    title="마커 전체 초기화"
+                    title="형광펜 전체 초기화"
                     onClick={(e) => { e.currentTarget.blur(); handleClearAllHighlights(); }}
                     className="px-1 py-0.5 text-[10px] text-red-400 hover:text-red-300 font-bold"
                   >
@@ -2007,14 +1948,14 @@ function MainApp() {
             </div>
         </div>
 
-        {/* 밑줄 마커 모드 활성화 시 안내 배너 */}
+        {/* 형광펜 모드 활성화 시 안내 배너 */}
         {activeHighlighter && (
-          <div className="shrink-0 bg-indigo-950/70 border-b border-indigo-500/30 px-4 py-1 flex justify-between items-center text-[11px] text-indigo-200">
+          <div className="shrink-0 bg-indigo-950/60 border-b border-indigo-500/30 px-4 py-1 flex justify-between items-center text-[11px] text-indigo-200">
             <span>
-              ✏️ <b>{activeHighlighter === 'purple' ? '보라색 이중선' : activeHighlighter === 'blue' ? '파란색 굵은선' : activeHighlighter === 'orange' ? '주황색 물결선' : '지우개'}</b> 모드 — 본문 단어나 빈칸을 터치/드래그하여 밑줄을 그으세요. (오답 체크와 겹치지 않음)
+              🖍️ <b>{activeHighlighter === 'yellow' ? '노란색' : activeHighlighter === 'green' ? '초록색' : activeHighlighter === 'pink' ? '분홍색' : '지우개'}</b> 모드 켜짐 — 본문 단어를 터치하거나 드래그하여 칠하세요. (자동 저장됨)
             </span>
             <button onClick={() => setActiveHighlighter(null)} className="text-[10px] bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded font-bold">
-              마커 끄기 ✕
+              펜 끄기 ✕
             </button>
           </div>
         )}
@@ -2392,10 +2333,10 @@ function MainApp() {
           border-color: #6b7280 !important; 
         }
 
-        /* 화이트 테마용 3색 밑줄 마커 시인성 최적화 */
-        .mk-purple { color: #6b21a8 !important; text-decoration-color: #9333ea !important; font-weight: 800 !important; }
-        .mk-blue { color: #0369a1 !important; text-decoration-color: #0284c7 !important; font-weight: 800 !important; }
-        .mk-orange { color: #c2410c !important; text-decoration-color: #ea580c !important; font-weight: 800 !important; }
+        /* 화이트 테마용 3색 형광펜 시인성 최적화 */
+        .hl-yellow { background-color: #fef08a !important; color: #111827 !important; border-bottom-color: #eab308 !important; font-weight: 800 !important; }
+        .hl-green { background-color: #bbf7d0 !important; color: #111827 !important; border-bottom-color: #22c55e !important; font-weight: 800 !important; }
+        .hl-pink { background-color: #fecdd3 !important; color: #111827 !important; border-bottom-color: #f43f5e !important; font-weight: 800 !important; }
 
         .text-amber-100, .text-amber-200 { color: #b45309 !important; font-weight: 800; }
         .text-teal-100, .text-teal-200 { color: #0f766e !important; font-weight: 800; }
