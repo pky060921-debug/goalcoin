@@ -608,7 +608,7 @@ function MainApp() {
   
   const [inputMode, setInputMode] = useState<'typing'|'touch'|'skimming'>('typing'); 
   const [skimmingWrongs, setSkimmingWrongs] = useState<Set<number>>(new Set());
-  const [skimmingFocusIdx, setSkimmingFocusIdx] = useState<number>(0);
+  const [skimmingFocusIdx, setSkimmingFocusIdx] = useState<number>(-1);
   const [isSkimmingPaused, setIsSkimmingPaused] = useState<boolean>(false);
   const lastKeyTimeRef = useRef<number>(0);
 
@@ -691,11 +691,15 @@ function MainApp() {
     return finalCandidates.sort((a, b) => a.localeCompare(b, 'ko'));
 
   }, [currentBlankIdx, blanks, touchCandidates, globalDict.groups]); 
-
+  
   useEffect(() => {
-    setSkimmingFocusIdx(currentBlankIdx);
+  if (inputMode === 'skimming') {
+    setSkimmingFocusIdx(-1);
     setIsSkimmingPaused(false);
-  }, [currentBlankIdx, activeCard, inputMode]);
+  } else {
+    setSkimmingFocusIdx(currentBlankIdx);
+  }
+}, [inputMode, activeCard, currentBlankIdx]);
 
   useEffect(() => {
     if (activeCard && inputMode === 'skimming') {
@@ -706,19 +710,20 @@ function MainApp() {
 
   // 💡 숨겨진 빈칸(아직 뒤 글자를 터치해 찾지 않은 빈칸)은 일반 진행에서 건너뛰거나 찾았을 때 자동 해결되도록 처리
   useEffect(() => {
-    if (!activeCard || inputMode !== 'skimming' || isSkimmingPaused || blanks.length === 0) return;
-
-    const timer = setTimeout(() => {
-      const nextUnresolvedIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct);
-      if (nextUnresolvedIdx !== -1) {
-        setSkimmingFocusIdx(nextUnresolvedIdx);
-      } else {
-        handleSkimmingSubmit(blanks.length - 1);
-      }
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, [activeCard, inputMode, isSkimmingPaused, skimmingFocusIdx, blanks]);
+  if (!activeCard || inputMode !== 'skimming' || isSkimmingPaused || blanks.length === 0) return;
+  const delay = skimmingFocusIdx === -1 ? 2000 : 1000;
+  const timer = setTimeout(() => {
+    if (skimmingFocusIdx === -1) {
+      const firstVisible = blanks.findIndex((b, idx) => !b.correct && (!cardHiddenTokens.has(`blank-${idx}`) || sessionRevealedTokens.has(`blank-${idx}`)));
+      setSkimmingFocusIdx(firstVisible !== -1 ? firstVisible : 0);
+    } else {
+      const nextIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct);
+      if (nextIdx !== -1) setSkimmingFocusIdx(nextIdx);
+      else handleSkimmingSubmit(blanks.length - 1);
+    }
+  }, delay);
+  return () => clearTimeout(timer);
+}, [activeCard, inputMode, isSkimmingPaused, skimmingFocusIdx, blanks, cardHiddenTokens, sessionRevealedTokens]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -1971,21 +1976,21 @@ function MainApp() {
 
       // 숨김 설정 모드일 때는 어떤 빈칸이든 정답 텍스트와 숨김 배지를 선명하게 보여줌
       if (isStealthEditMode) {
-        return (
-          <span
-            key={tokenKey}
-            onPointerDown={handleBlankPointerDown}
-            onPointerEnter={handleBlankPointerEnter}
-            className={`inline-block font-bold mx-1 px-2 py-0.5 rounded border cursor-pointer select-none transition-all ${
-              isStealthMarked
-                ? 'bg-fuchsia-900/70 text-fuchsia-200 border-fuchsia-400 ring-2 ring-fuchsia-400 shadow-[0_0_10px_rgba(217,70,239,0.5)]'
-                : 'bg-white/10 text-white/80 border-white/30 hover:border-fuchsia-400'
-            }`}
-          >
-            {isStealthMarked ? `🙈 ${item.text}` : `[${item.text}]`}
-          </span>
-        );
-      }
+            contentToRender.push(
+              <span
+                key={tokenKey}
+                onClick={(e) => { e.stopPropagation(); toggleStealthToken(tokenKey, false); }}
+                className={`cursor-pointer select-none transition-all ${
+                  isStealthMarked
+                    ? 'bg-fuchsia-900/80 text-fuchsia-200 border-y border-fuchsia-400 px-0.5'
+                    : 'bg-white/10 text-white/80 border-y border-white/30 hover:border-fuchsia-400 px-0.5'
+                }`}
+              >
+                {answerText}
+              </span>
+            );
+            return;
+          }
 
       // 스텔스에서 뒤 글자를 터치해 방금 찾아낸 빈칸은 황금빛/에메랄드 발견 배지로 표시
       if (isRevealedFromStealth) {
@@ -2146,10 +2151,12 @@ function MainApp() {
         const isStealthMarked = cardHiddenTokens.has(item.tokenKey);
         const isRevealedStealth = isStealthMarked && sessionRevealedTokens.has(item.tokenKey);
 
-        const stealthEditWordCls = isStealthEditMode && isStealthMarked
-          ? 'bg-fuchsia-900/70 text-fuchsia-200 border border-dashed border-fuchsia-400 px-1 rounded-sm ring-1 ring-fuchsia-400'
+        const stealthEditWordCls = isStealthEditMode
+          ? isStealthMarked
+            ? 'bg-fuchsia-900/80 text-fuchsia-200 border-y border-fuchsia-400 px-0.5'
+            : 'hover:bg-white/10 hover:border-y hover:border-fuchsia-400'
           : isRevealedStealth
-            ? 'bg-amber-500/30 text-amber-200 border-b-2 border-amber-400 px-1 rounded-sm font-extrabold animate-in zoom-in-95 duration-200'
+            ? 'bg-amber-500/30 text-amber-200 border-b-2 border-amber-400 px-0.5 font-extrabold animate-in zoom-in-95 duration-200'
             : '';
 
         contentToRender.push(
@@ -2188,7 +2195,7 @@ function MainApp() {
                 ⚡
               </span>
             )}
-            {isStealthEditMode && isStealthMarked ? `🙈${item.text}` : item.text}
+            {item.text}
           </span>
         );
       }
