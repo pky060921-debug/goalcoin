@@ -105,11 +105,7 @@ const autoApplyDictHelper = (content: string, dict: any) => {
     includeWords.forEach((iw: string) => {
       const chars = iw.replace(/\s+/g, '').split('');
       const flexibleRegexStr = chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*');
-      const regex = new RegExp(`\\[[^\\]]+\\]|(${flexibleRegexStr})`, 'gi');
-      
-      currentText = currentText.replace(regex, (match, p1) => {
-        if (match.startsWith('[')) return match; 
-        return `[${p1}]`; 
+      const regex = new RegExp(`\\[[^\\]]+\\]|(${flexibleRegexStr})`, 'gi');  currentText = currentText.replace(regex, (match, p1) => { if (match.startsWith('[')) return match; return `[${p1}]`; 
       });
     });
 
@@ -128,16 +124,17 @@ const getExtendedStats = (memoStr: string) => {
         upgrade: p.upgrade || 0, bestTime: p.bestTime || 0, totalCorrect: p.totalCorrect || 0, totalWrong: p.totalWrong || 0,
         history: p.history || [],
         highlights: p.highlights || {},
-        hiddenTokens: Array.isArray(p.hiddenTokens) ? p.hiddenTokens : []
+        hiddenTokens: Array.isArray(p.hiddenTokens) ? p.hiddenTokens : [], // 💡 영구 숨김 구간 토큰 목록
+        modifiedTokens: (p.modifiedTokens && typeof p.modifiedTokens === 'object') ? p.modifiedTokens : {} // 💡 본문 단어 변형 목록 (tokenKey -> 변형된 텍스트)
       };
     }
   } catch(e) {}
   
   try {
     const old = parseCardStats(memoStr);
-    return { text: old.text || "", filled: old.filled || 0, wrongIndices: old.wrongIndices || [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [], highlights: {}, hiddenTokens: [] };
+    return { text: old.text || "", filled: old.filled || 0, wrongIndices: old.wrongIndices || [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [], highlights: {}, hiddenTokens: [], modifiedTokens: {} };
   } catch(e) {
-    return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [], highlights: {}, hiddenTokens: [] };
+    return { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0, history: [], highlights: {}, hiddenTokens: [], modifiedTokens: {} };
   }
 };
 
@@ -161,12 +158,13 @@ const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
   }
 };
 
-const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict, hintLetter }: {
+const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict, hintLetter, preventScrollFocus }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
   expected: string; 
   abbrDict: Record<string, string>;
   hintLetter?: string | null;
+  preventScrollFocus?: boolean;
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -190,13 +188,13 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
   }, [expected, abbrDict]);
 
   useEffect(() => {
-    if (inputStatus === 'idle' && inputRef.current) {
+    if (inputStatus === 'idle' && inputRef.current && !preventScrollFocus) {
         const timer = setTimeout(() => {
-            if (inputRef.current) inputRef.current.focus();
+            if (inputRef.current) inputRef.current.focus({ preventScroll: true });
         }, 10);
         return () => clearTimeout(timer);
     }
-  }, [expected, inputStatus]);
+  }, [expected, inputStatus, preventScrollFocus]);
   
   useEffect(() => { 
     if (inputStatus === 'correct' || inputStatus === 'idle') {
@@ -264,7 +262,8 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
   return prevProps.inputStatus === nextProps.inputStatus && 
          prevProps.expected === nextProps.expected && 
          prevProps.abbrDict === nextProps.abbrDict && 
-         prevProps.hintLetter === nextProps.hintLetter;
+         prevProps.hintLetter === nextProps.hintLetter &&
+         prevProps.preventScrollFocus === nextProps.preventScrollFocus;
 });
 
 const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData, savedCards }: any) => {
@@ -585,28 +584,40 @@ function MainApp() {
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
 
-  const statsRef = useRef<{ text: string, filled: number, wrongIndices: Set<number>, sessionCorrect: number, highlights: Record<string, string>, hiddenTokens: Set<string> }>({
-    text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0, highlights: {}, hiddenTokens: new Set<string>()
+  // 💡 [수정 1] 채우기 시작 시 무조건 맨 위(scrollTop = 0)에 고정되어 있다가 2초 뒤 본문이 나오도록 제어하는 상태 및 Ref
+  const [isInitialDelay, setIsInitialDelay] = useState<boolean>(false);
+  const bodyScrollRef = useRef<HTMLDivElement>(null);
+  const isFirstBlankFocusRef = useRef<boolean>(true);
+
+  const statsRef = useRef<{ text: string, filled: number, wrongIndices: Set<number>, sessionCorrect: number, highlights: Record<string, string>, hiddenTokens: Set<string>, modifiedTokens: Record<string, string> }>({
+    text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0, highlights: {}, hiddenTokens: new Set<string>(), modifiedTokens: {}
   });
 
+  // 💡 초고시인성 3색 형광 마커 ('purple' | 'blue' | 'orange' | 'eraser' | null)
   const [activeHighlighter, setActiveHighlighter] = useState<'purple' | 'blue' | 'orange' | 'eraser' | null>(null);
   const [cardHighlights, setCardHighlights] = useState<Record<string, string>>({});
   const isHighlightingDragRef = useRef<boolean>(false);
 
-  const [isStealthEditMode, setIsStealthEditMode] = useState<boolean>(false);
-  const [cardHiddenTokens, setCardHiddenTokens] = useState<Set<string>>(new Set());
-  const [sessionRevealedTokens, setSessionRevealedTokens] = useState<Set<string>>(new Set());
-  const [showStealthHint, setShowStealthHint] = useState<boolean>(false);
+  // 💡 [수정 2] '변형' 모드 (구간 숨기기 + 본문 단어 변형 통합 시스템)
+  const [isStealthEditMode, setIsStealthEditMode] = useState<boolean>(false); // 변형 설정 모드
+  const [cardHiddenTokens, setCardHiddenTokens] = useState<Set<string>>(new Set()); // 영구 숨김 설정된 토큰 키 목록
+  const [cardModifiedTokens, setCardModifiedTokens] = useState<Record<string, string>>({}); // 본문 변형 단어 목록 (tokenKey -> 변형 텍스트, 예: "임직원")
+  const [sessionRevealedTokens, setSessionRevealedTokens] = useState<Set<string>>(new Set()); // 이번 회독에서 터치해 원래대로 복구/발견한 토큰 키 목록
+  const [showStealthHint, setShowStealthHint] = useState<boolean>(false); // 모르겠을 때 위치 힌트 표시 여부
+  const stealthDragMovedRef = useRef<boolean>(false);
 
   useEffect(() => {
-    const handleGlobalPointerUp = () => { isHighlightingDragRef.current = false; };
+    const handleGlobalPointerUp = () => {
+      isHighlightingDragRef.current = false;
+      stealthDragMovedRef.current = false;
+    };
     window.addEventListener('pointerup', handleGlobalPointerUp);
     return () => window.removeEventListener('pointerup', handleGlobalPointerUp);
   }, []);
   
   const [inputMode, setInputMode] = useState<'typing'|'touch'|'skimming'>('typing'); 
   const [skimmingWrongs, setSkimmingWrongs] = useState<Set<number>>(new Set());
-  const [skimmingFocusIdx, setSkimmingFocusIdx] = useState<number>(-1);
+  const [skimmingFocusIdx, setSkimmingFocusIdx] = useState<number>(0);
   const [isSkimmingPaused, setIsSkimmingPaused] = useState<boolean>(false);
   const lastKeyTimeRef = useRef<number>(0);
 
@@ -691,49 +702,40 @@ function MainApp() {
   }, [currentBlankIdx, blanks, touchCandidates, globalDict.groups]); 
 
   useEffect(() => {
-    if (inputMode === 'skimming') {
-      setSkimmingFocusIdx(-1);
-      setIsSkimmingPaused(false);
-    } else {
-      setSkimmingFocusIdx(currentBlankIdx);
-      setIsSkimmingPaused(false);
-    }
+    setSkimmingFocusIdx(currentBlankIdx);
+    setIsSkimmingPaused(false);
   }, [currentBlankIdx, activeCard, inputMode]);
 
   useEffect(() => {
-    if (activeCard && inputMode === 'skimming' && skimmingFocusIdx >= 0) {
-      const el = document.getElementById(`skimming-blank-${skimmingFocusIdx}`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }, [skimmingFocusIdx, inputMode, activeCard]);
-
-  useEffect(() => {
-    if (!activeCard || inputMode !== 'skimming' || isSkimmingPaused || blanks.length === 0) return;
-
-    const delay = skimmingFocusIdx === -1 ? 2000 : 1000;
-    const timer = setTimeout(() => {
-      if (skimmingFocusIdx === -1) {
-        const firstVisible = blanks.findIndex((b, idx) => idx >= currentBlankIdx && !b.correct && (!cardHiddenTokens.has(`blank-${idx}`) || sessionRevealedTokens.has(`blank-${idx}`)));
-        const firstAny = blanks.findIndex((b, idx) => idx >= currentBlankIdx && !b.correct);
-        const startIdx = firstVisible !== -1 ? firstVisible : firstAny;
-        if (startIdx !== -1) setSkimmingFocusIdx(startIdx);
-        else handleSkimmingSubmit(blanks.length - 1);
-      } else {
-        const nextUnresolvedIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct && (!cardHiddenTokens.has(`blank-${idx}`) || sessionRevealedTokens.has(`blank-${idx}`)));
-        if (nextUnresolvedIdx !== -1) {
-          setSkimmingFocusIdx(nextUnresolvedIdx);
-        } else {
-          handleSkimmingSubmit(blanks.length - 1);
-        }
+    if (activeCard && inputMode === 'skimming' && !isInitialDelay) {
+      if (skimmingFocusIdx === 0 && bodyScrollRef.current) {
+        bodyScrollRef.current.scrollTop = 0;
+        return;
       }
-    }, delay);
+      const el = document.getElementById(`skimming-blank-${skimmingFocusIdx}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [skimmingFocusIdx, inputMode, activeCard, isInitialDelay]);
+
+  // 💡 2초 초기 대기 중에는 스키밍 타이머도 멈춰두었다가 2초 뒤부터 진행
+  useEffect(() => {
+    if (!activeCard || inputMode !== 'skimming' || isSkimmingPaused || blanks.length === 0 || isInitialDelay) return;
+
+    const timer = setTimeout(() => {
+      const nextUnresolvedIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct);
+      if (nextUnresolvedIdx !== -1) {
+        setSkimmingFocusIdx(nextUnresolvedIdx);
+      } else {
+        handleSkimmingSubmit(blanks.length - 1);
+      }
+    }, 1000);
 
     return () => clearTimeout(timer);
-  }, [activeCard, inputMode, isSkimmingPaused, skimmingFocusIdx, blanks, currentBlankIdx, cardHiddenTokens, sessionRevealedTokens]);
+  }, [activeCard, inputMode, isSkimmingPaused, skimmingFocusIdx, blanks, isInitialDelay]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      if (!activeCard) return;
+      if (!activeCard || isInitialDelay) return;
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
 
       if (inputMode === 'skimming') {
@@ -762,13 +764,11 @@ function MainApp() {
           } else if (e.code === 'Space' || e.key === ' ') {
               if (!isSkimmingPaused) {
                   setIsSkimmingPaused(true);
-                  if (skimmingFocusIdx >= 0) {
-                    setSkimmingWrongs(prev => {
-                        const next = new Set(prev);
-                        next.add(skimmingFocusIdx);
-                        return next;
-                    });
-                  }
+                  setSkimmingWrongs(prev => {
+                      const next = new Set(prev);
+                      next.add(skimmingFocusIdx);
+                      return next;
+                  });
               } else {
                   setIsSkimmingPaused(false);
                   const nextIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct);
@@ -805,7 +805,7 @@ function MainApp() {
     };
     window.addEventListener('keydown', handleGlobalKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true });
-  }, [inputMode, activeCard, activeTouchCandidates, blanks, currentBlankIdx, inputStatus, skimmingFocusIdx, isSkimmingPaused, skimmingWrongs]);
+  }, [inputMode, activeCard, activeTouchCandidates, blanks, currentBlankIdx, inputStatus, skimmingFocusIdx, isSkimmingPaused, skimmingWrongs, isInitialDelay]);
 
 
   useEffect(() => {
@@ -1111,6 +1111,7 @@ function MainApp() {
           exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
           exStats.highlights = statsRef.current.highlights;
           exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
+          exStats.modifiedTokens = statsRef.current.modifiedTokens;
           
           if (navigator.onLine) {
             fetch("https://api.blankd.top/api/save-card", {
@@ -1258,11 +1259,13 @@ function MainApp() {
       exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
       exStats.highlights = next;
       exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
+      exStats.modifiedTokens = statsRef.current.modifiedTokens;
       handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats));
       return next;
     });
   };
 
+  // 💡 영구 숨김 구간 토글 핸들러
   const toggleStealthToken = (tokenKey: string, isDrag = false) => {
     if (!isStealthEditMode || !activeCard) return;
     setCardHiddenTokens(prev => {
@@ -1279,11 +1282,78 @@ function MainApp() {
       exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
       exStats.highlights = statsRef.current.highlights;
       exStats.hiddenTokens = Array.from(next);
+      exStats.modifiedTokens = statsRef.current.modifiedTokens;
       handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats));
       return next;
     });
   };
 
+  // 💡 [추가] 본문 단어를 클릭하여 변형 텍스트(예: "직원" -> "임직원")로 설정하거나 구간 숨김으로 전환하는 핸들러
+  const handleModifyWordInTransformMode = (tokenKey: string, originalWord: string) => {
+    if (!isStealthEditMode || !activeCard) return;
+
+    const currentModified = cardModifiedTokens[tokenKey];
+    const isCurrentlyHidden = cardHiddenTokens.has(tokenKey);
+
+    const input = window.prompt(
+      `[본문 변형 설정]\n원래 텍스트: "${originalWord}"\n\n` +
+      `• 변형할 텍스트(예: 임직원)를 입력하면 처음엔 변형된 글자로 보이고, 글자 윗부분을 터치하면 원래 텍스트("${originalWord}")가 나옵니다.\n` +
+      `• 아무것도 입력하지 않고(빈칸으로) 확인을 누르면 '${isCurrentlyHidden ? '구간 숨김 해제' : '구간 숨김(🙈)'}' 처리됩니다.\n` +
+      (currentModified ? `• 현재 변형값("${currentModified}")을 해제하려면 텍스트를 지우고 확인을 누르세요.` : ''),
+      currentModified || originalWord
+    );
+
+    if (input === null) return; // 취소 버튼 클릭 시
+
+    const trimmed = input.trim();
+
+    // 1. 빈 문자열이거나 원래 단어 그대로 입력한 경우 -> 변형 해제 또는 구간 숨김 토글
+    if (trimmed === '' || trimmed === originalWord) {
+      if (currentModified) {
+        setCardModifiedTokens(prev => {
+          const next = { ...prev };
+          delete next[tokenKey];
+          statsRef.current.modifiedTokens = next;
+          const exStats = getExtendedStats(activeCard.memo);
+          exStats.text = statsRef.current.text;
+          exStats.filled = statsRef.current.filled;
+          exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+          exStats.highlights = statsRef.current.highlights;
+          exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
+          exStats.modifiedTokens = next;
+          handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats));
+          return next;
+        });
+      } else {
+        toggleStealthToken(tokenKey, false);
+      }
+      return;
+    }
+
+    // 2. 새로운 변형 단어(예: "임직원")를 입력한 경우 -> 숨김 목록에서는 빼고 변형 목록에 저장
+    setCardHiddenTokens(prev => {
+      const next = new Set(prev);
+      next.delete(tokenKey);
+      statsRef.current.hiddenTokens = next;
+      return next;
+    });
+
+    setCardModifiedTokens(prev => {
+      const next = { ...prev, [tokenKey]: trimmed };
+      statsRef.current.modifiedTokens = next;
+      const exStats = getExtendedStats(activeCard.memo);
+      exStats.text = statsRef.current.text;
+      exStats.filled = statsRef.current.filled;
+      exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+      exStats.highlights = statsRef.current.highlights;
+      exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
+      exStats.modifiedTokens = next;
+      handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats));
+      return next;
+    });
+  };
+
+  // 💡 숨긴 구간 바로 뒤의 글자(트리거 단어)를 터치했을 때 숨겨진 정답 구간을 보여주는 핸들러
   const handleRevealHiddenSegment = (tokensToReveal: string[], blankIndicesToResolve: number[]) => {
     setSessionRevealedTokens(prev => {
       const next = new Set(prev);
@@ -1321,17 +1391,20 @@ function MainApp() {
 
   const handleClearAllStealth = () => {
     if (!activeCard) return;
-    if (cardHiddenTokens.size === 0) return;
-    if (window.confirm("이 조항에 설정된 모든 숨김 구간을 영구 해제하시겠습니까?")) {
+    if (cardHiddenTokens.size === 0 && Object.keys(cardModifiedTokens).length === 0) return;
+    if (window.confirm("이 조항에 설정된 모든 변형(단어 변형 및 구간 숨김)을 영구 해제하시겠습니까?")) {
       setCardHiddenTokens(new Set());
+      setCardModifiedTokens({});
       setSessionRevealedTokens(new Set());
       statsRef.current.hiddenTokens = new Set();
+      statsRef.current.modifiedTokens = {};
       const exStats = getExtendedStats(activeCard.memo);
       exStats.text = statsRef.current.text;
       exStats.filled = statsRef.current.filled;
       exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
       exStats.highlights = statsRef.current.highlights;
       exStats.hiddenTokens = [];
+      exStats.modifiedTokens = {};
       handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats));
     }
   };
@@ -1348,6 +1421,7 @@ function MainApp() {
       exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
       exStats.highlights = {};
       exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
+      exStats.modifiedTokens = statsRef.current.modifiedTokens;
       handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats));
     }
   };
@@ -1431,6 +1505,22 @@ function MainApp() {
   useEffect(() => {
     if (activeCard) {
       isClosingRef.current = false;
+      isFirstBlankFocusRef.current = true;
+
+      // 💡 카드가 열릴 때 무조건 맨 위(scrollTop = 0)로 올리고, 2초 대기 후 본문이 나타나도록 설정
+      setIsInitialDelay(true);
+      if (bodyScrollRef.current) {
+        bodyScrollRef.current.scrollTop = 0;
+      }
+      window.scrollTo(0, 0);
+
+      const delayTimer = setTimeout(() => {
+        setIsInitialDelay(false);
+        if (bodyScrollRef.current) {
+          bodyScrollRef.current.scrollTop = 0;
+        }
+      }, 2000);
+
       const cleanContent = activeCard.content;
       const lines = cleanContent.split('\n');
       const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
@@ -1451,6 +1541,7 @@ function MainApp() {
 
       const stats = getExtendedStats(activeCard.memo);
       const hiddenSet = new Set<string>(stats.hiddenTokens || []);
+      const modifiedMap = stats.modifiedTokens || {};
 
       const restoredBlanks = foundBlanks.map((b, i) => {
           let isCorrect = i < lastIdx;
@@ -1480,6 +1571,7 @@ function MainApp() {
       setIsFrozen(false); setHintLetter(null); 
       setCardHighlights(stats.highlights || {});
       setCardHiddenTokens(hiddenSet);
+      setCardModifiedTokens(modifiedMap);
       setSessionRevealedTokens(new Set());
       setShowStealthHint(false);
       setIsStealthEditMode(false);
@@ -1492,28 +1584,42 @@ function MainApp() {
           wrongIndices: new Set(stats.wrongIndices || []),
           sessionCorrect: 0,
           highlights: stats.highlights || {},
-          hiddenTokens: hiddenSet
+          hiddenTokens: hiddenSet,
+          modifiedTokens: modifiedMap
       };
       
       const cleanTitle = getStrictTitleOnly(cleanContent);
       localStorage.setItem('blankd_last_enhanced_id', activeCard.id.toString());
       localStorage.setItem('blankd_last_enhanced_title', cleanTitle || "이름 없는 카드");
+
+      return () => clearTimeout(delayTimer);
     } else {
+      setIsInitialDelay(false);
       if (recognitionRef.current) {
         recognitionRef.current.onend = null; recognitionRef.current.stop(); recognitionRef.current = null; setIsListening(false);
       }
     }
   }, [activeCard]);
 
+  // 💡 [수정 1 핵심] 처음 시작할 때는 절대로 중간으로 스크롤하지 않고 무조건 맨 위(scrollTop = 0)를 유지함!
   useEffect(() => {
-      if (activeCard && inputStatus === 'idle' && inputMode !== 'skimming') {
+      if (!activeCard || isInitialDelay) {
+          if (bodyScrollRef.current) bodyScrollRef.current.scrollTop = 0;
+          return;
+      }
+      if (inputStatus === 'idle' && inputMode !== 'skimming') {
+          if (isFirstBlankFocusRef.current) {
+              isFirstBlankFocusRef.current = false;
+              if (bodyScrollRef.current) bodyScrollRef.current.scrollTop = 0;
+              return;
+          }
           const timer = setTimeout(() => {
               const el = document.getElementById('active-blank');
-              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           }, 50);
           return () => clearTimeout(timer);
       }
-  }, [currentBlankIdx, inputMode, activeCard, inputStatus]);
+  }, [currentBlankIdx, inputMode, activeCard, inputStatus, isInitialDelay]);
 
   const finishCard = async (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
@@ -1531,6 +1637,7 @@ function MainApp() {
     exStats.wrongIndices = wrongArr;
     exStats.highlights = statsRef.current.highlights;
     exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
+    exStats.modifiedTokens = statsRef.current.modifiedTokens;
     
     const nowTimeStr = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('T', ' ').substring(0, 19);
     
@@ -1652,6 +1759,7 @@ function MainApp() {
     exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
     exStats.highlights = statsRef.current.highlights;
     exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
+    exStats.modifiedTokens = statsRef.current.modifiedTokens;
     
     const newMemo = JSON.stringify(exStats);
     setActiveCard(null);
@@ -1699,7 +1807,7 @@ function MainApp() {
   };
 
   const handleSequentialInput = (overrideInput?: string | any) => {
-    if (isProcessingRef.current) return; 
+    if (isProcessingRef.current || isInitialDelay) return; 
     if (inputStatus === 'correct' || !blanks[currentBlankIdx]) return;
     if (inputStatus === 'wrong') return; 
 
@@ -1746,7 +1854,7 @@ function MainApp() {
   };
   
   const handleShowAnswer = () => {
-    if (isProcessingRef.current) return;
+    if (isProcessingRef.current || isInitialDelay) return;
     if (!blanks[currentBlankIdx]) return;
     if (inputStatus === 'wrong') return; 
 
@@ -1849,7 +1957,7 @@ function MainApp() {
 
     const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter((p: string) => p !== '');
     let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
-    const targetIdxForPage = inputMode === 'skimming' ? Math.max(0, skimmingFocusIdx) : currentBlankIdx;
+    const targetIdxForPage = inputMode === 'skimming' ? skimmingFocusIdx : currentBlankIdx;
     for (let part of parts) {
         if (part === '##PAGE_BREAK##') tempPage++;
         else if (part.startsWith('[') && part.endsWith(']')) {
@@ -1884,17 +1992,16 @@ function MainApp() {
       return '';
     };
 
-    // 💡 화이트/다크 테마 모두에서 빈칸과 일반단어가 완전히 동일한 모양으로 묶이도록 전용 클래스(stealth-marked, stealth-revealed) 적용
-    const unifiedStealthSelectedCls = 'stealth-marked bg-fuchsia-900/80 text-fuchsia-100 border-b-2 border-fuchsia-400 font-bold py-0.5 transition-colors';
-    const unifiedStealthRevealedCls = 'stealth-revealed bg-amber-500/30 text-amber-200 border-b-2 border-amber-400 font-extrabold py-0.5 animate-in fade-in duration-200';
-
     const hasHighlights = Object.keys(cardHighlights).length > 0;
     const hasHiddenTokens = cardHiddenTokens.size > 0;
-    const needTokenizePlainText = !!activeHighlighter || isStealthEditMode || hasHighlights || hasHiddenTokens;
+    const hasModifiedTokens = Object.keys(cardModifiedTokens).length > 0;
+    const totalTransformCount = cardHiddenTokens.size + Object.keys(cardModifiedTokens).length;
+
+    // 💡 형광펜/변형설정이 꺼져있고 이 카드에 저장된 형광펜/변형도 없다면 일반 텍스트를 쪼개지 않고 고속 렌더링!
+    const needTokenizePlainText = !!activeHighlighter || isStealthEditMode || hasHighlights || hasHiddenTokens || hasModifiedTokens;
 
     let renderPage = 0; 
     let bIdx = 0; 
-    let lastBlankIdxOnPage = currentBlankIdx;
 
     type PageTokenItem = {
       type: 'blank' | 'word' | 'space' | 'raw';
@@ -1910,7 +2017,6 @@ function MainApp() {
       if (renderPage === displayPage) {
         if (part.startsWith('[') && part.endsWith(']')) {
           const targetBlankIdx = bIdx++;
-          lastBlankIdxOnPage = targetBlankIdx;
           pageItems.push({
             type: 'blank',
             tokenKey: `blank-${targetBlankIdx}`,
@@ -1942,6 +2048,7 @@ function MainApp() {
     let pendingHiddenKeys: string[] = [];
     let pendingHiddenBlanks: number[] = [];
     let remainingHiddenCount = 0;
+    let remainingModifiedCount = 0;
 
     const renderSingleBlank = (item: PageTokenItem, isRevealedFromStealth: boolean) => {
       const targetBlankIdx = item.blankIdx!;
@@ -1952,6 +2059,10 @@ function MainApp() {
       const blankMarkerColor = cardHighlights[tokenKey];
       const blankMarkerCls = getBlankMarkerClass(blankMarkerColor);
       const isStealthMarked = cardHiddenTokens.has(tokenKey);
+
+      const stealthEditCls = isStealthEditMode && isStealthMarked
+        ? 'ring-2 ring-fuchsia-400 bg-fuchsia-950/70 text-fuchsia-200 border-dashed border-fuchsia-400'
+        : '';
 
       const handleBlankPointerDown = (e: React.PointerEvent) => {
         if (isStealthEditMode) {
@@ -1975,28 +2086,30 @@ function MainApp() {
         else if (activeHighlighter) applyHighlightToToken(tokenKey, true);
       };
 
-      // 💡 숨김 설정 모드일 때 빈칸도 일반 단어와 100% 동일한 방식으로 터치/드래그되어 보라색 숨김 구간으로 즉시 활성화됨
       if (isStealthEditMode) {
         return (
           <span
             key={tokenKey}
             onPointerDown={handleBlankPointerDown}
             onPointerEnter={handleBlankPointerEnter}
-            className={`cursor-pointer select-none ${
+            className={`inline-block font-bold mx-1 px-2 py-0.5 rounded border cursor-pointer select-none transition-all ${
               isStealthMarked
-                ? unifiedStealthSelectedCls
-                : 'stealth-unmarked border-b-2 border-dashed border-fuchsia-400/70 px-0.5 hover:bg-fuchsia-500/20'
+                ? 'bg-fuchsia-900/70 text-fuchsia-200 border-fuchsia-400 ring-2 ring-fuchsia-400 shadow-[0_0_10px_rgba(217,70,239,0.5)]'
+                : 'bg-white/10 text-white/80 border-white/30 hover:border-fuchsia-400'
             }`}
           >
-            {item.text}
+            {isStealthMarked ? `🙈 ${item.text}` : `[${item.text}]`}
           </span>
         );
       }
 
       if (isRevealedFromStealth) {
         return (
-          <span key={tokenKey} className={unifiedStealthRevealedCls}>
-            {item.text}
+          <span
+            key={tokenKey}
+            className="inline-block font-extrabold mx-1 px-2 py-0.5 rounded bg-amber-500/30 text-amber-200 border border-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.5)] animate-in zoom-in-95 duration-200"
+          >
+            ✨ {item.text}
           </span>
         );
       }
@@ -2009,7 +2122,7 @@ function MainApp() {
             onPointerEnter={handleBlankPointerEnter}
             className={`inline-block font-bold mx-1 px-1.5 py-0.5 rounded transition-all ${
               isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'
-            } ${blankMarkerCls} ${activeHighlighter ? 'cursor-pointer select-none' : ''}`}
+            } ${blankMarkerCls} ${stealthEditCls} ${activeHighlighter ? 'cursor-pointer select-none' : ''}`}
           >
             {item.text}
           </span>
@@ -2017,7 +2130,7 @@ function MainApp() {
       } else if (inputMode === 'skimming' && targetBlankIdx >= currentBlankIdx) {
         const isSkimmingMarkedWrong = skimmingWrongs.has(targetBlankIdx);
         const isFocused = targetBlankIdx === skimmingFocusIdx;
-        const isRevealed = skimmingFocusIdx >= 0 && targetBlankIdx <= skimmingFocusIdx;
+        const isRevealed = targetBlankIdx <= skimmingFocusIdx;
 
         return (
           <span
@@ -2051,7 +2164,14 @@ function MainApp() {
         if (inputMode === 'typing') {
           return (
             <span id="active-blank" key="active-blank-input-fixed" className={`inline-block rounded-sm ${blankMarkerCls}`}>
-              <InlineBlankInput inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
+              <InlineBlankInput
+                inputStatus={inputStatus}
+                expected={blanks[currentBlankIdx]?.answer || ""}
+                abbrDict={globalDict.abbrs}
+                hintLetter={hintLetter}
+                preventScrollFocus={isInitialDelay}
+                onSubmit={handleSequentialInput}
+              />
             </span>
           );
         } else {
@@ -2093,24 +2213,7 @@ function MainApp() {
         if (pendingHiddenKeys.length > 0 && !isStealthEditMode) {
           continue;
         }
-        let prevNonSpace: PageTokenItem | null = null;
-        for (let p = idx - 1; p >= 0; p--) {
-          if (pageItems[p].type !== 'space') { prevNonSpace = pageItems[p]; break; }
-        }
-        let nextNonSpace: PageTokenItem | null = null;
-        for (let n = idx + 1; n < pageItems.length; n++) {
-          if (pageItems[n].type !== 'space') { nextNonSpace = pageItems[n]; break; }
-        }
-        const bothMarked = prevNonSpace && nextNonSpace && cardHiddenTokens.has(prevNonSpace.tokenKey) && cardHiddenTokens.has(nextNonSpace.tokenKey);
-        const bothRevealed = bothMarked && sessionRevealedTokens.has(prevNonSpace!.tokenKey) && sessionRevealedTokens.has(nextNonSpace!.tokenKey);
-
-        const spaceCls = isStealthEditMode && bothMarked
-          ? unifiedStealthSelectedCls
-          : !isStealthEditMode && bothRevealed
-            ? unifiedStealthRevealedCls
-            : '';
-
-        contentToRender.push(<span key={item.tokenKey} className={spaceCls}>{item.text}</span>);
+        contentToRender.push(<span key={item.tokenKey}>{item.text}</span>);
         continue;
       }
 
@@ -2147,7 +2250,7 @@ function MainApp() {
             >
               {showStealthHint && (
                 <span className="inline-block mr-0.5 px-1 py-0.2 bg-amber-500 text-black font-extrabold text-[10px] rounded animate-bounce shadow-[0_0_8px_rgba(245,158,11,0.9)]">
-                  ▸
+                  ⚡여기
                 </span>
               )}
               {blankEl}
@@ -2160,22 +2263,34 @@ function MainApp() {
         const hlColor = cardHighlights[item.tokenKey];
         const markerCls = getMarkerClass(hlColor);
         const isStealthMarked = cardHiddenTokens.has(item.tokenKey);
-        const isRevealedStealth = isStealthMarked && sessionRevealedTokens.has(item.tokenKey);
+        const modifiedText = cardModifiedTokens[item.tokenKey];
+        const isModifiedWord = typeof modifiedText === 'string' && modifiedText.length > 0;
+        const isRevealedStealth = (isStealthMarked || isModifiedWord) && sessionRevealedTokens.has(item.tokenKey);
+
+        if (!isStealthEditMode && isModifiedWord && !isRevealedStealth) {
+          remainingModifiedCount++;
+        }
 
         const stealthEditWordCls = isStealthEditMode && isStealthMarked
-          ? unifiedStealthSelectedCls
-          : isRevealedStealth
-            ? unifiedStealthRevealedCls
-            : '';
+          ? 'bg-fuchsia-900/70 text-fuchsia-200 border border-dashed border-fuchsia-400 px-1 rounded-sm ring-1 ring-fuchsia-400'
+          : isStealthEditMode && isModifiedWord
+            ? 'bg-cyan-900/70 text-cyan-200 border border-dashed border-cyan-400 px-1 rounded-sm ring-1 ring-cyan-400'
+            : isRevealedStealth
+              ? 'bg-amber-500/30 text-amber-200 border-b-2 border-amber-400 px-1 rounded-sm font-extrabold animate-in zoom-in-95 duration-200'
+              : '';
+
+        // 실전 풀이에서 표시할 텍스트: 변형된 단어이고 아직 터치로 복구하지 않았다면 변형된 텍스트("임직원")를 보여줌
+        const displayedWordText = isStealthEditMode
+          ? (isStealthMarked ? `🙈${item.text}` : isModifiedWord ? `🔀${modifiedText}(원문:${item.text})` : item.text)
+          : (isModifiedWord && !isRevealedStealth ? modifiedText : item.text);
 
         contentToRender.push(
           <span
             key={item.tokenKey}
             onPointerDown={(e) => {
               if (isStealthEditMode) {
-                e.preventDefault();
+                stealthDragMovedRef.current = false;
                 isHighlightingDragRef.current = true;
-                toggleStealthToken(item.tokenKey, false);
                 return;
               }
               if (activeHighlighter) {
@@ -2186,25 +2301,77 @@ function MainApp() {
             }}
             onPointerEnter={() => {
               if (!isHighlightingDragRef.current) return;
-              if (isStealthEditMode) toggleStealthToken(item.tokenKey, true);
-              else if (activeHighlighter) applyHighlightToToken(item.tokenKey, true);
+              if (isStealthEditMode) {
+                stealthDragMovedRef.current = true;
+                toggleStealthToken(item.tokenKey, true);
+              } else if (activeHighlighter) {
+                applyHighlightToToken(item.tokenKey, true);
+              }
             }}
             onClick={(e) => {
-              if (triggerKeys && !isStealthEditMode && !activeHighlighter) {
+              // 1. 변형 설정 모드일 때: 단어를 클릭하면 변형 텍스트 입력창 호출 (예: "직원" -> "임직원")
+              if (isStealthEditMode) {
+                e.stopPropagation();
+                if (!stealthDragMovedRef.current) {
+                  handleModifyWordInTransformMode(item.tokenKey, item.text);
+                }
+                return;
+              }
+              if (activeHighlighter) return;
+
+              // 2. 실전 풀이 중 변형된 단어("임직원")일 때: 글자 윗부분을 터치하면 원래 텍스트("직원")로 복구!
+              if (isModifiedWord && !isRevealedStealth) {
+                const rect = e.currentTarget.getBoundingClientRect();
+                const clickY = e.clientY - rect.top;
+                // 글자 윗부분(상단 60% 영역) 터치 시 원래 텍스트 복구 (앞에 숨김 구간이 있다면 함께 복구)
+                if (clickY <= rect.height * 0.65) {
+                  e.stopPropagation();
+                  setSessionRevealedTokens(prev => {
+                    const next = new Set(prev);
+                    next.add(item.tokenKey);
+                    return next;
+                  });
+                  if (triggerKeys) {
+                    handleRevealHiddenSegment(triggerKeys, triggerBlanks);
+                  }
+                  return;
+                }
+              }
+
+              // 3. 앞에 숨겨진 구간이 있는 트리거 단어일 때: 터치하면 숨겨진 구간 복구
+              if (triggerKeys) {
                 e.stopPropagation();
                 handleRevealHiddenSegment(triggerKeys, triggerBlanks);
               }
             }}
-            className={`transition-all ${markerCls} ${stealthEditWordCls} ${
-              activeHighlighter || isStealthEditMode || triggerKeys ? 'cursor-pointer select-none' : ''
-            } ${showStealthHint && triggerKeys ? 'ring-2 ring-amber-400 bg-amber-500/20 rounded-sm px-0.5' : ''}`}
+            className={`relative inline-block transition-all ${markerCls} ${stealthEditWordCls} ${
+              activeHighlighter || isStealthEditMode || triggerKeys || (isModifiedWord && !isRevealedStealth) ? 'cursor-pointer select-none' : ''
+            } ${showStealthHint && (triggerKeys || (isModifiedWord && !isRevealedStealth)) ? 'ring-2 ring-amber-400 bg-amber-500/20 rounded-sm px-0.5' : ''}`}
           >
-            {showStealthHint && triggerKeys && (
+            {/* 💡 변형된 단어("임직원")의 글자 윗부분 전용 투명 터치 감지 존: 모바일 손가락 터치에서도 윗부분 터치 시 100% 정확하게 원래 텍스트("직원")가 나오도록 보장 */}
+            {!isStealthEditMode && !activeHighlighter && isModifiedWord && !isRevealedStealth && (
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSessionRevealedTokens(prev => {
+                    const next = new Set(prev);
+                    next.add(item.tokenKey);
+                    return next;
+                  });
+                  if (triggerKeys) {
+                    handleRevealHiddenSegment(triggerKeys, triggerBlanks);
+                  }
+                }}
+                className="absolute -top-1.5 left-0 right-0 h-[65%] z-10 cursor-pointer"
+                title="글자 윗부분을 터치하면 원래 텍스트가 나타납니다"
+              />
+            )}
+            {showStealthHint && (triggerKeys || (isModifiedWord && !isRevealedStealth)) && (
               <span className="inline-block mr-0.5 px-1 py-0.2 bg-amber-500 text-black font-extrabold text-[10px] rounded animate-bounce shadow-[0_0_8px_rgba(245,158,11,0.9)]">
-                ▸
+                {isModifiedWord && !isRevealedStealth ? '🔀' : '⚡'}
               </span>
             )}
-            {item.text}
+            {displayedWordText}
           </span>
         );
       }
@@ -2224,17 +2391,18 @@ function MainApp() {
           }`}
           title="문장 끝에 숨겨진 구간이 있습니다. 터치하여 확인하세요."
         >
-          {showStealthHint ? '[끝 숨김 확인]' : '...'}
+          {showStealthHint ? '⚡[끝 숨김 확인]' : '...'}
         </span>
       );
     }
 
     const hasSavedMemo = statsRef.current.text && statsRef.current.text.trim().length > 0;
+    const totalRemainingTransforms = remainingHiddenCount + remainingModifiedCount;
     
     return (
       <div className="flex flex-col w-full h-[65vh] sm:h-[72vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
         
-        {/* 1. 상단 고정 컨테이너 */}
+        {/* 1. 상단 고정 컨테이너 (제목 + 변형 설정 + 3색 형광 마커 + 글자크기/노트) */}
         <div className="shrink-0 flex flex-wrap justify-between items-center border-b border-white/10 px-3 py-2 sm:px-5 sm:py-2.5 w-full gap-2 bg-[#0a0a0c] z-20">
             <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 min-w-[120px] pb-0.5`}>
               {displayTitle}
@@ -2242,7 +2410,7 @@ function MainApp() {
             
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
               
-              {/* 스텔스 구간 숨기기 컨트롤 툴바 */}
+              {/* 🔀 변형(구간 숨김 + 본문 단어 변형) 컨트롤 툴바 */}
               <div className="flex items-center gap-1 bg-white/5 px-1.5 py-1 rounded-sm border border-white/10">
                 <button
                   onClick={(e) => {
@@ -2256,15 +2424,15 @@ function MainApp() {
                   className={`px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-bold transition-all flex items-center gap-1 ${
                     isStealthEditMode
                       ? 'bg-fuchsia-600 text-white ring-2 ring-fuchsia-400 shadow-[0_0_10px_rgba(217,70,239,0.6)]'
-                      : cardHiddenTokens.size > 0
+                      : totalTransformCount > 0
                         ? 'bg-fuchsia-950/60 text-fuchsia-300 border border-fuchsia-500/40 hover:bg-fuchsia-900/70'
                         : 'bg-black/40 text-white/60 hover:text-white'
                   }`}
                 >
-                  <span>{isStealthEditMode ? '숨김완료' : `구간숨김(${cardHiddenTokens.size})`}</span>
+                  <span>🔀 {isStealthEditMode ? '변형 완료' : `변형(${totalTransformCount})`}</span>
                 </button>
 
-                {!isStealthEditMode && remainingHiddenCount > 0 && (
+                {!isStealthEditMode && totalRemainingTransforms > 0 && (
                   <button
                     onClick={(e) => {
                       e.currentTarget.blur();
@@ -2275,51 +2443,57 @@ function MainApp() {
                         ? 'bg-amber-500 text-black ring-2 ring-amber-300 shadow-md'
                         : 'bg-amber-950/60 text-amber-300 border border-amber-500/40 hover:bg-amber-900/70 animate-pulse'
                     }`}
-                    title="숨겨진 위치가 어디인지 모르겠을 때 위치 표시"
+                    title="변형되거나 숨겨진 위치가 어디인지 모르겠을 때 힌트 표시"
                   >
-                    위치힌트({remainingHiddenCount})
+                    💡위치힌트({totalRemainingTransforms})
                   </button>
                 )}
 
-                {cardHiddenTokens.size > 0 && (
+                {totalTransformCount > 0 && (
                   <button
-                    title="숨김 구간 전체 영구 해제"
+                    title="변형 및 숨김 전체 영구 해제"
                     onClick={(e) => { e.currentTarget.blur(); handleClearAllStealth(); }}
-                    className="px-1.5 py-0.5 text-[10px] text-red-400 hover:text-red-300 font-bold"
+                    className="px-1 py-0.5 text-[10px] text-red-400 hover:text-red-300 font-bold"
                   >
-                    해제
+                    🔓
                   </button>
                 )}
               </div>
 
-              {/* 3색 형광 마커 툴바 */}
-              <div className="flex items-center gap-1.5 bg-white/5 px-2 py-1 rounded-sm border border-white/10">
+              {/* 🖍️ 초고시인성 3색 형광 마커 툴바 */}
+              <div className="flex items-center gap-1 bg-white/5 px-1.5 py-1 rounded-sm border border-white/10">
                 <button
                   title="보라색 형광펜"
                   onClick={(e) => { e.currentTarget.blur(); setIsStealthEditMode(false); setActiveHighlighter(p => p === 'purple' ? null : 'purple'); }}
-                  className={`w-4 h-4 rounded-full bg-purple-500 transition-all ${
-                    activeHighlighter === 'purple' ? 'ring-2 ring-white scale-110 shadow-md' : 'opacity-40 hover:opacity-80'
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all border-b-2 border-purple-500 ${
+                    activeHighlighter === 'purple' ? 'bg-purple-600 text-white ring-2 ring-purple-400 scale-105 shadow-md' : 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30'
                   }`}
-                />
+                >
+                  🟣
+                </button>
                 <button
                   title="파란색 형광펜"
                   onClick={(e) => { e.currentTarget.blur(); setIsStealthEditMode(false); setActiveHighlighter(p => p === 'blue' ? null : 'blue'); }}
-                  className={`w-4 h-4 rounded-full bg-sky-500 transition-all ${
-                    activeHighlighter === 'blue' ? 'ring-2 ring-white scale-110 shadow-md' : 'opacity-40 hover:opacity-80'
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all border-b-2 border-sky-500 ${
+                    activeHighlighter === 'blue' ? 'bg-sky-600 text-white ring-2 ring-sky-400 scale-105 shadow-md' : 'bg-sky-500/20 text-sky-400 hover:bg-sky-500/30'
                   }`}
-                />
+                >
+                  🔵
+                </button>
                 <button
                   title="연두색 형광펜"
                   onClick={(e) => { e.currentTarget.blur(); setIsStealthEditMode(false); setActiveHighlighter(p => p === 'orange' ? null : 'orange'); }}
-                  className={`w-4 h-4 rounded-full bg-lime-500 transition-all ${
-                    activeHighlighter === 'orange' ? 'ring-2 ring-white scale-110 shadow-md' : 'opacity-40 hover:opacity-80'
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all border-b-2 border-lime-500 ${
+                    activeHighlighter === 'orange' ? 'bg-lime-600 text-white ring-2 ring-lime-400 scale-105 shadow-md' : 'bg-lime-500/20 text-lime-400 hover:bg-lime-500/30'
                   }`}
-                />
+                >
+                  🟢
+                </button>
                 <button
                   title="형광펜 부분 지우개"
                   onClick={(e) => { e.currentTarget.blur(); setIsStealthEditMode(false); setActiveHighlighter(p => p === 'eraser' ? null : 'eraser'); }}
                   className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all ${
-                    activeHighlighter === 'eraser' ? 'bg-zinc-700 text-white ring-1 ring-white' : 'bg-black/40 text-white/60 hover:text-white'
+                    activeHighlighter === 'eraser' ? 'bg-zinc-700 text-white ring-2 ring-zinc-400 scale-105' : 'bg-black/40 text-white/60 hover:text-white'
                   }`}
                 >
                   지우개
@@ -2330,7 +2504,7 @@ function MainApp() {
                     onClick={(e) => { e.currentTarget.blur(); handleClearAllHighlights(); }}
                     className="px-1 py-0.5 text-[10px] text-red-400 hover:text-red-300 font-bold"
                   >
-                    초기화
+                    🗑️
                   </button>
                 )}
               </div>
@@ -2344,35 +2518,35 @@ function MainApp() {
 
               {/* 암기 노트 토글 */}
               <button onClick={(e) => { e.currentTarget.blur(); setIsMemoOpen(!isMemoOpen); }} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md flex items-center gap-1">
-                <span>{isMemoOpen ? '노트 닫기' : '암기 노트'}</span>
+                <span>{isMemoOpen ? '노트 닫기 ✕' : '📝 암기 노트'}</span>
                 {!isMemoOpen && hasSavedMemo && <span className="text-teal-300 text-[8px] animate-pulse">●</span>}
               </button>
             </div>
         </div>
 
-        {/* 숨김 구간 설정 모드 안내 배너 */}
+        {/* 변형 모드 안내 배너 */}
         {isStealthEditMode && (
           <div className="shrink-0 bg-fuchsia-950/90 border-b border-fuchsia-500/50 px-4 py-1.5 flex justify-between items-center text-[11px] text-fuchsia-100">
             <span>
-              <b>숨김 구간 설정 모드</b> — 숨기고 싶은 빈칸이나 단어를 터치/드래그하세요. 연속된 단어와 빈칸은 하나로 묶여 표시됩니다.
+              🔀 <b>변형 설정 모드</b> — 본문 단어를 <b>클릭</b>해 다른 글자로 변형(예: 직원→임직원)하거나, <b>드래그 / [빈칸] 터치</b>로 구간을 숨기세요!
             </span>
             <button onClick={() => setIsStealthEditMode(false)} className="text-[10px] bg-fuchsia-600 hover:bg-fuchsia-500 text-white px-2.5 py-0.5 rounded font-bold shadow">
-              설정 완료
+              설정 완료 ✓
             </button>
           </div>
         )}
 
-        {/* 실전 풀이 중 숨겨진 구간이 있을 때 안내 배너 */}
-        {!isStealthEditMode && remainingHiddenCount > 0 && (
+        {/* 실전 풀이 중 변형/숨김 구간 안내 배너 */}
+        {!isStealthEditMode && totalRemainingTransforms > 0 && (
           <div className="shrink-0 bg-amber-950/60 border-b border-amber-500/30 px-4 py-1 flex justify-between items-center text-[11px] text-amber-200">
             <span>
-              현재 문장에 <b>{remainingHiddenCount}개</b>의 숨김 단어가 있습니다. <b>숨겨진 부분 바로 뒤의 글자</b>를 터치하면 나타납니다.
+              🕵️ <b>변형({remainingModifiedCount}) · 숨김({remainingHiddenCount})</b> — 변형된 글자는 <b>글자 윗부분</b>을, 숨겨진 구간은 <b>뒤의 글자</b>를 터치하면 원래 텍스트가 나옵니다!
             </span>
             <button
               onClick={() => setShowStealthHint(p => !p)}
               className="text-[10px] bg-amber-500/20 hover:bg-amber-500/40 border border-amber-400/50 text-amber-200 px-2 py-0.5 rounded font-bold"
             >
-              {showStealthHint ? '힌트 숨기기' : '위치 힌트 보기'}
+              {showStealthHint ? '힌트 숨기기' : '💡 위치 힌트 보기'}
             </button>
           </div>
         )}
@@ -2381,10 +2555,10 @@ function MainApp() {
         {activeHighlighter && !isStealthEditMode && (
           <div className="shrink-0 bg-indigo-950/80 border-b border-indigo-500/40 px-4 py-1 flex justify-between items-center text-[11px] text-indigo-200">
             <span>
-              <b>{activeHighlighter === 'purple' ? '보라색 형광펜' : activeHighlighter === 'blue' ? '파란색 형광펜' : activeHighlighter === 'orange' ? '연두색 형광펜' : '지우개'}</b> 켜짐 — 본문 단어나 빈칸을 터치/드래그하여 칠하세요.
+              🖍️ <b>{activeHighlighter === 'purple' ? '🟣 보라색 형광펜' : activeHighlighter === 'blue' ? '🔵 파란색 형광펜' : activeHighlighter === 'orange' ? '🟢 연두색 형광펜' : '🧹 지우개'}</b> 켜짐 — 본문 단어나 빈칸을 터치/드래그하여 칠하세요!
             </span>
             <button onClick={() => setActiveHighlighter(null)} className="text-[10px] bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded font-bold">
-              펜 끄기
+              펜 끄기 ✕
             </button>
           </div>
         )}
@@ -2392,11 +2566,17 @@ function MainApp() {
         {/* 2. 가운데 영역: 좌측 본문 스크롤 + 우측 메모 컨테이너 */}
         <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden bg-[#0a0a0c]">
             
-            {/* 좌측: 조항 본문 (독립 스크롤) */}
-            <div className="flex-1 min-h-0 overflow-y-scroll scroll-smooth custom-scrollbar px-3 py-3 sm:py-4 md:px-6 pb-8">
-                <div className={`whitespace-pre-wrap leading-relaxed ${bodyClass} font-serif break-all break-words w-full max-w-full text-white/90`}>
-                    {contentToRender}
-                </div>
+            {/* 좌측: 조항 본문 (독립 스크롤 - 시작 시 무조건 맨 위 고정 후 2초 뒤 표시) */}
+            <div ref={bodyScrollRef} className="flex-1 min-h-0 overflow-y-scroll custom-scrollbar px-3 py-3 sm:py-4 md:px-6 pb-8 relative">
+                {isInitialDelay ? (
+                  <div className="w-full h-full flex flex-col items-center justify-start pt-8 text-teal-400/80 select-none animate-pulse">
+                    <span className="text-xs sm:text-sm font-bold tracking-wider">⏳ 조항 제목을 먼저 확인하고 암기 내용을 떠올려보세요... (2초 후 표시)</span>
+                  </div>
+                ) : (
+                  <div className={`whitespace-pre-wrap leading-relaxed ${bodyClass} font-serif break-all break-words w-full max-w-full text-white/90 animate-in fade-in duration-200`}>
+                      {contentToRender}
+                  </div>
+                )}
             </div>
 
             {/* 우측: 별도 분리된 메모 컨테이너 (토글 시 표시) */}
@@ -2404,7 +2584,7 @@ function MainApp() {
               <div className="w-full md:w-80 lg:w-96 h-48 md:h-full shrink-0 border-t md:border-t-0 md:border-l border-teal-500/30 bg-teal-950/10 flex flex-col p-3 sm:p-4 animate-in fade-in duration-200">
                  <div className="flex justify-between items-center mb-2 pb-1.5 border-b border-teal-500/20 shrink-0">
                     <span className="text-xs font-bold text-teal-400 flex items-center gap-1">
-                      나만의 암기 노트
+                      📌 나만의 암기 노트
                     </span>
                     <span className="text-[10px] text-teal-500/70 font-mono">자동 저장됨</span>
                  </div>
@@ -2423,6 +2603,7 @@ function MainApp() {
                         exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
                         exStats.highlights = statsRef.current.highlights;
                         exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
+                        exStats.modifiedTokens = statsRef.current.modifiedTokens;
                         handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats)); 
                     }} 
                     className="flex-1 w-full text-[12px] sm:text-[13px] leading-relaxed text-teal-200 bg-black/40 p-2.5 sm:p-3 rounded border border-teal-500/30 outline-none focus:border-teal-400 transition-all resize-none custom-scrollbar shadow-inner font-sans" 
@@ -2438,12 +2619,10 @@ function MainApp() {
               <div className="flex flex-col gap-1.5 sm:gap-2 w-full p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[10px] sm:text-[11px] text-amber-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className={isSkimmingPaused ? "" : "animate-pulse"}>
-                      {isSkimmingPaused ? '일시정지됨' : skimmingFocusIdx === -1 ? '2초 후 첫 빈칸이 표시됩니다...' : '1초마다 자동 진행 중...'}
-                    </span> 
+                    <span className={isSkimmingPaused ? "" : "animate-pulse"}>{isSkimmingPaused ? '⏸️ 일시정지됨' : '▶️ 1초마다 자동 진행 중...'}</span> 
                     <span className="text-white/60 font-normal hidden sm:inline">| ▲: 멈춤 / ▼: 재개 / Space: 모름(오답)+멈춤</span>
                   </div>
-                  <span className="text-[10px] font-mono text-white/50 shrink-0">{Math.max(0, skimmingFocusIdx + 1)} / {blanks.length}</span>
+                  <span className="text-[10px] font-mono text-white/50 shrink-0">{skimmingFocusIdx + 1} / {blanks.length}</span>
                 </div>
                 <div className="flex gap-2 w-full">
                   <button 
@@ -2451,9 +2630,7 @@ function MainApp() {
                        e.currentTarget.blur();
                        if (!isSkimmingPaused) {
                          setIsSkimmingPaused(true);
-                         if (skimmingFocusIdx >= 0) {
-                           setSkimmingWrongs(prev => new Set(prev).add(skimmingFocusIdx));
-                         }
+                         setSkimmingWrongs(prev => new Set(prev).add(skimmingFocusIdx));
                        } else {
                          setIsSkimmingPaused(false);
                          const nextIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct);
@@ -2467,7 +2644,7 @@ function MainApp() {
                         : 'bg-red-900/60 hover:bg-red-800 border-red-500/50 text-red-200'
                     }`}
                   >
-                    {isSkimmingPaused ? '다시 진행하기 (▼ 또는 Space)' : '모름 체크 및 일시정지 (Space)'}
+                    {isSkimmingPaused ? '▶️ 다시 진행하기 (▼ 또는 Space)' : '⏸️ 모름 체크 및 일시정지 (Space)'}
                   </button>
                   <button 
                     onClick={(e) => {
@@ -2486,7 +2663,7 @@ function MainApp() {
               <div className="flex flex-col gap-1.5 sm:gap-2 w-full max-h-[22vh] overflow-y-auto custom-scrollbar p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[10px] sm:text-[11px] text-teal-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
-                    터치하여 정답을 선택하세요
+                    <span className="animate-pulse">👆</span> 터치하여 정답을 선택하세요
                   </div>
                 </div>
                 
@@ -2513,7 +2690,7 @@ function MainApp() {
                   }} 
                   className="w-full mt-0.5 sm:mt-1 py-1.5 sm:py-2.5 bg-red-900/40 hover:bg-red-900/60 border border-red-500/30 text-red-400 text-[11px] sm:text-[13px] font-bold rounded-sm shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
                 >
-                  모름 (오답 처리 후 다음 빈칸으로 넘어가기) <span className="text-[10px] text-red-500/60 font-mono ml-1">[0]</span>
+                  🤔 모름 (오답 처리 후 다음 빈칸으로 넘어가기) <span className="text-[10px] text-red-500/60 font-mono ml-1">[0]</span>
                 </button>
               </div>
             )}
@@ -2540,7 +2717,7 @@ function MainApp() {
                   }} 
                   className="px-2 sm:px-3 py-1.5 sm:py-2.5 bg-zinc-900/80 text-zinc-300 border border-zinc-500/50 rounded text-[10px] sm:text-xs font-bold flex-1 hover:bg-zinc-800 transition-all shadow-md flex items-center justify-center gap-2"
                 >
-                  {inputMode === 'typing' ? '터치 모드로 전환' : inputMode === 'touch' ? '스키밍 모드로 전환' : '타이핑 모드로 전환'}
+                  {inputMode === 'typing' ? '👆 터치 모드로 전환' : inputMode === 'touch' ? '⚡ 스키밍 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
                 </button>
                 <button 
                   id="show-answer-btn"
@@ -2557,7 +2734,7 @@ function MainApp() {
         </div>
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, skimmingWrongs, skimmingFocusIdx, isSkimmingPaused, touchCandidates, fontSizeLevel, activeTouchCandidates, activeHighlighter, cardHighlights, isStealthEditMode, cardHiddenTokens, sessionRevealedTokens, showStealthHint]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, skimmingWrongs, skimmingFocusIdx, isSkimmingPaused, touchCandidates, fontSizeLevel, activeTouchCandidates, activeHighlighter, cardHighlights, isStealthEditMode, cardHiddenTokens, cardModifiedTokens, sessionRevealedTokens, showStealthHint, isInitialDelay]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
@@ -2770,90 +2947,4 @@ function MainApp() {
         /* 화이트 테마용 3색 형광펜 초고시인성 스타일 */
         .mk-purple { background-color: #e9d5ff !important; color: #581c87 !important; border-bottom: 3px solid #9333ea !important; font-weight: 900 !important; }
         .mk-blue { background-color: #bae6fd !important; color: #0c4a6e !important; border-bottom: 3px solid #0284c7 !important; font-weight: 900 !important; }
-        .mk-orange { background-color: #d9f99d !important; color: #365314 !important; border-bottom: 3px solid #65a30d !important; font-weight: 900 !important; }
-
-        /* 화이트 테마용 스텔스 숨김 구간 통합 스타일 */
-        .stealth-marked { background-color: #f3e8ff !important; color: #6b21a8 !important; border-bottom: 3px solid #9333ea !important; font-weight: 900 !important; }
-        .stealth-unmarked { background-color: #faf5ff !important; color: #374151 !important; border-bottom: 2px dashed #a855f7 !important; }
-        .stealth-revealed { background-color: #fef08a !important; color: #854d0e !important; border-bottom: 3px solid #eab308 !important; font-weight: 900 !important; }
-
-        .text-amber-100, .text-amber-200 { color: #b45309 !important; font-weight: 800; }
-        .text-teal-100, .text-teal-200 { color: #0f766e !important; font-weight: 800; }
-
-        .text-teal-300, .text-teal-400, .text-teal-500 { color: #0f766e !important; font-weight: 800 !important; }
-        .bg-teal-900\\/20, .bg-teal-900\\/30, .bg-teal-900\\/40, .bg-teal-950\\/20, .bg-teal-500\\/10, .bg-teal-500\\/20 { 
-          background-color: #ccfbf1 !important; border-color: #0d9488 !important; 
-        }
-        .border-teal-500\\/30, .border-teal-500\\/40, .border-teal-500\\/50 { border-color: #0d9488 !important; }
-
-        .text-amber-300, .text-amber-400, .text-amber-500 { color: #b45309 !important; font-weight: 800 !important; }
-        .bg-amber-900\\/20, .bg-amber-900\\/30, .bg-amber-900\\/40, .bg-amber-950\\/20, .bg-amber-500\\/10, .bg-amber-500\\/20 { 
-          background-color: #fef3c7 !important; border-color: #d97706 !important; 
-        }
-        .border-amber-500\\/30, .border-amber-500\\/40, .border-amber-500\\/50, .border-amber-900\\/30 { border-color: #d97706 !important; }
-
-        .text-indigo-300, .text-indigo-400, .text-indigo-500 { color: #4338ca !important; font-weight: 800 !important; }
-        .bg-indigo-900\\/20, .bg-indigo-900\\/30, .bg-indigo-900\\/40 { 
-          background-color: #e0e7ff !important; border-color: #6366f1 !important; 
-        }
-        .border-indigo-500\\/30, .border-indigo-500\\/40, .border-indigo-500\\/50 { border-color: #6366f1 !important; }
-
-        .text-blue-300, .text-blue-400, .text-blue-500 { color: #1d4ed8 !important; font-weight: 800 !important; }
-        .bg-blue-900\\/20, .bg-blue-900\\/30, .bg-blue-900\\/40, .bg-blue-500\\/10, .bg-blue-500\\/20 { 
-          background-color: #dbeafe !important; border-color: #3b82f6 !important; 
-        }
-        .border-blue-500\\/30, .border-blue-500\\/40, .border-blue-500\\/50, .border-blue-500 { border-color: #3b82f6 !important; }
-
-        .text-red-300, .text-red-400, .text-red-500 { color: #b91c1c !important; font-weight: 800 !important; }
-        .bg-red-900\\/20, .bg-red-900\\/30, .bg-red-900\\/40, .bg-red-950\\/20, .bg-red-500\\/10, .bg-red-500\\/20 { 
-          background-color: #fee2e2 !important; border-color: #ef4444 !important; 
-        }
-        .border-red-500\\/30, .border-red-500\\/40, .border-red-500\\/50, .border-red-900\\/30 { border-color: #ef4444 !important; }
-
-        .text-green-300, .text-green-400, .text-green-500 { color: #15803d !important; font-weight: 800 !important; }
-        .bg-green-900\\/20, .bg-green-900\\/30, .bg-green-900\\/40, .bg-green-500\\/10, .bg-green-500\\/20 { 
-          background-color: #dcfce7 !important; border-color: #10b981 !important; 
-        }
-        .border-green-500\\/30, .border-green-500\\/40, .border-green-500\\/50 { border-color: #10b981 !important; }
-      `;
-    } else if (theme === 'green') {
-      return `
-        body { background-color: #163322; }
-        .bg-\\[\\#08080a\\] { background-color: #0f2418 !important; }
-        .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(15, 36, 24, 0.9) !important; }
-        .bg-\\[\\#0a0a0c\\] { background-color: #122b1c !important; }
-        .bg-\\[\\#0d0d0f\\] { background-color: #163322 !important; }
-      `;
-    }
-    return `body { background-color: #0d0d0f; }`; 
-  };
-
-  return (
-    <div className="min-h-screen bg-[#0d0d0f] text-[#d1d1d1] p-4 sm:p-6 md:p-8 relative pb-24 font-sans text-pretty overflow-x-hidden transition-colors">
-      <style>{getThemeCSS()}</style>
-      <header className="border-b border-white/10 bg-[#08080a] px-4 py-2.5 sticky top-0 z-40 backdrop-blur-md w-full">
-        <div className="w-full max-w-[1600px] mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3 px-2 sm:px-4 md:px-8">
-          <div className="flex items-center justify-between w-full md:w-auto">
-            <button onClick={() => { const lastTab = localStorage.getItem('blankd_active_tab') || 'progress'; setActiveTab(lastTab); }} className="text-xl sm:text-2xl font-bold tracking-widest text-current shrink-0 hover:text-teal-400 transition-colors">
-              BlankD
-            </button>
-          </div>
-
-          <div className="flex items-center justify-start md:justify-end gap-3 sm:gap-4 shrink-0 overflow-x-auto custom-scrollbar pb-1 md:pb-0 w-full md:w-auto">
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 uppercase hidden sm:inline">이어하기:</span>
-              {nextCatToCraft ? (
-                <button onClick={() => { setActiveTab('create'); setExpandedId(nextCatToCraft.id); }} className="bg-amber-900/30 border border-amber-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-amber-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]">
-                  <span className="text-[9px] sm:text-[10px] text-amber-400 font-bold whitespace-nowrap">▶ 만들기</span><span className="text-[10px] sm:text-[11px] font-medium text-amber-100 truncate">{getStrictTitleOnly(nextCatToCraft.title) || "다음 조항"}</span>
-                </button>
-              ) : (<div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">만들기 완료</div>)}
-
-              {nextStudyCard ? (
-                <button onClick={() => { setActiveTab('enhance'); setActiveCard(nextStudyCard); }} className="bg-teal-900/30 border border-teal-500/40 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm flex items-center gap-1.5 hover:bg-teal-900/50 transition-all text-left max-w-[140px] sm:max-w-[200px]">
-                  <span className="text-[9px] sm:text-[10px] text-teal-400 font-bold whitespace-nowrap">▶ 채우기</span><span className="text-[10px] sm:text-[11px] font-medium text-teal-100 truncate">{nextStudyCard.content.split('\n')[0].replace(/\[.*?\]/g, '').replace(/\(.*?\)/g, '').trim()}</span>
-                </button>
-              ) : (<div className="text-[10px] sm:text-[11px] text-white/20 border border-white/5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-sm">채우기 완료</div>)}
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0 ml-1 sm:ml-2 border-l border-white/10 pl-2 sm:pl-3">
-              <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 hidden sm:inline">사전
+        .mk-orange { background-color: #d9f99d !important; color: #365314 !important; border-bottom: 3px solid #65a30d !
