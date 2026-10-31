@@ -606,7 +606,6 @@ function MainApp() {
   
   const [inputMode, setInputMode] = useState<'typing'|'touch'|'skimming'>('typing'); 
   const [skimmingWrongs, setSkimmingWrongs] = useState<Set<number>>(new Set());
-  // 💡 [수정 1] 스키밍 모드 시작 시 첫 번째 칸이 바로 보이지 않고 2초 딜레이 후 나타나도록 초기값 -1 설정
   const [skimmingFocusIdx, setSkimmingFocusIdx] = useState<number>(-1);
   const [isSkimmingPaused, setIsSkimmingPaused] = useState<boolean>(false);
   const lastKeyTimeRef = useRef<number>(0);
@@ -691,7 +690,6 @@ function MainApp() {
 
   }, [currentBlankIdx, blanks, touchCandidates, globalDict.groups]); 
 
-  // 💡 [수정 1] 스키밍 모드 전환 또는 새 카드 진입 시 -1(아직 아무 빈칸도 안 보임) 상태로 시작
   useEffect(() => {
     if (inputMode === 'skimming') {
       setSkimmingFocusIdx(-1);
@@ -709,7 +707,6 @@ function MainApp() {
     }
   }, [skimmingFocusIdx, inputMode, activeCard]);
 
-  // 💡 [수정 1] 스키밍 시작 시 첫 번째 빈칸은 2초(2000ms) 딜레이 후 노출, 이후 빈칸은 1초(1000ms) 간격 진행
   useEffect(() => {
     if (!activeCard || inputMode !== 'skimming' || isSkimmingPaused || blanks.length === 0) return;
 
@@ -1887,9 +1884,9 @@ function MainApp() {
       return '';
     };
 
-    // 💡 [수정 3] 숨김 구간(빈칸 + 일반단어)이 하나로 자연스럽게 이어지도록 완전히 동일한 디자인 클래스 적용 (괄호/마진/이모지 제거)
-    const unifiedStealthSelectedCls = 'bg-fuchsia-900/75 text-fuchsia-100 border-b-2 border-fuchsia-400 font-bold py-0.5 transition-colors';
-    const unifiedStealthRevealedCls = 'bg-amber-500/30 text-amber-200 border-b-2 border-amber-400 font-extrabold py-0.5 animate-in fade-in duration-200';
+    // 💡 화이트/다크 테마 모두에서 빈칸과 일반단어가 완전히 동일한 모양으로 묶이도록 전용 클래스(stealth-marked, stealth-revealed) 적용
+    const unifiedStealthSelectedCls = 'stealth-marked bg-fuchsia-900/80 text-fuchsia-100 border-b-2 border-fuchsia-400 font-bold py-0.5 transition-colors';
+    const unifiedStealthRevealedCls = 'stealth-revealed bg-amber-500/30 text-amber-200 border-b-2 border-amber-400 font-extrabold py-0.5 animate-in fade-in duration-200';
 
     const hasHighlights = Object.keys(cardHighlights).length > 0;
     const hasHiddenTokens = cardHiddenTokens.size > 0;
@@ -1978,7 +1975,7 @@ function MainApp() {
         else if (activeHighlighter) applyHighlightToToken(tokenKey, true);
       };
 
-      // 💡 [수정 3] 숨김 설정 모드이거나 숨김으로 지정된 빈칸은 괄호·여백 없이 일반 숨김 단어와 100% 동일한 양식으로 표시
+      // 💡 숨김 설정 모드일 때 빈칸도 일반 단어와 100% 동일한 방식으로 터치/드래그되어 보라색 숨김 구간으로 즉시 활성화됨
       if (isStealthEditMode) {
         return (
           <span
@@ -1988,7 +1985,7 @@ function MainApp() {
             className={`cursor-pointer select-none ${
               isStealthMarked
                 ? unifiedStealthSelectedCls
-                : 'bg-white/10 text-white/90 border-b border-dashed border-white/40 px-0.5 hover:bg-fuchsia-900/40'
+                : 'stealth-unmarked border-b-2 border-dashed border-fuchsia-400/70 px-0.5 hover:bg-fuchsia-500/20'
             }`}
           >
             {item.text}
@@ -1996,7 +1993,6 @@ function MainApp() {
         );
       }
 
-      // 💡 [수정 3] 뒤 글자를 터치해 찾아낸 숨김 구간도 빈칸/일반단어 구분 없이 똑같은 양식으로 자연스럽게 연결
       if (isRevealedFromStealth) {
         return (
           <span key={tokenKey} className={unifiedStealthRevealedCls}>
@@ -2097,7 +2093,6 @@ function MainApp() {
         if (pendingHiddenKeys.length > 0 && !isStealthEditMode) {
           continue;
         }
-        // 💡 [수정 3] 앞뒤 토큰이 모두 숨김(또는 발견됨) 상태라면 공백에도 똑같은 배경색과 밑줄을 연결하여 끊김 없는 하나의 구간으로 묶음!
         let prevNonSpace: PageTokenItem | null = null;
         for (let p = idx - 1; p >= 0; p--) {
           if (pageItems[p].type !== 'space') { prevNonSpace = pageItems[p]; break; }
@@ -2167,7 +2162,6 @@ function MainApp() {
         const isStealthMarked = cardHiddenTokens.has(item.tokenKey);
         const isRevealedStealth = isStealthMarked && sessionRevealedTokens.has(item.tokenKey);
 
-        // 💡 [수정 3] 일반 단어도 빈칸과 100% 동일한 숨김/발견 스타일 적용
         const stealthEditWordCls = isStealthEditMode && isStealthMarked
           ? unifiedStealthSelectedCls
           : isRevealedStealth
@@ -2240,7 +2234,7 @@ function MainApp() {
     return (
       <div className="flex flex-col w-full h-[65vh] sm:h-[72vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
         
-        {/* 1. 상단 고정 컨테이너 (불필요한 아이콘을 제거하고 텍스트/도형 버튼으로 깔끔하게 구성) */}
+        {/* 1. 상단 고정 컨테이너 */}
         <div className="shrink-0 flex flex-wrap justify-between items-center border-b border-white/10 px-3 py-2 sm:px-5 sm:py-2.5 w-full gap-2 bg-[#0a0a0c] z-20">
             <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 min-w-[120px] pb-0.5`}>
               {displayTitle}
@@ -2298,7 +2292,7 @@ function MainApp() {
                 )}
               </div>
 
-              {/* 3색 형광 마커 툴바 (깔끔한 컬러 원형 버튼) */}
+              {/* 3색 형광 마커 툴바 */}
               <div className="flex items-center gap-1.5 bg-white/5 px-2 py-1 rounded-sm border border-white/10">
                 <button
                   title="보라색 형광펜"
@@ -2778,6 +2772,11 @@ function MainApp() {
         .mk-blue { background-color: #bae6fd !important; color: #0c4a6e !important; border-bottom: 3px solid #0284c7 !important; font-weight: 900 !important; }
         .mk-orange { background-color: #d9f99d !important; color: #365314 !important; border-bottom: 3px solid #65a30d !important; font-weight: 900 !important; }
 
+        /* 화이트 테마용 스텔스 숨김 구간 통합 스타일 */
+        .stealth-marked { background-color: #f3e8ff !important; color: #6b21a8 !important; border-bottom: 3px solid #9333ea !important; font-weight: 900 !important; }
+        .stealth-unmarked { background-color: #faf5ff !important; color: #374151 !important; border-bottom: 2px dashed #a855f7 !important; }
+        .stealth-revealed { background-color: #fef08a !important; color: #854d0e !important; border-bottom: 3px solid #eab308 !important; font-weight: 900 !important; }
+
         .text-amber-100, .text-amber-200 { color: #b45309 !important; font-weight: 800; }
         .text-teal-100, .text-teal-200 { color: #0f766e !important; font-weight: 800; }
 
@@ -2857,134 +2856,4 @@ function MainApp() {
             </div>
 
             <div className="flex items-center gap-2 shrink-0 ml-1 sm:ml-2 border-l border-white/10 pl-2 sm:pl-3">
-              <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 hidden sm:inline">사전:</span>
-              <button onClick={() => handleOpenDict('stop')} className="text-[10px] bg-amber-900/30 text-amber-400 border border-amber-500/40 px-2 py-1 rounded-sm hover:bg-amber-900/50 transition-colors">제외/포함</button>
-              <button onClick={() => handleOpenDict('abbr')} className="text-[10px] bg-indigo-900/30 text-indigo-400 border border-indigo-500/40 px-2 py-1 rounded-sm hover:bg-indigo-900/50 transition-colors">약어 채점</button>
-            </div>
-
-            <div className="h-5 sm:h-6 w-px bg-white/10 shrink-0 hidden sm:block ml-1 sm:ml-2"></div>
-
-            {isLoggedIn && (
-              <div className="flex items-center gap-3 sm:gap-4 shrink-0 font-mono">
-                {deferredPrompt && (
-                  <button onClick={handleInstallClick} className="bg-teal-600/50 border border-teal-500 text-teal-200 px-2 py-1 text-[9px] sm:text-[10px] rounded hover:bg-teal-600 transition-colors flex items-center shadow-md">
-                    앱 설치하기
-                  </button>
-                )}
-                {isOffline && (
-                  <span className="bg-red-900/80 border border-red-500 text-red-300 px-2 py-1 text-[9px] sm:text-[10px] rounded font-bold animate-pulse shadow-md">
-                    오프라인 모드
-                  </span>
-                )}
-                
-                <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">누적 회독수</span><span className="text-[10px] sm:text-xs font-bold text-amber-400">{minFilledCount} 회독</span></div>
-                <div className="h-5 sm:h-6 w-px bg-white/10"></div>
-                <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">예상 합격률</span><span className="text-[10px] sm:text-xs font-bold text-indigo-400">{passProbability}%</span></div>
-                <div className="h-5 sm:h-6 w-px bg-white/10 hidden sm:block"></div>
-                
-                <button onClick={async () => { 
-                  try {
-                    addLog("🔄 로그아웃 전 데이터 안전 동기화 중...");
-                    const offBal = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
-                    const offActivityLog = JSON.parse(localStorage.getItem(`blankd_activity_log_${safeAddress}`) || '{}');
-                    const offClaimedRewards = JSON.parse(localStorage.getItem(`blankd_claimed_rewards_${safeAddress}`) || '{}');
-                    await fetch("https://api.blankd.top/api/update-balance", {
-                      method: "POST", headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ wallet_address: safeAddress, balance: offBal, activity_log: offActivityLog, claimed_rewards: offClaimedRewards })
-                    });
-                    await flushQueue();
-                  } catch(e: any) {}
-                  await enokiFlow.logout(); 
-                  localStorage.clear(); 
-                  window.location.reload(); 
-                }} className="border border-white/20 px-2 py-1 text-[9px] sm:text-[10px] hover:bg-white/10 tracking-wider font-mono rounded-sm text-white/70 whitespace-nowrap shrink-0">로그아웃</button>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {isLoggedIn && (
-        <nav className="border-b border-white/5 bg-black/40 py-1.5 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
-          <div className="w-full max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2 px-2 sm:px-4 md:px-8">
-            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'market', label: '마켓' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
-            ))}
-          </div>
-        </nav>
-      )}
-
-      {!isLoggedIn ? (
-        <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
-          <h2 className="text-xl sm:text-2xl font-serif text-current mb-4 tracking-tight">빈칸개발 (BlankD)</h2>
-          <p className="text-xs sm:text-sm text-white/40 mb-10 sm:mb-12 text-center leading-relaxed">인지 부하 이론 기반의 학습 플랫폼<br/>압도적인 영구 기억을 형성합니다.</p>
-          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-[#111827] text-white text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
-        </main>
-      ) : (
-        <div className="w-full max-w-[1600px] mx-auto flex gap-4 sm:gap-6 px-2 sm:px-4 lg:px-8 items-start pb-10 transition-all duration-300">
-          <main className="flex-1 w-full min-w-0 transition-all duration-300">
-            {memoizedTabs}
-          </main>
-          
-          {isSidebarOpen ? (
-            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[320px] xl:w-[400px] transition-all duration-300 animate-in slide-in-from-right-8">
-              {renderDictionaryUI(false)}
-            </aside>
-          ) : (
-            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[40px] items-center justify-start transition-all duration-300 animate-in fade-in">
-              <button onClick={() => setIsSidebarOpen(true)} className="w-full h-32 bg-white/5 border border-white/10 hover:bg-white/10 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors flex-col gap-2 shadow-md">
-                <span className="text-xs">◀</span>
-                <span className="text-[10px] font-bold" style={{ writingMode: 'vertical-rl' }}>사전 열기</span>
-              </button>
-            </aside>
-          )}
-        </div>
-      )}
-
-      <div className="fixed bottom-4 right-4 z-[999] flex flex-col items-end gap-2">
-        {isTerminalOpen && (
-          <div className="w-[85vw] max-w-lg h-64 bg-black/95 border border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto rounded shadow-2xl flex flex-col custom-scrollbar animate-in slide-in-from-bottom-5 fade-in">
-            <div className="flex justify-between items-center mb-2 border-b border-teal-500/10 pb-2 sticky top-0 bg-black/95">
-              <span className="uppercase tracking-widest text-teal-500/50 font-bold">시스템 진단 터미널</span>
-              <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2 py-0.5 bg-white/5 rounded transition-colors">기록 지우기</button>
-            </div>
-            <div className="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
-              {systemLogs.map((l, i) => (
-                <div key={i} className={`leading-snug break-all ${l.includes('?') ? 'text-red-400 font-bold' : l.includes('▶?') ? 'text-amber-300' : ''}`}>{l}</div>
-              ))}
-            </div>
-          </div>
-        )}
-        <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>
-          {isTerminalOpen ? '터미널 닫기' : '터미널 열기'}
-        </button>
-      </div>
-
-      {isDictModalOpen && (
-        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] relative">
-            {renderDictionaryUI(true)}
-          </div>
-        </div>
-      )}
-
-      {activeCard && (
-        <CardModal 
-          activeCard={activeCard} 
-          renderContent={renderContent} 
-          onClose={handleCloseModal} 
-          goalBalance={goalBalance}
-          handleUseItem={handleUseItem}
-        />
-      )}
-    </div>
-  );
-}
-
-export default function App() { 
-  return (
-    <GlobalErrorBoundary>
-      <MainApp />
-    </GlobalErrorBoundary>
-  ); 
-}
+              <span className="text-[10px] sm:text-xs font-mono font-bold tracking-widest text-white/40 mr-1 hidden sm:inline">사전
