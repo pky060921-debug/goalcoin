@@ -594,7 +594,7 @@ function MainApp() {
   const [cardHighlights, setCardHighlights] = useState<Record<string, string>>({});
   const isHighlightingDragRef = useRef<boolean>(false);
 
-  // 💡 [추가] 스텔스 구간 숨기기 & 뒤 글자 터치 발견 시스템 상태
+  // 💡 스텔스 구간 숨기기 & 뒤 글자 터치 발견 시스템 상태
   const [isStealthEditMode, setIsStealthEditMode] = useState<boolean>(false); // 숨김 구간 설정 모드
   const [cardHiddenTokens, setCardHiddenTokens] = useState<Set<string>>(new Set()); // 영구 숨김 설정된 토큰 키 목록
   const [sessionRevealedTokens, setSessionRevealedTokens] = useState<Set<string>>(new Set()); // 이번 회독에서 뒤 글자를 터치해 찾아낸 토큰 키 목록
@@ -608,7 +608,8 @@ function MainApp() {
   
   const [inputMode, setInputMode] = useState<'typing'|'touch'|'skimming'>('typing'); 
   const [skimmingWrongs, setSkimmingWrongs] = useState<Set<number>>(new Set());
-  const [skimmingFocusIdx, setSkimmingFocusIdx] = useState<number>(0);
+  // 💡 [수정 1] 스키밍 모드 시작 시 첫 번째 빈칸이 바로 보이지 않고 2초 뒤 나오도록 초기값을 -1로 설정
+  const [skimmingFocusIdx, setSkimmingFocusIdx] = useState<number>(-1);
   const [isSkimmingPaused, setIsSkimmingPaused] = useState<boolean>(false);
   const lastKeyTimeRef = useRef<number>(0);
 
@@ -692,33 +693,51 @@ function MainApp() {
 
   }, [currentBlankIdx, blanks, touchCandidates, globalDict.groups]); 
 
+  // 💡 [수정 1] 스키밍 모드 진입 또는 페이지 이동 시 -1(미표시 대기 상태)로 시작하여 2초 딜레이 확보
   useEffect(() => {
-    setSkimmingFocusIdx(currentBlankIdx);
-    setIsSkimmingPaused(false);
+    if (inputMode === 'skimming') {
+      setSkimmingFocusIdx(-1);
+      setIsSkimmingPaused(false);
+    } else {
+      setSkimmingFocusIdx(currentBlankIdx);
+      setIsSkimmingPaused(false);
+    }
   }, [currentBlankIdx, activeCard, inputMode]);
 
   useEffect(() => {
-    if (activeCard && inputMode === 'skimming') {
+    if (activeCard && inputMode === 'skimming' && skimmingFocusIdx >= 0) {
       const el = document.getElementById(`skimming-blank-${skimmingFocusIdx}`);
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
   }, [skimmingFocusIdx, inputMode, activeCard]);
 
-  // 💡 숨겨진 빈칸(아직 뒤 글자를 터치해 찾지 않은 빈칸)은 일반 진행에서 건너뛰거나 찾았을 때 자동 해결되도록 처리
+  // 💡 [수정 1] 스키밍 시작 시 첫 번째 빈칸은 2초(2000ms) 뒤에 표시되고, 그 다음부터는 1초(1000ms)마다 진행
   useEffect(() => {
     if (!activeCard || inputMode !== 'skimming' || isSkimmingPaused || blanks.length === 0) return;
 
+    const delayMs = skimmingFocusIdx < currentBlankIdx ? 2000 : 1000;
+
     const timer = setTimeout(() => {
+      if (skimmingFocusIdx < currentBlankIdx) {
+        const firstUnresolved = blanks.findIndex((b, idx) => idx >= currentBlankIdx && !b.correct);
+        if (firstUnresolved !== -1) {
+          setSkimmingFocusIdx(firstUnresolved);
+        } else {
+          handleSkimmingSubmit(blanks.length - 1);
+        }
+        return;
+      }
+
       const nextUnresolvedIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct);
       if (nextUnresolvedIdx !== -1) {
         setSkimmingFocusIdx(nextUnresolvedIdx);
       } else {
         handleSkimmingSubmit(blanks.length - 1);
       }
-    }, 1000);
+    }, delayMs);
 
     return () => clearTimeout(timer);
-  }, [activeCard, inputMode, isSkimmingPaused, skimmingFocusIdx, blanks]);
+  }, [activeCard, inputMode, isSkimmingPaused, skimmingFocusIdx, currentBlankIdx, blanks]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -736,12 +755,14 @@ function MainApp() {
               lastKeyTimeRef.current = now;
           }
 
+          const effectiveFocusIdx = skimmingFocusIdx < currentBlankIdx ? currentBlankIdx : skimmingFocusIdx;
+
           if (e.key === 'ArrowUp') {
               setIsSkimmingPaused(true);
           } else if (e.key === 'ArrowDown') {
               if (isSkimmingPaused) {
                   setIsSkimmingPaused(false);
-                  const nextIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct);
+                  const nextIdx = blanks.findIndex((b, idx) => idx > effectiveFocusIdx && !b.correct);
                   if (nextIdx !== -1) {
                       setSkimmingFocusIdx(nextIdx);
                   } else {
@@ -751,14 +772,15 @@ function MainApp() {
           } else if (e.code === 'Space' || e.key === ' ') {
               if (!isSkimmingPaused) {
                   setIsSkimmingPaused(true);
+                  if (skimmingFocusIdx < currentBlankIdx) setSkimmingFocusIdx(currentBlankIdx);
                   setSkimmingWrongs(prev => {
                       const next = new Set(prev);
-                      next.add(skimmingFocusIdx);
+                      next.add(effectiveFocusIdx);
                       return next;
                   });
               } else {
                   setIsSkimmingPaused(false);
-                  const nextIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct);
+                  const nextIdx = blanks.findIndex((b, idx) => idx > effectiveFocusIdx && !b.correct);
                   if (nextIdx !== -1) {
                       setSkimmingFocusIdx(nextIdx);
                   } else {
@@ -766,12 +788,12 @@ function MainApp() {
                   }
               }
           } else if (e.key === 'ArrowRight') {
-              const nextIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct);
+              const nextIdx = blanks.findIndex((b, idx) => idx > effectiveFocusIdx && !b.correct);
               if (nextIdx !== -1) setSkimmingFocusIdx(nextIdx);
               else handleSkimmingSubmit(blanks.length - 1);
           } else if (e.key === 'ArrowLeft') {
               let prevIdx = -1;
-              for (let i = skimmingFocusIdx - 1; i >= currentBlankIdx; i--) {
+              for (let i = effectiveFocusIdx - 1; i >= currentBlankIdx; i--) {
                   if (!blanks[i]?.correct) { prevIdx = i; break; }
               }
               if (prevIdx !== -1) setSkimmingFocusIdx(prevIdx);
@@ -1250,7 +1272,6 @@ function MainApp() {
     });
   };
 
-  // 💡 [추가] 영구 숨김 구간 토글 및 실시간 DB 저장 핸들러 (내가 해제할 때까지 영구 유지)
   const toggleStealthToken = (tokenKey: string, isDrag = false) => {
     if (!isStealthEditMode || !activeCard) return;
     setCardHiddenTokens(prev => {
@@ -1272,7 +1293,6 @@ function MainApp() {
     });
   };
 
-  // 💡 [추가] 숨긴 구간 바로 뒤의 글자(트리거 단어)를 터치했을 때 숨겨진 정답 구간을 짠! 하고 보여주는 핸들러
   const handleRevealHiddenSegment = (tokensToReveal: string[], blankIndicesToResolve: number[]) => {
     setSessionRevealedTokens(prev => {
       const next = new Set(prev);
@@ -1290,7 +1310,6 @@ function MainApp() {
       });
       statsRef.current.sessionCorrect = (statsRef.current.sessionCorrect || 0) + blankIndicesToResolve.length;
 
-      // 현재 포커스된 빈칸이 방금 발견된 숨김 빈칸에 포함되어 있다면 다음 미해결 빈칸으로 자동 이동
       if (blankIndicesToResolve.includes(currentBlankIdx)) {
         setTimeout(() => {
           setBlanks(latestBlanks => {
@@ -1456,13 +1475,13 @@ function MainApp() {
 
       setBlanks(restoredBlanks); 
 
-      // 첫 시작 빈칸은 숨겨지지 않은 미해결 빈칸을 우선 타겟팅
       const firstUnresolvedVisible = restoredBlanks.findIndex((b, idx) => !b.correct && !hiddenSet.has(`blank-${idx}`));
       const firstUnresolvedAny = restoredBlanks.findIndex(b => !b.correct);
       setCurrentBlankIdx(firstUnresolvedVisible !== -1 ? firstUnresolvedVisible : (firstUnresolvedAny !== -1 ? firstUnresolvedAny : 0));
       setInputStatus('idle');
       setSkimmingWrongs(new Set());
       setIsSkimmingPaused(false);
+      setSkimmingFocusIdx(-1);
 
       const uniqueAnswers = Array.from(new Set(foundBlanks.map(b => b.answer)));
       setTouchCandidates(uniqueAnswers.sort((a, b) => a.localeCompare(b, 'ko')));
@@ -1672,7 +1691,6 @@ function MainApp() {
       return nb;
     });
     
-    // 아직 발견되지 않은 숨김 빈칸은 건너뛰고 다음 일반 빈칸으로 이동
     const nextVisibleIdx = blanks.findIndex((b, idx) => idx > currentBlankIdx && !b.correct && (!cardHiddenTokens.has(`blank-${idx}`) || sessionRevealedTokens.has(`blank-${idx}`)));
     const nextAnyIdx = blanks.findIndex((b, idx) => idx > currentBlankIdx && !b.correct);
     const nextIdx = nextVisibleIdx !== -1 ? nextVisibleIdx : nextAnyIdx;
@@ -1841,7 +1859,7 @@ function MainApp() {
 
     const parts = restContent.split(/(\[.*?\]|##PAGE_BREAK##)/g).filter((p: string) => p !== '');
     let displayPage = 0; let tempGlobalBlank = 0; let tempPage = 0;
-    const targetIdxForPage = inputMode === 'skimming' ? skimmingFocusIdx : currentBlankIdx;
+    const targetIdxForPage = inputMode === 'skimming' ? Math.max(currentBlankIdx, skimmingFocusIdx) : currentBlankIdx;
     for (let part of parts) {
         if (part === '##PAGE_BREAK##') tempPage++;
         else if (part.startsWith('[') && part.endsWith(']')) {
@@ -1878,14 +1896,12 @@ function MainApp() {
 
     const hasHighlights = Object.keys(cardHighlights).length > 0;
     const hasHiddenTokens = cardHiddenTokens.size > 0;
-    // 💡 [렉 방지 핵심] 형광펜/숨김설정이 꺼져있고 이 카드에 저장된 형광펜/숨김도 없다면 일반 텍스트를 쪼개지 않고 고속 렌더링!
     const needTokenizePlainText = !!activeHighlighter || isStealthEditMode || hasHighlights || hasHiddenTokens;
 
     let renderPage = 0; 
     let bIdx = 0; 
     let lastBlankIdxOnPage = currentBlankIdx;
 
-    // 현재 페이지의 아이템들을 플랫 리스트로 구성하여 '숨긴 구간'과 '바로 뒤의 트리거 글자'를 정확히 연결
     type PageTokenItem = {
       type: 'blank' | 'word' | 'space' | 'raw';
       tokenKey: string;
@@ -1928,12 +1944,41 @@ function MainApp() {
       }
     });
 
+    // 💡 [수정 2 & 3] 인접한 숨김 토큰 사이의 공백(space)도 동일한 숨김/발견 그룹으로 묶어 빈칸과 일반 단어가 끊어지지 않고 하나의 양식으로 이어지게 처리
+    const isStealthGroupToken = (idx: number): boolean => {
+      const it = pageItems[idx];
+      if (!it) return false;
+      if (it.type === 'blank' || it.type === 'word') return cardHiddenTokens.has(it.tokenKey);
+      if (it.type === 'space') {
+        const prev = pageItems[idx - 1];
+        const next = pageItems[idx + 1];
+        const prevHidden = prev && (prev.type === 'blank' || prev.type === 'word') && cardHiddenTokens.has(prev.tokenKey);
+        const nextHidden = next && (next.type === 'blank' || next.type === 'word') && cardHiddenTokens.has(next.tokenKey);
+        return !!(prevHidden && nextHidden);
+      }
+      return false;
+    };
+
+    const isRevealedGroupToken = (idx: number): boolean => {
+      const it = pageItems[idx];
+      if (!it) return false;
+      if (it.type === 'blank' || it.type === 'word') return cardHiddenTokens.has(it.tokenKey) && sessionRevealedTokens.has(it.tokenKey);
+      if (it.type === 'space') {
+        const prev = pageItems[idx - 1];
+        const next = pageItems[idx + 1];
+        const prevRev = prev && (prev.type === 'blank' || prev.type === 'word') && cardHiddenTokens.has(prev.tokenKey) && sessionRevealedTokens.has(prev.tokenKey);
+        const nextRev = next && (next.type === 'blank' || next.type === 'word') && cardHiddenTokens.has(next.tokenKey) && sessionRevealedTokens.has(next.tokenKey);
+        return !!(prevRev && nextRev);
+      }
+      return false;
+    };
+
     const contentToRender: any[] = [];
     let pendingHiddenKeys: string[] = [];
     let pendingHiddenBlanks: number[] = [];
     let remainingHiddenCount = 0;
 
-    const renderSingleBlank = (item: PageTokenItem, isRevealedFromStealth: boolean) => {
+    const renderSingleBlank = (item: PageTokenItem, isRevealedFromStealth: boolean, idx: number) => {
       const targetBlankIdx = item.blankIdx!;
       const tokenKey = item.tokenKey;
       const isCorrect = blanks[targetBlankIdx]?.correct || isRevealedFromStealth;
@@ -1942,10 +1987,6 @@ function MainApp() {
       const blankMarkerColor = cardHighlights[tokenKey];
       const blankMarkerCls = getBlankMarkerClass(blankMarkerColor);
       const isStealthMarked = cardHiddenTokens.has(tokenKey);
-
-      const stealthEditCls = isStealthEditMode && isStealthMarked
-        ? 'ring-2 ring-fuchsia-400 bg-fuchsia-950/70 text-fuchsia-200 border-dashed border-fuchsia-400'
-        : '';
 
       const handleBlankPointerDown = (e: React.PointerEvent) => {
         if (isStealthEditMode) {
@@ -1969,32 +2010,38 @@ function MainApp() {
         else if (activeHighlighter) applyHighlightToToken(tokenKey, true);
       };
 
-      // 숨김 설정 모드일 때는 어떤 빈칸이든 정답 텍스트와 숨김 배지를 선명하게 보여줌
+      // 💡 [수정 2 & 3] 숨김 설정 모드에서 아이콘/대괄호를 제거하고, 인접한 숨김 단어와 빈칸이 하나의 연속된 박스로 묶여 보이도록 통일
       if (isStealthEditMode) {
+        const prevMarked = isStealthGroupToken(idx - 1);
+        const nextMarked = isStealthGroupToken(idx + 1);
+        const roundCls = `${!prevMarked ? 'rounded-l pl-1' : ''} ${!nextMarked ? 'rounded-r pr-1' : ''}`;
         return (
           <span
             key={tokenKey}
             onPointerDown={handleBlankPointerDown}
             onPointerEnter={handleBlankPointerEnter}
-            className={`inline-block font-bold mx-1 px-2 py-0.5 rounded border cursor-pointer select-none transition-all ${
+            className={`cursor-pointer select-none transition-all font-bold py-0.5 ${
               isStealthMarked
-                ? 'bg-fuchsia-900/70 text-fuchsia-200 border-fuchsia-400 ring-2 ring-fuchsia-400 shadow-[0_0_10px_rgba(217,70,239,0.5)]'
-                : 'bg-white/10 text-white/80 border-white/30 hover:border-fuchsia-400'
+                ? `bg-fuchsia-800/80 text-fuchsia-100 border-y border-fuchsia-400 ${!prevMarked ? 'border-l' : ''} ${!nextMarked ? 'border-r' : ''} ${roundCls}`
+                : 'bg-white/10 text-white/80 border-b border-dashed border-white/30 px-1 rounded-sm hover:bg-fuchsia-900/40'
             }`}
           >
-            {isStealthMarked ? `🙈 ${item.text}` : `[${item.text}]`}
+            {item.text}
           </span>
         );
       }
 
-      // 스텔스에서 뒤 글자를 터치해 방금 찾아낸 빈칸은 황금빛/에메랄드 발견 배지로 표시
+      // 💡 [수정 2 & 3] 뒤 글자를 터치해 찾아낸 숨김 구간도 빈칸과 일반 글자 구분 없이 완전히 동일한 단일 양식으로 이어지게 표시
       if (isRevealedFromStealth) {
+        const prevRev = isRevealedGroupToken(idx - 1);
+        const nextRev = isRevealedGroupToken(idx + 1);
+        const roundCls = `${!prevRev ? 'rounded-l pl-1' : ''} ${!nextRev ? 'rounded-r pr-1' : ''}`;
         return (
           <span
             key={tokenKey}
-            className="inline-block font-extrabold mx-1 px-2 py-0.5 rounded bg-amber-500/30 text-amber-200 border border-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.5)] animate-in zoom-in-95 duration-200"
+            className={`font-bold py-0.5 bg-amber-500/30 text-amber-200 border-b-2 border-amber-400 ${roundCls} animate-in fade-in duration-200`}
           >
-            ✨ {item.text}
+            {item.text}
           </span>
         );
       }
@@ -2007,7 +2054,7 @@ function MainApp() {
             onPointerEnter={handleBlankPointerEnter}
             className={`inline-block font-bold mx-1 px-1.5 py-0.5 rounded transition-all ${
               isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'
-            } ${blankMarkerCls} ${stealthEditCls} ${activeHighlighter ? 'cursor-pointer select-none' : ''}`}
+            } ${blankMarkerCls} ${activeHighlighter ? 'cursor-pointer select-none' : ''}`}
           >
             {item.text}
           </span>
@@ -2015,7 +2062,7 @@ function MainApp() {
       } else if (inputMode === 'skimming' && targetBlankIdx >= currentBlankIdx) {
         const isSkimmingMarkedWrong = skimmingWrongs.has(targetBlankIdx);
         const isFocused = targetBlankIdx === skimmingFocusIdx;
-        const isRevealed = targetBlankIdx <= skimmingFocusIdx;
+        const isRevealed = skimmingFocusIdx >= currentBlankIdx && targetBlankIdx <= skimmingFocusIdx;
 
         return (
           <span
@@ -2063,7 +2110,7 @@ function MainApp() {
                 inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 'bg-amber-900/30 text-amber-400 border-amber-500 animate-pulse shadow-[0_0_8px_rgba(245,158,11,0.3)]'
               }`}
             >
-              {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '?'}
+              {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '✕') : inputStatus === 'correct' ? '✓' : '?'}
             </span>
           );
         }
@@ -2079,7 +2126,6 @@ function MainApp() {
       }
     };
 
-    // 💡 페이지 아이템 순회: 숨긴 구간은 화면에서 완전히 생략하고, 바로 다음에 오는 첫 글자(단어/빈칸)에 터치 트리거를 심음!
     for (let idx = 0; idx < pageItems.length; idx++) {
       const item = pageItems[idx];
 
@@ -2089,8 +2135,24 @@ function MainApp() {
       }
 
       if (item.type === 'space') {
-        // 앞선 단어가 현재 숨겨진 상태라면 공백도 함께 숨겨서 문장이 자연스럽게 이어지도록 함
         if (pendingHiddenKeys.length > 0 && !isStealthEditMode) {
+          continue;
+        }
+        // 숨김 설정 모드나 발견된 상태에서 양옆의 숨김 토큰을 하나로 이어주는 공백 스타일 적용
+        if (isStealthEditMode && isStealthGroupToken(idx)) {
+          contentToRender.push(
+            <span key={item.tokenKey} className="bg-fuchsia-800/80 text-fuchsia-100 border-y border-fuchsia-400 py-0.5">
+              {item.text}
+            </span>
+          );
+          continue;
+        }
+        if (!isStealthEditMode && isRevealedGroupToken(idx)) {
+          contentToRender.push(
+            <span key={item.tokenKey} className="bg-amber-500/30 text-amber-200 border-b-2 border-amber-400 py-0.5 font-bold">
+              {item.text}
+            </span>
+          );
           continue;
         }
         contentToRender.push(<span key={item.tokenKey}>{item.text}</span>);
@@ -2108,7 +2170,6 @@ function MainApp() {
         continue;
       }
 
-      // 만약 바로 앞에 숨겨진 구간(pendingHiddenKeys)이 대기 중이라면, 현재 이 글자(단어/빈칸)가 '숨긴 부분 바로 뒤의 트리거 글자'가 됨!
       const triggerKeys = pendingHiddenKeys.length > 0 ? [...pendingHiddenKeys] : null;
       const triggerBlanks = pendingHiddenBlanks.length > 0 ? [...pendingHiddenBlanks] : [];
       pendingHiddenKeys = [];
@@ -2116,7 +2177,7 @@ function MainApp() {
 
       if (item.type === 'blank') {
         const isRevealedStealth = cardHiddenTokens.has(item.tokenKey) && sessionRevealedTokens.has(item.tokenKey);
-        const blankEl = renderSingleBlank(item, isRevealedStealth);
+        const blankEl = renderSingleBlank(item, isRevealedStealth, idx);
 
         if (triggerKeys) {
           contentToRender.push(
@@ -2126,14 +2187,11 @@ function MainApp() {
                 e.stopPropagation();
                 handleRevealHiddenSegment(triggerKeys, triggerBlanks);
               }}
-              className="inline-flex items-center cursor-pointer group"
+              className={`inline-flex items-center cursor-pointer ${
+                showStealthHint ? 'ring-2 ring-amber-400 bg-amber-500/20 rounded-sm px-0.5' : ''
+              }`}
               title="이 앞에 숨겨진 내용이 있습니다! 터치하여 정답 확인"
             >
-              {showStealthHint && (
-                <span className="inline-block mr-0.5 px-1 py-0.2 bg-amber-500 text-black font-extrabold text-[10px] rounded animate-bounce shadow-[0_0_8px_rgba(245,158,11,0.9)]">
-                  ⚡여기
-                </span>
-              )}
               {blankEl}
             </span>
           );
@@ -2146,10 +2204,19 @@ function MainApp() {
         const isStealthMarked = cardHiddenTokens.has(item.tokenKey);
         const isRevealedStealth = isStealthMarked && sessionRevealedTokens.has(item.tokenKey);
 
+        const prevMarked = isStealthGroupToken(idx - 1);
+        const nextMarked = isStealthGroupToken(idx + 1);
+        const editRoundCls = `${!prevMarked ? 'rounded-l pl-1' : ''} ${!nextMarked ? 'rounded-r pr-1' : ''}`;
+
+        const prevRev = isRevealedGroupToken(idx - 1);
+        const nextRev = isRevealedGroupToken(idx + 1);
+        const revRoundCls = `${!prevRev ? 'rounded-l pl-1' : ''} ${!nextRev ? 'rounded-r pr-1' : ''}`;
+
+        // 💡 [수정 2 & 3] 일반 단어도 빈칸과 100% 동일한 숨김/발견 디자인으로 렌더링하여 하나의 구간으로 묶여 보이게 함
         const stealthEditWordCls = isStealthEditMode && isStealthMarked
-          ? 'bg-fuchsia-900/70 text-fuchsia-200 border border-dashed border-fuchsia-400 px-1 rounded-sm ring-1 ring-fuchsia-400'
+          ? `bg-fuchsia-800/80 text-fuchsia-100 border-y border-fuchsia-400 font-bold py-0.5 ${!prevMarked ? 'border-l' : ''} ${!nextMarked ? 'border-r' : ''} ${editRoundCls}`
           : isRevealedStealth
-            ? 'bg-amber-500/30 text-amber-200 border-b-2 border-amber-400 px-1 rounded-sm font-extrabold animate-in zoom-in-95 duration-200'
+            ? `bg-amber-500/30 text-amber-200 border-b-2 border-amber-400 font-bold py-0.5 ${revRoundCls} animate-in fade-in duration-200`
             : '';
 
         contentToRender.push(
@@ -2181,20 +2248,14 @@ function MainApp() {
             }}
             className={`transition-all ${markerCls} ${stealthEditWordCls} ${
               activeHighlighter || isStealthEditMode || triggerKeys ? 'cursor-pointer select-none' : ''
-            } ${showStealthHint && triggerKeys ? 'ring-2 ring-amber-400 bg-amber-500/20 rounded-sm px-0.5' : ''}`}
+            } ${showStealthHint && triggerKeys ? 'bg-amber-500/30 text-amber-200 border-b-2 border-amber-400 font-bold px-0.5 rounded-sm' : ''}`}
           >
-            {showStealthHint && triggerKeys && (
-              <span className="inline-block mr-0.5 px-1 py-0.2 bg-amber-500 text-black font-extrabold text-[10px] rounded animate-bounce shadow-[0_0_8px_rgba(245,158,11,0.9)]">
-                ⚡
-              </span>
-            )}
-            {isStealthEditMode && isStealthMarked ? `🙈${item.text}` : item.text}
+            {item.text}
           </span>
         );
       }
     }
 
-    // 만약 문장 맨 마지막 끝부분이 숨겨져 있어서 뒤에 올 글자가 없는 경우에는 끝에 터치 마크를 배치
     if (pendingHiddenKeys.length > 0 && !isStealthEditMode) {
       const finalKeys = [...pendingHiddenKeys];
       const finalBlanks = [...pendingHiddenBlanks];
@@ -2204,12 +2265,12 @@ function MainApp() {
           onClick={() => handleRevealHiddenSegment(finalKeys, finalBlanks)}
           className={`inline-block ml-1 px-1.5 py-0.5 rounded text-xs font-bold cursor-pointer select-none transition-all ${
             showStealthHint
-              ? 'bg-amber-500 text-black animate-bounce shadow-[0_0_8px_rgba(245,158,11,0.9)]'
+              ? 'bg-amber-500/30 text-amber-200 border-b-2 border-amber-400'
               : 'text-white/30 hover:text-amber-400'
           }`}
           title="문장 끝에 숨겨진 구간이 있습니다. 터치하여 확인하세요."
         >
-          {showStealthHint ? '⚡[끝 숨김 확인]' : '...'}
+          {showStealthHint ? '[끝 숨김 확인]' : '...'}
         </span>
       );
     }
@@ -2219,7 +2280,7 @@ function MainApp() {
     return (
       <div className="flex flex-col w-full h-[65vh] sm:h-[72vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
         
-        {/* 1. 상단 고정 컨테이너 (제목 + 스텔스 숨김 설정 + 3색 형광 마커 + 글자크기/노트) */}
+        {/* 1. 상단 고정 컨테이너 (불필요한 아이콘을 제거하고 텍스트 중심으로 깔끔하게 정리) */}
         <div className="shrink-0 flex flex-wrap justify-between items-center border-b border-white/10 px-3 py-2 sm:px-5 sm:py-2.5 w-full gap-2 bg-[#0a0a0c] z-20">
             <div className={`${titleColor} font-bold ${titleClass} leading-tight overflow-x-auto whitespace-nowrap custom-scrollbar flex-1 min-w-[120px] pb-0.5`}>
               {displayTitle}
@@ -2227,7 +2288,7 @@ function MainApp() {
             
             <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-wrap">
               
-              {/* 🙈 스텔스 구간 숨기기 컨트롤 툴바 */}
+              {/* 스텔스 구간 숨기기 컨트롤 툴바 */}
               <div className="flex items-center gap-1 bg-white/5 px-1.5 py-1 rounded-sm border border-white/10">
                 <button
                   onClick={(e) => {
@@ -2240,13 +2301,13 @@ function MainApp() {
                   }}
                   className={`px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-bold transition-all flex items-center gap-1 ${
                     isStealthEditMode
-                      ? 'bg-fuchsia-600 text-white ring-2 ring-fuchsia-400 shadow-[0_0_10px_rgba(217,70,239,0.6)]'
+                      ? 'bg-fuchsia-600 text-white ring-1 ring-fuchsia-400'
                       : cardHiddenTokens.size > 0
                         ? 'bg-fuchsia-950/60 text-fuchsia-300 border border-fuchsia-500/40 hover:bg-fuchsia-900/70'
                         : 'bg-black/40 text-white/60 hover:text-white'
                   }`}
                 >
-                  <span>🙈 {isStealthEditMode ? '숨김설정 완료' : `구간숨김(${cardHiddenTokens.size})`}</span>
+                  <span>{isStealthEditMode ? '숨김완료' : `구간숨김(${cardHiddenTokens.size})`}</span>
                 </button>
 
                 {!isStealthEditMode && remainingHiddenCount > 0 && (
@@ -2257,12 +2318,11 @@ function MainApp() {
                     }}
                     className={`px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-bold transition-all ${
                       showStealthHint
-                        ? 'bg-amber-500 text-black ring-2 ring-amber-300 shadow-md'
-                        : 'bg-amber-950/60 text-amber-300 border border-amber-500/40 hover:bg-amber-900/70 animate-pulse'
+                        ? 'bg-amber-500 text-black'
+                        : 'bg-amber-950/60 text-amber-300 border border-amber-500/40 hover:bg-amber-900/70'
                     }`}
-                    title="숨겨진 위치가 어디인지 모르겠을 때 힌트 화살표 표시"
                   >
-                    💡위치힌트({remainingHiddenCount})
+                    힌트({remainingHiddenCount})
                   </button>
                 )}
 
@@ -2270,47 +2330,41 @@ function MainApp() {
                   <button
                     title="숨김 구간 전체 영구 해제"
                     onClick={(e) => { e.currentTarget.blur(); handleClearAllStealth(); }}
-                    className="px-1 py-0.5 text-[10px] text-red-400 hover:text-red-300 font-bold"
+                    className="px-1.5 py-0.5 text-[10px] text-red-400 hover:text-red-300 font-bold"
                   >
-                    🔓
+                    해제
                   </button>
                 )}
               </div>
 
-              {/* 🖍️ 초고시인성 3색 형광 마커 툴바 */}
+              {/* 3색 형광 마커 툴바 */}
               <div className="flex items-center gap-1 bg-white/5 px-1.5 py-1 rounded-sm border border-white/10">
                 <button
                   title="보라색 형광펜"
                   onClick={(e) => { e.currentTarget.blur(); setIsStealthEditMode(false); setActiveHighlighter(p => p === 'purple' ? null : 'purple'); }}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all border-b-2 border-purple-500 ${
-                    activeHighlighter === 'purple' ? 'bg-purple-600 text-white ring-2 ring-purple-400 scale-105 shadow-md' : 'bg-purple-500/20 text-purple-400 hover:bg-purple-500/30'
+                  className={`w-4 h-4 rounded-full bg-purple-500 transition-all ${
+                    activeHighlighter === 'purple' ? 'ring-2 ring-white scale-110' : 'opacity-50 hover:opacity-100'
                   }`}
-                >
-                  🟣
-                </button>
+                />
                 <button
                   title="파란색 형광펜"
                   onClick={(e) => { e.currentTarget.blur(); setIsStealthEditMode(false); setActiveHighlighter(p => p === 'blue' ? null : 'blue'); }}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all border-b-2 border-sky-500 ${
-                    activeHighlighter === 'blue' ? 'bg-sky-600 text-white ring-2 ring-sky-400 scale-105 shadow-md' : 'bg-sky-500/20 text-sky-400 hover:bg-sky-500/30'
+                  className={`w-4 h-4 rounded-full bg-sky-500 transition-all ${
+                    activeHighlighter === 'blue' ? 'ring-2 ring-white scale-110' : 'opacity-50 hover:opacity-100'
                   }`}
-                >
-                  🔵
-                </button>
+                />
                 <button
                   title="연두색 형광펜"
                   onClick={(e) => { e.currentTarget.blur(); setIsStealthEditMode(false); setActiveHighlighter(p => p === 'orange' ? null : 'orange'); }}
-                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all border-b-2 border-lime-500 ${
-                    activeHighlighter === 'orange' ? 'bg-lime-600 text-white ring-2 ring-lime-400 scale-105 shadow-md' : 'bg-lime-500/20 text-lime-400 hover:bg-lime-500/30'
+                  className={`w-4 h-4 rounded-full bg-lime-500 transition-all ${
+                    activeHighlighter === 'orange' ? 'ring-2 ring-white scale-110' : 'opacity-50 hover:opacity-100'
                   }`}
-                >
-                  🟢
-                </button>
+                />
                 <button
                   title="형광펜 부분 지우개"
                   onClick={(e) => { e.currentTarget.blur(); setIsStealthEditMode(false); setActiveHighlighter(p => p === 'eraser' ? null : 'eraser'); }}
                   className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-all ${
-                    activeHighlighter === 'eraser' ? 'bg-zinc-700 text-white ring-2 ring-zinc-400 scale-105' : 'bg-black/40 text-white/60 hover:text-white'
+                    activeHighlighter === 'eraser' ? 'bg-zinc-700 text-white' : 'bg-black/40 text-white/60 hover:text-white'
                   }`}
                 >
                   지우개
@@ -2321,7 +2375,7 @@ function MainApp() {
                     onClick={(e) => { e.currentTarget.blur(); handleClearAllHighlights(); }}
                     className="px-1 py-0.5 text-[10px] text-red-400 hover:text-red-300 font-bold"
                   >
-                    🗑️
+                    초기화
                   </button>
                 )}
               </div>
@@ -2335,50 +2389,11 @@ function MainApp() {
 
               {/* 암기 노트 토글 */}
               <button onClick={(e) => { e.currentTarget.blur(); setIsMemoOpen(!isMemoOpen); }} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md flex items-center gap-1">
-                <span>{isMemoOpen ? '노트 닫기 ✕' : '📝 암기 노트'}</span>
-                {!isMemoOpen && hasSavedMemo && <span className="text-teal-300 text-[8px] animate-pulse">●</span>}
+                <span>{isMemoOpen ? '노트 닫기' : '암기노트'}</span>
+                {!isMemoOpen && hasSavedMemo && <span className="text-teal-300 text-[8px]">●</span>}
               </button>
             </div>
         </div>
-
-        {/* 숨김 구간 설정 모드 안내 배너 */}
-        {isStealthEditMode && (
-          <div className="shrink-0 bg-fuchsia-950/90 border-b border-fuchsia-500/50 px-4 py-1.5 flex justify-between items-center text-[11px] text-fuchsia-100">
-            <span>
-              🙈 <b>숨김 구간 설정 모드</b> — 숨기고 싶은 <b>[빈칸]</b>이나 <b>단어</b>를 터치/드래그하세요. (다시 터치하면 영구 숨김 해제됨)
-            </span>
-            <button onClick={() => setIsStealthEditMode(false)} className="text-[10px] bg-fuchsia-600 hover:bg-fuchsia-500 text-white px-2.5 py-0.5 rounded font-bold shadow">
-              설정 완료 ✓
-            </button>
-          </div>
-        )}
-
-        {/* 실전 풀이 중 숨겨진 구간이 있을 때 안내 배너 */}
-        {!isStealthEditMode && remainingHiddenCount > 0 && (
-          <div className="shrink-0 bg-amber-950/60 border-b border-amber-500/30 px-4 py-1 flex justify-between items-center text-[11px] text-amber-200">
-            <span>
-              🕵️ 현재 문장에 <b>{remainingHiddenCount}개</b>의 숨겨진 구간이 있습니다. <b>숨겨진 부분 바로 뒤의 글자</b>를 터치하면 정답이 나타납니다!
-            </span>
-            <button
-              onClick={() => setShowStealthHint(p => !p)}
-              className="text-[10px] bg-amber-500/20 hover:bg-amber-500/40 border border-amber-400/50 text-amber-200 px-2 py-0.5 rounded font-bold"
-            >
-              {showStealthHint ? '힌트 숨기기' : '💡 위치 힌트 보기'}
-            </button>
-          </div>
-        )}
-
-        {/* 형광펜 모드 활성화 시 안내 배너 */}
-        {activeHighlighter && !isStealthEditMode && (
-          <div className="shrink-0 bg-indigo-950/80 border-b border-indigo-500/40 px-4 py-1 flex justify-between items-center text-[11px] text-indigo-200">
-            <span>
-              🖍️ <b>{activeHighlighter === 'purple' ? '🟣 보라색 형광펜' : activeHighlighter === 'blue' ? '🔵 파란색 형광펜' : activeHighlighter === 'orange' ? '🟢 연두색 형광펜' : '🧹 지우개'}</b> 켜짐 — 본문 단어나 빈칸을 터치/드래그하여 칠하세요!
-            </span>
-            <button onClick={() => setActiveHighlighter(null)} className="text-[10px] bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded font-bold">
-              펜 끄기 ✕
-            </button>
-          </div>
-        )}
 
         {/* 2. 가운데 영역: 좌측 본문 스크롤 + 우측 메모 컨테이너 */}
         <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden bg-[#0a0a0c]">
@@ -2394,9 +2409,7 @@ function MainApp() {
             {isMemoOpen && (
               <div className="w-full md:w-80 lg:w-96 h-48 md:h-full shrink-0 border-t md:border-t-0 md:border-l border-teal-500/30 bg-teal-950/10 flex flex-col p-3 sm:p-4 animate-in fade-in duration-200">
                  <div className="flex justify-between items-center mb-2 pb-1.5 border-b border-teal-500/20 shrink-0">
-                    <span className="text-xs font-bold text-teal-400 flex items-center gap-1">
-                      📌 나만의 암기 노트
-                    </span>
+                    <span className="text-xs font-bold text-teal-400">나만의 암기 노트</span>
                     <span className="text-[10px] text-teal-500/70 font-mono">자동 저장됨</span>
                  </div>
                  <textarea 
@@ -2429,32 +2442,34 @@ function MainApp() {
               <div className="flex flex-col gap-1.5 sm:gap-2 w-full p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[10px] sm:text-[11px] text-amber-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className={isSkimmingPaused ? "" : "animate-pulse"}>{isSkimmingPaused ? '⏸️ 일시정지됨' : '▶️ 1초마다 자동 진행 중...'}</span> 
+                    <span>{isSkimmingPaused ? '일시정지됨' : skimmingFocusIdx < currentBlankIdx ? '준비 중 (2초 후 시작)...' : '1초마다 자동 진행 중...'}</span> 
                     <span className="text-white/60 font-normal hidden sm:inline">| ▲: 멈춤 / ▼: 재개 / Space: 모름(오답)+멈춤</span>
                   </div>
-                  <span className="text-[10px] font-mono text-white/50 shrink-0">{skimmingFocusIdx + 1} / {blanks.length}</span>
+                  <span className="text-[10px] font-mono text-white/50 shrink-0">{Math.max(0, skimmingFocusIdx + 1)} / {blanks.length}</span>
                 </div>
                 <div className="flex gap-2 w-full">
                   <button 
                     onClick={(e) => {
                        e.currentTarget.blur();
+                       const targetIdx = skimmingFocusIdx < currentBlankIdx ? currentBlankIdx : skimmingFocusIdx;
                        if (!isSkimmingPaused) {
                          setIsSkimmingPaused(true);
-                         setSkimmingWrongs(prev => new Set(prev).add(skimmingFocusIdx));
+                         if (skimmingFocusIdx < currentBlankIdx) setSkimmingFocusIdx(currentBlankIdx);
+                         setSkimmingWrongs(prev => new Set(prev).add(targetIdx));
                        } else {
                          setIsSkimmingPaused(false);
-                         const nextIdx = blanks.findIndex((b, idx) => idx > skimmingFocusIdx && !b.correct);
+                         const nextIdx = blanks.findIndex((b, idx) => idx > targetIdx && !b.correct);
                          if (nextIdx !== -1) setSkimmingFocusIdx(nextIdx);
                          else handleSkimmingSubmit(blanks.length - 1);
                        }
                     }} 
                     className={`flex-1 py-2 sm:py-3.5 border text-white text-[12px] sm:text-[14px] font-bold rounded shadow-md active:scale-95 transition-all flex items-center justify-center gap-2 ${
                       isSkimmingPaused 
-                        ? 'bg-teal-600 hover:bg-teal-500 border-teal-400 animate-pulse' 
+                        ? 'bg-teal-600 hover:bg-teal-500 border-teal-400' 
                         : 'bg-red-900/60 hover:bg-red-800 border-red-500/50 text-red-200'
                     }`}
                   >
-                    {isSkimmingPaused ? '▶️ 다시 진행하기 (▼ 또는 Space)' : '⏸️ 모름 체크 및 일시정지 (Space)'}
+                    {isSkimmingPaused ? '다시 진행하기 (▼ 또는 Space)' : '모름 체크 및 일시정지 (Space)'}
                   </button>
                   <button 
                     onClick={(e) => {
@@ -2473,7 +2488,7 @@ function MainApp() {
               <div className="flex flex-col gap-1.5 sm:gap-2 w-full max-h-[22vh] overflow-y-auto custom-scrollbar p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[10px] sm:text-[11px] text-teal-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
-                    <span className="animate-pulse">👆</span> 터치하여 정답을 선택하세요
+                    터치하여 정답을 선택하세요
                   </div>
                 </div>
                 
@@ -2500,7 +2515,7 @@ function MainApp() {
                   }} 
                   className="w-full mt-0.5 sm:mt-1 py-1.5 sm:py-2.5 bg-red-900/40 hover:bg-red-900/60 border border-red-500/30 text-red-400 text-[11px] sm:text-[13px] font-bold rounded-sm shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
                 >
-                  🤔 모름 (오답 처리 후 다음 빈칸으로 넘어가기) <span className="text-[10px] text-red-500/60 font-mono ml-1">[0]</span>
+                  모름 (오답 처리 후 다음 빈칸으로 넘어가기) <span className="text-[10px] text-red-500/60 font-mono ml-1">[0]</span>
                 </button>
               </div>
             )}
@@ -2527,7 +2542,7 @@ function MainApp() {
                   }} 
                   className="px-2 sm:px-3 py-1.5 sm:py-2.5 bg-zinc-900/80 text-zinc-300 border border-zinc-500/50 rounded text-[10px] sm:text-xs font-bold flex-1 hover:bg-zinc-800 transition-all shadow-md flex items-center justify-center gap-2"
                 >
-                  {inputMode === 'typing' ? '👆 터치 모드로 전환' : inputMode === 'touch' ? '⚡ 스키밍 모드로 전환' : '⌨️ 타이핑 모드로 전환'}
+                  {inputMode === 'typing' ? '터치 모드로 전환' : inputMode === 'touch' ? '스키밍 모드로 전환' : '타이핑 모드로 전환'}
                 </button>
                 <button 
                   id="show-answer-btn"
@@ -2848,124 +2863,4 @@ function MainApp() {
             {isLoggedIn && (
               <div className="flex items-center gap-3 sm:gap-4 shrink-0 font-mono">
                 {deferredPrompt && (
-                  <button onClick={handleInstallClick} className="bg-teal-600/50 border border-teal-500 text-teal-200 px-2 py-1 text-[9px] sm:text-[10px] rounded hover:bg-teal-600 transition-colors flex items-center shadow-md">
-                    앱 설치하기
-                  </button>
-                )}
-                {isOffline && (
-                  <span className="bg-red-900/80 border border-red-500 text-red-300 px-2 py-1 text-[9px] sm:text-[10px] rounded font-bold animate-pulse shadow-md">
-                    오프라인 모드
-                  </span>
-                )}
-                
-                <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">누적 회독수</span><span className="text-[10px] sm:text-xs font-bold text-amber-400">{minFilledCount} 회독</span></div>
-                <div className="h-5 sm:h-6 w-px bg-white/10"></div>
-                <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">예상 합격률</span><span className="text-[10px] sm:text-xs font-bold text-indigo-400">{passProbability}%</span></div>
-                <div className="h-5 sm:h-6 w-px bg-white/10 hidden sm:block"></div>
-                
-                <button onClick={async () => { 
-                  try {
-                    addLog("🔄 로그아웃 전 데이터 안전 동기화 중...");
-                    const offBal = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
-                    const offActivityLog = JSON.parse(localStorage.getItem(`blankd_activity_log_${safeAddress}`) || '{}');
-                    const offClaimedRewards = JSON.parse(localStorage.getItem(`blankd_claimed_rewards_${safeAddress}`) || '{}');
-                    await fetch("https://api.blankd.top/api/update-balance", {
-                      method: "POST", headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ wallet_address: safeAddress, balance: offBal, activity_log: offActivityLog, claimed_rewards: offClaimedRewards })
-                    });
-                    await flushQueue();
-                  } catch(e: any) {}
-                  await enokiFlow.logout(); 
-                  localStorage.clear(); 
-                  window.location.reload(); 
-                }} className="border border-white/20 px-2 py-1 text-[9px] sm:text-[10px] hover:bg-white/10 tracking-wider font-mono rounded-sm text-white/70 whitespace-nowrap shrink-0">로그아웃</button>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {isLoggedIn && (
-        <nav className="border-b border-white/5 bg-black/40 py-1.5 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
-          <div className="w-full max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2 px-2 sm:px-4 md:px-8">
-            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'market', label: '마켓' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
-            ))}
-          </div>
-        </nav>
-      )}
-
-      {!isLoggedIn ? (
-        <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
-          <h2 className="text-xl sm:text-2xl font-serif text-current mb-4 tracking-tight">빈칸개발 (BlankD)</h2>
-          <p className="text-xs sm:text-sm text-white/40 mb-10 sm:mb-12 text-center leading-relaxed">인지 부하 이론 기반의 학습 플랫폼<br/>압도적인 영구 기억을 형성합니다.</p>
-          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-[#111827] text-white text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
-        </main>
-      ) : (
-        <div className="w-full max-w-[1600px] mx-auto flex gap-4 sm:gap-6 px-2 sm:px-4 lg:px-8 items-start pb-10 transition-all duration-300">
-          <main className="flex-1 w-full min-w-0 transition-all duration-300">
-            {memoizedTabs}
-          </main>
-          
-          {isSidebarOpen ? (
-            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[320px] xl:w-[400px] transition-all duration-300 animate-in slide-in-from-right-8">
-              {renderDictionaryUI(false)}
-            </aside>
-          ) : (
-            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[40px] items-center justify-start transition-all duration-300 animate-in fade-in">
-              <button onClick={() => setIsSidebarOpen(true)} className="w-full h-32 bg-white/5 border border-white/10 hover:bg-white/10 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors flex-col gap-2 shadow-md">
-                <span className="text-xs">◀</span>
-                <span className="text-[10px] font-bold" style={{ writingMode: 'vertical-rl' }}>사전 열기</span>
-              </button>
-            </aside>
-          )}
-        </div>
-      )}
-
-      <div className="fixed bottom-4 right-4 z-[999] flex flex-col items-end gap-2">
-        {isTerminalOpen && (
-          <div className="w-[85vw] max-w-lg h-64 bg-black/95 border border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto rounded shadow-2xl flex flex-col custom-scrollbar animate-in slide-in-from-bottom-5 fade-in">
-            <div className="flex justify-between items-center mb-2 border-b border-teal-500/10 pb-2 sticky top-0 bg-black/95">
-              <span className="uppercase tracking-widest text-teal-500/50 font-bold">시스템 진단 터미널</span>
-              <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2 py-0.5 bg-white/5 rounded transition-colors">기록 지우기</button>
-            </div>
-            <div className="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
-              {systemLogs.map((l, i) => (
-                <div key={i} className={`leading-snug break-all ${l.includes('?') ? 'text-red-400 font-bold' : l.includes('▶?') ? 'text-amber-300' : ''}`}>{l}</div>
-              ))}
-            </div>
-          </div>
-        )}
-        <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>
-          {isTerminalOpen ? '터미널 닫기' : '터미널 열기'}
-        </button>
-      </div>
-
-      {isDictModalOpen && (
-        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] relative">
-            {renderDictionaryUI(true)}
-          </div>
-        </div>
-      )}
-
-      {activeCard && (
-        <CardModal 
-          activeCard={activeCard} 
-          renderContent={renderContent} 
-          onClose={handleCloseModal} 
-          goalBalance={goalBalance}
-          handleUseItem={handleUseItem}
-        />
-      )}
-    </div>
-  );
-}
-
-export default function App() { 
-  return (
-    <GlobalErrorBoundary>
-      <MainApp />
-    </GlobalErrorBoundary>
-  ); 
-}
+                  <button onClick={handleInstallClick} className="bg-teal-600/50 border border-teal-500 text-teal-200
