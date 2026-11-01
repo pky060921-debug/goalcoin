@@ -250,14 +250,9 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
   return (
     <input
       ref={inputRef}
-      placeholder={inputStatus === 'wrong' ? expected : (hintLetter ? hintLetter : "")}
+      placeholder={inputStatus === 'wrong' ? expected : (hintLetter ? hintLetter : "___")}
       readOnly={inputStatus !== 'idle'} 
-      className={`inline-block mx-1 px-1.5 py-0.5 text-center font-bold border-b-2 outline-none transition-all ${
-        inputStatus === 'wrong' ? 'bg-red-900/40 text-red-300 border-red-500 placeholder-red-400' :
-        inputStatus === 'correct' ? 'bg-teal-900/40 text-teal-300 border-teal-500' :
-        hintLetter ? 'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400 placeholder-amber-400/80' :
-        'bg-black/40 text-amber-300 border-amber-500/50 focus:border-amber-400'
-      }`}
+      className="inline-block mx-0.5 px-1 text-center font-bold bg-transparent outline-none text-current placeholder-current/40"
       style={{ width: '4.5em', maxWidth: '100%' }}
     />
   );
@@ -694,7 +689,6 @@ function MainApp() {
 
   }, [currentBlankIdx, blanks, touchCandidates, globalDict.groups]); 
 
-  // 💡 스키밍 모드 전환 또는 새 카드 진입 시 -1 상태로 초기화하고 본문 스크롤을 즉시 맨 위로 이동!
   useEffect(() => {
     if (inputMode === 'skimming') {
       setSkimmingFocusIdx(-1);
@@ -719,7 +713,6 @@ function MainApp() {
     }
   }, [skimmingFocusIdx, inputMode, activeCard]);
 
-  // 💡 스키밍 시작 시 첫 번째 빈칸은 2초(2000ms) 딜레이 후 노출, 이후 빈칸은 1초(1000ms) 간격 진행
   useEffect(() => {
     if (!activeCard || inputMode !== 'skimming' || isSkimmingPaused || blanks.length === 0) return;
 
@@ -1280,7 +1273,6 @@ function MainApp() {
     handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats));
   };
 
-  // 💡 [변형 설정 핸들러] 1번 터치/드래그: 구간 숨김 | 이미 숨김된 단어를 다시 터치: 다른 글자로 변형(예: 직원 -> 임직원) 또는 해제!
   const toggleStealthToken = (tokenKey: string, isDrag = false, origText = "") => {
     if (!activeCard) return;
 
@@ -1299,7 +1291,6 @@ function MainApp() {
     const isHidden = cardHiddenTokens.has(tokenKey);
     const currentFake = cardModifiedTokens[tokenKey];
 
-    // 아무 설정도 안 된 단어를 첫 터치 -> 즉시 구간 숨김으로 지정
     if (!isHidden && !currentFake) {
       const nextHidden = new Set(cardHiddenTokens);
       nextHidden.add(tokenKey);
@@ -1308,13 +1299,12 @@ function MainApp() {
       return;
     }
 
-    // 이미 숨김(또는 변형)된 단어를 다시 터치 -> 변형할 텍스트 입력창 오픈!
     const input = window.prompt(
       `🔄 [본문 변형 설정] 원래 텍스트: "${origText}"\n\n• 다른 단어로 변형하려면 아래에 입력하세요 (예: 임직원)\n• 숨김/변형을 해제하려면 빈칸으로 지우고 [확인]을 누르세요.`,
       currentFake || ""
     );
 
-    if (input === null) return; // 취소 시 현재 상태 유지
+    if (input === null) return;
 
     const trimmed = input.trim();
     const nextHidden = new Set(cardHiddenTokens);
@@ -1530,7 +1520,6 @@ function MainApp() {
       setShowStealthHint(false);
       setIsStealthEditMode(false);
 
-      // 💡 새 조항 진입 시 무조건 스크롤을 맨 위(0)로 즉시 이동!
       setTimeout(() => {
         if (bodyScrollRef.current) {
           bodyScrollRef.current.scrollTop = 0;
@@ -1921,12 +1910,7 @@ function MainApp() {
       return '';
     };
 
-    const getBlankMarkerClass = (color?: string) => {
-      if (color === 'purple' || color === 'yellow') return 'ring-[3px] ring-purple-500 ring-offset-1 ring-offset-transparent shadow-[0_0_10px_rgba(168,85,247,0.8)]';
-      if (color === 'blue') return 'ring-[3px] ring-sky-500 ring-offset-1 ring-offset-transparent shadow-[0_0_10px_rgba(14,165,233,0.8)]';
-      if (color === 'orange' || color === 'green' || color === 'pink') return 'ring-[3px] ring-lime-500 ring-offset-1 ring-offset-transparent shadow-[0_0_10px_rgba(132,204,22,0.8)]';
-      return '';
-    };
+    const getBlankMarkerClass = (color?: string) => getMarkerClass(color);
 
     const unifiedStealthSelectedCls = 'stealth-marked bg-fuchsia-900/75 text-fuchsia-100 border-b-2 border-fuchsia-400 font-bold px-0.5 py-0.5 transition-colors';
     const unifiedStealthRevealedCls = 'stealth-revealed bg-amber-500/30 text-amber-200 border-b-2 border-amber-400 font-extrabold px-0.5 py-0.5 animate-in fade-in duration-200';
@@ -2045,8 +2029,6 @@ function MainApp() {
       pendingHiddenKeys = [];
       pendingHiddenBlanks = [];
 
-      // 💡 [실전 풀이 중: 다른 글자로 변형된 토큰(예: "직원" -> "임직원")]
-      // 처음에는 변형된 텍스트("임직원")로 평문처럼 보이다가, 글자 윗부분이나 글자를 터치하면 원래 텍스트("직원")가 나타남!
       if (!isStealthEditMode && isModifiedToken) {
         const hlColor = cardHighlights[item.tokenKey];
         const markerCls = getMarkerClass(hlColor);
@@ -2128,7 +2110,6 @@ function MainApp() {
 
         const isCorrect = blanks[targetBlankIdx]?.correct; 
         const isCurrent = targetBlankIdx === currentBlankIdx; 
-        const isWrong = statsRef.current.wrongIndices.has(targetBlankIdx); 
         const blankMarkerCls = getBlankMarkerClass(cardHighlights[tokenKey]);
 
         const handleBlankPointerDown = (e: React.PointerEvent) => {
@@ -2141,13 +2122,16 @@ function MainApp() {
         let blankEl = null;
         if (isCorrect) {
           blankEl = (
-            <span key={tokenKey} onPointerDown={handleBlankPointerDown} className={`inline-block font-bold mx-1 px-1.5 py-0.5 rounded ${isWrong ? 'text-red-400 bg-red-900/20' : 'text-teal-400 bg-teal-900/20'} ${blankMarkerCls}`}>
+            <span
+              key={tokenKey}
+              onPointerDown={handleBlankPointerDown}
+              className={`${blankMarkerCls} ${activeHighlighter ? 'cursor-pointer select-none' : ''}`}
+            >
               {item.text}
             </span>
           );
         } else if (inputMode === 'skimming' && targetBlankIdx >= currentBlankIdx) {
           const isSkimmingMarkedWrong = skimmingWrongs.has(targetBlankIdx);
-          const isFocused = targetBlankIdx === skimmingFocusIdx;
           const isRevealed = skimmingFocusIdx >= 0 && targetBlankIdx <= skimmingFocusIdx;
 
           blankEl = (
@@ -2166,15 +2150,15 @@ function MainApp() {
                   toggleSkimmingWrong(targetBlankIdx);
                 }
               }}
-              className={`inline-block mx-1 text-center font-bold border-b-2 rounded-sm transition-all cursor-pointer select-none align-middle ${blankMarkerCls} ${
+              className={`inline-block cursor-pointer select-none align-baseline transition-all ${blankMarkerCls} ${
                 !isRevealed
-                  ? 'min-w-[40px] sm:min-w-[50px] h-4 sm:h-5 bg-white/5 border-white/20'
+                  ? 'min-w-[3.5em] text-transparent'
                   : isSkimmingMarkedWrong
-                    ? `px-1.5 py-0.5 bg-red-900/50 text-red-300 border-red-500 ${isFocused ? 'ring-2 ring-amber-400 scale-105' : ''}`
-                    : `px-1.5 py-0.5 ${isFocused ? 'bg-amber-500/30 text-amber-200 border-amber-400 ring-2 ring-amber-400 scale-105' : 'bg-teal-900/20 text-teal-400 border-teal-500/30'}`
+                    ? 'bg-red-500/30 text-red-300 font-bold px-1 rounded-sm'
+                    : ''
               }`}
             >
-              {isRevealed ? item.text : ''}
+              {isRevealed ? item.text : '____'}
             </span>
           );
         } else if (isCurrent) {
@@ -2186,13 +2170,24 @@ function MainApp() {
             );
           } else {
             blankEl = (
-              <span id="active-blank" key="active-blank-input-fixed" onPointerDown={handleBlankPointerDown} className={`inline-block mx-1 px-3 py-1 text-center font-bold border-b-2 rounded-t-sm min-w-[3em] ${blankMarkerCls} ${inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 border-red-500' : inputStatus === 'correct' ? 'bg-teal-900/50 text-teal-300 border-teal-500' : 'bg-amber-900/30 text-amber-400 border-amber-500 animate-pulse'}`}>
-                {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? '✅' : '?'}
+              <span
+                id="active-blank"
+                key="active-blank-input-fixed"
+                onPointerDown={handleBlankPointerDown}
+                className={`inline-block mx-0.5 px-1 text-center font-bold min-w-[2.5em] ${blankMarkerCls}`}
+              >
+                {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? item.text : '___'}
               </span>
             );
           }
         } else {
-          blankEl = <span key={tokenKey} onPointerDown={handleBlankPointerDown} className={`inline-block min-w-[40px] sm:min-w-[50px] h-4 sm:h-5 bg-white/5 border-b border-white/20 mx-1 align-middle rounded-sm ${blankMarkerCls}`} />;
+          blankEl = (
+            <span
+              key={tokenKey}
+              onPointerDown={handleBlankPointerDown}
+              className={`inline-block min-w-[3.5em] ${blankMarkerCls} ${activeHighlighter ? 'cursor-pointer' : ''}`}
+            />
+          );
         }
 
         if (triggerKeys) {
@@ -2203,11 +2198,11 @@ function MainApp() {
                 e.stopPropagation();
                 handleRevealHiddenSegment(triggerKeys, triggerBlanks);
               }}
-              className="inline-flex items-center cursor-pointer group"
+              className="cursor-pointer group align-baseline"
               title="이 앞에 숨겨진 내용이 있습니다! 터치하여 정답 확인"
             >
               {showStealthHint && (
-                <span className="inline-block mr-0.5 px-1 bg-amber-500 text-black font-extrabold text-[10px] rounded animate-bounce">
+                <span className="inline-block mr-0.5 px-1 bg-amber-500 text-black font-extrabold text-[10px] rounded animate-bounce align-baseline">
                   ▸
                 </span>
               )}
@@ -2278,7 +2273,7 @@ function MainApp() {
                 e.stopPropagation();
                 handleRevealHiddenSegment(triggerKeys, triggerBlanks);
               }}
-              className="inline-flex items-center cursor-pointer"
+              className="cursor-pointer"
             >
               {showStealthHint && (
                 <span className="inline-block mr-0.5 px-1 bg-amber-500 text-black font-extrabold text-[10px] rounded animate-bounce">
@@ -2942,114 +2937,4 @@ function MainApp() {
                   </span>
                 )}
                 
-                <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">누적 회독수</span><span className="text-[10px] sm:text-xs font-bold text-amber-400">{minFilledCount} 회독</span></div>
-                <div className="h-5 sm:h-6 w-px bg-white/10"></div>
-                <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">예상 합격률</span><span className="text-[10px] sm:text-xs font-bold text-indigo-400">{passProbability}%</span></div>
-                <div className="h-5 sm:h-6 w-px bg-white/10 hidden sm:block"></div>
-                
-                <button onClick={async () => { 
-                  try {
-                    addLog("🔄 로그아웃 전 데이터 안전 동기화 중...");
-                    const offBal = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
-                    const offActivityLog = JSON.parse(localStorage.getItem(`blankd_activity_log_${safeAddress}`) || '{}');
-                    const offClaimedRewards = JSON.parse(localStorage.getItem(`blankd_claimed_rewards_${safeAddress}`) || '{}');
-                    await fetch("https://api.blankd.top/api/update-balance", {
-                      method: "POST", headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ wallet_address: safeAddress, balance: offBal, activity_log: offActivityLog, claimed_rewards: offClaimedRewards })
-                    });
-                    await flushQueue();
-                  } catch(e: any) {}
-                  await enokiFlow.logout(); 
-                  localStorage.clear(); 
-                  window.location.reload(); 
-                }} className="border border-white/20 px-2 py-1 text-[9px] sm:text-[10px] hover:bg-white/10 tracking-wider font-mono rounded-sm text-white/70 whitespace-nowrap shrink-0">로그아웃</button>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {isLoggedIn && (
-        <nav className="border-b border-white/5 bg-black/40 py-1.5 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
-          <div className="w-full max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2 px-2 sm:px-4 md:px-8">
-            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'market', label: '마켓' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
-            ))}
-          </div>
-        </nav>
-      )}
-
-      {!isLoggedIn ? (
-        <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
-          <h2 className="text-xl sm:text-2xl font-serif text-current mb-4 tracking-tight">빈칸개발 (BlankD)</h2>
-          <p className="text-xs sm:text-sm text-white/40 mb-10 sm:mb-12 text-center leading-relaxed">인지 부하 이론 기반의 학습 플랫폼<br/>압도적인 영구 기억을 형성합니다.</p>
-          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-[#111827] text-white text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
-        </main>
-      ) : (
-        <div className="w-full max-w-[1600px] mx-auto flex gap-4 sm:gap-6 px-2 sm:px-4 lg:px-8 items-start pb-10 transition-all duration-300">
-          <main className="flex-1 w-full min-w-0 transition-all duration-300">
-            {memoizedTabs}
-          </main>
-          
-          {isSidebarOpen ? (
-            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[320px] xl:w-[400px] transition-all duration-300 animate-in slide-in-from-right-8">
-              {renderDictionaryUI(false)}
-            </aside>
-          ) : (
-            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[40px] items-center justify-start transition-all duration-300 animate-in fade-in">
-              <button onClick={() => setIsSidebarOpen(true)} className="w-full h-32 bg-white/5 border border-white/10 hover:bg-white/10 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors flex-col gap-2 shadow-md">
-                <span className="text-xs">◀</span>
-                <span className="text-[10px] font-bold" style={{ writingMode: 'vertical-rl' }}>사전 열기</span>
-              </button>
-            </aside>
-          )}
-        </div>
-      )}
-
-      <div className="fixed bottom-4 right-4 z-[999] flex flex-col items-end gap-2">
-        {isTerminalOpen && (
-          <div className="w-[85vw] max-w-lg h-64 bg-black/95 border border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto rounded shadow-2xl flex flex-col custom-scrollbar animate-in slide-in-from-bottom-5 fade-in">
-            <div className="flex justify-between items-center mb-2 border-b border-teal-500/10 pb-2 sticky top-0 bg-black/95">
-              <span className="uppercase tracking-widest text-teal-500/50 font-bold">시스템 진단 터미널</span>
-              <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2 py-0.5 bg-white/5 rounded transition-colors">기록 지우기</button>
-            </div>
-            <div className="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
-              {systemLogs.map((l, i) => (
-                <div key={i} className={`leading-snug break-all ${l.includes('?') ? 'text-red-400 font-bold' : l.includes('▶?') ? 'text-amber-300' : ''}`}>{l}</div>
-              ))}
-            </div>
-          </div>
-        )}
-        <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>
-          {isTerminalOpen ? '터미널 닫기' : '터미널 열기'}
-        </button>
-      </div>
-
-      {isDictModalOpen && (
-        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] relative">
-            {renderDictionaryUI(true)}
-          </div>
-        </div>
-      )}
-
-      {activeCard && (
-        <CardModal 
-          activeCard={activeCard} 
-          renderContent={renderContent} 
-          onClose={handleCloseModal} 
-          goalBalance={goalBalance}
-          handleUseItem={handleUseItem}
-        />
-      )}
-    </div>
-  );
-}
-
-export default function App() { 
-  return (
-    <GlobalErrorBoundary>
-      <MainApp />
-    </GlobalErrorBoundary>
-  ); 
-}
+                <div className
