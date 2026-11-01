@@ -252,7 +252,12 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
       ref={inputRef}
       placeholder={inputStatus === 'wrong' ? expected : (hintLetter ? hintLetter : "___")}
       readOnly={inputStatus !== 'idle'} 
-      className="inline-block mx-0.5 px-1 text-center font-bold bg-transparent outline-none text-current placeholder-current/40"
+      className={`inline-block mx-0.5 px-1 text-center font-bold bg-transparent outline-none transition-all ${
+        inputStatus === 'wrong' ? 'text-red-400 bg-red-900/30 rounded' :
+        inputStatus === 'correct' ? 'text-current' :
+        hintLetter ? 'text-amber-300 bg-black/40 rounded border-b border-amber-500/50' :
+        'text-white/60 border-b border-white/20 focus:text-white focus:border-white placeholder-white/30'
+      }`}
       style={{ width: '4.5em', maxWidth: '100%' }}
     />
   );
@@ -1023,6 +1028,23 @@ function MainApp() {
     });
   };
 
+  const registerToMarket = async (cardId: number) => {
+    const price = parseInt(prompt("판매할 가격(포인트)을 입력하세요:", "100") || "0", 10);
+    if (price > 0) {
+      try {
+        const res = await fetch("https://api.blankd.top/api/market/register", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet_address: safeAddress, card_id: cardId, price })
+        });
+        const data = await res.json();
+        if (res.ok) alert(data.message);
+        else alert(data.error);
+      } catch(e) {
+        alert("마켓 등록 중 오류가 발생했습니다.");
+      }
+    }
+  };
+
   const saveGlobalDict = async (newDict: any) => {
     setGlobalDict(newDict); 
     localStorage.setItem(`blankd_off_dict_${safeAddress}`, JSON.stringify(newDict));
@@ -1494,7 +1516,7 @@ function MainApp() {
           } else if (targetWrong) {
               const cleanAns = b.answer.replace(/\s+/g, '');
               const isTarget = targetWrong.some((w: string) => w.replace(/\s+/g, '') === cleanAns);
-              isCorrect = !isTarget;
+              isTarget = !isTarget;
           }
           return { ...b, correct: isCorrect };
       });
@@ -2110,6 +2132,7 @@ function MainApp() {
 
         const isCorrect = blanks[targetBlankIdx]?.correct; 
         const isCurrent = targetBlankIdx === currentBlankIdx; 
+        const isWrong = statsRef.current.wrongIndices.has(targetBlankIdx); 
         const blankMarkerCls = getBlankMarkerClass(cardHighlights[tokenKey]);
 
         const handleBlankPointerDown = (e: React.PointerEvent) => {
@@ -2118,20 +2141,20 @@ function MainApp() {
           isHighlightingDragRef.current = true;
           applyHighlightToToken(tokenKey, false);
         };
+        const handleBlankPointerEnter = () => {
+          if (activeHighlighter && isHighlightingDragRef.current) applyHighlightToToken(tokenKey, true);
+        };
 
         let blankEl = null;
         if (isCorrect) {
           blankEl = (
-            <span
-              key={tokenKey}
-              onPointerDown={handleBlankPointerDown}
-              className={`${blankMarkerCls} ${activeHighlighter ? 'cursor-pointer select-none' : ''}`}
-            >
+            <span key={tokenKey} onPointerDown={handleBlankPointerDown} onPointerEnter={handleBlankPointerEnter} className={`inline-block mx-0.5 px-0.5 transition-all ${blankMarkerCls} ${activeHighlighter ? 'cursor-pointer select-none' : ''}`}>
               {item.text}
             </span>
           );
         } else if (inputMode === 'skimming' && targetBlankIdx >= currentBlankIdx) {
           const isSkimmingMarkedWrong = skimmingWrongs.has(targetBlankIdx);
+          const isFocused = targetBlankIdx === skimmingFocusIdx;
           const isRevealed = skimmingFocusIdx >= 0 && targetBlankIdx <= skimmingFocusIdx;
 
           blankEl = (
@@ -2139,6 +2162,7 @@ function MainApp() {
               key={tokenKey}
               id={`skimming-blank-${targetBlankIdx}`}
               onPointerDown={handleBlankPointerDown}
+              onPointerEnter={handleBlankPointerEnter}
               onClick={(e) => {
                 e.stopPropagation();
                 if (activeHighlighter) return;
@@ -2150,12 +2174,12 @@ function MainApp() {
                   toggleSkimmingWrong(targetBlankIdx);
                 }
               }}
-              className={`inline-block cursor-pointer select-none align-baseline transition-all ${blankMarkerCls} ${
+              className={`inline-block mx-0.5 cursor-pointer select-none align-baseline transition-all ${blankMarkerCls} ${
                 !isRevealed
-                  ? 'min-w-[3.5em] text-transparent'
+                  ? 'min-w-[3em] text-transparent'
                   : isSkimmingMarkedWrong
-                    ? 'bg-red-500/30 text-red-300 font-bold px-1 rounded-sm'
-                    : ''
+                    ? `bg-red-500/30 text-red-300 font-bold px-1 rounded-sm ${isFocused ? 'ring-2 ring-amber-400' : ''}`
+                    : `px-0.5 ${isFocused ? 'ring-1 ring-white/50 bg-white/10 rounded-sm' : ''}`
               }`}
             >
               {isRevealed ? item.text : '____'}
@@ -2164,30 +2188,19 @@ function MainApp() {
         } else if (isCurrent) {
           if (inputMode === 'typing') {
             blankEl = (
-              <span id="active-blank" key="active-blank-input-fixed" className={`inline-block rounded-sm ${blankMarkerCls}`}>
+              <span id="active-blank" key="active-blank-input-fixed" className={`inline-block ${blankMarkerCls}`}>
                 <InlineBlankInput inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
               </span>
             );
           } else {
             blankEl = (
-              <span
-                id="active-blank"
-                key="active-blank-input-fixed"
-                onPointerDown={handleBlankPointerDown}
-                className={`inline-block mx-0.5 px-1 text-center font-bold min-w-[2.5em] ${blankMarkerCls}`}
-              >
+              <span id="active-blank" key="active-blank-input-fixed" onPointerDown={handleBlankPointerDown} onPointerEnter={handleBlankPointerEnter} className={`inline-block mx-0.5 px-1 text-center min-w-[2.5em] ${blankMarkerCls} ${inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 font-bold rounded-sm' : inputStatus === 'correct' ? '' : 'bg-white/10 rounded-sm'}`}>
                 {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? item.text : '___'}
               </span>
             );
           }
         } else {
-          blankEl = (
-            <span
-              key={tokenKey}
-              onPointerDown={handleBlankPointerDown}
-              className={`inline-block min-w-[3.5em] ${blankMarkerCls} ${activeHighlighter ? 'cursor-pointer' : ''}`}
-            />
-          );
+          blankEl = <span key={tokenKey} onPointerDown={handleBlankPointerDown} onPointerEnter={handleBlankPointerEnter} className={`inline-block min-w-[3em] mx-0.5 ${blankMarkerCls} ${activeHighlighter ? 'cursor-pointer' : ''}`} >____</span>;
         }
 
         if (triggerKeys) {
@@ -2198,11 +2211,11 @@ function MainApp() {
                 e.stopPropagation();
                 handleRevealHiddenSegment(triggerKeys, triggerBlanks);
               }}
-              className="cursor-pointer group align-baseline"
+              className="cursor-pointer group align-middle"
               title="이 앞에 숨겨진 내용이 있습니다! 터치하여 정답 확인"
             >
               {showStealthHint && (
-                <span className="inline-block mr-0.5 px-1 bg-amber-500 text-black font-extrabold text-[10px] rounded animate-bounce align-baseline">
+                <span className="inline-block mr-0.5 px-1 bg-amber-500 text-black font-extrabold text-[10px] rounded animate-bounce align-middle">
                   ▸
                 </span>
               )}
@@ -2408,9 +2421,9 @@ function MainApp() {
               </div>
 
               <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
-                 <button onClick={(e) => { e.currentTarget.blur(); setFontSizeLevel(p => Math.max(1, p - 1)); }} className="px-1.5 py-0.5 bg-black/40 text-white/60 text-xs rounded">-</button>
+                 <button onClick={(e) => { e.currentTarget.blur(); setFontSizeLevel(p => Math.max(1, p - 1)); }} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">-</button>
                  <span className="text-[10px] sm:text-[11px] font-mono text-white/80 w-3 text-center">{fontSizeLevel}</span>
-                 <button onClick={(e) => { e.currentTarget.blur(); setFontSizeLevel(p => Math.min(5, p + 1)); }} className="px-1.5 py-0.5 bg-black/40 text-white/60 text-xs rounded">+</button>
+                 <button onClick={(e) => { e.currentTarget.blur(); setFontSizeLevel(p => Math.min(5, p + 1)); }} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
               </div>
 
               <button onClick={(e) => { e.currentTarget.blur(); setIsMemoOpen(!isMemoOpen); }} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md flex items-center gap-1">
@@ -2937,4 +2950,114 @@ function MainApp() {
                   </span>
                 )}
                 
-                <div className
+                <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">누적 회독수</span><span className="text-[10px] sm:text-xs font-bold text-amber-400">{minFilledCount} 회독</span></div>
+                <div className="h-5 sm:h-6 w-px bg-white/10"></div>
+                <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">예상 합격률</span><span className="text-[10px] sm:text-xs font-bold text-indigo-400">{passProbability}%</span></div>
+                <div className="h-5 sm:h-6 w-px bg-white/10 hidden sm:block"></div>
+                
+                <button onClick={async () => { 
+                  try {
+                    addLog("🔄 로그아웃 전 데이터 안전 동기화 중...");
+                    const offBal = parseInt(localStorage.getItem(`blankd_off_bal_${safeAddress}`) || '0', 10);
+                    const offActivityLog = JSON.parse(localStorage.getItem(`blankd_activity_log_${safeAddress}`) || '{}');
+                    const offClaimedRewards = JSON.parse(localStorage.getItem(`blankd_claimed_rewards_${safeAddress}`) || '{}');
+                    await fetch("https://api.blankd.top/api/update-balance", {
+                      method: "POST", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ wallet_address: safeAddress, balance: offBal, activity_log: offActivityLog, claimed_rewards: offClaimedRewards })
+                    });
+                    await flushQueue();
+                  } catch(e: any) {}
+                  await enokiFlow.logout(); 
+                  localStorage.clear(); 
+                  window.location.reload(); 
+                }} className="border border-white/20 px-2 py-1 text-[9px] sm:text-[10px] hover:bg-white/10 tracking-wider font-mono rounded-sm text-white/70 whitespace-nowrap shrink-0">로그아웃</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {isLoggedIn && (
+        <nav className="border-b border-white/5 bg-black/40 py-1.5 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
+          <div className="w-full max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2 px-2 sm:px-4 md:px-8">
+            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'market', label: '마켓' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
+            ))}
+          </div>
+        </nav>
+      )}
+
+      {!isLoggedIn ? (
+        <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
+          <h2 className="text-xl sm:text-2xl font-serif text-current mb-4 tracking-tight">빈칸개발 (BlankD)</h2>
+          <p className="text-xs sm:text-sm text-white/40 mb-10 sm:mb-12 text-center leading-relaxed">인지 부하 이론 기반의 학습 플랫폼<br/>압도적인 영구 기억을 형성합니다.</p>
+          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-[#111827] text-white text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
+        </main>
+      ) : (
+        <div className="w-full max-w-[1600px] mx-auto flex gap-4 sm:gap-6 px-2 sm:px-4 lg:px-8 items-start pb-10 transition-all duration-300">
+          <main className="flex-1 w-full min-w-0 transition-all duration-300">
+            {memoizedTabs}
+          </main>
+          
+          {isSidebarOpen ? (
+            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[320px] xl:w-[400px] transition-all duration-300 animate-in slide-in-from-right-8">
+              {renderDictionaryUI(false)}
+            </aside>
+          ) : (
+            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[40px] items-center justify-start transition-all duration-300 animate-in fade-in">
+              <button onClick={() => setIsSidebarOpen(true)} className="w-full h-32 bg-white/5 border border-white/10 hover:bg-white/10 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors flex-col gap-2 shadow-md">
+                <span className="text-xs">◀</span>
+                <span className="text-[10px] font-bold" style={{ writingMode: 'vertical-rl' }}>사전 열기</span>
+              </button>
+            </aside>
+          )}
+        </div>
+      )}
+
+      <div className="fixed bottom-4 right-4 z-[999] flex flex-col items-end gap-2">
+        {isTerminalOpen && (
+          <div className="w-[85vw] max-w-lg h-64 bg-black/95 border border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto rounded shadow-2xl flex flex-col custom-scrollbar animate-in slide-in-from-bottom-5 fade-in">
+            <div className="flex justify-between items-center mb-2 border-b border-teal-500/10 pb-2 sticky top-0 bg-black/95">
+              <span className="uppercase tracking-widest text-teal-500/50 font-bold">시스템 진단 터미널</span>
+              <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2 py-0.5 bg-white/5 rounded transition-colors">기록 지우기</button>
+            </div>
+            <div className="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
+              {systemLogs.map((l, i) => (
+                <div key={i} className={`leading-snug break-all ${l.includes('?') ? 'text-red-400 font-bold' : l.includes('▶?') ? 'text-amber-300' : ''}`}>{l}</div>
+              ))}
+            </div>
+          </div>
+        )}
+        <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>
+          {isTerminalOpen ? '터미널 닫기' : '터미널 열기'}
+        </button>
+      </div>
+
+      {isDictModalOpen && (
+        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] relative">
+            {renderDictionaryUI(true)}
+          </div>
+        </div>
+      )}
+
+      {activeCard && (
+        <CardModal 
+          activeCard={activeCard} 
+          renderContent={renderContent} 
+          onClose={handleCloseModal} 
+          goalBalance={goalBalance}
+          handleUseItem={handleUseItem}
+        />
+      )}
+    </div>
+  );
+}
+
+export default function App() { 
+  return (
+    <GlobalErrorBoundary>
+      <MainApp />
+    </GlobalErrorBoundary>
+  ); 
+}
