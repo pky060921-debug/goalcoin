@@ -582,6 +582,23 @@ function MainApp() {
   const [systemLogs, setSystemLogs] = useState<string[]>(["[System] 터미널 온라인. 환영합니다, 설계자님."]);
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [isMemoOpen, setIsMemoOpen] = useState(false);
+  
+  const [memoSize, setMemoSize] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('blankd_memo_size');
+      return saved ? parseInt(saved, 10) : 320;
+    }
+    return 320;
+  });
+  useEffect(() => { localStorage.setItem('blankd_memo_size', memoSize.toString()); }, [memoSize]);
+  
+  const [isDesktop, setIsDesktop] = useState(typeof window !== 'undefined' ? window.innerWidth >= 768 : true);
+  useEffect(() => {
+    const handleResize = () => setIsDesktop(window.innerWidth >= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const [blanks, setBlanks] = useState<{answer: string, correct: boolean}[]>([]);
   const [currentBlankIdx, setCurrentBlankIdx] = useState(0);
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
@@ -1516,7 +1533,7 @@ function MainApp() {
           } else if (targetWrong) {
               const cleanAns = b.answer.replace(/\s+/g, '');
               const isTarget = targetWrong.some((w: string) => w.replace(/\s+/g, '') === cleanAns);
-              isTarget = !isTarget;
+              isCorrect = !isTarget;
           }
           return { ...b, correct: isCorrect };
       });
@@ -1533,7 +1550,6 @@ function MainApp() {
       const uniqueAnswers = Array.from(new Set(foundBlanks.map(b => b.answer)));
       setTouchCandidates(uniqueAnswers.sort((a, b) => a.localeCompare(b, 'ko')));
 
-      setIsMemoOpen(false);
       setIsFrozen(false); setHintLetter(null); 
       setCardHighlights(stats.highlights || {});
       setCardHiddenTokens(hiddenSet);
@@ -2141,20 +2157,20 @@ function MainApp() {
           isHighlightingDragRef.current = true;
           applyHighlightToToken(tokenKey, false);
         };
-        const handleBlankPointerEnter = () => {
-          if (activeHighlighter && isHighlightingDragRef.current) applyHighlightToToken(tokenKey, true);
-        };
 
         let blankEl = null;
         if (isCorrect) {
           blankEl = (
-            <span key={tokenKey} onPointerDown={handleBlankPointerDown} onPointerEnter={handleBlankPointerEnter} className={`inline-block mx-0.5 px-0.5 transition-all ${blankMarkerCls} ${activeHighlighter ? 'cursor-pointer select-none' : ''}`}>
+            <span
+              key={tokenKey}
+              onPointerDown={handleBlankPointerDown}
+              className={`${blankMarkerCls} ${activeHighlighter ? 'cursor-pointer select-none' : ''}`}
+            >
               {item.text}
             </span>
           );
         } else if (inputMode === 'skimming' && targetBlankIdx >= currentBlankIdx) {
           const isSkimmingMarkedWrong = skimmingWrongs.has(targetBlankIdx);
-          const isFocused = targetBlankIdx === skimmingFocusIdx;
           const isRevealed = skimmingFocusIdx >= 0 && targetBlankIdx <= skimmingFocusIdx;
 
           blankEl = (
@@ -2162,7 +2178,6 @@ function MainApp() {
               key={tokenKey}
               id={`skimming-blank-${targetBlankIdx}`}
               onPointerDown={handleBlankPointerDown}
-              onPointerEnter={handleBlankPointerEnter}
               onClick={(e) => {
                 e.stopPropagation();
                 if (activeHighlighter) return;
@@ -2174,12 +2189,12 @@ function MainApp() {
                   toggleSkimmingWrong(targetBlankIdx);
                 }
               }}
-              className={`inline-block mx-0.5 cursor-pointer select-none align-baseline transition-all ${blankMarkerCls} ${
+              className={`inline-block cursor-pointer select-none align-baseline transition-all ${blankMarkerCls} ${
                 !isRevealed
-                  ? 'min-w-[3em] text-transparent'
+                  ? 'min-w-[3.5em] text-transparent'
                   : isSkimmingMarkedWrong
-                    ? `bg-red-500/30 text-red-300 font-bold px-1 rounded-sm ${isFocused ? 'ring-2 ring-amber-400' : ''}`
-                    : `px-0.5 ${isFocused ? 'ring-1 ring-white/50 bg-white/10 rounded-sm' : ''}`
+                    ? 'bg-red-500/30 text-red-300 font-bold px-1 rounded-sm'
+                    : ''
               }`}
             >
               {isRevealed ? item.text : '____'}
@@ -2188,19 +2203,30 @@ function MainApp() {
         } else if (isCurrent) {
           if (inputMode === 'typing') {
             blankEl = (
-              <span id="active-blank" key="active-blank-input-fixed" className={`inline-block ${blankMarkerCls}`}>
+              <span id="active-blank" key="active-blank-input-fixed" className={`inline-block rounded-sm ${blankMarkerCls}`}>
                 <InlineBlankInput inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
               </span>
             );
           } else {
             blankEl = (
-              <span id="active-blank" key="active-blank-input-fixed" onPointerDown={handleBlankPointerDown} onPointerEnter={handleBlankPointerEnter} className={`inline-block mx-0.5 px-1 text-center min-w-[2.5em] ${blankMarkerCls} ${inputStatus === 'wrong' ? 'bg-red-900/50 text-red-300 font-bold rounded-sm' : inputStatus === 'correct' ? '' : 'bg-white/10 rounded-sm'}`}>
+              <span
+                id="active-blank"
+                key="active-blank-input-fixed"
+                onPointerDown={handleBlankPointerDown}
+                className={`inline-block mx-0.5 px-1 text-center font-bold min-w-[2.5em] ${blankMarkerCls}`}
+              >
                 {inputStatus === 'wrong' ? (blanks[currentBlankIdx]?.answer || '❌') : inputStatus === 'correct' ? item.text : '___'}
               </span>
             );
           }
         } else {
-          blankEl = <span key={tokenKey} onPointerDown={handleBlankPointerDown} onPointerEnter={handleBlankPointerEnter} className={`inline-block min-w-[3em] mx-0.5 ${blankMarkerCls} ${activeHighlighter ? 'cursor-pointer' : ''}`} >____</span>;
+          blankEl = (
+            <span
+              key={tokenKey}
+              onPointerDown={handleBlankPointerDown}
+              className={`inline-block min-w-[3.5em] ${blankMarkerCls} ${activeHighlighter ? 'cursor-pointer' : ''}`}
+            />
+          );
         }
 
         if (triggerKeys) {
@@ -2477,8 +2503,43 @@ function MainApp() {
             </div>
 
             {isMemoOpen && (
-              <div className="w-full md:w-80 lg:w-96 h-48 md:h-full shrink-0 border-t md:border-t-0 md:border-l border-teal-500/30 bg-teal-950/10 flex flex-col p-3 sm:p-4 animate-in fade-in duration-200">
-                 <div className="flex justify-between items-center mb-2 pb-1.5 border-b border-teal-500/20 shrink-0">
+              <div 
+                 className="relative shrink-0 border-t md:border-t-0 md:border-l border-teal-500/30 bg-teal-950/10 flex flex-col p-3 sm:p-4 animate-in fade-in duration-200"
+                 style={{ 
+                   width: isDesktop ? memoSize : '100%', 
+                   height: isDesktop ? '100%' : memoSize 
+                 }}
+              >
+                 <div 
+                    className="absolute left-0 top-0 md:w-2 md:h-full w-full h-2 cursor-row-resize md:cursor-col-resize hover:bg-teal-500/50 z-10 transition-colors flex items-center justify-center group"
+                    onPointerDown={(e) => {
+                       e.preventDefault();
+                       const startPos = isDesktop ? e.clientX : e.clientY;
+                       const startSize = memoSize;
+                       
+                       const onPointerMove = (moveEvent: PointerEvent) => {
+                          if (isDesktop) {
+                             const newWidth = startSize - (moveEvent.clientX - startPos);
+                             setMemoSize(Math.max(200, Math.min(newWidth, window.innerWidth * 0.7)));
+                          } else {
+                             const newHeight = startSize - (moveEvent.clientY - startPos);
+                             setMemoSize(Math.max(150, Math.min(newHeight, window.innerHeight * 0.7)));
+                          }
+                       };
+                       
+                       const onPointerUp = () => {
+                          document.removeEventListener('pointermove', onPointerMove);
+                          document.removeEventListener('pointerup', onPointerUp);
+                       };
+                       
+                       document.addEventListener('pointermove', onPointerMove);
+                       document.addEventListener('pointerup', onPointerUp);
+                    }}
+                 >
+                    <div className="bg-teal-500/30 rounded-full md:w-1 md:h-8 w-8 h-1 group-hover:bg-teal-400"></div>
+                 </div>
+
+                 <div className="flex justify-between items-center mb-2 pb-1.5 border-b border-teal-500/20 shrink-0 pl-1 md:pl-2">
                     <span className="text-xs font-bold text-teal-400 flex items-center gap-1">
                       나만의 암기 노트
                     </span>
@@ -2633,7 +2694,7 @@ function MainApp() {
         </div>
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, isListening, globalDict.abbrs, hintLetter, inputMode, skimmingWrongs, skimmingFocusIdx, isSkimmingPaused, touchCandidates, fontSizeLevel, activeTouchCandidates, activeHighlighter, cardHighlights, isStealthEditMode, cardHiddenTokens, cardModifiedTokens, sessionRevealedTokens, showStealthHint]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, memoSize, isDesktop, isListening, globalDict.abbrs, hintLetter, inputMode, skimmingWrongs, skimmingFocusIdx, isSkimmingPaused, touchCandidates, fontSizeLevel, activeTouchCandidates, activeHighlighter, cardHighlights, isStealthEditMode, cardHiddenTokens, cardModifiedTokens, sessionRevealedTokens, showStealthHint]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
