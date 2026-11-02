@@ -578,6 +578,9 @@ function MainApp() {
   const [isTerminalOpen, setIsTerminalOpen] = useState(false);
   const [isMemoOpen, setIsMemoOpen] = useState(false);
   
+  const [tableRows, setTableRows] = useState(3);
+  const [tableCols, setTableCols] = useState(3);
+  
   const [memoSize, setMemoSize] = useState(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('blankd_memo_size');
@@ -786,7 +789,8 @@ function MainApp() {
       if (
         target.tagName === 'INPUT' || 
         target.tagName === 'TEXTAREA' ||
-        target.isContentEditable
+        target.isContentEditable ||
+        target.getAttribute('contenteditable') === 'true'
       ) return;
 
       if (inputMode === 'skimming') {
@@ -1408,7 +1412,9 @@ function MainApp() {
             } else {
               const anyUnresolved = latestBlanks.findIndex(b => !b.correct);
               if (anyUnresolved !== -1) setCurrentBlankIdx(anyUnresolved);
-              else finishCard();
+              else {
+                if (!checkUnrevealedStealth()) finishCard();
+              }
             }
             return latestBlanks;
           });
@@ -2574,45 +2580,60 @@ function MainApp() {
                     <div className="bg-teal-500/30 rounded-full md:w-1 md:h-8 w-8 h-1 group-hover:bg-teal-400"></div>
                  </div>
 
-                 <div className="flex justify-between items-center mb-2 pb-1.5 border-b border-teal-500/20 shrink-0 pl-1 md:pl-2">
+                 <div className="flex flex-wrap justify-between items-center mb-2 pb-1.5 border-b border-teal-500/20 shrink-0 pl-1 md:pl-2 gap-2">
                     <span className="text-xs font-bold text-teal-400 flex items-center gap-1">
                       나만의 암기 노트
                     </span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <div className="flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded border border-teal-500/30 text-[10px] text-teal-300">
+                        <span>행</span>
+                        <input 
+                          type="number" 
+                          min="1" 
+                          max="20"
+                          value={tableRows} 
+                          onChange={(e) => setTableRows(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                          className="w-7 bg-transparent border-b border-teal-500/50 text-center font-bold outline-none text-white focus:border-teal-400"
+                        />
+                        <span>열</span>
+                        <input 
+                          type="number" 
+                          min="1" 
+                          max="10"
+                          value={tableCols} 
+                          onChange={(e) => setTableCols(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                          className="w-7 bg-transparent border-b border-teal-500/50 text-center font-bold outline-none text-white focus:border-teal-400"
+                        />
+                      </div>
                       <button 
                         onPointerDown={(e) => {
                           e.preventDefault();
                           const el = document.getElementById(`memo-editor-${activeCard.id}`);
                           if (el) {
                             el.focus();
-                            const input = window.prompt("표의 행(가로줄)과 열(칸) 개수를 띄어쓰기로 입력하세요.\n(예: 3행 2열 -> 3 2)", "3 3");
-                            if (input) {
-                              const parts = input.trim().split(/\s+/);
-                              const rows = parseInt(parts[0], 10);
-                              const cols = parseInt(parts[1], 10);
-                              if (rows > 0 && cols > 0) {
-                                let html = '<table class="memo-table"><tbody>';
-                                for (let r = 0; r < rows; r++) {
-                                  html += '<tr>';
-                                  for (let c = 0; c < cols; c++) {
-                                    if (r === 0) html += `<th>항목 ${c+1}</th>`;
-                                    else html += '<td><br></td>';
-                                  }
-                                  html += '</tr>';
+                            const r = Math.max(1, tableRows);
+                            const c = Math.max(1, tableCols);
+                            let html = '<table class="memo-table"><tbody>';
+                            for (let rowIdx = 0; rowIdx < r; rowIdx++) {
+                              html += '<tr>';
+                              for (let colIdx = 0; colIdx < c; colIdx++) {
+                                if (rowIdx === 0) {
+                                  html += `<th>항목 ${colIdx + 1}</th>`;
+                                } else {
+                                  html += '<td><br></td>';
                                 }
-                                html += '</tbody></table><p><br></p>';
-                                document.execCommand('insertHTML', false, html);
-                              } else {
-                                alert("숫자를 올바르게 입력해주세요. (예: 3 3)");
                               }
+                              html += '</tr>';
                             }
+                            html += '</tbody></table><p><br></p>';
+                            document.execCommand('insertHTML', false, html);
                           }
                         }}
-                        className="text-[10px] bg-teal-900/50 hover:bg-teal-800 text-teal-200 border border-teal-500/40 px-2 py-0.5 rounded transition-colors shadow-sm cursor-pointer z-20"
+                        className="text-[10px] bg-teal-900/50 hover:bg-teal-800 text-teal-200 border border-teal-500/40 px-2 py-0.5 rounded transition-colors shadow-sm cursor-pointer z-20 whitespace-nowrap"
                       >
                         📊 표 삽입
                       </button>
-                      <span className="text-[10px] text-teal-500/70 font-mono">자동 저장됨</span>
+                      <span className="text-[10px] text-teal-500/70 font-mono hidden sm:inline">자동저장</span>
                     </div>
                  </div>
                  <div 
@@ -2769,7 +2790,7 @@ function MainApp() {
         </div>
       </div>
     );
-  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, memoSize, isDesktop, isListening, globalDict.abbrs, hintLetter, inputMode, skimmingWrongs, skimmingFocusIdx, isSkimmingPaused, touchCandidates, fontSizeLevel, activeTouchCandidates, activeHighlighter, cardHighlights, isStealthEditMode, cardHiddenTokens, cardModifiedTokens, sessionRevealedTokens, showStealthHint]);
+  }, [activeCard, blanks, currentBlankIdx, inputStatus, isMemoOpen, memoSize, isDesktop, isListening, globalDict.abbrs, hintLetter, inputMode, skimmingWrongs, skimmingFocusIdx, isSkimmingPaused, touchCandidates, fontSizeLevel, activeTouchCandidates, activeHighlighter, cardHighlights, isStealthEditMode, cardHiddenTokens, cardModifiedTokens, sessionRevealedTokens, showStealthHint, tableRows, tableCols]);
 
   const renderContent = React.useCallback(() => memoizedCardContent, [memoizedCardContent]);
 
