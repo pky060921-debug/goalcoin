@@ -252,12 +252,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
       ref={inputRef}
       placeholder={inputStatus === 'wrong' ? expected : (hintLetter ? hintLetter : "___")}
       readOnly={inputStatus !== 'idle'} 
-      className={`inline-block mx-0.5 px-1 text-center font-bold bg-transparent outline-none transition-all ${
-        inputStatus === 'wrong' ? 'text-red-400 bg-red-900/30 rounded' :
-        inputStatus === 'correct' ? 'text-current' :
-        hintLetter ? 'text-amber-300 bg-black/40 rounded border-b border-amber-500/50' :
-        'text-white/60 border-b border-white/20 focus:text-white focus:border-white placeholder-white/30'
-      }`}
+      className="inline-block mx-0.5 px-1 text-center font-bold bg-transparent outline-none text-current placeholder-current/40"
       style={{ width: '4.5em', maxWidth: '100%' }}
     />
   );
@@ -767,7 +762,7 @@ function MainApp() {
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (!activeCard) return;
-      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA' || document.activeElement?.getAttribute('contenteditable') === 'true') return;
 
       if (inputMode === 'skimming') {
           if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key) || e.code === 'Space') {
@@ -2543,19 +2538,37 @@ function MainApp() {
                     <span className="text-xs font-bold text-teal-400 flex items-center gap-1">
                       나만의 암기 노트
                     </span>
-                    <span className="text-[10px] text-teal-500/70 font-mono">자동 저장됨</span>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onPointerDown={(e) => {
+                          e.preventDefault();
+                          const el = document.getElementById(`memo-editor-${activeCard.id}`);
+                          if (el) {
+                            el.focus();
+                            document.execCommand('insertHTML', false, '<table class="memo-table"><tbody><tr><th>비교 항목</th><th>내용 A</th><th>내용 B</th></tr><tr><td><br></td><td><br></td><td><br></td></tr><tr><td><br></td><td><br></td><td><br></td></tr></tbody></table><p><br></p>');
+                          }
+                        }}
+                        className="text-[10px] bg-teal-900/50 hover:bg-teal-800 text-teal-200 border border-teal-500/40 px-2 py-0.5 rounded transition-colors shadow-sm cursor-pointer z-20"
+                      >
+                        📊 표 삽입
+                      </button>
+                      <span className="text-[10px] text-teal-500/70 font-mono">자동 저장됨</span>
+                    </div>
                  </div>
-                 <textarea 
+                 <div 
+                    id={`memo-editor-${activeCard.id}`}
                     key={`memo-${activeCard.id}`}
-                    defaultValue={statsRef.current.text || ""} 
-                    placeholder="이 조항의 핵심 키워드, 두문자, 헷갈리는 포인트를 자유롭게 기록하세요. (줄바꿈 가능)" 
-                    onChange={(e) => {
-                        statsRef.current.text = e.target.value;
+                    contentEditable
+                    suppressContentEditableWarning
+                    dangerouslySetInnerHTML={{ 
+                      __html: (statsRef.current.text || "").includes('<') 
+                        ? statsRef.current.text 
+                        : (statsRef.current.text || "").replace(/\n/g, '<br/>')
                     }}
                     onBlur={(e) => { 
-                        statsRef.current.text = e.target.value; 
+                        statsRef.current.text = e.currentTarget.innerHTML; 
                         const exStats = getExtendedStats(activeCard.memo);
-                        exStats.text = e.target.value;
+                        exStats.text = e.currentTarget.innerHTML;
                         exStats.filled = statsRef.current.filled;
                         exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
                         exStats.highlights = statsRef.current.highlights;
@@ -2563,7 +2576,7 @@ function MainApp() {
                         exStats.modifiedTokens = statsRef.current.modifiedTokens;
                         handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats)); 
                     }} 
-                    className="flex-1 w-full text-[12px] sm:text-[13px] leading-relaxed text-teal-200 bg-black/40 p-2.5 sm:p-3 rounded border border-teal-500/30 outline-none focus:border-teal-400 transition-all resize-none custom-scrollbar shadow-inner font-sans" 
+                    className="memo-editor flex-1 w-full text-[12px] sm:text-[13px] leading-relaxed text-teal-200 bg-black/40 p-2.5 sm:p-3 rounded border border-teal-500/30 outline-none focus:border-teal-400 transition-all overflow-y-auto custom-scrollbar shadow-inner font-sans empty:before:content-['이_조항의_핵심_키워드,_비교_표,_두문자를_자유롭게_기록하세요.'] empty:before:text-teal-500/40 empty:before:pointer-events-none"
                  />
               </div>
             )}
@@ -2914,42 +2927,36 @@ function MainApp() {
 
         .text-amber-100, .text-amber-200 { color: #b45309 !important; font-weight: 800; }
         .text-teal-100, .text-teal-200 { color: #0f766e !important; font-weight: 800; }
-
         .text-teal-300, .text-teal-400, .text-teal-500 { color: #0f766e !important; font-weight: 800 !important; }
-        .bg-teal-900\\/20, .bg-teal-900\\/30, .bg-teal-900\\/40, .bg-teal-950\\/20, .bg-teal-500\\/10, .bg-teal-500\\/20 { 
-          background-color: #ccfbf1 !important; border-color: #0d9488 !important; 
-        }
+        .bg-teal-900\\/20, .bg-teal-900\\/30, .bg-teal-900\\/40, .bg-teal-950\\/20, .bg-teal-500\\/10, .bg-teal-500\\/20 { background-color: #ccfbf1 !important; border-color: #0d9488 !important; }
         .border-teal-500\\/30, .border-teal-500\\/40, .border-teal-500\\/50 { border-color: #0d9488 !important; }
 
         .text-amber-300, .text-amber-400, .text-amber-500 { color: #b45309 !important; font-weight: 800 !important; }
-        .bg-amber-900\\/20, .bg-amber-900\\/30, .bg-amber-900\\/40, .bg-amber-950\\/20, .bg-amber-500\\/10, .bg-amber-500\\/20 { 
-          background-color: #fef3c7 !important; border-color: #d97706 !important; 
-        }
+        .bg-amber-900\\/20, .bg-amber-900\\/30, .bg-amber-900\\/40, .bg-amber-950\\/20, .bg-amber-500\\/10, .bg-amber-500\\/20 { background-color: #fef3c7 !important; border-color: #d97706 !important; }
         .border-amber-500\\/30, .border-amber-500\\/40, .border-amber-500\\/50, .border-amber-900\\/30 { border-color: #d97706 !important; }
 
         .text-indigo-300, .text-indigo-400, .text-indigo-500 { color: #4338ca !important; font-weight: 800 !important; }
-        .bg-indigo-900\\/20, .bg-indigo-900\\/30, .bg-indigo-900\\/40 { 
-          background-color: #e0e7ff !important; border-color: #6366f1 !important; 
-        }
+        .bg-indigo-900\\/20, .bg-indigo-900\\/30, .bg-indigo-900\\/40 { background-color: #e0e7ff !important; border-color: #6366f1 !important; }
         .border-indigo-500\\/30, .border-indigo-500\\/40, .border-indigo-500\\/50 { border-color: #6366f1 !important; }
 
         .text-blue-300, .text-blue-400, .text-blue-500 { color: #1d4ed8 !important; font-weight: 800 !important; }
-        .bg-blue-900\\/20, .bg-blue-900\\/30, .bg-blue-900\\/40, .bg-blue-500\\/10, .bg-blue-500\\/20 { 
-          background-color: #dbeafe !important; border-color: #3b82f6 !important; 
-        }
+        .bg-blue-900\\/20, .bg-blue-900\\/30, .bg-blue-900\\/40, .bg-blue-500\\/10, .bg-blue-500\\/20 { background-color: #dbeafe !important; border-color: #3b82f6 !important; }
         .border-blue-500\\/30, .border-blue-500\\/40, .border-blue-500\\/50, .border-blue-500 { border-color: #3b82f6 !important; }
 
         .text-red-300, .text-red-400, .text-red-500 { color: #b91c1c !important; font-weight: 800 !important; }
-        .bg-red-900\\/20, .bg-red-900\\/30, .bg-red-900\\/40, .bg-red-950\\/20, .bg-red-500\\/10, .bg-red-500\\/20 { 
-          background-color: #fee2e2 !important; border-color: #ef4444 !important; 
-        }
+        .bg-red-900\\/20, .bg-red-900\\/30, .bg-red-900\\/40, .bg-red-950\\/20, .bg-red-500\\/10, .bg-red-500\\/20 { background-color: #fee2e2 !important; border-color: #ef4444 !important; }
         .border-red-500\\/30, .border-red-500\\/40, .border-red-500\\/50, .border-red-900\\/30 { border-color: #ef4444 !important; }
 
         .text-green-300, .text-green-400, .text-green-500 { color: #15803d !important; font-weight: 800 !important; }
-        .bg-green-900\\/20, .bg-green-900\\/30, .bg-green-900\\/40, .bg-green-500\\/10, .bg-green-500\\/20 { 
-          background-color: #dcfce7 !important; border-color: #10b981 !important; 
-        }
+        .bg-green-900\\/20, .bg-green-900\\/30, .bg-green-900\\/40, .bg-green-500\\/10, .bg-green-500\\/20 { background-color: #dcfce7 !important; border-color: #10b981 !important; }
         .border-green-500\\/30, .border-green-500\\/40, .border-green-500\\/50 { border-color: #10b981 !important; }
+
+        /* 화이트 테마 암기노트 에디터 스타일 */
+        .memo-editor { cursor: text; }
+        .memo-editor table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
+        .memo-editor th, .memo-editor td { border: 1px solid rgba(13, 148, 136, 0.5) !important; padding: 0.4rem; min-width: 3rem; }
+        .memo-editor th { background-color: rgba(13, 148, 136, 0.1) !important; color: #0f766e !important; font-weight: bold; text-align: center; }
+        .memo-editor td { background-color: #ffffff !important; color: #111827 !important; }
       `;
     } else if (theme === 'green') {
       return `
@@ -2958,9 +2965,25 @@ function MainApp() {
         .bg-\\[\\#08080a\\]\\/80 { background-color: rgba(15, 36, 24, 0.9) !important; }
         .bg-\\[\\#0a0a0c\\] { background-color: #122b1c !important; }
         .bg-\\[\\#0d0d0f\\] { background-color: #163322 !important; }
+        
+        /* 다크(그린) 테마 암기노트 에디터 스타일 */
+        .memo-editor { cursor: text; }
+        .memo-editor table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
+        .memo-editor th, .memo-editor td { border: 1px solid rgba(20, 184, 166, 0.4); padding: 0.4rem; min-width: 3rem; }
+        .memo-editor th { background-color: rgba(20, 184, 166, 0.15); font-weight: bold; text-align: center; }
+        .memo-editor td { background-color: rgba(0, 0, 0, 0.2); }
       `;
     }
-    return `body { background-color: #0d0d0f; }`; 
+    return `
+      body { background-color: #0d0d0f; }
+      
+      /* 다크(블랙) 테마 암기노트 에디터 스타일 */
+      .memo-editor { cursor: text; }
+      .memo-editor table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
+      .memo-editor th, .memo-editor td { border: 1px solid rgba(20, 184, 166, 0.4); padding: 0.4rem; min-width: 3rem; }
+      .memo-editor th { background-color: rgba(20, 184, 166, 0.15); font-weight: bold; text-align: center; }
+      .memo-editor td { background-color: rgba(0, 0, 0, 0.2); }
+    `; 
   };
 
   return (
