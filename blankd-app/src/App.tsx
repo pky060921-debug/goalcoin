@@ -720,13 +720,11 @@ function MainApp() {
   useEffect(() => {
     if (inputMode === 'skimming') {
       setSkimmingFocusIdx(-1);
-      setIsSkimmingPaused(false);
       if (bodyScrollRef.current) {
         bodyScrollRef.current.scrollTop = 0;
       }
     } else {
       setSkimmingFocusIdx(currentBlankIdx);
-      setIsSkimmingPaused(false);
     }
   }, [currentBlankIdx, activeCard, inputMode]);
 
@@ -770,13 +768,25 @@ function MainApp() {
     return () => clearTimeout(timer);
   }, [activeCard, inputMode, isSkimmingPaused, skimmingFocusIdx, blanks, currentBlankIdx, cardHiddenTokens, cardModifiedTokens, sessionRevealedTokens]);
 
+  const checkUnrevealedStealth = () => {
+    const hasUnrevealed = Array.from(cardHiddenTokens).some(k => !sessionRevealedTokens.has(k)) || 
+                          Object.keys(cardModifiedTokens).some(k => !sessionRevealedTokens.has(k));
+    if (hasUnrevealed) {
+      alert("⚠️ 아직 확인하지 않은 변형/숨김 구간이 남아 있습니다.\n본문의 빛나는 텍스트나 '▸' 화살표를 터치해 모두 확인한 후 넘어가주세요!");
+      return true;
+    }
+    return false;
+  };
+
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (!activeCard) return;
+      const target = e.target as HTMLElement;
+      
       if (
-        document.activeElement?.tagName === 'INPUT' || 
-        document.activeElement?.tagName === 'TEXTAREA' ||
-        document.activeElement?.getAttribute('contenteditable') === 'true'
+        target.tagName === 'INPUT' || 
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
       ) return;
 
       if (inputMode === 'skimming') {
@@ -848,7 +858,8 @@ function MainApp() {
     };
     window.addEventListener('keydown', handleGlobalKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true });
-  }, [inputMode, activeCard, activeTouchCandidates, blanks, currentBlankIdx, inputStatus, skimmingFocusIdx, isSkimmingPaused, skimmingWrongs]);
+  }, [inputMode, activeCard, activeTouchCandidates, blanks, currentBlankIdx, inputStatus, skimmingFocusIdx, isSkimmingPaused, skimmingWrongs, cardHiddenTokens, cardModifiedTokens, sessionRevealedTokens]);
+
 
   useEffect(() => {
     const handleOnline = () => {
@@ -1500,6 +1511,10 @@ function MainApp() {
         setInputStatus('idle');
         isProcessingRef.current = false;
     } else {
+        if (checkUnrevealedStealth()) {
+            isProcessingRef.current = false;
+            return;
+        }
         setCurrentBlankIdx(blanks.length);
         localStorage.removeItem(`blankd_progress_${activeCard.id}`);
         setInputStatus('idle');
@@ -1554,7 +1569,6 @@ function MainApp() {
       setCurrentBlankIdx(firstUnresolvedVisible !== -1 ? firstUnresolvedVisible : (firstUnresolvedAny !== -1 ? firstUnresolvedAny : 0));
       setInputStatus('idle');
       setSkimmingWrongs(new Set());
-      setIsSkimmingPaused(false);
 
       const uniqueAnswers = Array.from(new Set(foundBlanks.map(b => b.answer)));
       setTouchCandidates(uniqueAnswers.sort((a, b) => a.localeCompare(b, 'ko')));
@@ -1783,6 +1797,10 @@ function MainApp() {
         setInputStatus('idle');
         isProcessingRef.current = false;
     } else {
+        if (checkUnrevealedStealth()) {
+            isProcessingRef.current = false;
+            return;
+        }
         localStorage.removeItem(`blankd_progress_${activeCard.id}`);
         setInputStatus('idle');
         isProcessingRef.current = false;
@@ -2083,12 +2101,15 @@ function MainApp() {
         const modifiedEl = !isModifiedRevealed ? (
           <span
             key={item.tokenKey}
-            onClick={(e) => {
-              e.stopPropagation();
-              const keys = triggerKeys ? [...triggerKeys, item.tokenKey] : [item.tokenKey];
-              const bIdxs = [...triggerBlanks];
-              if (item.type === 'blank' && item.blankIdx !== undefined) bIdxs.push(item.blankIdx);
-              handleRevealHiddenSegment(keys, bIdxs);
+            onClickCapture={(e) => {
+              if (!isStealthEditMode && !activeHighlighter) {
+                e.stopPropagation();
+                e.preventDefault();
+                const keys = triggerKeys ? [...triggerKeys, item.tokenKey] : [item.tokenKey];
+                const bIdxs = [...triggerBlanks];
+                if (item.type === 'blank' && item.blankIdx !== undefined) bIdxs.push(item.blankIdx);
+                handleRevealHiddenSegment(keys, bIdxs);
+              }
             }}
             className={`relative inline-block pt-2 -mt-2 cursor-pointer select-none transition-all ${markerCls} ${
               showStealthHint ? 'ring-2 ring-amber-400 bg-amber-500/20 rounded-sm px-0.5 font-bold' : ''
@@ -2105,9 +2126,10 @@ function MainApp() {
         ) : (
           <span
             key={item.tokenKey}
-            onClick={(e) => {
-              if (triggerKeys) {
+            onClickCapture={(e) => {
+              if (triggerKeys && !isStealthEditMode && !activeHighlighter) {
                 e.stopPropagation();
+                e.preventDefault();
                 handleRevealHiddenSegment(triggerKeys, triggerBlanks);
               }
             }}
@@ -2243,8 +2265,11 @@ function MainApp() {
             <span
               key={`trigger-wrap-${tokenKey}`}
               onClickCapture={(e) => {
-                e.stopPropagation();
-                handleRevealHiddenSegment(triggerKeys, triggerBlanks);
+                if (!isStealthEditMode && !activeHighlighter) {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  handleRevealHiddenSegment(triggerKeys, triggerBlanks);
+                }
               }}
               className="cursor-pointer group align-middle"
               title="이 앞에 숨겨진 내용이 있습니다! 터치하여 정답 확인"
@@ -2293,12 +2318,6 @@ function MainApp() {
               if (isStealthEditMode) toggleStealthToken(tokenKey, true, item.text);
               else if (activeHighlighter) applyHighlightToToken(tokenKey, true);
             }}
-            onClick={(e) => {
-              if (triggerKeys && !isStealthEditMode && !activeHighlighter) {
-                e.stopPropagation();
-                handleRevealHiddenSegment(triggerKeys, triggerBlanks);
-              }
-            }}
             className={`transition-all ${markerCls} ${stealthEditWordCls} ${
               activeHighlighter || isStealthEditMode || triggerKeys ? 'cursor-pointer select-none' : ''
             }`}
@@ -2318,8 +2337,11 @@ function MainApp() {
             <span
               key={`trigger-wrap-word-${tokenKey}`}
               onClickCapture={(e) => {
-                e.stopPropagation();
-                handleRevealHiddenSegment(triggerKeys, triggerBlanks);
+                if (!isStealthEditMode && !activeHighlighter) {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  handleRevealHiddenSegment(triggerKeys, triggerBlanks);
+                }
               }}
               className="cursor-pointer"
             >
@@ -2343,7 +2365,13 @@ function MainApp() {
       contentToRender.push(
         <span
           key="trailing-hidden-trigger"
-          onClick={() => handleRevealHiddenSegment(finalKeys, finalBlanks)}
+          onClickCapture={(e) => {
+            if (!isStealthEditMode && !activeHighlighter) {
+              e.stopPropagation();
+              e.preventDefault();
+              handleRevealHiddenSegment(finalKeys, finalBlanks);
+            }
+          }}
           className={`inline-block ml-1 px-1.5 py-0.5 rounded text-xs font-bold cursor-pointer select-none transition-all ${
             showStealthHint ? 'bg-amber-500 text-black animate-bounce' : 'text-white/30 hover:text-amber-400'
           }`}
@@ -2557,7 +2585,27 @@ function MainApp() {
                           const el = document.getElementById(`memo-editor-${activeCard.id}`);
                           if (el) {
                             el.focus();
-                            document.execCommand('insertHTML', false, '<table class="memo-table"><tbody><tr><th>비교 항목</th><th>내용 A</th><th>내용 B</th></tr><tr><td><br></td><td><br></td><td><br></td></tr><tr><td><br></td><td><br></td><td><br></td></tr><tr><td><br></td><td><br></td><td><br></td></tr></tbody></table><p><br></p>');
+                            const input = window.prompt("표의 행(가로줄)과 열(칸) 개수를 띄어쓰기로 입력하세요.\n(예: 3행 2열 -> 3 2)", "3 3");
+                            if (input) {
+                              const parts = input.trim().split(/\s+/);
+                              const rows = parseInt(parts[0], 10);
+                              const cols = parseInt(parts[1], 10);
+                              if (rows > 0 && cols > 0) {
+                                let html = '<table class="memo-table"><tbody>';
+                                for (let r = 0; r < rows; r++) {
+                                  html += '<tr>';
+                                  for (let c = 0; c < cols; c++) {
+                                    if (r === 0) html += `<th>항목 ${c+1}</th>`;
+                                    else html += '<td><br></td>';
+                                  }
+                                  html += '</tr>';
+                                }
+                                html += '</tbody></table><p><br></p>';
+                                document.execCommand('insertHTML', false, html);
+                              } else {
+                                alert("숫자를 올바르게 입력해주세요. (예: 3 3)");
+                              }
+                            }
                           }
                         }}
                         className="text-[10px] bg-teal-900/50 hover:bg-teal-800 text-teal-200 border border-teal-500/40 px-2 py-0.5 rounded transition-colors shadow-sm cursor-pointer z-20"
@@ -2686,6 +2734,7 @@ function MainApp() {
                 onClick={(e) => {
                   e.currentTarget.blur();
                   if (!isProcessingRef.current) {
+                     if (checkUnrevealedStealth()) return;
                      isProcessingRef.current = true;
                      forceAdvance();
                   }
@@ -3077,7 +3126,7 @@ function MainApp() {
       {isLoggedIn && (
         <nav className="border-b border-white/5 bg-black/40 py-1.5 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="w-full max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2 px-2 sm:px-4 md:px-8">
-            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'market', label: '마켓' }, { id: 'exam', label: '모고사' }, { id: 'settings', label: '설정' }].map(tab => (
+            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'market', label: '마켓' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
             ))}
           </div>
@@ -3158,3 +3207,4 @@ export default function App() {
     </GlobalErrorBoundary>
   ); 
 }
+```eof
