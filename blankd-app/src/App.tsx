@@ -599,10 +599,21 @@ function MainApp() {
   const [inputStatus, setInputStatus] = useState<'idle'|'correct'|'wrong'>('idle');
 
   const bodyScrollRef = useRef<HTMLDivElement>(null);
+  const memoEditorRef = useRef<HTMLDivElement>(null);
 
   const statsRef = useRef<{ text: string, filled: number, wrongIndices: Set<number>, sessionCorrect: number, highlights: Record<string, string>, hiddenTokens: Set<string>, modifiedTokens: Record<string, string> }>({
     text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0, highlights: {}, hiddenTokens: new Set<string>(), modifiedTokens: {}
   });
+
+  useEffect(() => {
+    if (activeCard && memoEditorRef.current) {
+      const savedMemo = statsRef.current.text || "";
+      const newHtml = savedMemo.includes('<') ? savedMemo : savedMemo.replace(/\n/g, '<br/>');
+      if (memoEditorRef.current.innerHTML !== newHtml) {
+        memoEditorRef.current.innerHTML = newHtml;
+      }
+    }
+  }, [activeCard]);
 
   const [activeHighlighter, setActiveHighlighter] = useState<'purple' | 'blue' | 'orange' | 'eraser' | null>(null);
   const [cardHighlights, setCardHighlights] = useState<Record<string, string>>({});
@@ -762,7 +773,11 @@ function MainApp() {
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (!activeCard) return;
-      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA' || document.activeElement?.getAttribute('contenteditable') === 'true') return;
+      if (
+        document.activeElement?.tagName === 'INPUT' || 
+        document.activeElement?.tagName === 'TEXTAREA' ||
+        document.activeElement?.getAttribute('contenteditable') === 'true'
+      ) return;
 
       if (inputMode === 'skimming') {
           if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key) || e.code === 'Space') {
@@ -834,7 +849,6 @@ function MainApp() {
     window.addEventListener('keydown', handleGlobalKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true });
   }, [inputMode, activeCard, activeTouchCandidates, blanks, currentBlankIdx, inputStatus, skimmingFocusIdx, isSkimmingPaused, skimmingWrongs]);
-
 
   useEffect(() => {
     const handleOnline = () => {
@@ -2228,7 +2242,7 @@ function MainApp() {
           contentToRender.push(
             <span
               key={`trigger-wrap-${tokenKey}`}
-              onClick={(e) => {
+              onClickCapture={(e) => {
                 e.stopPropagation();
                 handleRevealHiddenSegment(triggerKeys, triggerBlanks);
               }}
@@ -2303,7 +2317,7 @@ function MainApp() {
           contentToRender.push(
             <span
               key={`trigger-wrap-word-${tokenKey}`}
-              onClick={(e) => {
+              onClickCapture={(e) => {
                 e.stopPropagation();
                 handleRevealHiddenSegment(triggerKeys, triggerBlanks);
               }}
@@ -2339,8 +2353,6 @@ function MainApp() {
         </span>
       );
     }
-
-    const hasSavedMemo = statsRef.current.text && statsRef.current.text.trim().length > 0;
     
     return (
       <div className="flex flex-col w-full h-[65vh] sm:h-[72vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
@@ -2449,7 +2461,7 @@ function MainApp() {
 
               <button onClick={(e) => { e.currentTarget.blur(); setIsMemoOpen(!isMemoOpen); }} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md flex items-center gap-1">
                 <span>{isMemoOpen ? '노트 닫기' : '암기 노트'}</span>
-                {!isMemoOpen && hasSavedMemo && <span className="text-teal-300 text-[8px] animate-pulse">●</span>}
+                {!isMemoOpen && (statsRef.current.text || "").trim().length > 0 && <span className="text-teal-300 text-[8px] animate-pulse">●</span>}
               </button>
             </div>
         </div>
@@ -2545,7 +2557,7 @@ function MainApp() {
                           const el = document.getElementById(`memo-editor-${activeCard.id}`);
                           if (el) {
                             el.focus();
-                            document.execCommand('insertHTML', false, '<table class="memo-table"><tbody><tr><th>비교 항목</th><th>내용 A</th><th>내용 B</th></tr><tr><td><br></td><td><br></td><td><br></td></tr><tr><td><br></td><td><br></td><td><br></td></tr></tbody></table><p><br></p>');
+                            document.execCommand('insertHTML', false, '<table class="memo-table"><tbody><tr><th>비교 항목</th><th>내용 A</th><th>내용 B</th></tr><tr><td><br></td><td><br></td><td><br></td></tr><tr><td><br></td><td><br></td><td><br></td></tr><tr><td><br></td><td><br></td><td><br></td></tr></tbody></table><p><br></p>');
                           }
                         }}
                         className="text-[10px] bg-teal-900/50 hover:bg-teal-800 text-teal-200 border border-teal-500/40 px-2 py-0.5 rounded transition-colors shadow-sm cursor-pointer z-20"
@@ -2558,6 +2570,7 @@ function MainApp() {
                  <div 
                     id={`memo-editor-${activeCard.id}`}
                     key={`memo-${activeCard.id}`}
+                    ref={memoEditorRef}
                     contentEditable
                     suppressContentEditableWarning
                     dangerouslySetInnerHTML={{ 
@@ -3064,7 +3077,7 @@ function MainApp() {
       {isLoggedIn && (
         <nav className="border-b border-white/5 bg-black/40 py-1.5 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
           <div className="w-full max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2 px-2 sm:px-4 md:px-8">
-            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'market', label: '마켓' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
+            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'market', label: '마켓' }, { id: 'exam', label: '모고사' }, { id: 'settings', label: '설정' }].map(tab => (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
             ))}
           </div>
