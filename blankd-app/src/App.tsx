@@ -193,6 +193,11 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
   useEffect(() => {
     if (inputStatus === 'idle' && inputRef.current) {
         const timer = setTimeout(() => {
+            // 암기노트 작성 중일 때는 빈칸 인풋이 포커스를 뺏지 않도록 방어
+            const activeEl = document.activeElement as HTMLElement | null;
+            if (activeEl && (activeEl.closest('.memo-editor') || activeEl.closest('.memo-panel-container') || activeEl.isContentEditable)) {
+                return;
+            }
             if (inputRef.current) inputRef.current.focus();
         }, 10);
         return () => clearTimeout(timer);
@@ -603,20 +608,25 @@ function MainApp() {
 
   const bodyScrollRef = useRef<HTMLDivElement>(null);
   const memoEditorRef = useRef<HTMLDivElement>(null);
+  const lastLoadedMemoCardIdRef = useRef<any>(null);
 
   const statsRef = useRef<{ text: string, filled: number, wrongIndices: Set<number>, sessionCorrect: number, highlights: Record<string, string>, hiddenTokens: Set<string>, modifiedTokens: Record<string, string> }>({
     text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0, highlights: {}, hiddenTokens: new Set<string>(), modifiedTokens: {}
   });
 
+  // 암기노트가 열리거나 카드가 전환될 때만 안전하게 초기 HTML을 로드 (재렌더링 시 커서 초기화 완벽 방지)
   useEffect(() => {
-    if (activeCard && memoEditorRef.current) {
-      const savedMemo = statsRef.current.text || "";
-      const newHtml = savedMemo.includes('<') ? savedMemo : savedMemo.replace(/\n/g, '<br/>');
-      if (memoEditorRef.current.innerHTML !== newHtml) {
+    if (activeCard && isMemoOpen && memoEditorRef.current) {
+      if (lastLoadedMemoCardIdRef.current !== activeCard.id) {
+        const savedMemo = statsRef.current.text || "";
+        const newHtml = savedMemo.includes('<') ? savedMemo : savedMemo.replace(/\n/g, '<br/>');
         memoEditorRef.current.innerHTML = newHtml;
+        lastLoadedMemoCardIdRef.current = activeCard.id;
       }
+    } else if (!isMemoOpen) {
+      lastLoadedMemoCardIdRef.current = null;
     }
-  }, [activeCard]);
+  }, [activeCard, isMemoOpen]);
 
   const [activeHighlighter, setActiveHighlighter] = useState<'purple' | 'blue' | 'orange' | 'eraser' | null>(null);
   const [cardHighlights, setCardHighlights] = useState<Record<string, string>>({});
@@ -784,14 +794,37 @@ function MainApp() {
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (!activeCard) return;
-      const target = e.target as HTMLElement;
+      const target = e.target as HTMLElement | null;
+      const activeEl = document.activeElement as HTMLElement | null;
       
+      // 암기노트(contentEditable 및 하위 td/th/p/div 태그)나 입력창 내부일 경우 키 가로채기 완벽 차단
       if (
-        target.tagName === 'INPUT' || 
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable ||
-        target.getAttribute('contenteditable') === 'true'
-      ) return;
+        target && (
+          target.tagName === 'INPUT' || 
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable ||
+          target.getAttribute('contenteditable') === 'true' ||
+          !!target.closest('[contenteditable="true"]') ||
+          !!target.closest('.memo-editor') ||
+          !!target.closest('.memo-panel-container')
+        )
+      ) {
+        return;
+      }
+
+      if (
+        activeEl && (
+          activeEl.tagName === 'INPUT' ||
+          activeEl.tagName === 'TEXTAREA' ||
+          activeEl.isContentEditable ||
+          activeEl.getAttribute('contenteditable') === 'true' ||
+          !!activeEl.closest('[contenteditable="true"]') ||
+          !!activeEl.closest('.memo-editor') ||
+          !!activeEl.closest('.memo-panel-container')
+        )
+      ) {
+        return;
+      }
 
       if (inputMode === 'skimming') {
           if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key) || e.code === 'Space') {
@@ -1628,6 +1661,9 @@ function MainApp() {
   const finishCard = async (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
+    if (memoEditorRef.current) {
+      statsRef.current.text = memoEditorRef.current.innerHTML;
+    }
     const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = 0;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     
@@ -1756,6 +1792,9 @@ function MainApp() {
   const handleCloseModal = async () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
+    if (memoEditorRef.current) {
+      statsRef.current.text = memoEditorRef.current.innerHTML;
+    }
     const currentId = activeCard.id;
     const exStats = getExtendedStats(activeCard.memo);
     exStats.text = statsRef.current.text;
@@ -2493,7 +2532,24 @@ function MainApp() {
                  <button onClick={(e) => { e.currentTarget.blur(); setFontSizeLevel(p => Math.min(5, p + 1)); }} className="px-1.5 py-0.5 bg-black/40 hover:bg-black/60 rounded text-white/60 text-xs transition-colors">+</button>
               </div>
 
-              <button onClick={(e) => { e.currentTarget.blur(); setIsMemoOpen(!isMemoOpen); }} className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md flex items-center gap-1">
+              <button 
+                onClick={(e) => { 
+                  e.currentTarget.blur(); 
+                  if (isMemoOpen && memoEditorRef.current && activeCard) {
+                    statsRef.current.text = memoEditorRef.current.innerHTML;
+                    const exStats = getExtendedStats(activeCard.memo);
+                    exStats.text = memoEditorRef.current.innerHTML;
+                    exStats.filled = statsRef.current.filled;
+                    exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+                    exStats.highlights = statsRef.current.highlights;
+                    exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
+                    exStats.modifiedTokens = statsRef.current.modifiedTokens;
+                    handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats));
+                  }
+                  setIsMemoOpen(!isMemoOpen); 
+                }} 
+                className="px-2 py-1 bg-teal-900/30 text-teal-400 border border-teal-500/50 rounded text-[10px] sm:text-[11px] font-bold shrink-0 hover:bg-teal-900/50 transition-all shadow-md flex items-center gap-1"
+              >
                 <span>{isMemoOpen ? '노트 닫기' : '암기 노트'}</span>
                 {!isMemoOpen && (statsRef.current.text || "").trim().length > 0 && <span className="text-teal-300 text-[8px] animate-pulse">●</span>}
               </button>
@@ -2545,10 +2601,14 @@ function MainApp() {
 
             {isMemoOpen && (
               <div 
-                 className="relative shrink-0 border-t md:border-t-0 md:border-l border-teal-500/30 bg-teal-950/10 flex flex-col p-3 sm:p-4 animate-in fade-in duration-200"
+                 className="memo-panel-container relative shrink-0 border-t md:border-t-0 md:border-l border-teal-500/30 bg-teal-950/10 flex flex-col p-3 sm:p-4 animate-in fade-in duration-200"
                  style={{ 
                    width: isDesktop ? memoSize : '100%', 
                    height: isDesktop ? '100%' : memoSize 
+                 }}
+                 onKeyDown={(e) => {
+                   // 상위 모달(CardModal 등)로 키 이벤트가 버블링되어 방향키/엔터키가 차단되는 현상 방지
+                   e.stopPropagation();
                  }}
               >
                  <div 
@@ -2608,7 +2668,7 @@ function MainApp() {
                       <button 
                         onPointerDown={(e) => {
                           e.preventDefault();
-                          const el = document.getElementById(`memo-editor-${activeCard.id}`);
+                          const el = memoEditorRef.current;
                           if (el) {
                             el.focus();
                             const r = Math.max(1, tableRows);
@@ -2625,8 +2685,9 @@ function MainApp() {
                               }
                               html += '</tr>';
                             }
-                            html += '</tbody></table><p><br></p>';
+                            html += '</tbody></table><div><br></div>';
                             document.execCommand('insertHTML', false, html);
+                            statsRef.current.text = el.innerHTML;
                           }
                         }}
                         className="text-[10px] bg-teal-900/50 hover:bg-teal-800 text-teal-200 border border-teal-500/40 px-2 py-0.5 rounded transition-colors shadow-sm cursor-pointer z-20 whitespace-nowrap"
@@ -2640,17 +2701,21 @@ function MainApp() {
                     id={`memo-editor-${activeCard.id}`}
                     key={`memo-${activeCard.id}`}
                     ref={memoEditorRef}
-                    contentEditable
-                    suppressContentEditableWarning
-                    dangerouslySetInnerHTML={{ 
-                      __html: (statsRef.current.text || "").includes('<') 
-                        ? statsRef.current.text 
-                        : (statsRef.current.text || "").replace(/\n/g, '<br/>')
+                    contentEditable={true}
+                    suppressContentEditableWarning={true}
+                    onKeyDown={(e) => {
+                        // 엔터키, 방향키, 백스페이스 등 모든 키 입력이 외부 리스너에 가로채이지 않도록 전파 중단
+                        e.stopPropagation();
+                    }}
+                    onInput={(e) => {
+                        // 입력 즉시 메모리(statsRef)에 반영하여 리렌더링 시 텍스트 유실 및 커서 튕김 원천 차단
+                        statsRef.current.text = e.currentTarget.innerHTML;
                     }}
                     onBlur={(e) => { 
-                        statsRef.current.text = e.currentTarget.innerHTML; 
+                        const latestHtml = e.currentTarget.innerHTML;
+                        statsRef.current.text = latestHtml; 
                         const exStats = getExtendedStats(activeCard.memo);
-                        exStats.text = e.currentTarget.innerHTML;
+                        exStats.text = latestHtml;
                         exStats.filled = statsRef.current.filled;
                         exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
                         exStats.highlights = statsRef.current.highlights;
@@ -2658,7 +2723,7 @@ function MainApp() {
                         exStats.modifiedTokens = statsRef.current.modifiedTokens;
                         handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats)); 
                     }} 
-                    className="memo-editor flex-1 w-full text-[12px] sm:text-[13px] leading-relaxed text-teal-200 bg-black/40 p-2.5 sm:p-3 rounded border border-teal-500/30 outline-none focus:border-teal-400 transition-all overflow-y-auto custom-scrollbar shadow-inner font-sans empty:before:content-['이_조항의_핵심_키워드,_비교_표,_두문자를_자유롭게_기록하세요.'] empty:before:text-teal-500/40 empty:before:pointer-events-none"
+                    className="memo-editor flex-1 w-full text-[12px] sm:text-[13px] leading-relaxed text-teal-200 bg-black/40 p-2.5 sm:p-3 rounded border border-teal-500/30 outline-none focus:border-teal-400 transition-all overflow-y-auto custom-scrollbar shadow-inner font-sans select-text empty:before:content-['이_조항의_핵심_키워드,_비교_표,_두문자를_자유롭게_기록하세요.'] empty:before:text-teal-500/40 empty:before:pointer-events-none"
                  />
               </div>
             )}
@@ -3035,7 +3100,8 @@ function MainApp() {
         .border-green-500\\/30, .border-green-500\\/40, .border-green-500\\/50 { border-color: #10b981 !important; }
 
         /* 화이트 테마 암기노트 에디터 스타일 */
-        .memo-editor { cursor: text; }
+        .memo-editor { cursor: text; -webkit-user-select: text; user-select: text; }
+        .memo-editor * { -webkit-user-select: text; user-select: text; }
         .memo-editor table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
         .memo-editor th, .memo-editor td { border: 1px solid rgba(13, 148, 136, 0.5) !important; padding: 0.4rem; min-width: 3rem; }
         .memo-editor th { background-color: rgba(13, 148, 136, 0.1) !important; color: #0f766e !important; font-weight: bold; text-align: center; }
@@ -3050,7 +3116,8 @@ function MainApp() {
         .bg-\\[\\#0d0d0f\\] { background-color: #163322 !important; }
         
         /* 다크(그린) 테마 암기노트 에디터 스타일 */
-        .memo-editor { cursor: text; }
+        .memo-editor { cursor: text; -webkit-user-select: text; user-select: text; }
+        .memo-editor * { -webkit-user-select: text; user-select: text; }
         .memo-editor table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
         .memo-editor th, .memo-editor td { border: 1px solid rgba(20, 184, 166, 0.4); padding: 0.4rem; min-width: 3rem; }
         .memo-editor th { background-color: rgba(20, 184, 166, 0.15); font-weight: bold; text-align: center; }
@@ -3061,7 +3128,8 @@ function MainApp() {
       body { background-color: #0d0d0f; }
       
       /* 다크(블랙) 테마 암기노트 에디터 스타일 */
-      .memo-editor { cursor: text; }
+      .memo-editor { cursor: text; -webkit-user-select: text; user-select: text; }
+      .memo-editor * { -webkit-user-select: text; user-select: text; }
       .memo-editor table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
       .memo-editor th, .memo-editor td { border: 1px solid rgba(20, 184, 166, 0.4); padding: 0.4rem; min-width: 3rem; }
       .memo-editor th { background-color: rgba(20, 184, 166, 0.15); font-weight: bold; text-align: center; }
@@ -3158,73 +3226,4 @@ function MainApp() {
         <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
           <h2 className="text-xl sm:text-2xl font-serif text-current mb-4 tracking-tight">빈칸개발 (BlankD)</h2>
           <p className="text-xs sm:text-sm text-white/40 mb-10 sm:mb-12 text-center leading-relaxed">인지 부하 이론 기반의 학습 플랫폼<br/>압도적인 영구 기억을 형성합니다.</p>
-          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-[#111827] text-white text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
-        </main>
-      ) : (
-        <div className="w-full max-w-[1600px] mx-auto flex gap-4 sm:gap-6 px-2 sm:px-4 lg:px-8 items-start pb-10 transition-all duration-300">
-          <main className="flex-1 w-full min-w-0 transition-all duration-300">
-            {memoizedTabs}
-          </main>
-          
-          {isSidebarOpen ? (
-            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[320px] xl:w-[400px] transition-all duration-300 animate-in slide-in-from-right-8">
-              {renderDictionaryUI(false)}
-            </aside>
-          ) : (
-            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[40px] items-center justify-start transition-all duration-300 animate-in fade-in">
-              <button onClick={() => setIsSidebarOpen(true)} className="w-full h-32 bg-white/5 border border-white/10 hover:bg-white/10 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors flex-col gap-2 shadow-md">
-                <span className="text-xs">◀</span>
-                <span className="text-[10px] font-bold" style={{ writingMode: 'vertical-rl' }}>사전 열기</span>
-              </button>
-            </aside>
-          )}
-        </div>
-      )}
-
-      <div className="fixed bottom-4 right-4 z-[999] flex flex-col items-end gap-2">
-        {isTerminalOpen && (
-          <div className="w-[85vw] max-w-lg h-64 bg-black/95 border border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto rounded shadow-2xl flex flex-col custom-scrollbar animate-in slide-in-from-bottom-5 fade-in">
-            <div className="flex justify-between items-center mb-2 border-b border-teal-500/10 pb-2 sticky top-0 bg-black/95">
-              <span className="uppercase tracking-widest text-teal-500/50 font-bold">시스템 진단 터미널</span>
-              <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2 py-0.5 bg-white/5 rounded transition-colors">기록 지우기</button>
-            </div>
-            <div className="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
-              {systemLogs.map((l, i) => (
-                <div key={i} className={`leading-snug break-all ${l.includes('?') ? 'text-red-400 font-bold' : l.includes('▶?') ? 'text-amber-300' : ''}`}>{l}</div>
-              ))}
-            </div>
-          </div>
-        )}
-        <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>
-          {isTerminalOpen ? '터미널 닫기' : '터미널 열기'}
-        </button>
-      </div>
-
-      {isDictModalOpen && (
-        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] relative">
-            {renderDictionaryUI(true)}
-          </div>
-        </div>
-      )}
-
-      {activeCard && (
-        <CardModal 
-          activeCard={activeCard} 
-          renderContent={renderContent} 
-          onClose={handleCloseModal} 
-          goalBalance={goalBalance}
-          handleUseItem={handleUseItem}
-        />
-      )}
-    </div>
-  );
-}
-
-export default function App() { 
-  return (
-    <GlobalErrorBoundary>
-      <MainApp />
-    </GlobalErrorBoundary>
-  ); 
-}
+          <button onClick
