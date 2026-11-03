@@ -3226,110 +3226,73 @@ function MainApp() {
           <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
           <h2 className="text-xl sm:text-2xl font-serif text-current mb-4 tracking-tight">빈칸개발 (BlankD)</h2>
           <p className="text-xs sm:text-sm text-white/40 mb-10 sm:mb-12 text-center leading-relaxed">인지 부하 이론 기반의 학습 플랫폼<br/>압도적인 영구 기억을 형성합니다.</p>
-          <button
-            onClick={async () => {
-              try {
-                const clientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || "";
-                const url = await enokiFlow.createAuthorizationURL({
-                  provider: "google",
-                  network: "testnet",
-                  clientId,
-                  redirectUrl: window.location.origin,
-                  extraParams: {
-                    scope: ["openid", "email", "profile"],
-                  },
-                });
-                window.location.href = url;
-              } catch (e: any) {
-                addLog(`🚨 구글 로그인 초기화 오류: ${e.message}`);
-                alert("로그인 연결 중 오류가 발생했습니다.");
-              }
-            }}
-            className="w-full py-3.5 px-6 bg-teal-600/20 hover:bg-teal-600/30 border border-teal-500/50 text-teal-300 font-bold text-xs sm:text-sm rounded-sm transition-all shadow-lg flex items-center justify-center gap-2 active:scale-95"
-          >
-            <span>Google 계정으로 시작하기 (zkLogin)</span>
-          </button>
+          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-[#111827] text-white text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
         </main>
       ) : (
-        <div className="w-full max-w-[1600px] mx-auto px-2 sm:px-4 md:px-8 flex flex-col lg:flex-row gap-6 items-start relative">
-          {/* 메인 탭 영역 */}
-          <div className="flex-1 w-full min-w-0">
+        <div className="w-full max-w-[1600px] mx-auto flex gap-4 sm:gap-6 px-2 sm:px-4 lg:px-8 items-start pb-10 transition-all duration-300">
+          <main className="flex-1 w-full min-w-0 transition-all duration-300">
             {memoizedTabs}
-          </div>
-
-          {/* 데스크톱 우측 사전 사이드바 */}
+          </main>
+          
           {isSidebarOpen ? (
-            <aside className="hidden lg:block w-80 xl:w-96 shrink-0 sticky top-20 h-[calc(100vh-7rem)]">
+            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[320px] xl:w-[400px] transition-all duration-300 animate-in slide-in-from-right-8">
               {renderDictionaryUI(false)}
             </aside>
           ) : (
-            <button
-              onClick={() => setIsSidebarOpen(true)}
-              className="hidden lg:flex fixed right-0 top-1/2 -translate-y-1/2 bg-[#08080a] border border-r-0 border-white/20 px-2 py-4 rounded-l-sm text-xs font-bold text-white/60 hover:text-teal-400 hover:border-teal-500/50 transition-all z-30 shadow-xl items-center gap-1"
-              title="사전 패널 열기"
-            >
-              ◀ 사전
-            </button>
+            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[40px] items-center justify-start transition-all duration-300 animate-in fade-in">
+              <button onClick={() => setIsSidebarOpen(true)} className="w-full h-32 bg-white/5 border border-white/10 hover:bg-white/10 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors flex-col gap-2 shadow-md">
+                <span className="text-xs">◀</span>
+                <span className="text-[10px] font-bold" style={{ writingMode: 'vertical-rl' }}>사전 열기</span>
+              </button>
+            </aside>
           )}
         </div>
       )}
 
-      {/* 모바일/태블릿용 사전 모달 */}
+      <div className="fixed bottom-4 right-4 z-[999] flex flex-col items-end gap-2">
+        {isTerminalOpen && (
+          <div className="w-[85vw] max-w-lg h-64 bg-black/95 border border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto rounded shadow-2xl flex flex-col custom-scrollbar animate-in slide-in-from-bottom-5 fade-in">
+            <div className="flex justify-between items-center mb-2 border-b border-teal-500/10 pb-2 sticky top-0 bg-black/95">
+              <span className="uppercase tracking-widest text-teal-500/50 font-bold">시스템 진단 터미널</span>
+              <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2 py-0.5 bg-white/5 rounded transition-colors">기록 지우기</button>
+            </div>
+            <div className="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
+              {systemLogs.map((l, i) => (
+                <div key={i} className={`leading-snug break-all ${l.includes('🚨') ? 'text-red-400 font-bold' : l.includes('▶️') ? 'text-amber-300' : ''}`}>{l}</div>
+              ))}
+            </div>
+          </div>
+        )}
+        <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>
+          {isTerminalOpen ? '터미널 닫기' : '터미널 열기'}
+        </button>
+      </div>
+
       {isDictModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 lg:hidden">
-          <div className="w-full max-w-lg h-[75vh] flex flex-col">
+        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] relative">
             {renderDictionaryUI(true)}
           </div>
         </div>
       )}
 
-      {/* 빈칸 학습 카드 모달 */}
       {activeCard && (
-        <CardModal
-          activeCard={activeCard}
-          onClose={handleCloseModal}
-          renderContent={renderContent}
-          handleReviewSelect={handleReviewSelect}
-          handleUseItem={handleUseItem}
+        <CardModal 
+          activeCard={activeCard} 
+          renderContent={renderContent} 
+          onClose={handleCloseModal} 
           goalBalance={goalBalance}
-          isFrozen={isFrozen}
-          isListening={isListening}
-          toggleVoiceRecognition={toggleVoiceRecognition}
-          registerToMarket={registerToMarket}
+          handleUseItem={handleUseItem}
         />
       )}
-
-      {/* 하단 시스템 로그 터미널 */}
-      <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end">
-        {isTerminalOpen && (
-          <div className="mb-2 w-80 sm:w-96 max-h-48 bg-[#08080a]/95 border border-white/15 rounded-sm p-3 shadow-2xl backdrop-blur-md flex flex-col font-mono text-[10px] sm:text-[11px]">
-            <div className="flex justify-between items-center border-b border-white/10 pb-1.5 mb-2 text-white/50">
-              <span className="font-bold text-teal-400">SYSTEM TERMINAL</span>
-              <button onClick={() => setIsTerminalOpen(false)} className="hover:text-white">✕</button>
-            </div>
-            <div className="flex-1 overflow-y-auto space-y-1 custom-scrollbar text-white/70">
-              {systemLogs.map((log, i) => (
-                <div key={i} className="leading-snug break-all">{log}</div>
-              ))}
-            </div>
-          </div>
-        )}
-        <button
-          onClick={() => setIsTerminalOpen(!isTerminalOpen)}
-          className="px-3 py-1.5 bg-[#08080a] border border-white/15 rounded-sm text-[10px] sm:text-xs font-mono text-white/60 hover:text-teal-400 hover:border-teal-500/40 shadow-lg transition-all flex items-center gap-2"
-        >
-          <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse"></span>
-          <span>로그 ({systemLogs.length})</span>
-        </button>
-      </div>
     </div>
   );
 }
 
-export default function App() {
+export default function App() { 
   return (
     <GlobalErrorBoundary>
       <MainApp />
     </GlobalErrorBoundary>
-  );
+  ); 
 }
