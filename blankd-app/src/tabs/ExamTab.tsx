@@ -14,7 +14,7 @@ export interface OxQuestion {
   explanation: string;
 }
 
-// 💡 기본 내장 핵심 OX 문제 (JSON 파일 업로드 시 120문제 전체로 확장·대체 가능)
+// 💡 기본 내장 핵심 OX 문제
 const DEFAULT_OX_QUESTIONS: OxQuestion[] = [
   { id: 1, category: "즉시·지체없이·미리", question: "공단은 기관장이 예탁한 현역병 등의 요양급여비용과 요양비가 공단이 부담해야 할 금액에 미치지 못할 때에는 기관장에게 이를 지체 없이 청구해야 한다.", answer: "X", explanation: "지체 없이가 아니라 '즉시' 청구하고, 기관장은 공단의 청구에 따라 지급해야 합니다(영 제27조제4항)." },
   { id: 2, category: "즉시·지체없이·미리", question: "공단은 부당이득 징수금 압류 통지를 받은 자가 징수금에 상당하는 다른 재산을 담보로 제공하고 압류 해제를 요구하는 경우 압류를 즉시 해제하여야 한다.", answer: "O", explanation: "타 재산 담보 제공 요구 시 또는 법원의 무죄 판결 확정 등으로 위반 혐의가 입증되지 아니한 경우 '즉시' 압류를 해제해야 합니다(법 제81조의2제3항)." },
@@ -52,7 +52,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       const saved = localStorage.getItem(`blankd_ox_bank_${safeAddress}`);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed)) return parsed;
       }
     } catch (e) {}
     return DEFAULT_OX_QUESTIONS;
@@ -62,6 +62,10 @@ export const ExamTab = ({ walletAddress, address }: any) => {
   const [oxFilterWrongOnly, setOxFilterWrongOnly] = useState<boolean>(false);
   const [oxCurrentIdx, setOxCurrentIdx] = useState<number>(0);
   const [oxSelectedAnswer, setOxSelectedAnswer] = useState<'O' | 'X' | null>(null);
+
+  // 💡 OX 문제 선택 삭제 모드 및 선택된 문제 ID 집합
+  const [isOxDeleteMode, setIsOxDeleteMode] = useState<boolean>(false);
+  const [selectedOxIds, setSelectedOxIds] = useState<Set<number>>(new Set());
 
   // 각 문제별 풀이 기록: { [id]: 'correct' | 'wrong' }
   const [oxHistory, setOxHistory] = useState<Record<number, 'correct' | 'wrong'>>(() => {
@@ -97,6 +101,14 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setOxSelectedAnswer(null);
   }, [oxCategory, oxFilterWrongOnly]);
 
+  // 문제 삭제 등으로 인해 현재 인덱스가 범위를 벗어났을 때 안전하게 보정
+  useEffect(() => {
+    if (oxCurrentIdx >= filteredOxQuestions.length && filteredOxQuestions.length > 0) {
+      setOxCurrentIdx(filteredOxQuestions.length - 1);
+      setOxSelectedAnswer(null);
+    }
+  }, [filteredOxQuestions.length, oxCurrentIdx]);
+
   const currentOxQ = filteredOxQuestions[oxCurrentIdx] || null;
 
   const handleSelectOx = (choice: 'O' | 'X') => {
@@ -127,7 +139,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     }
   };
 
-  // JSON 문제 파일 업로드 핸들러
+  // 💡 [수정] JSON 문제 파일 업로드 핸들러 (덮어쓰기 대신 기존 문제 뒤에 추가)
   const handleUploadOxJson = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -136,11 +148,43 @@ export const ExamTab = ({ walletAddress, address }: any) => {
       try {
         const parsed = JSON.parse(event.target?.result as string);
         if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].question && parsed[0].answer) {
-          setOxBank(parsed);
-          setOxCurrentIdx(0);
-          setOxSelectedAnswer(null);
-          setOxCategory('전체');
-          alert(`✅ 총 ${parsed.length}개의 OX 문제가 성공적으로 등록되었습니다!`);
+          setOxBank(prevBank => {
+            const existingQuestions = new Set(prevBank.map(q => q.question.trim()));
+            let maxId = prevBank.reduce((max, q) => Math.max(max, Number(q.id) || 0), 0);
+
+            const addedQuestions: OxQuestion[] = [];
+            let duplicateCount = 0;
+
+            parsed.forEach((item: any) => {
+              if (!item.question || !item.answer) return;
+              const qText = String(item.question).trim();
+              if (existingQuestions.has(qText)) {
+                duplicateCount++;
+                return;
+              }
+              existingQuestions.add(qText);
+              maxId += 1;
+              addedQuestions.push({
+                id: maxId,
+                category: item.category ? String(item.category).trim() : "추가 문제",
+                question: qText,
+                answer: String(item.answer).trim().toUpperCase() === 'O' ? 'O' : 'X',
+                explanation: item.explanation ? String(item.explanation).trim() : ""
+              });
+            });
+
+            if (addedQuestions.length === 0) {
+              alert(`⚠️ 새로 추가된 문제가 없습니다. (중복된 문제 ${duplicateCount}개 제외)`);
+              return prevBank;
+            }
+
+            const nextBank = [...prevBank, ...addedQuestions];
+            alert(
+              `✅ ${addedQuestions.length}개의 OX 문제가 새로 추가되었습니다! (총 ${nextBank.length}문제)` +
+              (duplicateCount > 0 ? `\n* 이미 존재하는 중복 문제 ${duplicateCount}개는 자동 제외되었습니다.` : '')
+            );
+            return nextBank;
+          });
         } else {
           alert("❌ 올바른 OX 문제 JSON 형식이 아닙니다.");
         }
@@ -152,6 +196,64 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     reader.readAsText(file);
   };
 
+  // 💡 [추가] 현재 보고 있는 단일 OX 문제 즉시 삭제
+  const handleDeleteSingleOx = (targetId: number) => {
+    if (!window.confirm(`현재 문제(#${targetId})를 삭제하시겠습니까?`)) return;
+    setOxBank(prev => prev.filter(q => q.id !== targetId));
+    setOxHistory(prev => {
+      const next = { ...prev };
+      delete next[targetId];
+      return next;
+    });
+    setSelectedOxIds(prev => {
+      const next = new Set(prev);
+      next.delete(targetId);
+      return next;
+    });
+    setOxSelectedAnswer(null);
+  };
+
+  // 💡 [추가] 선택 삭제 모드에서 문제 선택/해제 토글
+  const toggleSelectOxForDelete = (id: number) => {
+    setSelectedOxIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // 💡 [추가] 현재 필터링된 목록 전체 선택 / 해제
+  const handleToggleSelectAllFiltered = () => {
+    const filteredIds = filteredOxQuestions.map(q => q.id);
+    const allSelected = filteredIds.length > 0 && filteredIds.every(id => selectedOxIds.has(id));
+    setSelectedOxIds(prev => {
+      const next = new Set(prev);
+      if (allSelected) {
+        filteredIds.forEach(id => next.delete(id));
+      } else {
+        filteredIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  // 💡 [추가] 선택한 OX 문제들 일괄 삭제 실행
+  const handleDeleteSelectedOxQuestions = () => {
+    if (selectedOxIds.size === 0) return alert("삭제할 문제를 먼저 선택해주세요.");
+    if (!window.confirm(`선택한 ${selectedOxIds.size}개의 OX 문제를 삭제하시겠습니까?`)) return;
+
+    setOxBank(prev => prev.filter(q => !selectedOxIds.has(q.id)));
+    setOxHistory(prev => {
+      const next = { ...prev };
+      selectedOxIds.forEach(id => delete next[id]);
+      return next;
+    });
+    setSelectedOxIds(new Set());
+    setIsOxDeleteMode(false);
+    setOxSelectedAnswer(null);
+  };
+
   const handleResetOxHistory = () => {
     if (window.confirm("OX 풀이 기록(정답/오답 내역)을 모두 초기화하시겠습니까?")) {
       setOxHistory({});
@@ -160,13 +262,15 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     }
   };
 
-  const handleDeleteUploadedOxBank = () => {
-    if (window.confirm("업로드한 JSON 문제집을 삭제하고 기본 문제(20문항)로 되돌리시겠습니까?")) {
+  const handleRestoreDefaultOxBank = () => {
+    if (window.confirm("모든 문제 변경사항을 초기화하고 기본 문제(20문항)로 되돌리시겠습니까?")) {
       setOxBank(DEFAULT_OX_QUESTIONS);
       localStorage.removeItem(`blankd_ox_bank_${safeAddress}`);
       setOxCurrentIdx(0);
       setOxSelectedAnswer(null);
       setOxCategory('전체');
+      setSelectedOxIds(new Set());
+      setIsOxDeleteMode(false);
     }
   };
 
@@ -201,7 +305,7 @@ export const ExamTab = ({ walletAddress, address }: any) => {
 
 
   // =========================================================================
-  // 2. PDF 실전 모의고사 관련 상태 및 로직 (삭제 기능 추가)
+  // 2. PDF 실전 모의고사 관련 상태 및 로직 (삭제 기능 포함)
   // =========================================================================
   const [examFile, setExamFile] = useState<File | null>(null);
   const [answerFile, setAnswerFile] = useState<File | null>(null);
@@ -332,7 +436,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     setUserAnswers(prev => ({ ...prev, [qNum]: ans }));
   };
 
-  // 💡 [추가] 올라와 있는 문제지 PDF 삭제 핸들러
   const handleDeleteExamFile = () => {
     if (window.confirm("현재 올라와 있는 모의고사 문제지 PDF를 닫고 삭제하시겠습니까?")) {
       setExamFile(null);
@@ -343,7 +446,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     }
   };
 
-  // 💡 [추가] 올라와 있는 정답지 PDF 및 채점결과 삭제 핸들러
   const handleDeleteAnswerFile = () => {
     if (window.confirm("업로드된 정답지 PDF와 채점 결과를 삭제하시겠습니까?")) {
       setAnswerFile(null);
@@ -356,7 +458,6 @@ export const ExamTab = ({ walletAddress, address }: any) => {
     }
   };
 
-  // 💡 [수정] 모의고사 전체 완전 삭제 (파일 + 필기 + OMR 마킹 일괄 삭제)
   const handleResetAll = () => {
     if (window.confirm("업로드된 모의고사 PDF 파일과 모든 필기, OMR 마킹 기록을 완전히 삭제하시겠습니까?")) {
       setExamFile(null);
@@ -461,22 +562,34 @@ export const ExamTab = ({ walletAddress, address }: any) => {
         {examMode === 'ox' ? (
           <div className="flex flex-wrap items-center gap-2">
             <label className="cursor-pointer bg-amber-900/40 hover:bg-amber-900/60 border border-amber-500/40 text-amber-300 text-[11px] font-bold px-3 py-1.5 rounded-sm transition-colors shadow-sm">
-              📂 JSON 문제파일 불러오기
+              ➕ JSON 문제 추가 업로드
               <input ref={oxFileInputRef} type="file" accept=".json" className="hidden" onChange={handleUploadOxJson} />
             </label>
-            {oxBank.length > DEFAULT_OX_QUESTIONS.length && (
-              <button
-                onClick={handleDeleteUploadedOxBank}
-                className="bg-red-950/50 hover:bg-red-900/60 border border-red-500/40 text-red-300 text-[11px] font-bold px-3 py-1.5 rounded-sm transition-colors"
-              >
-                🗑️ 업로드 문제집 삭제
-              </button>
-            )}
+            <button
+              onClick={() => {
+                setIsOxDeleteMode(prev => !prev);
+                setSelectedOxIds(new Set());
+              }}
+              className={`text-[11px] font-bold px-3 py-1.5 rounded-sm border transition-colors ${
+                isOxDeleteMode
+                  ? 'bg-red-600 text-white border-red-400 shadow-[0_0_10px_rgba(239,68,68,0.4)]'
+                  : 'bg-red-950/40 hover:bg-red-900/60 border-red-500/40 text-red-300'
+              }`}
+            >
+              {isOxDeleteMode ? '✕ 선택 삭제 종료' : '🗑️ 문제 골라서 삭제'}
+            </button>
+            <button
+              onClick={handleRestoreDefaultOxBank}
+              className="bg-white/5 hover:bg-white/15 border border-white/10 text-white/60 text-[11px] font-bold px-3 py-1.5 rounded-sm transition-colors"
+              title="기본 20문제로 되돌리기"
+            >
+              🔄 기본 문제로 복원
+            </button>
             <button
               onClick={handleResetOxHistory}
               className="bg-white/5 hover:bg-white/15 border border-white/10 text-white/60 text-[11px] font-bold px-3 py-1.5 rounded-sm transition-colors"
             >
-              🔄 풀이 기록 초기화
+              🧹 풀이 기록 초기화
             </button>
           </div>
         ) : (
@@ -573,13 +686,22 @@ export const ExamTab = ({ walletAddress, address }: any) => {
               </div>
             ) : (
               <div className="my-auto py-6 space-y-8">
-                <div className="flex justify-between items-center">
+                <div className="flex flex-wrap justify-between items-center gap-2">
                   <span className="px-3 py-1 bg-indigo-950/60 border border-indigo-500/40 text-indigo-300 text-xs font-bold rounded-sm">
                     📁 {currentOxQ.category || '비교표 핵심'}
                   </span>
-                  <span className="font-mono text-sm font-bold text-white/60">
-                    Q. {oxCurrentIdx + 1} / {filteredOxQuestions.length} <span className="text-white/30 text-xs">(고유번호 #{currentOxQ.id})</span>
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-sm font-bold text-white/60">
+                      Q. {oxCurrentIdx + 1} / {filteredOxQuestions.length} <span className="text-white/30 text-xs">(고유번호 #{currentOxQ.id})</span>
+                    </span>
+                    <button
+                      onClick={() => handleDeleteSingleOx(currentOxQ.id)}
+                      className="px-2.5 py-1 bg-red-950/40 hover:bg-red-900/70 border border-red-500/40 text-red-300 text-[11px] font-bold rounded-sm transition-colors"
+                      title="현재 보고 있는 이 문제를 즉시 삭제합니다"
+                    >
+                      🗑️ 이 문제 삭제
+                    </button>
+                  </div>
                 </div>
 
                 <div className="text-base sm:text-xl md:text-2xl font-serif leading-relaxed text-white/95 break-keep bg-white/[0.02] p-5 sm:p-7 rounded-sm border border-white/5 shadow-inner">
@@ -672,11 +794,26 @@ export const ExamTab = ({ walletAddress, address }: any) => {
             </div>
           </div>
 
-          {/* 우측: OX 점수 현황판 및 문항 빠른 이동 그리드 */}
+          {/* 우측: OX 점수 현황판 및 문항 빠른 이동 / 선택 삭제 그리드 */}
           <div className="bg-[#0a0a0c] border border-white/10 rounded-sm shadow-xl p-4 flex flex-col h-[65vh]">
-            <h3 className="text-sm font-bold text-teal-400 tracking-widest border-b border-white/10 pb-3 mb-3">
-              📊 OX 학습 현황판
-            </h3>
+            <div className="flex justify-between items-center border-b border-white/10 pb-3 mb-3">
+              <h3 className="text-sm font-bold text-teal-400 tracking-widest">
+                📊 OX 학습 현황판
+              </h3>
+              <button
+                onClick={() => {
+                  setIsOxDeleteMode(prev => !prev);
+                  setSelectedOxIds(new Set());
+                }}
+                className={`px-2 py-1 rounded-sm text-[10px] font-bold border transition-all ${
+                  isOxDeleteMode
+                    ? 'bg-red-600 text-white border-red-400'
+                    : 'bg-red-950/40 text-red-300 border-red-500/30 hover:bg-red-900/50'
+                }`}
+              >
+                {isOxDeleteMode ? '취소' : '☑️ 선택 삭제 모드'}
+              </button>
+            </div>
 
             <div className="grid grid-cols-3 gap-2 mb-4 font-mono text-center">
               <div className="bg-white/5 p-2.5 rounded-sm border border-white/10">
@@ -693,42 +830,82 @@ export const ExamTab = ({ walletAddress, address }: any) => {
               </div>
             </div>
 
-            <div className="text-[11px] text-white/50 mb-2 font-bold">문항 바로가기 ({filteredOxQuestions.length}문항)</div>
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-[11px] text-white/50 font-bold">
+                {isOxDeleteMode ? `삭제할 번호 클릭 (${selectedOxIds.size}개 선택됨)` : `문항 바로가기 (${filteredOxQuestions.length}문항)`}
+              </span>
+              {isOxDeleteMode && filteredOxQuestions.length > 0 && (
+                <button
+                  onClick={handleToggleSelectAllFiltered}
+                  className="text-[10px] text-amber-300 bg-amber-950/50 border border-amber-500/30 px-2 py-0.5 rounded-sm font-bold hover:bg-amber-900/60"
+                >
+                  현재 목록 전체선택
+                </button>
+              )}
+            </div>
+
             <div className="flex-1 overflow-y-auto custom-scrollbar pr-1">
               <div className="grid grid-cols-5 gap-1.5">
                 {filteredOxQuestions.map((q, idx) => {
                   const status = oxHistory[q.id];
                   const isCurrent = idx === oxCurrentIdx;
+                  const isSelectedForDelete = selectedOxIds.has(q.id);
+
                   return (
                     <button
                       key={q.id}
                       onClick={() => {
-                        setOxCurrentIdx(idx);
-                        setOxSelectedAnswer(null);
+                        if (isOxDeleteMode) {
+                          toggleSelectOxForDelete(q.id);
+                        } else {
+                          setOxCurrentIdx(idx);
+                          setOxSelectedAnswer(null);
+                        }
                       }}
-                      className={`py-2 rounded-sm font-mono text-xs font-bold border transition-all ${
-                        isCurrent
-                          ? 'ring-2 ring-amber-400 border-amber-400 bg-amber-500/20 text-amber-200'
-                          : status === 'correct'
-                            ? 'bg-teal-950/50 border-teal-500/40 text-teal-300'
-                            : status === 'wrong'
-                              ? 'bg-red-950/60 border-red-500/50 text-red-300'
-                              : 'bg-white/5 border-white/10 text-white/40 hover:bg-white/10'
+                      title={q.question}
+                      className={`relative py-2 rounded-sm font-mono text-xs font-bold border transition-all ${
+                        isOxDeleteMode
+                          ? isSelectedForDelete
+                            ? 'bg-red-600 text-white border-red-300 ring-2 ring-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]'
+                            : 'bg-white/5 border-white/20 text-white/60 hover:border-red-400/60'
+                          : isCurrent
+                            ? 'ring-2 ring-amber-400 border-amber-400 bg-amber-500/20 text-amber-200'
+                            : status === 'correct'
+                              ? 'bg-teal-950/50 border-teal-500/40 text-teal-300'
+                              : status === 'wrong'
+                                ? 'bg-red-950/60 border-red-500/50 text-red-300'
+                                : 'bg-white/5 border-white/10 text-white/40 hover:bg-white/10'
                       }`}
                     >
                       {q.id}
+                      {isOxDeleteMode && isSelectedForDelete && (
+                        <span className="absolute top-0.5 right-0.5 text-[8px] leading-none">✓</span>
+                      )}
                     </button>
                   );
                 })}
               </div>
             </div>
+
+            {/* 선택 삭제 모드일 때 하단 일괄 삭제 실행 버튼 */}
+            {isOxDeleteMode && (
+              <div className="pt-3 mt-2 border-t border-white/10 flex gap-2">
+                <button
+                  onClick={handleDeleteSelectedOxQuestions}
+                  disabled={selectedOxIds.size === 0}
+                  className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 disabled:opacity-30 text-white text-xs font-bold rounded-sm shadow-lg transition-all"
+                >
+                  🗑️ 선택한 {selectedOxIds.size}개 문제 삭제
+                </button>
+              </div>
+            )}
           </div>
 
         </div>
       )}
 
       {/* =========================================================================
-          모드 B: 📄 PDF 실전 모의고사 뷰어 및 OMR (기존 기능 + 파일 삭제 완비)
+          모드 B: 📄 PDF 실전 모의고사 뷰어 및 OMR
       ========================================================================= */}
       {examMode === 'pdf' && (
         <div className="flex flex-col lg:flex-row gap-6 w-full h-[80vh]">
