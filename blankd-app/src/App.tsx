@@ -3223,7 +3223,113 @@ function MainApp() {
       )}
 
       {!isLoggedIn ? (
-        <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
+          <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
           <h2 className="text-xl sm:text-2xl font-serif text-current mb-4 tracking-tight">빈칸개발 (BlankD)</h2>
           <p className="text-xs sm:text-sm text-white/40 mb-10 sm:mb-12 text-center leading-relaxed">인지 부하 이론 기반의 학습 플랫폼<br/>압도적인 영구 기억을 형성합니다.</p>
-          <button onClick
+          <button
+            onClick={async () => {
+              try {
+                const clientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || "";
+                const url = await enokiFlow.createAuthorizationURL({
+                  provider: "google",
+                  network: "testnet",
+                  clientId,
+                  redirectUrl: window.location.origin,
+                  extraParams: {
+                    scope: ["openid", "email", "profile"],
+                  },
+                });
+                window.location.href = url;
+              } catch (e: any) {
+                addLog(`🚨 구글 로그인 초기화 오류: ${e.message}`);
+                alert("로그인 연결 중 오류가 발생했습니다.");
+              }
+            }}
+            className="w-full py-3.5 px-6 bg-teal-600/20 hover:bg-teal-600/30 border border-teal-500/50 text-teal-300 font-bold text-xs sm:text-sm rounded-sm transition-all shadow-lg flex items-center justify-center gap-2 active:scale-95"
+          >
+            <span>Google 계정으로 시작하기 (zkLogin)</span>
+          </button>
+        </main>
+      ) : (
+        <div className="w-full max-w-[1600px] mx-auto px-2 sm:px-4 md:px-8 flex flex-col lg:flex-row gap-6 items-start relative">
+          {/* 메인 탭 영역 */}
+          <div className="flex-1 w-full min-w-0">
+            {memoizedTabs}
+          </div>
+
+          {/* 데스크톱 우측 사전 사이드바 */}
+          {isSidebarOpen ? (
+            <aside className="hidden lg:block w-80 xl:w-96 shrink-0 sticky top-20 h-[calc(100vh-7rem)]">
+              {renderDictionaryUI(false)}
+            </aside>
+          ) : (
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="hidden lg:flex fixed right-0 top-1/2 -translate-y-1/2 bg-[#08080a] border border-r-0 border-white/20 px-2 py-4 rounded-l-sm text-xs font-bold text-white/60 hover:text-teal-400 hover:border-teal-500/50 transition-all z-30 shadow-xl items-center gap-1"
+              title="사전 패널 열기"
+            >
+              ◀ 사전
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 모바일/태블릿용 사전 모달 */}
+      {isDictModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 lg:hidden">
+          <div className="w-full max-w-lg h-[75vh] flex flex-col">
+            {renderDictionaryUI(true)}
+          </div>
+        </div>
+      )}
+
+      {/* 빈칸 학습 카드 모달 */}
+      {activeCard && (
+        <CardModal
+          activeCard={activeCard}
+          onClose={handleCloseModal}
+          renderContent={renderContent}
+          handleReviewSelect={handleReviewSelect}
+          handleUseItem={handleUseItem}
+          goalBalance={goalBalance}
+          isFrozen={isFrozen}
+          isListening={isListening}
+          toggleVoiceRecognition={toggleVoiceRecognition}
+          registerToMarket={registerToMarket}
+        />
+      )}
+
+      {/* 하단 시스템 로그 터미널 */}
+      <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end">
+        {isTerminalOpen && (
+          <div className="mb-2 w-80 sm:w-96 max-h-48 bg-[#08080a]/95 border border-white/15 rounded-sm p-3 shadow-2xl backdrop-blur-md flex flex-col font-mono text-[10px] sm:text-[11px]">
+            <div className="flex justify-between items-center border-b border-white/10 pb-1.5 mb-2 text-white/50">
+              <span className="font-bold text-teal-400">SYSTEM TERMINAL</span>
+              <button onClick={() => setIsTerminalOpen(false)} className="hover:text-white">✕</button>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-1 custom-scrollbar text-white/70">
+              {systemLogs.map((log, i) => (
+                <div key={i} className="leading-snug break-all">{log}</div>
+              ))}
+            </div>
+          </div>
+        )}
+        <button
+          onClick={() => setIsTerminalOpen(!isTerminalOpen)}
+          className="px-3 py-1.5 bg-[#08080a] border border-white/15 rounded-sm text-[10px] sm:text-xs font-mono text-white/60 hover:text-teal-400 hover:border-teal-500/40 shadow-lg transition-all flex items-center gap-2"
+        >
+          <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse"></span>
+          <span>로그 ({systemLogs.length})</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <GlobalErrorBoundary>
+      <MainApp />
+    </GlobalErrorBoundary>
+  );
+}
