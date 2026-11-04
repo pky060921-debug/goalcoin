@@ -16,8 +16,12 @@ const safeParseStats = (memoStr: string) => {
   try {
     if (memoStr && memoStr.trim().startsWith('{')) {
       const p = JSON.parse(memoStr);
+      const rawText = (p.text || "").replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim();
+      // 빈 태그(<br>, <div><br></div> 등)만 있는 경우 빈 문자열 처리
+      const plainCheck = rawText.replace(/<[^>]*>/g, '').trim();
+      const hasTable = /<table/i.test(rawText);
       return {
-        text: (p.text || "").replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(),
+        text: (plainCheck || hasTable) ? rawText : "",
         filled: p.filled || 0,
         wrongIndices: Array.isArray(p.wrongIndices) ? p.wrongIndices : []
       };
@@ -25,8 +29,11 @@ const safeParseStats = (memoStr: string) => {
   } catch (e) {}
   try {
     const old = parseCardStats(memoStr);
+    const rawText = (old.text || "").replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim();
+    const plainCheck = rawText.replace(/<[^>]*>/g, '').trim();
+    const hasTable = /<table/i.test(rawText);
     return {
-      text: (old.text || "").replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim(),
+      text: (plainCheck || hasTable) ? rawText : "",
       filled: old.filled || 0,
       wrongIndices: Array.isArray(old.wrongIndices) ? old.wrongIndices : []
     };
@@ -50,7 +57,7 @@ export const RecordTab = ({
   // 암기 노트 버튼 클릭 시 노트가 밑으로 펼쳐지는 상태
   const [openNoteIds, setOpenNoteIds] = useState<Set<number | string>>(new Set());
 
-  // 보조 필터 (전체 / 오답만 / 암기노트만)
+  // 보조 필터 (전체 / 오답 조항만 / 암기노트만)
   const [filterMode, setFilterMode] = useState<'all' | 'wrong_only' | 'note_only'>('all');
 
   useEffect(() => {
@@ -139,19 +146,21 @@ export const RecordTab = ({
             ))}
           </div>
 
-          {/* 우측 보조 필터 (전체 / 오답 조항만 / 노트 있는 조항만) */}
+          {/* 우측 보조 필터 (전체 표시 / 오답 조항만 / 암기노트만) */}
           <div className="flex items-center gap-1.5 shrink-0">
             {[
               { id: 'all', label: '전체 표시' },
               { id: 'wrong_only', label: '❌ 오답 조항만' },
-              { id: 'note_only', label: '📌 노트 조항만' }
+              { id: 'note_only', label: '📌 암기노트만' }
             ].map(tab => (
               <button
                 key={tab.id}
                 onClick={() => setFilterMode(tab.id as any)}
                 className={`px-2.5 py-1 text-[10px] sm:text-[11px] font-bold rounded-sm border transition-all ${
                   filterMode === tab.id
-                    ? 'bg-indigo-900/60 text-indigo-200 border-indigo-400'
+                    ? tab.id === 'note_only'
+                      ? 'bg-teal-600 text-white border-teal-400 shadow-[0_0_10px_rgba(20,184,166,0.4)]'
+                      : 'bg-indigo-900/60 text-indigo-200 border-indigo-400'
                     : 'bg-white/5 text-white/40 border-white/10 hover:text-white/70'
                 }`}
               >
@@ -175,6 +184,8 @@ export const RecordTab = ({
             }
             return true;
           });
+
+          if (filterMode !== 'all' && folderCards.length === 0) return null;
 
           return openFolders[folder] && (
             <div
@@ -232,9 +243,14 @@ export const RecordTab = ({
                     const hasWrong = stats.wrongIndices.length > 0;
                     const wrongSet = new Set<number>(stats.wrongIndices);
                     const noteText = stats.text;
+                    const formattedNoteHtml = noteText.includes('<') ? noteText : noteText.replace(/\n/g, '<br/>');
 
+                    const isNoteOnlyMode = filterMode === 'note_only';
                     const isExpanded = expandedCardIds.has(card.id);
                     const isNoteOpen = openNoteIds.has(card.id);
+
+                    // 💡 '암기노트만' 모드일 때는 조항명을 누르지 않아도 조항명 바로 아래에 암기노트 창이 항상 붙어서 표시됨
+                    const showAttachedNoteOnly = Boolean(noteText && (isNoteOnlyMode || (!isExpanded && isNoteOpen)));
 
                     const titleLen = displayTitle.length;
                     const titleSizing =
@@ -277,15 +293,17 @@ export const RecordTab = ({
 
                     return (
                       <div key={card.id} className={`relative transition-all w-full ${colClass}`}>
-                        {/* 1. EnhanceTab과 동일한 1줄 조항 바 (클릭 시 밑으로 전체 내용이 펼쳐짐) */}
+                        {/* 1. 1줄 조항명 바 */}
                         <div
                           onClick={(e) => {
                             e.stopPropagation();
                             toggleCardExpand(card.id);
                           }}
-                          className={`w-full p-2 sm:p-2.5 rounded-sm border flex flex-col justify-center cursor-pointer text-left ${
-                            isExpanded
-                              ? "border-teal-400 bg-teal-950/30 ring-1 ring-teal-500/40"
+                          className={`w-full p-2 sm:p-2.5 border flex flex-col justify-center cursor-pointer text-left ${
+                            showAttachedNoteOnly ? "rounded-t-sm border-b-0" : "rounded-sm"
+                          } ${
+                            isExpanded || showAttachedNoteOnly
+                              ? "border-teal-500/50 bg-teal-950/30"
                               : hasWrong
                                 ? "border-red-500/40 bg-red-900/20 hover:bg-red-900/30"
                                 : "border-indigo-500/30 bg-indigo-900/20 hover:bg-indigo-900/40"
@@ -299,7 +317,17 @@ export const RecordTab = ({
                               <span className="text-[9px] text-white/40 shrink-0">{isExpanded ? '▼' : '▶'}</span>
                               <span className="truncate">{displayTitle}</span>
                               {noteText && (
-                                <span className="text-[9px] text-teal-300 shrink-0 ml-0.5" title="암기노트 있음">📌</span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleNoteOpen(card.id);
+                                  }}
+                                  className="text-[9px] text-teal-300 hover:text-teal-100 shrink-0 ml-0.5 px-1 py-0.5 rounded bg-teal-900/40 border border-teal-500/30"
+                                  title="암기노트만 바로 붙여서 보기/접기"
+                                >
+                                  📌
+                                </button>
                               )}
                             </div>
 
@@ -325,7 +353,20 @@ export const RecordTab = ({
                           </div>
                         </div>
 
-                        {/* 2. 조항을 눌렀을 때 바로 밑으로 펼쳐지는 전체 내용 + 암기 노트 버튼 + 오답풀기 버튼 */}
+                        {/* 2. [핵심] '📌 암기노트만' 버튼 활성화 시 (또는 📌 아이콘 클릭 시) 조항명 바로 아래에 창이 붙어 있는 상태로 암기노트만 표시 */}
+                        {showAttachedNoteOnly && (
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            className="p-2.5 sm:p-3 bg-[#0a0a0c] border border-teal-500/50 rounded-b-sm text-teal-200 text-xs leading-relaxed font-sans shadow-md"
+                          >
+                            <div
+                              className="memo-editor break-words whitespace-pre-wrap"
+                              dangerouslySetInnerHTML={{ __html: formattedNoteHtml }}
+                            />
+                          </div>
+                        )}
+
+                        {/* 3. 조항명을 직접 클릭했을 때 펼쳐지는 전체 조항 본문 */}
                         {isExpanded && (
                           <div
                             onClick={(e) => e.stopPropagation()}
@@ -339,22 +380,24 @@ export const RecordTab = ({
                             {/* 하단 버튼 바: 암기 노트 보기 버튼 & 오답만 풀기 / 전체 풀기 */}
                             <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/10">
                               <div>
-                                {noteText ? (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      toggleNoteOpen(card.id);
-                                    }}
-                                    className={`px-2.5 py-1 text-[10px] sm:text-[11px] font-bold rounded-sm border transition-all flex items-center gap-1 ${
-                                      isNoteOpen
-                                        ? 'bg-teal-600 text-white border-teal-400'
-                                        : 'bg-teal-950/60 hover:bg-teal-900/80 text-teal-300 border-teal-500/40'
-                                    }`}
-                                  >
-                                    <span>📌 암기 노트 {isNoteOpen ? '접기 ▲' : '보기 ▼'}</span>
-                                  </button>
-                                ) : (
-                                  <span className="text-[10px] text-white/30 font-mono">작성된 암기노트 없음</span>
+                                {!isNoteOnlyMode && (
+                                  noteText ? (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleNoteOpen(card.id);
+                                      }}
+                                      className={`px-2.5 py-1 text-[10px] sm:text-[11px] font-bold rounded-sm border transition-all flex items-center gap-1 ${
+                                        isNoteOpen
+                                          ? 'bg-teal-600 text-white border-teal-400'
+                                          : 'bg-teal-950/60 hover:bg-teal-900/80 text-teal-300 border-teal-500/40'
+                                      }`}
+                                    >
+                                      <span>📌 암기 노트 {isNoteOpen ? '접기 ▲' : '보기 ▼'}</span>
+                                    </button>
+                                  ) : (
+                                    <span className="text-[10px] text-white/30 font-mono">작성된 암기노트 없음</span>
+                                  )
                                 )}
                               </div>
 
@@ -386,9 +429,9 @@ export const RecordTab = ({
                               </div>
                             </div>
 
-                            {/* 3. 암기 노트 보기 버튼을 눌렀을 때 밑으로 나오는 노트 내용 */}
-                            {noteText && isNoteOpen && (
-                              <div className="p-3 bg-teal-950/30 border border-teal-500/40 rounded-sm text-teal-200 text-xs whitespace-pre-wrap leading-relaxed font-sans shadow-inner animate-in slide-in-from-top-1 duration-150">
+                            {/* 일반 모드에서 조항을 펼친 뒤 암기 노트 보기를 눌렀을 때 나오는 노트 내용 */}
+                            {!isNoteOnlyMode && noteText && isNoteOpen && (
+                              <div className="p-3 bg-teal-950/30 border border-teal-500/40 rounded-sm text-teal-200 text-xs leading-relaxed font-sans shadow-inner animate-in slide-in-from-top-1 duration-150">
                                 <div className="text-[10px] text-teal-400 font-bold mb-1.5 flex items-center justify-between border-b border-teal-500/20 pb-1">
                                   <span>📌 나만의 암기 노트</span>
                                   <button
@@ -398,7 +441,10 @@ export const RecordTab = ({
                                     닫기 ✕
                                   </button>
                                 </div>
-                                {noteText}
+                                <div
+                                  className="memo-editor break-words whitespace-pre-wrap"
+                                  dangerouslySetInnerHTML={{ __html: formattedNoteHtml }}
+                                />
                               </div>
                             )}
                           </div>
