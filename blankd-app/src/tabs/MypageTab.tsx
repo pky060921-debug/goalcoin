@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 
-export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setSystemLogs, useAiRecommend, setUseAiRecommend, studyMode, setStudyMode, globalDict, saveGlobalDict, loadAllData, theme, setTheme }: any) => {
+export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setSystemLogs, useAiRecommend, setUseAiRecommend, studyMode, setStudyMode, globalDict, saveGlobalDict, loadAllData, theme, setTheme, savedCards }: any) => {
   const [showWallet, setShowWallet] = useState(false);
   const [lawFile, setLawFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -17,6 +17,10 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
   const [fromReps, setFromReps] = useState("");
   const [toReps, setToReps] = useState("");
   const [isUpdatingReps, setIsUpdatingReps] = useState(false);
+
+  // 💡 장별 목표 회독수 설정 상태
+  const [targetRepsSettings, setTargetRepsSettings] = useState<Record<string, number>>({});
+  const [availableFolders, setAvailableFolders] = useState<string[]>([]);
 
   useEffect(() => {
     const fetchUserEmail = async () => {
@@ -50,6 +54,42 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
     };
     fetchRanking();
   }, []);
+
+  // 💡 컴포넌트 마운트 시 저장된 목표 회독수 설정 및 폴더 목록 로드
+  useEffect(() => {
+    if (savedCards && savedCards.length > 0) {
+      const folders = Array.from(new Set(savedCards.map((c: any) => c.folder_name)))
+        .filter(f => f && f !== '기본 폴더')
+        .sort() as string[];
+      setAvailableFolders(folders);
+      
+      try {
+        const savedSettings = localStorage.getItem(`blankd_target_reps_${safeAddress}`);
+        if (savedSettings) {
+          setTargetRepsSettings(JSON.parse(savedSettings));
+        } else {
+          // 기본값: 모든 장의 목표 회독수를 50으로 설정
+          const initialSettings: Record<string, number> = {};
+          folders.forEach(f => initialSettings[f] = 50);
+          setTargetRepsSettings(initialSettings);
+          localStorage.setItem(`blankd_target_reps_${safeAddress}`, JSON.stringify(initialSettings));
+        }
+      } catch (e) {
+        console.error("목표 회독수 로드 실패", e);
+      }
+    }
+  }, [savedCards, safeAddress]);
+
+  // 💡 목표 회독수 변경 핸들러
+  const handleTargetRepsChange = (folder: string, value: string) => {
+    const numValue = Math.max(1, parseInt(value) || 1); // 최소 1
+    const newSettings = { ...targetRepsSettings, [folder]: numValue };
+    setTargetRepsSettings(newSettings);
+    localStorage.setItem(`blankd_target_reps_${safeAddress}`, JSON.stringify(newSettings));
+    
+    // 이벤트를 발생시켜 App.tsx의 헤더(합격률)가 즉시 리렌더링되도록 함
+    window.dispatchEvent(new Event("targetRepsUpdated"));
+  };
 
   const handleFileUploadAndSubmit = async () => {
     if (!lawFile) { alert("전송할 원본 학습용 데이터 파일(.txt)을 선택해주십시오."); return; }
@@ -193,14 +233,18 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
       for (let i = 0; i < nextCards.length; i++) {
         const card = nextCards[i];
-        let memoObj = { text: "", filled: 0, wrongIndices: [], upgrade: 0, bestTime: 0, totalCorrect: 0, totalWrong: 0 };
+        let currentFilled = 0;
+        let memoObj = { text: "", filled: 0, wrongIndices: [] };
+        
         try {
-          if (card.memo && card.memo.startsWith('{')) {
-            memoObj = { ...memoObj, ...JSON.parse(card.memo) };
+          if (card.memo) {
+             const parsed = JSON.parse(card.memo);
+             memoObj = { ...parsed };
+             currentFilled = parsed.filled || 0;
           }
         } catch(e) {}
 
-        if (memoObj.filled === fromVal) {
+        if (currentFilled === fromVal) {
           changeCount++;
           memoObj.filled = toVal;
           const newMemo = JSON.stringify(memoObj);
@@ -237,6 +281,7 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
       localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(nextCards));
       if (typeof loadAllData === 'function') await loadAllData(true);
+      window.dispatchEvent(new Event("targetRepsUpdated")); // 강제 리렌더링 (헤더 합격률 갱신용)
       
       alert(`✅ [교정 성공] 총 ${changeCount}개 카드의 반복 횟수가 ${toVal}회로 일괄 변경되었습니다.`);
       setFromReps(""); setToReps("");
@@ -284,6 +329,40 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
         <div className="border-t border-white/10"></div>
 
+        {/* 🧠 장별 목표 회독수 설정 (신규 추가) */}
+        <div className="space-y-3">
+          <div className="text-xs text-indigo-400 font-bold tracking-wider font-mono uppercase flex items-center gap-2">
+            <span>🎯</span> 장별 필요 회독수 개별 설정
+          </div>
+          <div className="bg-black/40 border border-white/5 p-4 rounded-sm space-y-4">
+            <p className="text-[10px] sm:text-[11px] text-white/40 leading-relaxed">
+              각 장별로 완벽한 합격(100%)을 위해 필요한 <span className="text-indigo-400 font-bold">목표 회독 수</span>를 다르게 설정할 수 있습니다. 상단의 '예상 합격률' 계산에 실시간 반영됩니다.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              {availableFolders.map(folder => (
+                <div key={folder} className="flex flex-col bg-white/5 p-2 rounded-sm border border-white/10">
+                  <span className="text-[10px] font-bold text-white/70 mb-1 truncate">{folder}</span>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="number"
+                      min="1"
+                      value={targetRepsSettings[folder] || 50}
+                      onChange={(e) => handleTargetRepsChange(folder, e.target.value)}
+                      className="bg-black/50 border border-white/20 px-2 py-1 text-xs text-indigo-300 font-bold outline-none rounded-sm focus:border-indigo-400 w-full text-center"
+                    />
+                    <span className="text-[10px] text-white/40 shrink-0">회</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {availableFolders.length === 0 && (
+              <div className="text-[10px] text-white/30 text-center py-2">학습할 조항 데이터가 없습니다.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="border-t border-white/10"></div>
+
         {/* 🎨 화면 테마 설정 */}
         <div className="space-y-3">
           <div className="text-xs text-white/50 font-bold tracking-wider font-mono uppercase flex items-center gap-2">
@@ -298,7 +377,7 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
         <div className="border-t border-white/10"></div>
 
-        {/* 🧠 복습 모드 설정 (신규 추가) */}
+        {/* 🧠 복습 모드 설정 (수동 Anki식 등) */}
         <div className="space-y-3">
           <div className="text-xs text-indigo-400 font-bold tracking-wider font-mono uppercase flex items-center gap-2">
             <span>🧠</span> 복습 모드 설정
