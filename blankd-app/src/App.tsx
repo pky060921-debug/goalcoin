@@ -193,7 +193,6 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
   useEffect(() => {
     if (inputStatus === 'idle' && inputRef.current) {
         const timer = setTimeout(() => {
-            // 암기노트 작성 중일 때는 빈칸 인풋이 포커스를 뺏지 않도록 방어
             const activeEl = document.activeElement as HTMLElement | null;
             if (activeEl && (activeEl.closest('.memo-editor') || activeEl.closest('.memo-panel-container') || activeEl.isContentEditable)) {
                 return;
@@ -614,13 +613,16 @@ function MainApp() {
     text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0, highlights: {}, hiddenTokens: new Set<string>(), modifiedTokens: {}
   });
 
-  // 암기노트가 열리거나 카드가 전환될 때만 안전하게 초기 HTML을 로드 (재렌더링 시 커서 초기화 완벽 방지)
+  // 💡 [수정] 암기노트가 열리거나 카드가 전환될 때 activeCard.memo에서 직접 해당 조항의 노트를 로드 (이전 조항 덮어쓰기 원천 차단)
   useEffect(() => {
     if (activeCard && isMemoOpen && memoEditorRef.current) {
-      if (lastLoadedMemoCardIdRef.current !== activeCard.id) {
-        const savedMemo = statsRef.current.text || "";
+      if (String(lastLoadedMemoCardIdRef.current) !== String(activeCard.id)) {
+        const stats = getExtendedStats(activeCard.memo);
+        const savedMemo = stats.text ? stats.text.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim() : "";
         const newHtml = savedMemo.includes('<') ? savedMemo : savedMemo.replace(/\n/g, '<br/>');
         memoEditorRef.current.innerHTML = newHtml;
+        memoEditorRef.current.dataset.cardId = String(activeCard.id);
+        statsRef.current.text = savedMemo;
         lastLoadedMemoCardIdRef.current = activeCard.id;
       }
     } else if (!isMemoOpen) {
@@ -797,7 +799,6 @@ function MainApp() {
       const target = e.target as HTMLElement | null;
       const activeEl = document.activeElement as HTMLElement | null;
       
-      // 암기노트(contentEditable 및 하위 td/th/p/div 태그)나 입력창 내부일 경우 키 가로채기 완벽 차단
       if (
         target && (
           target.tagName === 'INPUT' || 
@@ -1564,6 +1565,53 @@ function MainApp() {
     }
   };
 
+  // 💡 [추가/수정] 상단 네비게이션용 예상 합격률 상태 및 계산 로직 (장별 가중치 반영)
+  const [passProbability, setPassProbability] = useState<number>(0);
+
+  useEffect(() => {
+    const calculatePassProbability = () => {
+      if (!savedCards || savedCards.length === 0) {
+        setPassProbability(0);
+        return;
+      }
+      
+      let targetSettings: Record<string, number> = {};
+      try {
+        const saved = localStorage.getItem(`blankd_target_reps_${safeAddress}`);
+        if (saved) targetSettings = JSON.parse(saved);
+      } catch (e) {}
+
+      let totalScore = 0;
+      let totalCount = 0;
+
+      savedCards.forEach((c: any) => {
+        if (!c.folder_name || c.folder_name === '기본 폴더') return;
+        const stats = getExtendedStats(c.memo);
+        const currentReps = stats.filled || 0;
+        // 설정값이 없으면 기본 목표 회독수 50으로 계산
+        const targetReps = targetSettings[c.folder_name] || 50; 
+        
+        let cardScore = (currentReps / targetReps) * 100;
+        if (cardScore > 100) cardScore = 100; // 100% 초과 방지
+        
+        totalScore += cardScore;
+        totalCount += 1;
+      });
+
+      if (totalCount > 0) {
+        setPassProbability(Math.floor(totalScore / totalCount));
+      } else {
+        setPassProbability(0);
+      }
+    };
+
+    calculatePassProbability();
+    window.addEventListener("targetRepsUpdated", calculatePassProbability);
+    return () => window.removeEventListener("targetRepsUpdated", calculatePassProbability);
+  }, [savedCards, safeAddress]);
+
+  const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => getExtendedStats(card.memo || "").filled || 0)) : 0;
+
   useEffect(() => {
     if (activeCard) {
       isClosingRef.current = false;
@@ -1658,12 +1706,15 @@ function MainApp() {
       }
   }, [currentBlankIdx, inputMode, activeCard, inputStatus]);
 
+  // 💡 [수정] 카드 종료 시 ID 검증 (덮어쓰기 방지)
   const finishCard = async (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
-    if (memoEditorRef.current) {
+    
+    if (memoEditorRef.current && memoEditorRef.current.dataset.cardId === String(activeCard.id)) {
       statsRef.current.text = memoEditorRef.current.innerHTML;
     }
+    
     const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = 0;
     const wrongArr = Array.from(statsRef.current.wrongIndices);
     
@@ -1789,12 +1840,15 @@ function MainApp() {
 
   const handleReviewSelect = (days: number) => { if (!activeCard) return; statsRef.current.filled += 1; finishCard(days); };
 
+  // 💡 [수정] 모달 닫을 때 ID 검증 (덮어쓰기 방지)
   const handleCloseModal = async () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
-    if (memoEditorRef.current) {
+    
+    if (memoEditorRef.current && memoEditorRef.current.dataset.cardId === String(activeCard.id)) {
       statsRef.current.text = memoEditorRef.current.innerHTML;
     }
+    
     const currentId = activeCard.id;
     const exStats = getExtendedStats(activeCard.memo);
     exStats.text = statsRef.current.text;
@@ -1942,41 +1996,6 @@ function MainApp() {
     recognition.onend = () => { if (recognitionRef.current) { try { recognitionRef.current.start(); } catch(e) {} } else { setIsListening(false); } };
     recognitionRef.current = recognition; recognition.start();
   };
-
-  const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => getExtendedStats(card.memo || "").filled || 0)) : 0;
-  const passProbability = Math.min(minFilledCount * 2, 100);
-
-  const { nextCatToCraft, nextStudyCard } = useMemo(() => {
-    let craftTarget = null; let studyTarget = null;
-    if (!isLoggedIn) return { nextCatToCraft: null, nextStudyCard: null };
-
-    if (categories && categories.length > 0) {
-      const craftedOrigIds = new Set(); const craftedTitles: string[] = [];
-      const cleanText = (text: string) => text ? text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '').replace(/[^가-힣a-zA-Z0-9一-龥]/g, '') : "";
-      savedCards.forEach((c: any) => {
-        const firstLine = c.content.split('\n')[0];
-        if (firstLine) craftedTitles.push(cleanText(firstLine));
-      });
-      const sortedCats = [...categories].sort((a: any, b: any) => a.id - b.id);
-      craftTarget = sortedCats.find((cat: any) => {
-        const cleanTitle = cleanText(cat.title || "");
-        return !(cleanTitle && craftedTitles.some(t => t === cleanTitle || t.endsWith(cleanTitle)));
-      });
-    }
-
-    if (savedCards && savedCards.length > 0) {
-      const cardsWithStatus = savedCards.map(c => {
-         const stats = getExtendedStats(c.memo);
-         return { ...c, repetitions: stats.filled || 0, origId: parseInt(c.id, 10) };
-      }).filter(c => !isNaN(c.origId)).sort((a, b) => a.origId - b.origId);
-      
-      if (cardsWithStatus.length > 0) {
-        const minReps = Math.min(...cardsWithStatus.map(c => c.repetitions));
-        studyTarget = cardsWithStatus.find(c => c.repetitions === minReps) || cardsWithStatus[0];
-      }
-    }
-    return { nextCatToCraft: craftTarget, nextStudyCard: studyTarget };
-  }, [isLoggedIn, categories, savedCards]);
 
   const memoizedCardContent = useMemo(() => {
     if (!activeCard) return null;
@@ -2456,23 +2475,6 @@ function MainApp() {
                   <span>{isStealthEditMode ? '변형완료' : `변형(${totalTransformCount})`}</span>
                 </button>
 
-                {!isStealthEditMode && remainingHiddenCount > 0 && (
-                  <button
-                    onClick={(e) => {
-                      e.currentTarget.blur();
-                      setShowStealthHint(prev => !prev);
-                    }}
-                    className={`px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-bold transition-all ${
-                      showStealthHint
-                        ? 'bg-amber-500 text-black ring-2 ring-amber-300 shadow-md'
-                        : 'bg-amber-950/60 text-amber-300 border border-amber-500/40 hover:bg-amber-900/70 animate-pulse'
-                    }`}
-                    title="변형/숨겨진 위치가 어디인지 모르겠을 때 위치 표시"
-                  >
-                    위치힌트({remainingHiddenCount})
-                  </button>
-                )}
-
                 {totalTransformCount > 0 && (
                   <button
                     title="변형 구간 전체 영구 해제"
@@ -2556,42 +2558,6 @@ function MainApp() {
             </div>
         </div>
 
-        {isStealthEditMode && (
-          <div className="shrink-0 bg-fuchsia-950/90 border-b border-fuchsia-500/50 px-4 py-1.5 flex justify-between items-center text-[11px] text-fuchsia-100">
-            <span>
-              <b>변형 설정 모드</b> — 1번 터치(또는 드래그): <b>구간 숨김</b> | 숨김된 단어를 한 번 더 터치: <b>다른 글자로 변형(예: 직원→임직원) 또는 해제</b>
-            </span>
-            <button onClick={() => setIsStealthEditMode(false)} className="text-[10px] bg-fuchsia-600 hover:bg-fuchsia-500 text-white px-2.5 py-0.5 rounded font-bold shadow">
-              설정 완료
-            </button>
-          </div>
-        )}
-
-        {!isStealthEditMode && remainingHiddenCount > 0 && (
-          <div className="shrink-0 bg-amber-950/60 border-b border-amber-500/30 px-4 py-1 flex justify-between items-center text-[11px] text-amber-200">
-            <span>
-              현재 문장에 <b>{remainingHiddenCount}개</b>의 변형/숨김 구간이 있습니다. <b>변형된 글자 윗부분(또는 숨긴 곳 바로 뒤 글자)</b>을 터치하면 원래 텍스트가 나타납니다.
-            </span>
-            <button
-              onClick={() => setShowStealthHint(p => !p)}
-              className="text-[10px] bg-amber-500/20 hover:bg-amber-500/40 border border-amber-400/50 text-amber-200 px-2 py-0.5 rounded font-bold"
-            >
-              {showStealthHint ? '힌트 숨기기' : '위치 힌트 보기'}
-            </button>
-          </div>
-        )}
-
-        {activeHighlighter && !isStealthEditMode && (
-          <div className="shrink-0 bg-indigo-950/80 border-b border-indigo-500/40 px-4 py-1 flex justify-between items-center text-[11px] text-indigo-200">
-            <span>
-              <b>{activeHighlighter === 'purple' ? '보라색 형광펜' : activeHighlighter === 'blue' ? '파란색 형광펜' : activeHighlighter === 'orange' ? '연두색 형광펜' : '지우개'}</b> 켜짐 — 본문 단어나 빈칸을 터치/드래그하여 칠하세요.
-            </span>
-            <button onClick={() => setActiveHighlighter(null)} className="text-[10px] bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded font-bold">
-              펜 끄기
-            </button>
-          </div>
-        )}
-
         <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden bg-[#0a0a0c]">
             <div ref={bodyScrollRef} className="flex-1 min-h-0 overflow-y-scroll scroll-smooth custom-scrollbar px-3 py-3 sm:py-4 md:px-6 pb-8">
                 <div className={`whitespace-pre-wrap leading-relaxed ${bodyClass} font-serif break-all break-words w-full max-w-full text-white/90`}>
@@ -2607,7 +2573,6 @@ function MainApp() {
                    height: isDesktop ? '100%' : memoSize 
                  }}
                  onKeyDown={(e) => {
-                   // 상위 모달(CardModal 등)로 키 이벤트가 버블링되어 방향키/엔터키가 차단되는 현상 방지
                    e.stopPropagation();
                  }}
               >
@@ -2697,21 +2662,26 @@ function MainApp() {
                       <span className="text-[10px] text-teal-500/70 font-mono hidden sm:inline">자동저장</span>
                     </div>
                  </div>
+                 
+                 {/* 💡 [핵심] 암기노트 에디터 - data-card-id 추가 및 onInput/onBlur 일치 확인 로직 포함 */}
                  <div 
                     id={`memo-editor-${activeCard.id}`}
                     key={`memo-${activeCard.id}`}
+                    data-card-id={String(activeCard.id)}
                     ref={memoEditorRef}
                     contentEditable={true}
                     suppressContentEditableWarning={true}
                     onKeyDown={(e) => {
-                        // 엔터키, 방향키, 백스페이스 등 모든 키 입력이 외부 리스너에 가로채이지 않도록 전파 중단
                         e.stopPropagation();
                     }}
                     onInput={(e) => {
-                        // 입력 즉시 메모리(statsRef)에 반영하여 리렌더링 시 텍스트 유실 및 커서 튕김 원천 차단
+                        if (e.currentTarget.dataset.cardId !== String(activeCard.id)) return;
                         statsRef.current.text = e.currentTarget.innerHTML;
                     }}
                     onBlur={(e) => { 
+                        if (isClosingRef.current) return;
+                        if (e.currentTarget.dataset.cardId !== String(activeCard.id)) return;
+
                         const latestHtml = e.currentTarget.innerHTML;
                         statsRef.current.text = latestHtml; 
                         const exStats = getExtendedStats(activeCard.memo);
@@ -2956,7 +2926,7 @@ function MainApp() {
           <ExamTab walletAddress={safeAddress} address={safeAddress} />
         </div>
         <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
-          <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} zkLogin={zkLogin} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} globalDict={globalDict} saveGlobalDict={saveGlobalDict} loadAllData={loadAllData} theme={theme} setTheme={setTheme}/>
+          <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} zkLogin={zkLogin} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} globalDict={globalDict} saveGlobalDict={saveGlobalDict} loadAllData={loadAllData} theme={theme} setTheme={setTheme} savedCards={savedCards} />
         </div>
       </>
     );
@@ -3065,7 +3035,6 @@ function MainApp() {
           border-color: #6b7280 !important; 
         }
 
-        /* 화이트 테마용 3색 형광펜 및 변형 스타일 */
         .mk-purple { background-color: #e9d5ff !important; color: #581c87 !important; border-bottom: 3px solid #9333ea !important; font-weight: 900 !important; }
         .mk-blue { background-color: #bae6fd !important; color: #0c4a6e !important; border-bottom: 3px solid #0284c7 !important; font-weight: 900 !important; }
         .mk-orange { background-color: #d9f99d !important; color: #365314 !important; border-bottom: 3px solid #65a30d !important; font-weight: 900 !important; }
@@ -3099,7 +3068,6 @@ function MainApp() {
         .bg-green-900\\/20, .bg-green-900\\/30, .bg-green-900\\/40, .bg-green-500\\/10, .bg-green-500\\/20 { background-color: #dcfce7 !important; border-color: #10b981 !important; }
         .border-green-500\\/30, .border-green-500\\/40, .border-green-500\\/50 { border-color: #10b981 !important; }
 
-        /* 화이트 테마 암기노트 에디터 스타일 */
         .memo-editor { cursor: text; -webkit-user-select: text; user-select: text; }
         .memo-editor * { -webkit-user-select: text; user-select: text; }
         .memo-editor table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
@@ -3115,7 +3083,6 @@ function MainApp() {
         .bg-\\[\\#0a0a0c\\] { background-color: #122b1c !important; }
         .bg-\\[\\#0d0d0f\\] { background-color: #163322 !important; }
         
-        /* 다크(그린) 테마 암기노트 에디터 스타일 */
         .memo-editor { cursor: text; -webkit-user-select: text; user-select: text; }
         .memo-editor * { -webkit-user-select: text; user-select: text; }
         .memo-editor table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
@@ -3127,7 +3094,6 @@ function MainApp() {
     return `
       body { background-color: #0d0d0f; }
       
-      /* 다크(블랙) 테마 암기노트 에디터 스타일 */
       .memo-editor { cursor: text; -webkit-user-select: text; user-select: text; }
       .memo-editor * { -webkit-user-select: text; user-select: text; }
       .memo-editor table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; }
