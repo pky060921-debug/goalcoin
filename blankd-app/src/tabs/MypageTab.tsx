@@ -208,9 +208,10 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
     }
   };
 
+  // 💡 [핵심 수정] 오류가 발생하던 학습 횟수 일괄 교정 로직 전면 재작성 (savedCards 실시간 참조)
   const handleBulkUpdateReps = async () => {
-    const fromVal = parseInt(fromReps);
-    const toVal = parseInt(toReps);
+    const fromVal = parseInt(fromReps, 10);
+    const toVal = parseInt(toReps, 10);
     
     if (isNaN(fromVal) || isNaN(toVal)) {
       alert("현재 횟수와 변경할 목표 횟수를 모두 숫자로 입력해주세요.");
@@ -223,27 +224,37 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
     setIsUpdatingReps(true);
     try {
-      const localCardsStr = localStorage.getItem(`blankd_off_card_${safeAddress}`);
-      if (!localCardsStr) throw new Error("로컬에 저장된 카드 데이터가 없습니다.");
-      let localCards = JSON.parse(localCardsStr);
+      // 로컬 스토리지가 아닌, App.tsx에서 전달받은 실제 최신 상태(savedCards)를 기준으로 안전하게 순회
+      if (!savedCards || savedCards.length === 0) {
+        throw new Error("로드된 카드 데이터가 없습니다. 새로고침 후 다시 시도해주세요.");
+      }
 
       let changeCount = 0;
       const updateFns: any[] = [];
-      const nextCards = [...localCards];
+      const nextCards = [...savedCards];
 
       for (let i = 0; i < nextCards.length; i++) {
         const card = nextCards[i];
         let currentFilled = 0;
-        let memoObj = { text: "", filled: 0, wrongIndices: [] };
+        let memoObj: any = { text: "", filled: 0, wrongIndices: [] };
         
         try {
           if (card.memo) {
-             const parsed = JSON.parse(card.memo);
-             memoObj = { ...parsed };
-             currentFilled = parsed.filled || 0;
+            // 메모가 JSON 형식인 경우만 안전 파싱
+            if (card.memo.trim().startsWith('{')) {
+              const parsed = JSON.parse(card.memo);
+              memoObj = { ...parsed };
+              currentFilled = Number(parsed.filled) || 0; // 문자열 '0' 이슈 방지용 명시적 숫자 변환
+            } else {
+              // 레거시 형식 지원 (과거 데이터 안전 처리)
+              const parts = card.memo.split('|');
+              currentFilled = parts.length > 2 ? parseInt(parts[2], 10) : 0;
+              memoObj = { text: parts[1] || "", filled: currentFilled, wrongIndices: [] };
+            }
           }
         } catch(e) {}
 
+        // 현재 카드의 회독수가 목표 수정치와 일치한다면
         if (currentFilled === fromVal) {
           changeCount++;
           memoObj.filled = toVal;
@@ -259,6 +270,7 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
             memo: newMemo
           };
 
+          // 서버 전송을 위한 큐 적재
           updateFns.push(() => fetch("https://api.blankd.top/api/save-card", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -275,13 +287,19 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
       if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[일괄 교정] ${changeCount}개의 카드를 ${fromVal}회 ➔ ${toVal}회로 변경 중...`]);
 
+      // 서버 과부하 방지를 위해 5개씩 묶어서 배치(Batch) 비동기 전송
       for (let i = 0; i < updateFns.length; i += 5) {
         await Promise.all(updateFns.slice(i, i + 5).map(fn => fn()));
       }
 
+      // 서버 전송 완료 후 로컬 스토리지 강제 갱신
       localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(nextCards));
+      
+      // 화면 즉각 갱신을 위해 데이터 다시 로드
       if (typeof loadAllData === 'function') await loadAllData(true);
-      window.dispatchEvent(new Event("targetRepsUpdated")); // 강제 리렌더링 (헤더 합격률 갱신용)
+      
+      // 앱 상단 합격률 계산식에 변경된 값 반영 트리거
+      window.dispatchEvent(new Event("targetRepsUpdated")); 
       
       alert(`✅ [교정 성공] 총 ${changeCount}개 카드의 반복 횟수가 ${toVal}회로 일괄 변경되었습니다.`);
       setFromReps(""); setToReps("");
