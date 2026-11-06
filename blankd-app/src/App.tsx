@@ -613,7 +613,7 @@ function MainApp() {
     text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0, highlights: {}, hiddenTokens: new Set<string>(), modifiedTokens: {}
   });
 
-  // 💡 [수정] 암기노트가 열리거나 카드가 전환될 때 activeCard.memo에서 직접 해당 조항의 노트를 로드 (이전 조항 덮어쓰기 원천 차단)
+  // 💡 [수정] 암기노트 덮어쓰기 방지: activeCard.memo에서 직접 노트 로드 및 dataset 반영
   useEffect(() => {
     if (activeCard && isMemoOpen && memoEditorRef.current) {
       if (String(lastLoadedMemoCardIdRef.current) !== String(activeCard.id)) {
@@ -1565,8 +1565,9 @@ function MainApp() {
     }
   };
 
-  // 💡 [추가/수정] 상단 네비게이션용 예상 합격률 상태 및 계산 로직 (장별 가중치 반영)
+  // 💡 [수정] 상단 네비게이션용 예상 합격률 상태 및 계산 로직 (장별 가중치 반영)
   const [passProbability, setPassProbability] = useState<number>(0);
+  const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => getExtendedStats(card.memo || "").filled || 0)) : 0;
 
   useEffect(() => {
     const calculatePassProbability = () => {
@@ -1610,7 +1611,38 @@ function MainApp() {
     return () => window.removeEventListener("targetRepsUpdated", calculatePassProbability);
   }, [savedCards, safeAddress]);
 
-  const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => getExtendedStats(card.memo || "").filled || 0)) : 0;
+  // 💡 [누락 복원] '이어하기' 처리를 위한 useMemo 로직
+  const { nextCatToCraft, nextStudyCard } = useMemo(() => {
+    let craftTarget = null; let studyTarget = null;
+    if (!isLoggedIn) return { nextCatToCraft: null, nextStudyCard: null };
+
+    if (categories && categories.length > 0) {
+      const craftedOrigIds = new Set(); const craftedTitles: string[] = [];
+      const cleanText = (text: string) => text ? text.replace(/\([^)]*\)|\[[^\]]*\]|<[^>]*>/g, '').replace(/[^가-힣a-zA-Z0-9一-龥]/g, '') : "";
+      savedCards.forEach((c: any) => {
+        const firstLine = c.content.split('\n')[0];
+        if (firstLine) craftedTitles.push(cleanText(firstLine));
+      });
+      const sortedCats = [...categories].sort((a: any, b: any) => a.id - b.id);
+      craftTarget = sortedCats.find((cat: any) => {
+        const cleanTitle = cleanText(cat.title || "");
+        return !(cleanTitle && craftedTitles.some(t => t === cleanTitle || t.endsWith(cleanTitle)));
+      });
+    }
+
+    if (savedCards && savedCards.length > 0) {
+      const cardsWithStatus = savedCards.map(c => {
+         const stats = getExtendedStats(c.memo);
+         return { ...c, repetitions: stats.filled || 0, origId: parseInt(c.id, 10) };
+      }).filter(c => !isNaN(c.origId)).sort((a, b) => a.origId - b.origId);
+      
+      if (cardsWithStatus.length > 0) {
+        const minReps = Math.min(...cardsWithStatus.map(c => c.repetitions));
+        studyTarget = cardsWithStatus.find(c => c.repetitions === minReps) || cardsWithStatus[0];
+      }
+    }
+    return { nextCatToCraft: craftTarget, nextStudyCard: studyTarget };
+  }, [isLoggedIn, categories, savedCards]);
 
   useEffect(() => {
     if (activeCard) {
@@ -1706,7 +1738,7 @@ function MainApp() {
       }
   }, [currentBlankIdx, inputMode, activeCard, inputStatus]);
 
-  // 💡 [수정] 카드 종료 시 ID 검증 (덮어쓰기 방지)
+  // 💡 [수정] 카드 종료 시 dataset을 통한 에디터 내용 오염 검증 (덮어쓰기 방지)
   const finishCard = async (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
@@ -1840,7 +1872,7 @@ function MainApp() {
 
   const handleReviewSelect = (days: number) => { if (!activeCard) return; statsRef.current.filled += 1; finishCard(days); };
 
-  // 💡 [수정] 모달 닫을 때 ID 검증 (덮어쓰기 방지)
+  // 💡 [수정] 모달 닫을 시 ID 검증 (덮어쓰기 방지)
   const handleCloseModal = async () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
@@ -2053,7 +2085,6 @@ function MainApp() {
     let bIdx = 0; 
     let pendingHiddenKeys: string[] = [];
     let pendingHiddenBlanks: number[] = [];
-    let remainingHiddenCount = 0;
     const contentToRender: any[] = [];
 
     type PageTokenItem = {
@@ -2145,12 +2176,7 @@ function MainApp() {
         if (item.type === 'blank' && item.blankIdx !== undefined) {
           pendingHiddenBlanks.push(item.blankIdx);
         }
-        remainingHiddenCount++;
         continue;
-      }
-
-      if (!isStealthEditMode && isModifiedToken && !isModifiedRevealed) {
-        remainingHiddenCount++;
       }
 
       const triggerKeys = pendingHiddenKeys.length > 0 ? [...pendingHiddenKeys] : null;
@@ -2175,16 +2201,8 @@ function MainApp() {
                 handleRevealHiddenSegment(keys, bIdxs);
               }
             }}
-            className={`relative inline-block pt-2 -mt-2 cursor-pointer select-none transition-all ${markerCls} ${
-              showStealthHint ? 'ring-2 ring-amber-400 bg-amber-500/20 rounded-sm px-0.5 font-bold' : ''
-            }`}
-            title="글자 윗부분이나 글자를 터치하면 원래 텍스트가 나타납니다"
+            className={`relative inline-block pt-2 -mt-2 cursor-pointer select-none transition-all ${markerCls}`}
           >
-            {showStealthHint && (
-              <span className="inline-block mr-0.5 px-1 bg-amber-500 text-black font-extrabold text-[10px] rounded animate-bounce">
-                ▸
-              </span>
-            )}
             {fakeText}
           </span>
         ) : (
@@ -2198,7 +2216,6 @@ function MainApp() {
               }
             }}
             className={`${unifiedStealthRevealedCls} ${triggerKeys ? 'cursor-pointer' : ''}`}
-            title={`변형 전 위장 텍스트: ${fakeText}`}
           >
             {item.text}
           </span>
@@ -2228,7 +2245,6 @@ function MainApp() {
               className={`inline-block cursor-pointer select-none ${
                 isStMarked ? unifiedStealthSelectedCls : 'border-b-2 border-dashed border-purple-400/60 px-0.5 hover:bg-purple-500/20'
               }`}
-              title={isStMarked ? "한 번 더 터치하면 다른 글자로 변형하거나 해제할 수 있습니다" : "터치하여 숨김/변형 설정"}
             >
               {isModifiedToken ? `${fakeText}(←${item.text})` : item.text}
             </span>
@@ -2336,13 +2352,7 @@ function MainApp() {
                 }
               }}
               className="cursor-pointer group align-middle"
-              title="이 앞에 숨겨진 내용이 있습니다! 터치하여 정답 확인"
             >
-              {showStealthHint && (
-                <span className="inline-block mr-0.5 px-1 bg-amber-500 text-black font-extrabold text-[10px] rounded animate-bounce align-middle">
-                  ▸
-                </span>
-              )}
               {blankEl}
             </span>
           );
@@ -2385,13 +2395,7 @@ function MainApp() {
             className={`transition-all ${markerCls} ${stealthEditWordCls} ${
               activeHighlighter || isStealthEditMode || triggerKeys ? 'cursor-pointer select-none' : ''
             }`}
-            title={isStealthEditMode && isStealthMarked ? "한 번 더 터치하면 다른 글자로 변형하거나 해제할 수 있습니다" : undefined}
           >
-            {showStealthHint && triggerKeys && (
-              <span className="inline-block mr-0.5 px-1 bg-amber-500 text-black font-extrabold text-[10px] rounded animate-bounce">
-                ▸
-              </span>
-            )}
             {isStealthEditMode && isModifiedToken ? `${fakeText}(←${item.text})` : item.text}
           </span>
         );
@@ -2409,11 +2413,6 @@ function MainApp() {
               }}
               className="cursor-pointer"
             >
-              {showStealthHint && (
-                <span className="inline-block mr-0.5 px-1 bg-amber-500 text-black font-extrabold text-[10px] rounded animate-bounce">
-                  ▸
-                </span>
-              )}
               {wordEl}
             </span>
           );
@@ -2436,12 +2435,9 @@ function MainApp() {
               handleRevealHiddenSegment(finalKeys, finalBlanks);
             }
           }}
-          className={`inline-block ml-1 px-1.5 py-0.5 rounded text-xs font-bold cursor-pointer select-none transition-all ${
-            showStealthHint ? 'bg-amber-500 text-black animate-bounce' : 'text-white/30 hover:text-amber-400'
-          }`}
-          title="문장 끝에 숨겨진 구간이 있습니다. 터치하여 확인하세요."
+          className="inline-block ml-1 px-1.5 py-0.5 rounded text-xs font-bold cursor-pointer select-none transition-all text-white/30 hover:text-amber-400"
         >
-          {showStealthHint ? '[끝 숨김 확인]' : '...'}
+          ...
         </span>
       );
     }
@@ -2538,15 +2534,17 @@ function MainApp() {
                 onClick={(e) => { 
                   e.currentTarget.blur(); 
                   if (isMemoOpen && memoEditorRef.current && activeCard) {
-                    statsRef.current.text = memoEditorRef.current.innerHTML;
-                    const exStats = getExtendedStats(activeCard.memo);
-                    exStats.text = memoEditorRef.current.innerHTML;
-                    exStats.filled = statsRef.current.filled;
-                    exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
-                    exStats.highlights = statsRef.current.highlights;
-                    exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
-                    exStats.modifiedTokens = statsRef.current.modifiedTokens;
-                    handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats));
+                    if (memoEditorRef.current.dataset.cardId === String(activeCard.id)) {
+                      statsRef.current.text = memoEditorRef.current.innerHTML;
+                      const exStats = getExtendedStats(activeCard.memo);
+                      exStats.text = memoEditorRef.current.innerHTML;
+                      exStats.filled = statsRef.current.filled;
+                      exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+                      exStats.highlights = statsRef.current.highlights;
+                      exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
+                      exStats.modifiedTokens = statsRef.current.modifiedTokens;
+                      handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats));
+                    }
                   }
                   setIsMemoOpen(!isMemoOpen); 
                 }} 
@@ -2926,7 +2924,7 @@ function MainApp() {
           <ExamTab walletAddress={safeAddress} address={safeAddress} />
         </div>
         <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
-          <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} zkLogin={zkLogin} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} globalDict={globalDict} saveGlobalDict={saveGlobalDict} loadAllData={loadAllData} theme={theme} setTheme={setTheme} savedCards={savedCards} />
+          <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} zkLogin={zkLogin} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} globalDict={globalDict} saveGlobalDict={saveGlobalDict} loadAllData={loadAllData} theme={theme} setTheme={setTheme} savedCards={savedCards}/>
         </div>
       </>
     );
