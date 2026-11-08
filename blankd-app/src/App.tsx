@@ -3227,4 +3227,36 @@ function MainApp() {
             </div>
           </div>
         )}
-        <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50
+        <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50 border-red-500/50 text-red-400 hover:bg-red-900/80' : 'bg-teal-900/50 border-teal-500/50 text-teal-400 hover:bg-teal-900/80'}`}>
+          {isTerminalOpen ? '터미널 닫기' : '터미널 열기'}
+        </button>
+      </div>
+
+      {isDictModalOpen && (
+        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-lg shadow-2xl flex flex-col max-h-[85vh] relative">
+            {renderDictionaryUI(true)}
+          </div>
+        </div>
+      )}
+
+      {activeCard && (
+        <CardModal 
+          activeCard={activeCard} 
+          renderContent={renderContent} 
+          onClose={handleCloseModal} 
+          goalBalance={goalBalance}
+          handleUseItem={handleUseItem}
+        />
+      )}
+    </div>
+  );
+}
+
+export default function App() { 
+  return (
+    <GlobalErrorBoundary>
+      <MainApp />
+    </GlobalErrorBoundary>
+  ); 
+}
