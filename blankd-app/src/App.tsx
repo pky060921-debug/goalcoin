@@ -607,19 +607,26 @@ function MainApp() {
 
   const bodyScrollRef = useRef<HTMLDivElement>(null);
   const memoEditorRef = useRef<HTMLDivElement>(null);
+  const lastLoadedMemoCardIdRef = useRef<any>(null);
 
   const statsRef = useRef<{ text: string, filled: number, wrongIndices: Set<number>, sessionCorrect: number, highlights: Record<string, string>, hiddenTokens: Set<string>, modifiedTokens: Record<string, string> }>({
     text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0, highlights: {}, hiddenTokens: new Set<string>(), modifiedTokens: {}
   });
 
-  // 💡 [핵심 수정] 암기노트 창 닫았다 열 때 내용 증발 방지 (statsRef.current.text 무조건 신뢰)
+  // 💡 [핵심 수정] 암기노트 전환 시 이전 조항 내용 덮어쓰기 방지 (dataset 활용)
   useEffect(() => {
     if (activeCard && isMemoOpen && memoEditorRef.current) {
-      // 노트 창이 다시 열릴 때는 무조건 세션 중 실시간 저장된 최신 상태(statsRef.current.text)를 삽입
-      const savedMemo = statsRef.current.text || "";
-      const newHtml = savedMemo.includes('<') ? savedMemo : savedMemo.replace(/\n/g, '<br/>');
-      memoEditorRef.current.innerHTML = newHtml;
-      memoEditorRef.current.dataset.cardId = String(activeCard.id);
+      if (String(lastLoadedMemoCardIdRef.current) !== String(activeCard.id)) {
+        const stats = getExtendedStats(activeCard.memo);
+        const savedMemo = stats.text ? stats.text.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim() : "";
+        const newHtml = savedMemo.includes('<') ? savedMemo : savedMemo.replace(/\n/g, '<br/>');
+        memoEditorRef.current.innerHTML = newHtml;
+        memoEditorRef.current.dataset.cardId = String(activeCard.id);
+        statsRef.current.text = savedMemo;
+        lastLoadedMemoCardIdRef.current = activeCard.id;
+      }
+    } else if (!isMemoOpen) {
+      lastLoadedMemoCardIdRef.current = null;
     }
   }, [activeCard, isMemoOpen]);
 
@@ -825,7 +832,6 @@ function MainApp() {
               e.preventDefault();
               e.stopPropagation();
               if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-
               const now = Date.now();
               if (e.repeat || (now - lastKeyTimeRef.current < 120)) return;
               lastKeyTimeRef.current = now;
@@ -1558,9 +1564,8 @@ function MainApp() {
     }
   };
 
-  // 💡 [수정] 상단 네비게이션용 예상 합격률 상태 및 계산 로직 (장별 가중치 반영)
+  // 💡 [핵심 반영] 상단 예상 합격률 (장별 목표 회독수 가중 평균 반영)
   const [passProbability, setPassProbability] = useState<number>(0);
-  const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => getExtendedStats(card.memo || "").filled || 0)) : 0;
 
   useEffect(() => {
     const calculatePassProbability = () => {
@@ -1603,7 +1608,9 @@ function MainApp() {
     return () => window.removeEventListener("targetRepsUpdated", calculatePassProbability);
   }, [savedCards, safeAddress]);
 
-  // 💡 [누락 복원] '이어하기' 처리를 위한 useMemo 로직
+  const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => getExtendedStats(card.memo || "").filled || 0)) : 0;
+
+  // 💡 [누락 복구] 이어하기 버튼용 상태
   const { nextCatToCraft, nextStudyCard } = useMemo(() => {
     let craftTarget = null; let studyTarget = null;
     if (!isLoggedIn) return { nextCatToCraft: null, nextStudyCard: null };
@@ -1635,6 +1642,7 @@ function MainApp() {
     }
     return { nextCatToCraft: craftTarget, nextStudyCard: studyTarget };
   }, [isLoggedIn, categories, savedCards]);
+
 
   useEffect(() => {
     if (activeCard) {
@@ -1730,12 +1738,11 @@ function MainApp() {
       }
   }, [currentBlankIdx, inputMode, activeCard, inputStatus]);
 
-  // 💡 [핵심 수정] 카드 종료 시 데이터 검증을 통해 암기노트 증발/덮어쓰기 방지
+  // 💡 [핵심 반영] 카드 종료 시 ID 검증 (덮어쓰기 방지)
   const finishCard = async (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
     
-    // 현재 열려 있는 에디터가 방금 풀던 그 조항이 확실히 맞을 때만 DOM의 내용으로 업데이트
     if (memoEditorRef.current && memoEditorRef.current.dataset.cardId === String(activeCard.id)) {
       statsRef.current.text = memoEditorRef.current.innerHTML;
     }
@@ -1865,7 +1872,7 @@ function MainApp() {
 
   const handleReviewSelect = (days: number) => { if (!activeCard) return; statsRef.current.filled += 1; finishCard(days); };
 
-  // 💡 [핵심 수정] 모달 닫을 시 에디터 내용 검증 추가
+  // 💡 [핵심 반영] 모달 닫을 시 ID 검증 (덮어쓰기 방지)
   const handleCloseModal = async () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
@@ -2021,17 +2028,6 @@ function MainApp() {
     recognition.onend = () => { if (recognitionRef.current) { try { recognitionRef.current.start(); } catch(e) {} } else { setIsListening(false); } };
     recognitionRef.current = recognition; recognition.start();
   };
-
-  // 💡 [핵심 수정] 암기노트 증발 방지 로직이 반영된 useEffect
-  useEffect(() => {
-    if (activeCard && isMemoOpen && memoEditorRef.current) {
-      // 컴포넌트가 활성화될 때 무조건 임시 저장소(statsRef)의 가장 최신 텍스트를 주입합니다.
-      const savedMemo = statsRef.current.text || "";
-      const newHtml = savedMemo.includes('<') ? savedMemo : savedMemo.replace(/\n/g, '<br/>');
-      memoEditorRef.current.innerHTML = newHtml;
-      memoEditorRef.current.dataset.cardId = String(activeCard.id);
-    }
-  }, [activeCard, isMemoOpen]);
 
   const memoizedCardContent = useMemo(() => {
     if (!activeCard) return null;
@@ -2474,6 +2470,16 @@ function MainApp() {
                 >
                   <span>{isStealthEditMode ? '변형완료' : `변형(${totalTransformCount})`}</span>
                 </button>
+
+                {totalTransformCount > 0 && (
+                  <button
+                    title="변형 구간 전체 영구 해제"
+                    onClick={(e) => { e.currentTarget.blur(); handleClearAllStealth(); }}
+                    className="px-1.5 py-0.5 text-[10px] text-red-400 hover:text-red-300 font-bold"
+                  >
+                    해제
+                  </button>
+                )}
               </div>
 
               <div className="flex items-center gap-1.5 bg-white/5 px-2 py-1 rounded-sm border border-white/10">
@@ -2507,6 +2513,15 @@ function MainApp() {
                 >
                   지우개
                 </button>
+                {hasHighlights && (
+                  <button
+                    title="형광펜 전체 초기화"
+                    onClick={(e) => { e.currentTarget.blur(); handleClearAllHighlights(); }}
+                    className="px-1 py-0.5 text-[10px] text-red-400 hover:text-red-300 font-bold"
+                  >
+                    초기화
+                  </button>
+                )}
               </div>
 
               <div className="flex items-center gap-1 bg-white/5 px-1 sm:px-2 py-1 rounded-sm border border-white/10">
@@ -2518,7 +2533,6 @@ function MainApp() {
               <button 
                 onClick={(e) => { 
                   e.currentTarget.blur(); 
-                  // 💡 [핵심] 암기노트 저장 전 대상 ID 재확인 로직 추가
                   if (isMemoOpen && memoEditorRef.current && activeCard) {
                     if (memoEditorRef.current.dataset.cardId === String(activeCard.id)) {
                       statsRef.current.text = memoEditorRef.current.innerHTML;
@@ -2647,7 +2661,7 @@ function MainApp() {
                     </div>
                  </div>
                  
-                 {/* 💡 [핵심 수정] 암기노트 에디터 - data-card-id 추가 및 onInput/onBlur에서 ID 일치 확인 처리 */}
+                 {/* 💡 [핵심] 암기노트 에디터 - data-card-id 추가 및 onInput/onBlur 일치 확인 로직 포함 */}
                  <div 
                     id={`memo-editor-${activeCard.id}`}
                     key={`memo-${activeCard.id}`}
@@ -3163,4 +3177,54 @@ function MainApp() {
       </header>
 
       {isLoggedIn && (
-        <nav className="border-b border-white/5 bg-black/40 py-1
+        <nav className="border-b border-white/5 bg-black/40 py-1.5 overflow-x-auto whitespace-nowrap custom-scrollbar w-full mb-6">
+          <div className="w-full max-w-[1600px] mx-auto flex items-center justify-start gap-1 sm:gap-2 px-2 sm:px-4 md:px-8">
+            {[{ id: 'progress', label: '진행상황' }, { id: 'create', label: '만들기' }, { id: 'enhance', label: '채우기' }, { id: 'record', label: '기록실' }, { id: 'market', label: '마켓' }, { id: 'exam', label: '모의고사' }, { id: 'settings', label: '설정' }].map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 sm:px-4 py-1.5 text-[11px] sm:text-xs font-bold tracking-widest rounded-sm transition-all ${activeTab === tab.id ? 'bg-white/10 text-current' : 'text-white/40 hover:text-white/70'}`}>{tab.label}</button>
+            ))}
+          </div>
+        </nav>
+      )}
+
+      {!isLoggedIn ? (
+          <main className="max-w-md mx-auto mt-20 sm:mt-24 flex flex-col items-center px-4">
+          <h2 className="text-xl sm:text-2xl font-serif text-current mb-4 tracking-tight">빈칸개발 (BlankD)</h2>
+          <p className="text-xs sm:text-sm text-white/40 mb-10 sm:mb-12 text-center leading-relaxed">인지 부하 이론 기반의 학습 플랫폼<br/>압도적인 영구 기억을 형성합니다.</p>
+          <button onClick={async () => { window.location.href = await enokiFlow.createAuthorizationURL({ provider: 'google', clientId: '536814695888-bepe0chce3nq31vuu3th60c7al7vpsv7.apps.googleusercontent.com', redirectUrl: window.location.origin, network: 'testnet', extraParams: { scope: ['openid', 'email', 'profile'] }}); }} className="w-full py-4 bg-[#111827] text-white text-sm font-bold rounded-sm mb-6 transition-transform active:scale-95 shadow-lg">Google 계정으로 시작하기</button>
+        </main>
+      ) : (
+        <div className="w-full max-w-[1600px] mx-auto flex gap-4 sm:gap-6 px-2 sm:px-4 lg:px-8 items-start pb-10 transition-all duration-300">
+          <main className="flex-1 w-full min-w-0 transition-all duration-300">
+            {memoizedTabs}
+          </main>
+          
+          {isSidebarOpen ? (
+            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[320px] xl:w-[400px] transition-all duration-300 animate-in slide-in-from-right-8">
+              {renderDictionaryUI(false)}
+            </aside>
+          ) : (
+            <aside className="hidden lg:flex flex-col shrink-0 sticky top-[100px] h-[calc(100vh-140px)] w-[40px] items-center justify-start transition-all duration-300 animate-in fade-in">
+              <button onClick={() => setIsSidebarOpen(true)} className="w-full h-32 bg-white/5 border border-white/10 hover:bg-white/10 rounded-sm flex items-center justify-center text-white/50 hover:text-white transition-colors flex-col gap-2 shadow-md">
+                <span className="text-xs">◀</span>
+                <span className="text-[10px] font-bold" style={{ writingMode: 'vertical-rl' }}>사전 열기</span>
+              </button>
+            </aside>
+          )}
+        </div>
+      )}
+
+      <div className="fixed bottom-4 right-4 z-[999] flex flex-col items-end gap-2">
+        {isTerminalOpen && (
+          <div className="w-[85vw] max-w-lg h-64 bg-black/95 border border-teal-500/30 p-4 font-mono text-[11px] text-teal-400 overflow-y-auto rounded shadow-2xl flex flex-col custom-scrollbar animate-in slide-in-from-bottom-5 fade-in">
+            <div className="flex justify-between items-center mb-2 border-b border-teal-500/10 pb-2 sticky top-0 bg-black/95">
+              <span className="uppercase tracking-widest text-teal-500/50 font-bold">시스템 진단 터미널</span>
+              <button onClick={() => setSystemLogs([])} className="text-white/40 hover:text-white px-2 py-0.5 bg-white/5 rounded transition-colors">기록 지우기</button>
+            </div>
+            <div className="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
+              {systemLogs.map((l, i) => (
+                <div key={i} className={`leading-snug break-all ${l.includes('🚨') ? 'text-red-400 font-bold' : l.includes('▶️') ? 'text-amber-300' : ''}`}>{l}</div>
+              ))}
+            </div>
+          </div>
+        )}
+        <button onClick={() => setIsTerminalOpen(!isTerminalOpen)} className={`px-4 py-2 rounded-full font-bold text-[11px] uppercase tracking-wider shadow-lg transition-all border ${isTerminalOpen ? 'bg-red-900/50
