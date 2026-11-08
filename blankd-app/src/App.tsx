@@ -613,7 +613,7 @@ function MainApp() {
     text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0, highlights: {}, hiddenTokens: new Set<string>(), modifiedTokens: {}
   });
 
-  // 💡 암기노트 전환 시 이전 조항 덮어쓰기 방지 (dataset 활용)
+  // 💡 [수정] 암기노트 덮어쓰기 방지: activeCard.memo에서 직접 노트 로드 및 dataset 반영
   useEffect(() => {
     if (activeCard && isMemoOpen && memoEditorRef.current) {
       if (String(lastLoadedMemoCardIdRef.current) !== String(activeCard.id)) {
@@ -832,6 +832,7 @@ function MainApp() {
               e.preventDefault();
               e.stopPropagation();
               if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+
               const now = Date.now();
               if (e.repeat || (now - lastKeyTimeRef.current < 120)) return;
               lastKeyTimeRef.current = now;
@@ -896,6 +897,7 @@ function MainApp() {
     window.addEventListener('keydown', handleGlobalKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true });
   }, [inputMode, activeCard, activeTouchCandidates, blanks, currentBlankIdx, inputStatus, skimmingFocusIdx, isSkimmingPaused, skimmingWrongs, cardHiddenTokens, cardModifiedTokens, sessionRevealedTokens]);
+
 
   useEffect(() => {
     const handleOnline = () => {
@@ -1563,8 +1565,9 @@ function MainApp() {
     }
   };
 
-  // 💡 [핵심 반영] 장별 목표 회독수 가중 평균 합격률 로직
+  // 💡 [수정] 상단 네비게이션용 예상 합격률 상태 및 계산 로직 (장별 가중치 반영)
   const [passProbability, setPassProbability] = useState<number>(0);
+  const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => getExtendedStats(card.memo || "").filled || 0)) : 0;
 
   useEffect(() => {
     const calculatePassProbability = () => {
@@ -1586,10 +1589,11 @@ function MainApp() {
         if (!c.folder_name || c.folder_name === '기본 폴더') return;
         const stats = getExtendedStats(c.memo);
         const currentReps = stats.filled || 0;
+        // 설정값이 없으면 기본 목표 회독수 50으로 계산
         const targetReps = targetSettings[c.folder_name] || 50; 
         
         let cardScore = (currentReps / targetReps) * 100;
-        if (cardScore > 100) cardScore = 100; 
+        if (cardScore > 100) cardScore = 100; // 100% 초과 방지
         
         totalScore += cardScore;
         totalCount += 1;
@@ -1607,9 +1611,7 @@ function MainApp() {
     return () => window.removeEventListener("targetRepsUpdated", calculatePassProbability);
   }, [savedCards, safeAddress]);
 
-  const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => getExtendedStats(card.memo || "").filled || 0)) : 0;
-
-  // 💡 [누락 복원] 이어하기 버튼 표시용 useMemo 블록
+  // 💡 [누락 복원] '이어하기' 처리를 위한 useMemo 로직
   const { nextCatToCraft, nextStudyCard } = useMemo(() => {
     let craftTarget = null; let studyTarget = null;
     if (!isLoggedIn) return { nextCatToCraft: null, nextStudyCard: null };
@@ -1641,7 +1643,6 @@ function MainApp() {
     }
     return { nextCatToCraft: craftTarget, nextStudyCard: studyTarget };
   }, [isLoggedIn, categories, savedCards]);
-
 
   useEffect(() => {
     if (activeCard) {
@@ -1737,7 +1738,7 @@ function MainApp() {
       }
   }, [currentBlankIdx, inputMode, activeCard, inputStatus]);
 
-  // 💡 [핵심 반영] 카드 종료 시 ID 검증 (덮어쓰기 방지)
+  // 💡 [수정] 카드 종료 시 dataset을 통한 에디터 내용 오염 검증 (덮어쓰기 방지)
   const finishCard = async (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
@@ -1871,7 +1872,7 @@ function MainApp() {
 
   const handleReviewSelect = (days: number) => { if (!activeCard) return; statsRef.current.filled += 1; finishCard(days); };
 
-  // 💡 [핵심 반영] 모달 닫을 시 ID 검증 (덮어쓰기 방지)
+  // 💡 [수정] 모달 닫을 시 ID 검증 (덮어쓰기 방지)
   const handleCloseModal = async () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
@@ -2660,6 +2661,7 @@ function MainApp() {
                     </div>
                  </div>
                  
+                 {/* 💡 [핵심] 암기노트 에디터 - data-card-id 추가 및 onInput/onBlur 일치 확인 로직 포함 */}
                  <div 
                     id={`memo-editor-${activeCard.id}`}
                     key={`memo-${activeCard.id}`}
@@ -2922,7 +2924,7 @@ function MainApp() {
           <ExamTab walletAddress={safeAddress} address={safeAddress} />
         </div>
         <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
-          <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} zkLogin={zkLogin} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} globalDict={globalDict} saveGlobalDict={saveGlobalDict} loadAllData={loadAllData} theme={theme} setTheme={setTheme} savedCards={savedCards} />
+          <MypageTab safeAddress={safeAddress} enokiFlow={enokiFlow} zkLogin={zkLogin} useAiRecommend={useAiRecommend} setUseAiRecommend={setUseAiRecommend} studyMode={studyMode} setStudyMode={setStudyMode} globalDict={globalDict} saveGlobalDict={saveGlobalDict} loadAllData={loadAllData} theme={theme} setTheme={setTheme} savedCards={savedCards}/>
         </div>
       </>
     );
