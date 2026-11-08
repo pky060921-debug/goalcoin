@@ -14,6 +14,8 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
   const [rankingData, setRankingData] = useState<any[]>([]);
   const [isLoadingRanking, setIsLoadingRanking] = useState(false);
 
+  // 💡 장별 학습 횟수 교정용 상태
+  const [targetFolderForUpdate, setTargetFolderForUpdate] = useState<string>("");
   const [fromReps, setFromReps] = useState("");
   const [toReps, setToReps] = useState("");
   const [isUpdatingReps, setIsUpdatingReps] = useState(false);
@@ -63,6 +65,11 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
         .sort() as string[];
       setAvailableFolders(folders);
       
+      // 일괄 교정용 기본 선택 폴더 설정
+      if (folders.length > 0 && !targetFolderForUpdate) {
+        setTargetFolderForUpdate(folders[0]);
+      }
+      
       try {
         const savedSettings = localStorage.getItem(`blankd_target_reps_${safeAddress}`);
         if (savedSettings) {
@@ -78,7 +85,7 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
         console.error("목표 회독수 로드 실패", e);
       }
     }
-  }, [savedCards, safeAddress]);
+  }, [savedCards, safeAddress, targetFolderForUpdate]);
 
   // 💡 목표 회독수 변경 핸들러
   const handleTargetRepsChange = (folder: string, value: string) => {
@@ -208,23 +215,27 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
     }
   };
 
-  // 💡 [핵심 수정] 오류가 발생하던 학습 횟수 일괄 교정 로직 전면 재작성 (savedCards 실시간 참조)
+  // 💡 [수정] 전체 변경 삭제 및 선택한 장(폴더) 내에서만 반복 횟수 일괄 변경
   const handleBulkUpdateReps = async () => {
     const fromVal = parseInt(fromReps, 10);
     const toVal = parseInt(toReps, 10);
     
+    if (!targetFolderForUpdate) {
+      alert("변경할 폴더(장)를 선택해주세요.");
+      return;
+    }
+
     if (isNaN(fromVal) || isNaN(toVal)) {
       alert("현재 횟수와 변경할 목표 횟수를 모두 숫자로 입력해주세요.");
       return;
     }
 
-    if (!window.confirm(`현재 반복 횟수가 [${fromVal}회]인 모든 카드를 [${toVal}회]로 일괄 변경하시겠습니까?`)) {
+    if (!window.confirm(`[${targetFolderForUpdate}] 내에서 반복 횟수가 [${fromVal}회]인 카드를 [${toVal}회]로 일괄 변경하시겠습니까?`)) {
       return;
     }
 
     setIsUpdatingReps(true);
     try {
-      // 로컬 스토리지가 아닌, App.tsx에서 전달받은 실제 최신 상태(savedCards)를 기준으로 안전하게 순회
       if (!savedCards || savedCards.length === 0) {
         throw new Error("로드된 카드 데이터가 없습니다. 새로고침 후 다시 시도해주세요.");
       }
@@ -235,18 +246,20 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
       for (let i = 0; i < nextCards.length; i++) {
         const card = nextCards[i];
+        
+        // 💡 오직 선택한 폴더의 카드만 적용!
+        if (card.folder_name !== targetFolderForUpdate) continue;
+
         let currentFilled = 0;
         let memoObj: any = { text: "", filled: 0, wrongIndices: [] };
         
         try {
           if (card.memo) {
-            // 메모가 JSON 형식인 경우만 안전 파싱
             if (card.memo.trim().startsWith('{')) {
               const parsed = JSON.parse(card.memo);
               memoObj = { ...parsed };
-              currentFilled = Number(parsed.filled) || 0; // 문자열 '0' 이슈 방지용 명시적 숫자 변환
+              currentFilled = Number(parsed.filled) || 0;
             } else {
-              // 레거시 형식 지원 (과거 데이터 안전 처리)
               const parts = card.memo.split('|');
               currentFilled = parts.length > 2 ? parseInt(parts[2], 10) : 0;
               memoObj = { text: parts[1] || "", filled: currentFilled, wrongIndices: [] };
@@ -254,7 +267,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
           }
         } catch(e) {}
 
-        // 현재 카드의 회독수가 목표 수정치와 일치한다면
         if (currentFilled === fromVal) {
           changeCount++;
           memoObj.filled = toVal;
@@ -270,7 +282,6 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
             memo: newMemo
           };
 
-          // 서버 전송을 위한 큐 적재
           updateFns.push(() => fetch("https://api.blankd.top/api/save-card", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -280,28 +291,22 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
       }
 
       if (changeCount === 0) {
-        alert(`❌ 현재 반복 횟수가 ${fromVal}회인 카드가 존재하지 않습니다.`);
+        alert(`❌ [${targetFolderForUpdate}] 내에 현재 반복 횟수가 ${fromVal}회인 카드가 존재하지 않습니다.`);
         setIsUpdatingReps(false);
         return;
       }
 
-      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[일괄 교정] ${changeCount}개의 카드를 ${fromVal}회 ➔ ${toVal}회로 변경 중...`]);
+      if (setSystemLogs) setSystemLogs((prev: string[]) => [...prev, `[장별 일괄 교정] ${targetFolderForUpdate} 내 ${changeCount}개 카드를 ${fromVal}회 ➔ ${toVal}회로 변경 중...`]);
 
-      // 서버 과부하 방지를 위해 5개씩 묶어서 배치(Batch) 비동기 전송
       for (let i = 0; i < updateFns.length; i += 5) {
         await Promise.all(updateFns.slice(i, i + 5).map(fn => fn()));
       }
 
-      // 서버 전송 완료 후 로컬 스토리지 강제 갱신
       localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(nextCards));
-      
-      // 화면 즉각 갱신을 위해 데이터 다시 로드
       if (typeof loadAllData === 'function') await loadAllData(true);
-      
-      // 앱 상단 합격률 계산식에 변경된 값 반영 트리거
       window.dispatchEvent(new Event("targetRepsUpdated")); 
       
-      alert(`✅ [교정 성공] 총 ${changeCount}개 카드의 반복 횟수가 ${toVal}회로 일괄 변경되었습니다.`);
+      alert(`✅ [교정 성공] [${targetFolderForUpdate}]의 총 ${changeCount}개 카드 반복 횟수가 ${toVal}회로 일괄 변경되었습니다.`);
       setFromReps(""); setToReps("");
     } catch(err: any) {
       alert(`❌ 일괄 변경 실패: ${err.message}`);
@@ -477,38 +482,51 @@ export const MypageTab = ({ safeAddress, enokiFlow, zkLogin, setCategories, setS
 
         <div className="border-t border-white/10"></div>
 
-        {/* 🛠️ 조건부 일괄 데이터 교정 (어드민) */}
+        {/* 🛠️ 장별 학습 횟수 일괄 교정 (어드민) - 변경된 부분 */}
         <div className="space-y-3">
           <div className="text-xs text-indigo-400 font-bold tracking-wider font-mono uppercase flex items-center gap-2">
-            <span>🛠️</span> 학습 횟수 일괄 교정 (어드민)
+            <span>🛠️</span> 장별 학습 횟수 일괄 교정 (어드민)
           </div>
           <div className="p-4 bg-black/40 border border-white/5 rounded-sm space-y-4">
             <p className="text-[10px] sm:text-[11px] text-white/40 leading-relaxed">
-              특정 반복(채우기) 횟수를 가진 <span className="text-indigo-400">모든 카드</span>를 찾아 원하는 횟수로 한꺼번에 덮어씁니다.<br/>
-              예) 현재 0회인 카드를 모두 1회로 변경
+              선택한 <span className="text-indigo-400 font-bold">특정 장(폴더)</span> 내에서 특정 반복(채우기) 횟수를 가진 카드를 찾아 원하는 횟수로 한꺼번에 덮어씁니다.<br/>
+              예) 제1장 내에서 현재 0회인 카드를 모두 10회로 변경
             </p>
-            <div className="flex gap-2">
-              <input 
-                type="number" 
-                placeholder="현재 횟수 (예: 0)" 
-                value={fromReps}
-                onChange={(e) => setFromReps(e.target.value)}
-                className="flex-1 bg-black/50 border border-white/10 p-2.5 text-xs text-white/90 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full"
-              />
-              <input 
-                type="number" 
-                placeholder="변경할 횟수 (예: 1)" 
-                value={toReps}
-                onChange={(e) => setToReps(e.target.value)}
-                className="flex-1 bg-black/50 border border-white/10 p-2.5 text-xs text-white/90 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full"
-              />
-              <button 
-                onClick={handleBulkUpdateReps} 
-                disabled={isUpdatingReps || fromReps === "" || toReps === ""}
-                className={`px-4 font-bold text-[11px] rounded-sm transition-all shadow-md shrink-0 ${isUpdatingReps || fromReps === "" || toReps === "" ? 'bg-white/5 text-white/30 border border-white/10 cursor-not-allowed' : 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/50 hover:bg-indigo-600/40'}`}
+            <div className="flex flex-col gap-2">
+              <select
+                value={targetFolderForUpdate}
+                onChange={(e) => setTargetFolderForUpdate(e.target.value)}
+                className="w-full bg-black/50 border border-white/10 p-2.5 text-xs text-white/90 outline-none rounded-sm focus:border-indigo-500/50 transition-colors"
               >
-                {isUpdatingReps ? "적용 중.." : "일괄 변경"}
-              </button>
+                <option value="" disabled>적용할 장(폴더)을 선택하세요</option>
+                {availableFolders.map(f => (
+                  <option key={f} value={f}>{f}</option>
+                ))}
+              </select>
+
+              <div className="flex gap-2">
+                <input 
+                  type="number" 
+                  placeholder="현재 횟수 (예: 0)" 
+                  value={fromReps}
+                  onChange={(e) => setFromReps(e.target.value)}
+                  className="flex-1 bg-black/50 border border-white/10 p-2.5 text-xs text-white/90 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full"
+                />
+                <input 
+                  type="number" 
+                  placeholder="변경할 횟수 (예: 1)" 
+                  value={toReps}
+                  onChange={(e) => setToReps(e.target.value)}
+                  className="flex-1 bg-black/50 border border-white/10 p-2.5 text-xs text-white/90 outline-none rounded-sm focus:border-indigo-500/50 transition-colors w-full"
+                />
+                <button 
+                  onClick={handleBulkUpdateReps} 
+                  disabled={isUpdatingReps || fromReps === "" || toReps === "" || !targetFolderForUpdate}
+                  className={`px-4 font-bold text-[11px] rounded-sm transition-all shadow-md shrink-0 ${isUpdatingReps || fromReps === "" || toReps === "" || !targetFolderForUpdate ? 'bg-white/5 text-white/30 border border-white/10 cursor-not-allowed' : 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/50 hover:bg-indigo-600/40'}`}
+                >
+                  {isUpdatingReps ? "적용 중.." : "일괄 변경"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
