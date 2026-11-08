@@ -613,7 +613,7 @@ function MainApp() {
     text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0, highlights: {}, hiddenTokens: new Set<string>(), modifiedTokens: {}
   });
 
-  // 💡 [핵심 수정] 암기노트 전환 시 이전 조항 내용 덮어쓰기 방지 (dataset 활용)
+  // 💡 암기노트 전환 시 이전 조항 덮어쓰기 방지 (dataset 활용)
   useEffect(() => {
     if (activeCard && isMemoOpen && memoEditorRef.current) {
       if (String(lastLoadedMemoCardIdRef.current) !== String(activeCard.id)) {
@@ -896,7 +896,6 @@ function MainApp() {
     window.addEventListener('keydown', handleGlobalKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true });
   }, [inputMode, activeCard, activeTouchCandidates, blanks, currentBlankIdx, inputStatus, skimmingFocusIdx, isSkimmingPaused, skimmingWrongs, cardHiddenTokens, cardModifiedTokens, sessionRevealedTokens]);
-
 
   useEffect(() => {
     const handleOnline = () => {
@@ -1564,7 +1563,7 @@ function MainApp() {
     }
   };
 
-  // 💡 [핵심 반영] 상단 예상 합격률 (장별 목표 회독수 가중 평균 반영)
+  // 💡 [핵심 반영] 장별 목표 회독수 가중 평균 합격률 로직
   const [passProbability, setPassProbability] = useState<number>(0);
 
   useEffect(() => {
@@ -1610,7 +1609,7 @@ function MainApp() {
 
   const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => getExtendedStats(card.memo || "").filled || 0)) : 0;
 
-  // 💡 [누락 복구] 이어하기 버튼용 상태
+  // 💡 [누락 복원] 이어하기 버튼 표시용 useMemo 블록
   const { nextCatToCraft, nextStudyCard } = useMemo(() => {
     let craftTarget = null; let studyTarget = null;
     if (!isLoggedIn) return { nextCatToCraft: null, nextStudyCard: null };
@@ -2661,7 +2660,6 @@ function MainApp() {
                     </div>
                  </div>
                  
-                 {/* 💡 [핵심] 암기노트 에디터 - data-card-id 추가 및 onInput/onBlur 일치 확인 로직 포함 */}
                  <div 
                     id={`memo-editor-${activeCard.id}`}
                     key={`memo-${activeCard.id}`}
