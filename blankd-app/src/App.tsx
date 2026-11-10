@@ -151,7 +151,7 @@ const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
     const qStr = localStorage.getItem('blankd_sync_queue');
     const q = qStr ? JSON.parse(qStr) : { memos: [], answers: [] };
     if (type === 'MEMO') {
-      q.memos = q.memos.filter((m: any) => m.id !== payload.id); 
+      q.memos = q.memos.filter((m: any) => String(m.id) !== String(payload.id)); 
       q.memos.push(payload);
     } else if (type === 'ANSWER') {
       q.answers.push(payload);
@@ -609,26 +609,9 @@ function MainApp() {
   const memoEditorRef = useRef<HTMLDivElement>(null);
   const lastLoadedMemoCardIdRef = useRef<any>(null);
 
-  const statsRef = useRef<{ text: string, filled: number, wrongIndices: Set<number>, sessionCorrect: number, highlights: Record<string, string>, hiddenTokens: Set<string>, modifiedTokens: Record<string, string> }>({
-    text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0, highlights: {}, hiddenTokens: new Set<string>(), modifiedTokens: {}
+  const statsRef = useRef<{ cardId: any, text: string, filled: number, wrongIndices: Set<number>, sessionCorrect: number, highlights: Record<string, string>, hiddenTokens: Set<string>, modifiedTokens: Record<string, string> }>({
+    cardId: null, text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0, highlights: {}, hiddenTokens: new Set<string>(), modifiedTokens: {}
   });
-
-  // 💡 암기노트 전환 시 이전 조항 덮어쓰기 방지 (dataset 활용)
-  useEffect(() => {
-    if (activeCard && isMemoOpen && memoEditorRef.current) {
-      if (String(lastLoadedMemoCardIdRef.current) !== String(activeCard.id)) {
-        const stats = getExtendedStats(activeCard.memo);
-        const savedMemo = stats.text ? stats.text.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim() : "";
-        const newHtml = savedMemo.includes('<') ? savedMemo : savedMemo.replace(/\n/g, '<br/>');
-        memoEditorRef.current.innerHTML = newHtml;
-        memoEditorRef.current.dataset.cardId = String(activeCard.id);
-        statsRef.current.text = savedMemo;
-        lastLoadedMemoCardIdRef.current = activeCard.id;
-      }
-    } else if (!isMemoOpen) {
-      lastLoadedMemoCardIdRef.current = null;
-    }
-  }, [activeCard, isMemoOpen]);
 
   const [activeHighlighter, setActiveHighlighter] = useState<'purple' | 'blue' | 'orange' | 'eraser' | null>(null);
   const [cardHighlights, setCardHighlights] = useState<Record<string, string>>({});
@@ -1308,15 +1291,25 @@ function MainApp() {
   };
 
   const handleUpdateMemoBackground = async (id: number, memo: string) => {
+    // 💡 현재 열려 있는 activeCard의 memo도 즉시 동기화하여 암기노트 재오픈 시 초기값으로 덮어써지는 현상 방지
+    if (activeCard && String(activeCard.id) === String(id)) {
+      activeCard.memo = memo;
+    }
+    if (activeCardRef.current && String(activeCardRef.current.id) === String(id)) {
+      activeCardRef.current.memo = memo;
+    }
+
     setSavedCards(prev => {
-      const next = prev.map(c => c.id === id ? { ...c, memo } : c);
+      const next = prev.map(c => String(c.id) === String(id) ? { ...c, memo } : c);
       localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
       return next;
     });
     pushToQueue('MEMO', { id, memo });
     
     if (navigator.onLine) {
-      const target = savedCards.find((c:any) => c.id === id);
+      const target = (activeCard && String(activeCard.id) === String(id))
+        ? activeCard
+        : savedCards.find((c:any) => String(c.id) === String(id));
       if (target) {
         fetch("https://api.blankd.top/api/save-card", {
           method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
@@ -1708,6 +1701,7 @@ function MainApp() {
       let cleanText = stats.text ? stats.text.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim() : "";
 
       statsRef.current = { 
+          cardId: activeCard.id,
           text: cleanText, 
           filled: stats.filled, 
           wrongIndices: new Set(stats.wrongIndices || []),
@@ -1726,6 +1720,26 @@ function MainApp() {
       }
     }
   }, [activeCard]);
+
+  // 💡 암기노트 열기/재오픈/전환 시 최신 메모 유지 및 초기화 방지 (activeCard 초기화 useEffect 이후 실행)
+  useEffect(() => {
+    if (activeCard && isMemoOpen && memoEditorRef.current) {
+      if (String(lastLoadedMemoCardIdRef.current) !== String(activeCard.id)) {
+        const stats = getExtendedStats(activeCard.memo);
+        const rawText = (String(statsRef.current.cardId) === String(activeCard.id) && statsRef.current.text !== undefined)
+          ? statsRef.current.text
+          : (stats.text || "");
+        const savedMemo = rawText ? rawText.replace(/\(\s*\)\s*=>\s*x\(\s*null\s*\)/g, "").trim() : "";
+        const newHtml = savedMemo.includes('<') ? savedMemo : savedMemo.replace(/\n/g, '<br/>');
+        memoEditorRef.current.innerHTML = newHtml;
+        memoEditorRef.current.dataset.cardId = String(activeCard.id);
+        statsRef.current.text = savedMemo;
+        lastLoadedMemoCardIdRef.current = activeCard.id;
+      }
+    } else {
+      lastLoadedMemoCardIdRef.current = null;
+    }
+  }, [activeCard, isMemoOpen]);
 
   useEffect(() => {
       if (activeCard && inputStatus === 'idle' && inputMode !== 'skimming') {
@@ -1773,6 +1787,7 @@ function MainApp() {
     exStats.totalWrong += wrongArr.length;
 
     const newMemo = JSON.stringify(exStats);
+    activeCard.memo = newMemo;
 
     const earnedPoints = correctCount * 5; 
     handleUpdateBalance(earnedPoints);
@@ -1824,7 +1839,7 @@ function MainApp() {
     const nextReviewDate = new Date(); nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
 
     const folderCards = savedCards.filter(c => c.folder_name === currentFolder);
-    const currentIdx = folderCards.findIndex(c => c.id === currentId);
+    const currentIdx = folderCards.findIndex(c => String(c.id) === String(currentId));
     
     let nextCard = null;
     if (isTargetMode) {
@@ -1845,7 +1860,7 @@ function MainApp() {
 
     setActiveCard(nextCard);
     setSavedCards(prev => {
-      const next = prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c);
+      const next = prev.map(c => String(c.id) === String(currentId) ? { ...c, memo: newMemo } : c);
       localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
       return next;
     });
@@ -1890,10 +1905,11 @@ function MainApp() {
     exStats.modifiedTokens = statsRef.current.modifiedTokens;
     
     const newMemo = JSON.stringify(exStats);
+    activeCard.memo = newMemo;
     setActiveCard(null);
 
     setSavedCards(prev => {
-      const next = prev.map(c => c.id === currentId ? { ...c, memo: newMemo } : c);
+      const next = prev.map(c => String(c.id) === String(currentId) ? { ...c, memo: newMemo } : c);
       localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
       return next;
     });
@@ -2534,9 +2550,10 @@ function MainApp() {
                   e.currentTarget.blur(); 
                   if (isMemoOpen && memoEditorRef.current && activeCard) {
                     if (memoEditorRef.current.dataset.cardId === String(activeCard.id)) {
-                      statsRef.current.text = memoEditorRef.current.innerHTML;
+                      const latestHtml = memoEditorRef.current.innerHTML;
+                      statsRef.current.text = latestHtml;
                       const exStats = getExtendedStats(activeCard.memo);
-                      exStats.text = memoEditorRef.current.innerHTML;
+                      exStats.text = latestHtml;
                       exStats.filled = statsRef.current.filled;
                       exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
                       exStats.highlights = statsRef.current.highlights;
@@ -2631,7 +2648,7 @@ function MainApp() {
                         onPointerDown={(e) => {
                           e.preventDefault();
                           const el = memoEditorRef.current;
-                          if (el) {
+                          if (el && activeCard) {
                             el.focus();
                             const r = Math.max(1, tableRows);
                             const c = Math.max(1, tableCols);
@@ -2649,7 +2666,16 @@ function MainApp() {
                             }
                             html += '</tbody></table><div><br></div>';
                             document.execCommand('insertHTML', false, html);
-                            statsRef.current.text = el.innerHTML;
+                            const latestHtml = el.innerHTML;
+                            statsRef.current.text = latestHtml;
+                            const exStats = getExtendedStats(activeCard.memo);
+                            exStats.text = latestHtml;
+                            exStats.filled = statsRef.current.filled;
+                            exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+                            exStats.highlights = statsRef.current.highlights;
+                            exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
+                            exStats.modifiedTokens = statsRef.current.modifiedTokens;
+                            handleUpdateMemoBackground(activeCard.id, JSON.stringify(exStats));
                           }
                         }}
                         className="text-[10px] bg-teal-900/50 hover:bg-teal-800 text-teal-200 border border-teal-500/40 px-2 py-0.5 rounded transition-colors shadow-sm cursor-pointer z-20 whitespace-nowrap"
@@ -2663,7 +2689,6 @@ function MainApp() {
                  <div 
                     id={`memo-editor-${activeCard.id}`}
                     key={`memo-${activeCard.id}`}
-                    data-card-id={String(activeCard.id)}
                     ref={memoEditorRef}
                     contentEditable={true}
                     suppressContentEditableWarning={true}
@@ -2672,7 +2697,16 @@ function MainApp() {
                     }}
                     onInput={(e) => {
                         if (e.currentTarget.dataset.cardId !== String(activeCard.id)) return;
-                        statsRef.current.text = e.currentTarget.innerHTML;
+                        const latestHtml = e.currentTarget.innerHTML;
+                        statsRef.current.text = latestHtml;
+                        const exStats = getExtendedStats(activeCard.memo);
+                        exStats.text = latestHtml;
+                        exStats.filled = statsRef.current.filled;
+                        exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+                        exStats.highlights = statsRef.current.highlights;
+                        exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
+                        exStats.modifiedTokens = statsRef.current.modifiedTokens;
+                        activeCard.memo = JSON.stringify(exStats);
                     }}
                     onBlur={(e) => { 
                         if (isClosingRef.current) return;
