@@ -162,14 +162,21 @@ const pushToQueue = (type: 'MEMO' | 'ANSWER', payload: any) => {
   }
 };
 
-const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict, hintLetter }: {
+const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict, hintLetter, cardId, blankIdx }: {
   inputStatus: string;
   onSubmit: (val: string) => void;
   expected: string; 
   abbrDict: Record<string, string>;
   hintLetter?: string | null;
+  cardId?: any;
+  blankIdx?: number;
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
+  // 💡 항상 최신 onSubmit(handleSequentialInput) 클로저를 참조하도록 Ref 유지 (조항/빈칸 전환 시 멈춤 방지)
+  const onSubmitRef = useRef(onSubmit);
+  useEffect(() => {
+    onSubmitRef.current = onSubmit;
+  }, [onSubmit]);
 
   const validAnswers = useMemo(() => {
       const expectedClean = expected.replace(/\s+/g, '').toLowerCase();
@@ -201,7 +208,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
         }, 10);
         return () => clearTimeout(timer);
     }
-  }, [expected, inputStatus]);
+  }, [expected, inputStatus, cardId, blankIdx]);
   
   useEffect(() => { 
     if (inputStatus === 'correct' || inputStatus === 'idle') {
@@ -209,7 +216,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
     } else if (inputStatus === 'wrong') {
         if (inputRef.current) inputRef.current.value = expected;
     }
-  }, [inputStatus, expected]);
+  }, [inputStatus, expected, cardId, blankIdx]);
 
   useEffect(() => {
     const handleInput = (e: Event) => {
@@ -223,7 +230,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
         if (cleanInput === '') return;
         if (validAnswers.includes(cleanInput)) {
             el.value = '';
-            onSubmit(newVal); 
+            onSubmitRef.current(newVal); 
         }
     };
 
@@ -236,7 +243,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
             const el = e.target as HTMLInputElement;
             const newVal = el.value;
             el.value = '';
-            onSubmit(newVal);
+            onSubmitRef.current(newVal);
         }
     };
 
@@ -249,7 +256,7 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
             el.removeEventListener('keydown', handleKeyDown);
         };
     }
-  }, [validAnswers, onSubmit, inputStatus]);
+  }, [validAnswers, inputStatus, cardId, blankIdx]);
   
   return (
     <input
@@ -264,7 +271,9 @@ const InlineBlankInput = React.memo(({ inputStatus, onSubmit, expected, abbrDict
   return prevProps.inputStatus === nextProps.inputStatus && 
          prevProps.expected === nextProps.expected && 
          prevProps.abbrDict === nextProps.abbrDict && 
-         prevProps.hintLetter === nextProps.hintLetter;
+         prevProps.hintLetter === nextProps.hintLetter &&
+         prevProps.cardId === nextProps.cardId &&
+         prevProps.blankIdx === nextProps.blankIdx;
 });
 
 const MarketTab = ({ safeAddress, goalBalance, handleUpdateBalance, loadAllData, savedCards }: any) => {
@@ -608,6 +617,8 @@ function MainApp() {
   const bodyScrollRef = useRef<HTMLDivElement>(null);
   const memoEditorRef = useRef<HTMLDivElement>(null);
   const lastLoadedMemoCardIdRef = useRef<any>(null);
+  const advanceTimerRef = useRef<any>(null);
+  const forceAdvanceRef = useRef<() => void>(() => {});
 
   const statsRef = useRef<{ cardId: any, text: string, filled: number, wrongIndices: Set<number>, sessionCorrect: number, highlights: Record<string, string>, hiddenTokens: Set<string>, modifiedTokens: Record<string, string> }>({
     cardId: null, text: "", filled: 0, wrongIndices: new Set<number>(), sessionCorrect: 0, highlights: {}, hiddenTokens: new Set<string>(), modifiedTokens: {}
@@ -766,9 +777,9 @@ function MainApp() {
     return () => clearTimeout(timer);
   }, [activeCard, inputMode, isSkimmingPaused, skimmingFocusIdx, blanks, currentBlankIdx, cardHiddenTokens, cardModifiedTokens, sessionRevealedTokens]);
 
-  const checkUnrevealedStealth = () => {
-    const hasUnrevealed = Array.from(cardHiddenTokens).some(k => !sessionRevealedTokens.has(k)) || 
-                          Object.keys(cardModifiedTokens).some(k => !sessionRevealedTokens.has(k));
+  const checkUnrevealedStealth = (currentRevealedSet: Set<string> = sessionRevealedTokens) => {
+    const hasUnrevealed = Array.from(cardHiddenTokens).some(k => !currentRevealedSet.has(k)) || 
+                          Object.keys(cardModifiedTokens).some(k => !currentRevealedSet.has(k));
     if (hasUnrevealed) {
       alert("⚠️ 아직 확인하지 않은 변형/숨김 구간이 남아 있습니다.\n본문의 빛나는 텍스트나 '▸' 화살표를 터치해 모두 확인한 후 넘어가주세요!");
       return true;
@@ -1291,7 +1302,6 @@ function MainApp() {
   };
 
   const handleUpdateMemoBackground = async (id: number, memo: string) => {
-    // 💡 현재 열려 있는 activeCard의 memo도 즉시 동기화하여 암기노트 재오픈 시 초기값으로 덮어써지는 현상 방지
     if (activeCard && String(activeCard.id) === String(id)) {
       activeCard.memo = memo;
     }
@@ -1412,38 +1422,39 @@ function MainApp() {
   };
 
   const handleRevealHiddenSegment = (tokensToReveal: string[], blankIndicesToResolve: number[]) => {
-    setSessionRevealedTokens(prev => {
-      const next = new Set(prev);
-      tokensToReveal.forEach(k => next.add(k));
-      return next;
-    });
+    const nextRevealed = new Set(sessionRevealedTokens);
+    tokensToReveal.forEach(k => nextRevealed.add(k));
+    setSessionRevealedTokens(nextRevealed);
+
+    const updatedBlanks = blanks.map((b, idx) =>
+      blankIndicesToResolve.includes(idx) ? { ...b, correct: true } : b
+    );
 
     if (blankIndicesToResolve.length > 0) {
-      setBlanks(prev => {
-        const next = [...prev];
-        blankIndicesToResolve.forEach(bIdx => {
-          if (next[bIdx]) next[bIdx] = { ...next[bIdx], correct: true };
-        });
-        return next;
-      });
+      setBlanks(updatedBlanks);
       statsRef.current.sessionCorrect = (statsRef.current.sessionCorrect || 0) + blankIndicesToResolve.length;
+    }
 
-      if (blankIndicesToResolve.includes(currentBlankIdx)) {
-        setTimeout(() => {
-          setBlanks(latestBlanks => {
-            const nextUnresolved = latestBlanks.findIndex((b, idx) => idx > currentBlankIdx && !b.correct);
-            if (nextUnresolved !== -1) {
-              setCurrentBlankIdx(nextUnresolved);
-            } else {
-              const anyUnresolved = latestBlanks.findIndex(b => !b.correct);
-              if (anyUnresolved !== -1) setCurrentBlankIdx(anyUnresolved);
-              else {
-                if (!checkUnrevealedStealth()) finishCard();
-              }
-            }
-            return latestBlanks;
-          });
-        }, 150);
+    const nextUnresolvedAfter = updatedBlanks.findIndex((b, idx) => idx > currentBlankIdx && !b.correct);
+    const anyUnresolved = updatedBlanks.findIndex(b => !b.correct);
+
+    if (blankIndicesToResolve.includes(currentBlankIdx)) {
+      setTimeout(() => {
+        if (nextUnresolvedAfter !== -1) {
+          setCurrentBlankIdx(nextUnresolvedAfter);
+        } else if (anyUnresolved !== -1) {
+          setCurrentBlankIdx(anyUnresolved);
+        } else {
+          if (!checkUnrevealedStealth(nextRevealed)) finishCard();
+        }
+      }, 150);
+    } else if (anyUnresolved === -1 && updatedBlanks.length > 0) {
+      // 💡 모든 빈칸을 이미 채운 상태에서 마지막 남은 변형/숨김 구간을 확인한 경우 즉시 다음 조항으로 전환
+      const stillHasUnrevealed =
+        Array.from(cardHiddenTokens).some(k => !nextRevealed.has(k)) ||
+        Object.keys(cardModifiedTokens).some(k => !nextRevealed.has(k));
+      if (!stillHasUnrevealed) {
+        setTimeout(() => finishCard(), 150);
       }
     }
   };
@@ -1513,9 +1524,15 @@ function MainApp() {
   };
 
   const handleSkimmingSubmit = (pageEndIdx: number) => {
-    if (isProcessingRef.current) return;
+    if (isProcessingRef.current || !activeCard) return;
     isProcessingRef.current = true;
     
+    const nextIdxAfterPage = blanks.findIndex((b, idx) => idx > pageEndIdx && !b.correct);
+    if (nextIdxAfterPage === -1 && checkUnrevealedStealth()) {
+        isProcessingRef.current = false;
+        return;
+    }
+
     const newWrongs = new Set(statsRef.current.wrongIndices);
     let newlyCorrect = 0;
 
@@ -1534,22 +1551,17 @@ function MainApp() {
     
     setBlanks(prev => prev.map((b, i) => (i >= currentBlankIdx && i <= pageEndIdx) ? { ...b, correct: true } : b));
     
-    const nextIdx = blanks.findIndex((b, idx) => idx > pageEndIdx && !b.correct);
-    
-    if (nextIdx !== -1) {
-        setCurrentBlankIdx(nextIdx);
-        localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
+    if (nextIdxAfterPage !== -1) {
+        setCurrentBlankIdx(nextIdxAfterPage);
+        localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdxAfterPage.toString());
         setInputStatus('idle');
         isProcessingRef.current = false;
     } else {
-        if (checkUnrevealedStealth()) {
-            isProcessingRef.current = false;
-            return;
-        }
         setCurrentBlankIdx(blanks.length);
         localStorage.removeItem(`blankd_progress_${activeCard.id}`);
         setInputStatus('idle');
-        setTimeout(() => {
+        if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+        advanceTimerRef.current = setTimeout(() => {
             isProcessingRef.current = false;
             finishCard();
         }, 200);
@@ -1637,8 +1649,14 @@ function MainApp() {
 
 
   useEffect(() => {
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
+    }
+    isProcessingRef.current = false;
+    isClosingRef.current = false;
+
     if (activeCard) {
-      isClosingRef.current = false;
       const cleanContent = activeCard.content;
       const lines = cleanContent.split('\n');
       const restContent = lines.length > 1 ? lines.slice(1).join('\n').trim() : cleanContent;
@@ -1652,7 +1670,8 @@ function MainApp() {
       });
       
       const savedProgress = localStorage.getItem(`blankd_progress_${activeCard.id}`);
-      const lastIdx = savedProgress ? parseInt(savedProgress, 10) : 0;
+      const rawLastIdx = savedProgress ? parseInt(savedProgress, 10) : 0;
+      const lastIdx = (!isNaN(rawLastIdx) && rawLastIdx < foundBlanks.length) ? rawLastIdx : 0;
       
       const targetWrong = activeCard._targetWrongWords || null;
       const targetWrongIndices = activeCard._targetWrongIndices || null;
@@ -1661,7 +1680,7 @@ function MainApp() {
       const hiddenSet = new Set<string>(stats.hiddenTokens || []);
       const modMap = stats.modifiedTokens || {};
 
-      const restoredBlanks = foundBlanks.map((b, i) => {
+      let restoredBlanks = foundBlanks.map((b, i) => {
           let isCorrect = i < lastIdx;
           if (targetWrongIndices) {
               isCorrect = !targetWrongIndices.includes(i); 
@@ -1673,6 +1692,12 @@ function MainApp() {
           return { ...b, correct: isCorrect };
       });
 
+      // 💡 만약 모든 빈칸이 이미 완료된 상태로 로드되었다면 처음부터 풀 수 있도록 리셋 (조항 열자마자 멈추는 현상 방지)
+      if (restoredBlanks.length > 0 && restoredBlanks.every(b => b.correct)) {
+        restoredBlanks = restoredBlanks.map(b => ({ ...b, correct: false }));
+        localStorage.removeItem(`blankd_progress_${activeCard.id}`);
+      }
+
       setBlanks(restoredBlanks); 
 
       const firstUnresolvedVisible = restoredBlanks.findIndex((b, idx) => !b.correct && !hiddenSet.has(`blank-${idx}`) && !modMap[`blank-${idx}`]);
@@ -1680,6 +1705,7 @@ function MainApp() {
       setCurrentBlankIdx(firstUnresolvedVisible !== -1 ? firstUnresolvedVisible : (firstUnresolvedAny !== -1 ? firstUnresolvedAny : 0));
       setInputStatus('idle');
       setSkimmingWrongs(new Set());
+      setIsSkimmingPaused(false);
 
       const uniqueAnswers = Array.from(new Set(foundBlanks.map(b => b.answer)));
       setTouchCandidates(uniqueAnswers.sort((a, b) => a.localeCompare(b, 'ko')));
@@ -1751,207 +1777,263 @@ function MainApp() {
       }
   }, [currentBlankIdx, inputMode, activeCard, inputStatus]);
 
-  // 💡 [핵심 반영] 카드 종료 시 ID 검증 (덮어쓰기 방지)
+  // 💡 카드 종료 및 다음 조항 전환 시 비동기 블로킹/잠금 방지
   const finishCard = async (customDays?: number) => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
-    
-    if (memoEditorRef.current && memoEditorRef.current.dataset.cardId === String(activeCard.id)) {
-      statsRef.current.text = memoEditorRef.current.innerHTML;
+    isProcessingRef.current = false;
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
     }
     
-    const currentId = activeCard.id; const currentFolder = activeCard.folder_name; const finalTime = 0;
-    const wrongArr = Array.from(statsRef.current.wrongIndices);
-    
-    const isTargetMode = !!activeCard._targetWrongWords || !!activeCard._isTargetMode;
-    const correctCount = statsRef.current.sessionCorrect || 0;
-    const isCorrect = wrongArr.length === 0;
-
-    const exStats = getExtendedStats(activeCard.memo);
-    exStats.text = statsRef.current.text;
-    exStats.filled = exStats.filled + 1; 
-    exStats.wrongIndices = wrongArr;
-    exStats.highlights = statsRef.current.highlights;
-    exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
-    exStats.modifiedTokens = statsRef.current.modifiedTokens;
-    
-    const nowTimeStr = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('T', ' ').substring(0, 19);
-    
-    exStats.history = [{
-      date: nowTimeStr,
-      wrongCount: wrongArr.length,
-      wrongWords: wrongArr.map(idx => blanks[idx]?.answer).filter(Boolean)
-    }];
-    
-    exStats.totalCorrect += correctCount;
-    exStats.totalWrong += wrongArr.length;
-
-    const newMemo = JSON.stringify(exStats);
-    activeCard.memo = newMemo;
-
-    const earnedPoints = correctCount * 5; 
-    handleUpdateBalance(earnedPoints);
-
-    const todayStr = getKoreanDateString();
-    setActivityLog(prev => {
-      const next = { ...prev };
-      next[todayStr] = (next[todayStr] || 0) + correctCount;
-      localStorage.setItem(`blankd_activity_log_${safeAddress}`, JSON.stringify(next));
+    try {
+      const cardSnapshot = activeCard;
+      if (memoEditorRef.current && memoEditorRef.current.dataset.cardId === String(cardSnapshot.id)) {
+        statsRef.current.text = memoEditorRef.current.innerHTML;
+      }
       
-      if (navigator.onLine) {
-        fetch("https://api.blankd.top/api/update-balance", {
-           method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
-           body: JSON.stringify({ wallet_address: safeAddress, activity_log: next })
-        }).catch(()=>{});
+      const currentId = cardSnapshot.id;
+      const currentFolder = cardSnapshot.folder_name;
+      const finalTime = 0;
+      const wrongArr = Array.from(statsRef.current.wrongIndices);
+      
+      const isTargetMode = !!cardSnapshot._targetWrongWords || !!cardSnapshot._isTargetMode;
+      const correctCount = statsRef.current.sessionCorrect || 0;
+      const isCorrect = wrongArr.length === 0;
+
+      const exStats = getExtendedStats(cardSnapshot.memo);
+      exStats.text = statsRef.current.text;
+      exStats.filled = exStats.filled + 1; 
+      exStats.wrongIndices = wrongArr;
+      exStats.highlights = statsRef.current.highlights;
+      exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
+      exStats.modifiedTokens = statsRef.current.modifiedTokens;
+      
+      const nowTimeStr = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().replace('T', ' ').substring(0, 19);
+      
+      exStats.history = [{
+        date: nowTimeStr,
+        wrongCount: wrongArr.length,
+        wrongWords: wrongArr.map(idx => blanks[idx]?.answer).filter(Boolean)
+      }];
+      
+      exStats.totalCorrect += correctCount;
+      exStats.totalWrong += wrongArr.length;
+
+      const newMemo = JSON.stringify(exStats);
+      cardSnapshot.memo = newMemo;
+
+      const earnedPoints = correctCount * 5; 
+      handleUpdateBalance(earnedPoints);
+
+      const todayStr = getKoreanDateString();
+      setActivityLog(prev => {
+        const next = { ...prev };
+        next[todayStr] = (next[todayStr] || 0) + correctCount;
+        localStorage.setItem(`blankd_activity_log_${safeAddress}`, JSON.stringify(next));
+        
+        if (navigator.onLine) {
+          fetch("https://api.blankd.top/api/update-balance", {
+             method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
+             body: JSON.stringify({ wallet_address: safeAddress, activity_log: next })
+          }).catch(()=>{});
+        }
+        return next;
+      });
+
+      let daysInterval = customDays;
+      if (daysInterval === undefined) {
+        const wrongCount = wrongArr.length; const totalBlanks = blanks.length;
+        let quality = 5;
+        if (totalBlanks > 0 && wrongCount > 0) {
+          const wrongRatio = wrongCount / totalBlanks;
+          if (wrongRatio > 0.5) quality = 1; else if (wrongRatio > 0.2) quality = 2; else quality = 3;
+        }
+        let easiness = parseFloat(localStorage.getItem(`blankd_factor_${currentId}`) || "2.5");
+        easiness = easiness + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+        if (easiness < 1.3) easiness = 1.3;
+        localStorage.setItem(`blankd_factor_${currentId}`, easiness.toString());
+
+        const currentRepetitions = exStats.filled;
+        if (quality < 3) { daysInterval = 1; } 
+        else {
+          if (currentRepetitions === 1) daysInterval = 1;
+          else if (currentRepetitions === 2) daysInterval = 4;
+          else daysInterval = Math.ceil((currentRepetitions - 1) * easiness);
+        }
+      } else {
+        let quality = 3;
+        if (daysInterval === 1) quality = 1; else if (daysInterval === 4) quality = 2; else if (daysInterval >= 14) quality = 5;
+        let easiness = parseFloat(localStorage.getItem(`blankd_factor_${currentId}`) || "2.5");
+        easiness = easiness + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
+        if (easiness < 1.3) easiness = 1.3;
+        localStorage.setItem(`blankd_factor_${currentId}`, easiness.toString());
       }
-      return next;
-    });
 
-    let daysInterval = customDays;
-    if (daysInterval === undefined) {
-      const wrongCount = wrongArr.length; const totalBlanks = blanks.length;
-      let quality = 5;
-      if (totalBlanks > 0 && wrongCount > 0) {
-        const wrongRatio = wrongCount / totalBlanks;
-        if (wrongRatio > 0.5) quality = 1; else if (wrongRatio > 0.2) quality = 2; else quality = 3;
-      }
-      let easiness = parseFloat(localStorage.getItem(`blankd_factor_${currentId}`) || "2.5");
-      easiness = easiness + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
-      if (easiness < 1.3) easiness = 1.3;
-      localStorage.setItem(`blankd_factor_${currentId}`, easiness.toString());
+      const nextReviewDate = new Date(); nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
 
-      const currentRepetitions = exStats.filled;
-      if (quality < 3) { daysInterval = 1; } 
-      else {
-        if (currentRepetitions === 1) daysInterval = 1;
-        else if (currentRepetitions === 2) daysInterval = 4;
-        else daysInterval = Math.ceil((currentRepetitions - 1) * easiness);
-      }
-    } else {
-      let quality = 3;
-      if (daysInterval === 1) quality = 1; else if (daysInterval === 4) quality = 2; else if (daysInterval >= 14) quality = 5;
-      let easiness = parseFloat(localStorage.getItem(`blankd_factor_${currentId}`) || "2.5");
-      easiness = easiness + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
-      if (easiness < 1.3) easiness = 1.3;
-      localStorage.setItem(`blankd_factor_${currentId}`, easiness.toString());
-    }
-
-    const nextReviewDate = new Date(); nextReviewDate.setDate(nextReviewDate.getDate() + daysInterval);
-
-    const folderCards = savedCards.filter(c => c.folder_name === currentFolder);
-    const currentIdx = folderCards.findIndex(c => String(c.id) === String(currentId));
-    
-    let nextCard = null;
-    if (isTargetMode) {
-       for (let i = currentIdx + 1; i < folderCards.length; i++) {
-           const nCard = folderCards[i];
-           const nStats = getExtendedStats(nCard.memo);
-           const nWrong = Array.from(nStats.wrongIndices || []);
-           if (nWrong.length > 0) {
-               nextCard = { ...nCard, _targetWrongIndices: nWrong, _isTargetMode: true };
-               break;
+      const folderCards = savedCards.filter(c => c.folder_name === currentFolder);
+      const currentIdx = folderCards.findIndex(c => String(c.id) === String(currentId));
+      
+      let nextCard = null;
+      if (currentIdx !== -1) {
+        if (isTargetMode) {
+           for (let i = currentIdx + 1; i < folderCards.length; i++) {
+               const nCard = folderCards[i];
+               const nStats = getExtendedStats(nCard.memo);
+               const nWrong = Array.from(nStats.wrongIndices || []);
+               if (nWrong.length > 0) {
+                   nextCard = { ...nCard, _targetWrongIndices: nWrong, _isTargetMode: true };
+                   break;
+               }
            }
-       }
-    } else {
-       nextCard = folderCards[currentIdx + 1] || null;
-    }
+        } else {
+           nextCard = folderCards[currentIdx + 1] || null;
+        }
+      }
 
-    localStorage.removeItem(`blankd_progress_${currentId}`);
+      localStorage.removeItem(`blankd_progress_${currentId}`);
 
-    setActiveCard(nextCard);
-    setSavedCards(prev => {
-      const next = prev.map(c => String(c.id) === String(currentId) ? { ...c, memo: newMemo } : c);
-      localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
-      return next;
-    });
-    
-    pushToQueue('MEMO', { id: currentId, memo: newMemo });
-    pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
-    
-    if (isOffline) {
-      addLog(`💾 오프라인 기록 보존됨`);
-    } else {
-      addLog(`🎉 완료! 기록 갱신 됨. +${earnedPoints} Point`);
-      try {
-        await fetch("https://api.blankd.top/api/save-card", {
+      setSavedCards(prev => {
+        const next = prev.map(c => String(c.id) === String(currentId) ? { ...c, memo: newMemo } : c);
+        localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
+        return next;
+      });
+      setActiveCard(nextCard);
+      if (!nextCard) {
+        isClosingRef.current = false;
+      }
+      
+      pushToQueue('MEMO', { id: currentId, memo: newMemo });
+      pushToQueue('ANSWER', { card_id: currentId, is_correct: isCorrect, clear_time: finalTime, next_review: nextReviewDate.toISOString() });
+      
+      if (isOffline) {
+        addLog(`💾 오프라인 기록 보존됨`);
+      } else {
+        addLog(`🎉 완료! 기록 갱신 됨. +${earnedPoints} Point`);
+        fetch("https://api.blankd.top/api/save-card", {
           method: "POST", 
           keepalive: true, 
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
+          body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: cardSnapshot.content, answer_text: cardSnapshot.answer_text || "", folder_name: cardSnapshot.folder_name, memo: newMemo })
+        }).catch(() => {}).finally(() => {
+          flushQueue();
         });
-      } catch(e) {}
-      flushQueue();
+      }
+    } catch (err) {
+      isClosingRef.current = false;
+      isProcessingRef.current = false;
     }
   };
 
   const handleReviewSelect = (days: number) => { if (!activeCard) return; statsRef.current.filled += 1; finishCard(days); };
 
-  // 💡 [핵심 반영] 모달 닫을 시 ID 검증 (덮어쓰기 방지)
+  // 💡 모달 닫을 시 ID 검증 및 잠금 해제 보장
   const handleCloseModal = async () => {
     if (isClosingRef.current || !activeCard) return;
     isClosingRef.current = true;
-    
-    if (memoEditorRef.current && memoEditorRef.current.dataset.cardId === String(activeCard.id)) {
-      statsRef.current.text = memoEditorRef.current.innerHTML;
+    isProcessingRef.current = false;
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+      advanceTimerRef.current = null;
     }
     
-    const currentId = activeCard.id;
-    const exStats = getExtendedStats(activeCard.memo);
-    exStats.text = statsRef.current.text;
-    exStats.filled = statsRef.current.filled;
-    exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
-    exStats.highlights = statsRef.current.highlights;
-    exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
-    exStats.modifiedTokens = statsRef.current.modifiedTokens;
-    
-    const newMemo = JSON.stringify(exStats);
-    activeCard.memo = newMemo;
-    setActiveCard(null);
+    try {
+      const cardSnapshot = activeCard;
+      if (memoEditorRef.current && memoEditorRef.current.dataset.cardId === String(cardSnapshot.id)) {
+        statsRef.current.text = memoEditorRef.current.innerHTML;
+      }
+      
+      const currentId = cardSnapshot.id;
+      const exStats = getExtendedStats(cardSnapshot.memo);
+      exStats.text = statsRef.current.text;
+      exStats.filled = statsRef.current.filled;
+      exStats.wrongIndices = Array.from(statsRef.current.wrongIndices);
+      exStats.highlights = statsRef.current.highlights;
+      exStats.hiddenTokens = Array.from(statsRef.current.hiddenTokens);
+      exStats.modifiedTokens = statsRef.current.modifiedTokens;
+      
+      const newMemo = JSON.stringify(exStats);
+      cardSnapshot.memo = newMemo;
 
-    setSavedCards(prev => {
-      const next = prev.map(c => String(c.id) === String(currentId) ? { ...c, memo: newMemo } : c);
-      localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
-      return next;
-    });
-    pushToQueue('MEMO', { id: currentId, memo: newMemo });
-    
-    if (navigator.onLine) {
-      try {
-        await fetch("https://api.blankd.top/api/save-card", {
+      setSavedCards(prev => {
+        const next = prev.map(c => String(c.id) === String(currentId) ? { ...c, memo: newMemo } : c);
+        localStorage.setItem(`blankd_off_card_${safeAddress}`, JSON.stringify(next));
+        return next;
+      });
+      setActiveCard(null);
+      isClosingRef.current = false;
+
+      pushToQueue('MEMO', { id: currentId, memo: newMemo });
+      
+      if (navigator.onLine) {
+        fetch("https://api.blankd.top/api/save-card", {
           method: "POST", keepalive: true, headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: activeCard.content, answer_text: activeCard.answer_text || "", folder_name: activeCard.folder_name, memo: newMemo })
+          body: JSON.stringify({ wallet_address: safeAddress, card_id: currentId, card_content: cardSnapshot.content, answer_text: cardSnapshot.answer_text || "", folder_name: cardSnapshot.folder_name, memo: newMemo })
+        }).catch(() => {}).finally(() => {
+          flushQueue();
         });
-      } catch(e) {}
+      }
+    } catch (err) {
+      isClosingRef.current = false;
+      isProcessingRef.current = false;
     }
-    flushQueue();
   };
 
   const forceAdvance = () => {
-    setBlanks(prev => {
-      const nb = [...prev];
-      if (nb[currentBlankIdx]) nb[currentBlankIdx].correct = true;
-      return nb;
-    });
-    
-    const nextVisibleIdx = blanks.findIndex((b, idx) => idx > currentBlankIdx && !b.correct && ((!cardHiddenTokens.has(`blank-${idx}`) && !cardModifiedTokens[`blank-${idx}`]) || sessionRevealedTokens.has(`blank-${idx}`)));
-    const nextAnyIdx = blanks.findIndex((b, idx) => idx > currentBlankIdx && !b.correct);
-    const nextIdx = nextVisibleIdx !== -1 ? nextVisibleIdx : nextAnyIdx;
+    if (!activeCard) {
+      isProcessingRef.current = false;
+      return;
+    }
+
+    const isBlankVisible = (idx: number) =>
+      (!cardHiddenTokens.has(`blank-${idx}`) && !cardModifiedTokens[`blank-${idx}`]) ||
+      sessionRevealedTokens.has(`blank-${idx}`);
+
+    // 현재 빈칸 이후 또는 전체 범위에서 아직 안 푼 다음 빈칸 탐색
+    const nextVisibleAfter = blanks.findIndex((b, idx) => idx > currentBlankIdx && !b.correct && isBlankVisible(idx));
+    const nextVisibleBefore = blanks.findIndex((b, idx) => idx < currentBlankIdx && !b.correct && isBlankVisible(idx));
+    const nextAnyAfter = blanks.findIndex((b, idx) => idx > currentBlankIdx && !b.correct);
+    const nextAnyBefore = blanks.findIndex((b, idx) => idx < currentBlankIdx && !b.correct);
+
+    const nextIdx =
+      nextVisibleAfter !== -1 ? nextVisibleAfter :
+      nextVisibleBefore !== -1 ? nextVisibleBefore :
+      nextAnyAfter !== -1 ? nextAnyAfter :
+      nextAnyBefore;
 
     if (nextIdx !== -1) {
+        setBlanks(prev => prev.map((b, i) => i === currentBlankIdx ? { ...b, correct: true } : b));
         setCurrentBlankIdx(nextIdx);
         localStorage.setItem(`blankd_progress_${activeCard.id}`, nextIdx.toString());
         setInputStatus('idle');
         isProcessingRef.current = false;
     } else {
+        // 💡 마지막 빈칸 완료 전 미확인 변형/숨김 구간이 있으면 먼저 안내 (빈칸이 먼저 사라져 멈추는 현상 방지)
         if (checkUnrevealedStealth()) {
+            setInputStatus('idle');
             isProcessingRef.current = false;
             return;
         }
+        setBlanks(prev => prev.map((b, i) => i === currentBlankIdx ? { ...b, correct: true } : b));
         localStorage.removeItem(`blankd_progress_${activeCard.id}`);
         setInputStatus('idle');
         isProcessingRef.current = false;
         finishCard();
     }
+  };
+
+  useEffect(() => {
+    forceAdvanceRef.current = forceAdvance;
+  });
+
+  const scheduleForceAdvance = (delayMs: number) => {
+    if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+    advanceTimerRef.current = setTimeout(() => {
+      advanceTimerRef.current = null;
+      forceAdvanceRef.current();
+    }, delayMs);
   };
 
   const handleSequentialInput = (overrideInput?: string | any) => {
@@ -1983,7 +2065,7 @@ function MainApp() {
           statsRef.current.wrongIndices.delete(currentBlankIdx);
       }
       statsRef.current.sessionCorrect = (statsRef.current.sessionCorrect || 0) + 1;
-      setTimeout(forceAdvance, 150); 
+      scheduleForceAdvance(150); 
     } else { 
       isProcessingRef.current = true; 
       setInputStatus('wrong'); 
@@ -1992,9 +2074,9 @@ function MainApp() {
       handleUpdateBalance(-10);
       addLog(`❌ 오답! (-10P)`);
 
-      const nextIdx = blanks.findIndex((b, idx) => idx > currentBlankIdx && !b.correct);
-      if (nextIdx !== -1) {
-          setTimeout(forceAdvance, 600); 
+      const hasMoreUnresolved = blanks.some((b, idx) => idx !== currentBlankIdx && !b.correct);
+      if (hasMoreUnresolved) {
+          scheduleForceAdvance(600); 
       } else {
           isProcessingRef.current = false; 
       }
@@ -2003,8 +2085,16 @@ function MainApp() {
   
   const handleShowAnswer = () => {
     if (isProcessingRef.current) return;
-    if (!blanks[currentBlankIdx]) return;
-    if (inputStatus === 'wrong') return; 
+    if (blanks.length === 0 || !blanks[currentBlankIdx]) {
+      if (!checkUnrevealedStealth()) finishCard();
+      return;
+    }
+    if (inputStatus === 'wrong') {
+      // 이미 오답이 표시된 마지막 빈칸에서 다시 스킵/엔터를 누르면 즉시 다음 조항으로 이동
+      isProcessingRef.current = true;
+      forceAdvanceRef.current();
+      return;
+    }
 
     isProcessingRef.current = true;
     setInputStatus('wrong'); 
@@ -2013,9 +2103,9 @@ function MainApp() {
     handleUpdateBalance(-10);
     addLog(`❌ 정답 확인 (-10P)`);
 
-    const nextIdx = blanks.findIndex((b, idx) => idx > currentBlankIdx && !b.correct);
-    if (nextIdx !== -1) {
-        setTimeout(forceAdvance, 800);
+    const hasMoreUnresolved = blanks.some((b, idx) => idx !== currentBlankIdx && !b.correct);
+    if (hasMoreUnresolved) {
+        scheduleForceAdvance(800);
     } else {
         isProcessingRef.current = false;
     }
@@ -2329,15 +2419,23 @@ function MainApp() {
         } else if (isCurrent) {
           if (inputMode === 'typing') {
             blankEl = (
-              <span id="active-blank" key="active-blank-input-fixed" className={`inline-block rounded-sm ${blankMarkerCls}`}>
-                <InlineBlankInput inputStatus={inputStatus} expected={blanks[currentBlankIdx]?.answer || ""} abbrDict={globalDict.abbrs} hintLetter={hintLetter} onSubmit={handleSequentialInput}/>
+              <span id="active-blank" key={`active-blank-${activeCard.id}-${currentBlankIdx}`} className={`inline-block rounded-sm ${blankMarkerCls}`}>
+                <InlineBlankInput
+                  cardId={activeCard.id}
+                  blankIdx={currentBlankIdx}
+                  inputStatus={inputStatus}
+                  expected={blanks[currentBlankIdx]?.answer || ""}
+                  abbrDict={globalDict.abbrs}
+                  hintLetter={hintLetter}
+                  onSubmit={handleSequentialInput}
+                />
               </span>
             );
           } else {
             blankEl = (
               <span
                 id="active-blank"
-                key="active-blank-input-fixed"
+                key={`active-blank-${activeCard.id}-${currentBlankIdx}`}
                 onPointerDown={handleBlankPointerDown}
                 className={`inline-block mx-0.5 px-1 text-center font-bold min-w-[2.5em] ${blankMarkerCls}`}
               >
@@ -2456,6 +2554,13 @@ function MainApp() {
         </span>
       );
     }
+
+    // 💡 현재 빈칸 외에 남은 미해결 빈칸이 있는지 정확히 체크 (타겟 복습 모드, 변형 해제, 빈칸 없는 조항 등 모든 케이스 대응)
+    const hasMoreUnresolvedBlanks = blanks.some((b, idx) => idx !== currentBlankIdx && !b.correct);
+    const allBlanksAlreadySolved = blanks.length === 0 || blanks.every(b => b.correct);
+    const showNextClauseButton =
+      inputMode !== 'skimming' &&
+      (allBlanksAlreadySolved || (inputStatus === 'wrong' && !hasMoreUnresolvedBlanks));
     
     return (
       <div className="flex flex-col w-full h-[65vh] sm:h-[72vh] max-w-full overflow-hidden relative bg-[#0a0a0c] rounded-md border border-white/5 shadow-xl">
@@ -2731,21 +2836,25 @@ function MainApp() {
 
         <div className="shrink-0 w-full bg-[#0d0d0f] border-t border-white/10 p-2 sm:p-3 z-30 flex flex-col gap-1.5 sm:gap-3 shadow-[0_-10px_20px_rgba(0,0,0,0.5)]">
             
-            {inputMode === 'skimming' && currentBlankIdx < blanks.length && (
+            {inputMode === 'skimming' && (
               <div className="flex flex-col gap-1.5 sm:gap-2 w-full p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[10px] sm:text-[11px] text-amber-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className={isSkimmingPaused ? "" : "animate-pulse"}>
-                      {isSkimmingPaused ? '일시정지됨' : skimmingFocusIdx === -1 ? '2초 후 첫 빈칸이 표시됩니다...' : '1초마다 자동 진행 중...'}
+                      {blanks.length === 0 ? '빈칸이 없는 조항입니다.' : isSkimmingPaused ? '일시정지됨' : skimmingFocusIdx === -1 ? '2초 후 첫 빈칸이 표시됩니다...' : '1초마다 자동 진행 중...'}
                     </span> 
                     <span className="text-white/60 font-normal hidden sm:inline">| ▲: 멈춤 / ▼: 재개 / Space: 모름(오답)+멈춤</span>
                   </div>
-                  <span className="text-[10px] font-mono text-white/50 shrink-0">{Math.max(0, skimmingFocusIdx + 1)} / {blanks.length}</span>
+                  <span className="text-[10px] font-mono text-white/50 shrink-0">{blanks.length === 0 ? '0 / 0' : `${Math.min(blanks.length, Math.max(0, skimmingFocusIdx + 1))} / ${blanks.length}`}</span>
                 </div>
                 <div className="flex gap-2 w-full">
                   <button 
                     onClick={(e) => {
                        e.currentTarget.blur();
+                       if (blanks.length === 0) {
+                         if (!checkUnrevealedStealth()) finishCard();
+                         return;
+                       }
                        if (!isSkimmingPaused) {
                          setIsSkimmingPaused(true);
                          if (skimmingFocusIdx >= 0) {
@@ -2759,17 +2868,21 @@ function MainApp() {
                        }
                     }} 
                     className={`flex-1 py-2 sm:py-3.5 border text-white text-[12px] sm:text-[14px] font-bold rounded shadow-md active:scale-95 transition-all flex items-center justify-center gap-2 ${
-                      isSkimmingPaused 
+                      isSkimmingPaused || blanks.length === 0
                         ? 'bg-teal-600 hover:bg-teal-500 border-teal-400 animate-pulse' 
                         : 'bg-red-900/60 hover:bg-red-800 border-red-500/50 text-red-200'
                     }`}
                   >
-                    {isSkimmingPaused ? '다시 진행하기 (▼ 또는 Space)' : '모름 체크 및 일시정지 (Space)'}
+                    {blanks.length === 0 ? '다음 조항으로 넘어가기 ▶' : isSkimmingPaused ? '다시 진행하기 (▼ 또는 Space)' : '모름 체크 및 일시정지 (Space)'}
                   </button>
                   <button 
                     onClick={(e) => {
                        e.currentTarget.blur();
-                       handleSkimmingSubmit(blanks.length - 1);
+                       if (blanks.length === 0) {
+                         if (!checkUnrevealedStealth()) finishCard();
+                       } else {
+                         handleSkimmingSubmit(blanks.length - 1);
+                       }
                     }} 
                     className="px-3 sm:px-4 py-2 sm:py-3.5 bg-zinc-800 hover:bg-zinc-700 border border-white/10 text-white/70 text-[11px] sm:text-[13px] font-bold rounded shadow-md active:scale-95 transition-all shrink-0"
                   >
@@ -2779,7 +2892,7 @@ function MainApp() {
               </div>
             )}
 
-            {inputMode === 'touch' && activeTouchCandidates.length > 0 && (
+            {inputMode === 'touch' && !showNextClauseButton && activeTouchCandidates.length > 0 && (
               <div className="flex flex-col gap-1.5 sm:gap-2 w-full max-h-[22vh] overflow-y-auto custom-scrollbar p-1.5 sm:p-2.5 bg-black/20 rounded border border-white/5 shadow-inner">
                 <div className="w-full text-[10px] sm:text-[11px] text-teal-400 mb-0.5 sm:mb-1 font-bold flex items-center justify-between">
                   <div className="flex items-center gap-1">
@@ -2815,21 +2928,22 @@ function MainApp() {
               </div>
             )}
             
-            {inputStatus === 'wrong' && currentBlankIdx === blanks.length - 1 && inputMode !== 'skimming' ? (
+            {showNextClauseButton ? (
               <button 
+                id="show-answer-btn"
                 onClick={(e) => {
                   e.currentTarget.blur();
                   if (!isProcessingRef.current) {
                      if (checkUnrevealedStealth()) return;
                      isProcessingRef.current = true;
-                     forceAdvance();
+                     forceAdvanceRef.current();
                   }
                 }} 
                 className="w-full py-2 sm:py-3 bg-red-600/80 hover:bg-red-500 text-white text-[12px] sm:text-[15px] font-bold rounded shadow-[0_0_15px_rgba(220,38,38,0.5)] animate-pulse border border-red-400 flex justify-center items-center gap-2"
               >
                 <span>다음 조항으로 넘어가기 ▶</span>
               </button>
-            ) : (
+            ) : inputMode !== 'skimming' ? (
               <div className="flex justify-between items-center w-full gap-1.5 sm:gap-2 flex-wrap">
                 <button 
                   onClick={(e) => {
@@ -2851,7 +2965,7 @@ function MainApp() {
                   정답 보기(스킵)
                 </button>
               </div>
-            )}
+            ) : null}
         </div>
       </div>
     );
