@@ -12,16 +12,6 @@ export interface OxQuestion {
   source?: string;
 }
 
-export interface SubjectiveQuestion {
-  id: number;
-  title: string;
-  question: string;
-  modelAnswer: string;
-  keywords: string[];
-  userAnswer?: string;
-  score?: number;
-}
-
 interface ExamTabProps {
   walletAddress?: string;
   address?: string;
@@ -68,7 +58,6 @@ const isCalculationQuestion = (q: OxQuestion): boolean => {
 export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme }) => {
   const safeAddress = walletAddress || address || 'default';
   const storageKeyOx = `blankd_ox_questions_${safeAddress}`;
-  const storageKeyOxAnswers = `blankd_ox_user_answers_${safeAddress}`;
   const storageKeyOxFolders = `blankd_ox_folders_${safeAddress}`;
 
   // 화이트 모드(라이트 테마) 실시간 감지
@@ -106,7 +95,7 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
   // 상단 탭 모드: 'ox' (일반 법령·정관 오답노트) | 'calc' (계산 문제 전용) | 'subjective' (단답·요약)
   const [examSubTab, setExamSubTab] = useState<'ox' | 'calc' | 'subjective'>('ox');
 
-  // OX 문제 목록 상태
+  // 문제 목록 상태
   const [oxQuestions, setOxQuestions] = useState<OxQuestion[]>(() => {
     try {
       const saved =
@@ -135,26 +124,16 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
     return ['계산 문제', '자주 틀리는 조항', '시험 직전 필수암기'];
   });
 
-  // 사용자 O/X 풀이 기록
-  const [oxUserAnswers, setOxUserAnswers] = useState<Record<number, string>>(() => {
-    try {
-      const saved =
-        localStorage.getItem(storageKeyOxAnswers) ||
-        localStorage.getItem('blankd_ox_user_answers_default');
-      if (saved) return JSON.parse(saved);
-    } catch (e) {}
-    return {};
-  });
-
   // 필터 상태
   const [activeFolder, setActiveFolder] = useState<string>('전체');
   const [activeCategory, setActiveCategory] = useState<string>('전체');
   const [activeSubCategory, setActiveSubCategory] = useState<string>('전체');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'unsolved' | 'wrong' | 'correct'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // 정답/해설 펼침 상태 (조항 클릭 시 토글)
-  const [expandedOxIds, setExpandedOxIds] = useState<Set<number>>(new Set());
+  // 💡 1) 조항 클릭 시 우측 빨간 동그라미(간략 정답 배지)만 표시하는 상태
+  const [expandedAnswerIds, setExpandedAnswerIds] = useState<Set<number>>(new Set());
+  // 💡 2) [상세 해설] 버튼을 눌렀을 때만 하단 상세 해설 박스를 여는 상태
+  const [expandedDetailIds, setExpandedDetailIds] = useState<Set<number>>(new Set());
   const [showAllAnswers, setShowAllAnswers] = useState<boolean>(false);
 
   // 폴더 생성 및 일괄 분류/선택 모드 상태
@@ -195,14 +174,6 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
     } catch (e) {}
   }, [oxFolders, storageKeyOxFolders]);
 
-  useEffect(() => {
-    try {
-      const serialized = JSON.stringify(oxUserAnswers);
-      localStorage.setItem(storageKeyOxAnswers, serialized);
-      localStorage.setItem('blankd_ox_user_answers_default', serialized);
-    } catch (e) {}
-  }, [oxUserAnswers, storageKeyOxAnswers]);
-
   // 문제 데이터 내의 폴더명이 oxFolders에 없으면 자동 등록
   useEffect(() => {
     const foldersInQuestions = Array.from(
@@ -220,7 +191,7 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
     }
   }, [oxQuestions]);
 
-  // 정답 핵심 텍스트 추출 헬퍼
+  // 간략 정답 핵심 텍스트 추출 헬퍼 (조항 클릭 시 오른쪽 빨간 동그라미 배지에만 표시)
   const getConciseCorrectAnswer = (q: OxQuestion): string => {
     if (q.correctAnswer && q.correctAnswer.trim()) {
       return q.correctAnswer.trim();
@@ -236,9 +207,9 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
     return q.answer === 'O' ? 'O (맞는 지문)' : 'X (틀린 지문)';
   };
 
-  // 조항(문장) 클릭 시 정답 배지 및 해설 토글
-  const toggleOxExp = (id: number) => {
-    setExpandedOxIds((prev) => {
+  // 조항(문장) 클릭 시 -> 오른쪽 빨간 동그라미 간략 정답만 토글
+  const toggleInlineAnswer = (id: number) => {
+    setExpandedAnswerIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -246,14 +217,24 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
     });
   };
 
-  // 전체 정답 보기/숨기기 토글
+  // [상세 해설] 버튼 클릭 시 -> 하단 상세 해설 박스만 토글
+  const toggleDetailExplanation = (id: number) => {
+    setExpandedDetailIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // 전체 정답 보기/숨기기 토글 (간략 정답 배지 일괄 토글)
   const handleToggleAllAnswers = () => {
     if (showAllAnswers) {
       setShowAllAnswers(false);
-      setExpandedOxIds(new Set());
+      setExpandedAnswerIds(new Set());
     } else {
       setShowAllAnswers(true);
-      setExpandedOxIds(new Set(filteredQuestions.map((q) => q.id)));
+      setExpandedAnswerIds(new Set(filteredQuestions.map((q) => q.id)));
     }
   };
 
@@ -309,13 +290,6 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
       prev.map((q) => ((q.folder || '').trim() === folderName ? { ...q, folder: '' } : q))
     );
     if (activeFolder === folderName) setActiveFolder('전체');
-  };
-
-  // 개별 문항 폴더 지정
-  const handleAssignSingleQuestionFolder = (questionId: number, folderName: string) => {
-    setOxQuestions((prev) =>
-      prev.map((q) => (q.id === questionId ? { ...q, folder: folderName } : q))
-    );
   };
 
   // 선택된 문항들을 특정 폴더로 일괄 이동
@@ -417,8 +391,8 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
             }
           });
           setOxQuestions(deduped);
-          setOxUserAnswers({});
-          setExpandedOxIds(new Set());
+          setExpandedAnswerIds(new Set());
+          setExpandedDetailIds(new Set());
           setActiveFolder('전체');
           setActiveCategory('전체');
           setActiveSubCategory('전체');
@@ -457,7 +431,6 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
   // 현재 탭('ox' vs 'calc')의 베이스 문항 풀
   const baseModeQuestions = useMemo(() => {
     if (examSubTab === 'calc') return calcQuestions;
-    // 일반 탭에서 사용자가 '계산 문제' 폴더나 '계산 문제' 카테고리를 직접 클릭한 경우를 제외하면 일반 문항만 표시
     if (activeFolder === '계산 문제' || activeCategory === '계산 문제') return calcQuestions;
     return nonCalcQuestions;
   }, [examSubTab, nonCalcQuestions, calcQuestions, activeFolder, activeCategory]);
@@ -503,9 +476,7 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
   const subCategoriesList = useMemo(() => {
     if (examSubTab === 'calc') {
       const subs = Array.from(
-        new Set(
-          calcQuestions.map((q) => (q.subCategory || '').trim()).filter(Boolean)
-        )
+        new Set(calcQuestions.map((q) => (q.subCategory || '').trim()).filter(Boolean))
       );
       return ['전체', ...subs];
     }
@@ -529,11 +500,6 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
       if (activeSubCategory !== '전체' && (q.subCategory || '').trim() !== activeSubCategory)
         return false;
 
-      const userAns = oxUserAnswers[q.id];
-      if (statusFilter === 'unsolved' && userAns !== undefined) return false;
-      if (statusFilter === 'wrong' && (!userAns || userAns === q.answer)) return false;
-      if (statusFilter === 'correct' && userAns !== q.answer) return false;
-
       if (searchQuery.trim()) {
         const kw = searchQuery.trim().toLowerCase();
         const inQ = q.question.toLowerCase().includes(kw);
@@ -550,9 +516,7 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
     folderFilteredQuestions,
     activeCategory,
     activeSubCategory,
-    statusFilter,
     searchQuery,
-    oxUserAnswers,
   ]);
 
   // 현재 필터 목록 전체 선택/해제
@@ -601,12 +565,10 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
 
   /**
    * 조항 렌더링 함수:
-   * 1) 틀린 부분 인라인 하이라이트(wrongParts) 제거
-   * 2) 항목형 문항(원래 문제가 위에 있고 \n(1)...(2)...가 이어지는 형태)은
-   *    원래 문제를 위에 굵게 표시하고 아래에 (1)(2) 항목을 이어서 표시
-   * 3) 조항 클릭 시 오른쪽에 빨간색 동그라미 형태 배지(👉 정답: ...) 표시
+   * - 조항 클릭 시 오른쪽에 빨간색 동그라미 형태(간략한 해설/정답)만 표시
+   * - 하단 상세 해설 박스는 [상세 해설] 버튼을 눌렀을 때만 별도로 표시
    */
-  const renderClauseWithRightAnswerBadge = (q: OxQuestion, isExpanded: boolean) => {
+  const renderClauseWithRightAnswerBadge = (q: OxQuestion, isAnswerVisible: boolean) => {
     const ansText = getConciseCorrectAnswer(q);
     const hasStemAndItems = q.question.includes('\n(1)');
     let stemPart = '';
@@ -647,7 +609,7 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
           </span>
         )}
 
-        {isExpanded && ansText && (
+        {isAnswerVisible && ansText && (
           <span
             className={`inline-flex items-center gap-1 ml-2.5 px-3 py-0.5 rounded-full text-xs sm:text-[13px] font-extrabold align-middle shadow-sm border-2 transition-all ${
               isLightMode
@@ -663,21 +625,13 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
     );
   };
 
-  // 통계 수치
-  const totalSolved = Object.keys(oxUserAnswers).length;
-  const totalCorrect = Object.entries(oxUserAnswers).filter(([idStr, ans]) => {
-    const q = oxQuestions.find((item) => item.id === Number(idStr));
-    return q && q.answer === ans;
-  }).length;
-  const totalWrong = totalSolved - totalCorrect;
-
   return (
     <div
       className={`w-full space-y-4 transition-colors ${
         isLightMode ? 'text-slate-900' : 'text-zinc-100'
       }`}
     >
-      {/* 상단 헤더 & 모드 분리 탭(일반 법령·정관 오답노트 vs 계산 문제 별도 분리) */}
+      {/* 상단 헤더 & 모드 분리 탭 */}
       <div
         className={`p-4 rounded-xl border flex flex-col lg:flex-row lg:items-center justify-between gap-3 shadow-sm ${
           isLightMode ? 'bg-white border-slate-300' : 'bg-[#0a0a0c] border-white/10'
@@ -732,24 +686,6 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
               ✍️ 나만의 단답·요약 노트
             </button>
           </div>
-
-          <div
-            className={`text-xs font-bold flex items-center gap-2 px-2.5 py-1 rounded-lg border ${
-              isLightMode
-                ? 'bg-slate-100 border-slate-300 text-slate-800'
-                : 'bg-white/5 border-white/10 text-zinc-300'
-            }`}
-          >
-            <span>총 {oxQuestions.length}문항</span>
-            <span>·</span>
-            <span className={isLightMode ? 'text-teal-700' : 'text-teal-400'}>
-              정답 {totalCorrect}
-            </span>
-            <span>·</span>
-            <span className={isLightMode ? 'text-rose-700' : 'text-rose-400'}>
-              오답 {totalWrong}
-            </span>
-          </div>
         </div>
 
         {/* 우측 액션 버튼들 */}
@@ -792,21 +728,6 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
             }`}
           >
             ➕ 문항 추가
-          </button>
-
-          <button
-            onClick={() => {
-              if (confirm('모든 O/X 풀이 체크 기록을 초기화하시겠습니까?')) {
-                setOxUserAnswers({});
-              }
-            }}
-            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all ${
-              isLightMode
-                ? 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
-                : 'bg-white/5 text-zinc-400 border-white/10 hover:text-white'
-            }`}
-          >
-            🔄 풀이 초기화
           </button>
         </div>
       </div>
@@ -920,7 +841,7 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
       {examSubTab !== 'subjective' ? (
         <>
           {/* ===================================================================== */}
-          {/* 📁 1. 나만의 학습 폴더 바 (일반 탭에서 폴더 생성 / 이름변경 / 삭제 / 분류) */}
+          {/* 📁 1. 나만의 학습 폴더 바 (폴더 생성 / 이름변경 / 삭제 / 다중선택 이동) */}
           {/* ===================================================================== */}
           {examSubTab === 'ox' && (
             <div
@@ -936,13 +857,6 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
                     }`}
                   >
                     📁 내 학습 폴더 분류
-                  </span>
-                  <span
-                    className={`text-[11px] font-medium ${
-                      isLightMode ? 'text-slate-600' : 'text-zinc-400'
-                    }`}
-                  >
-                    (계산 문제는 상단 [🧮 계산 문제] 탭 또는 [🗂️ 계산 문제] 폴더로 별도 분리되어 있습니다)
                   </span>
                 </div>
 
@@ -1009,7 +923,7 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
                         : 'bg-white/5 text-zinc-200 border-white/15 hover:bg-white/10'
                     }`}
                   >
-                    {isSelectMode ? '☑️ 선택 분류 모드 닫기' : '☑️ 문항 다중선택 · 폴더 이동'}
+                    {isSelectMode ? '☑️ 선택 분류 모드 닫기' : '☑️ 문항 선택 · 폴더 이동'}
                   </button>
                 </div>
               </div>
@@ -1077,7 +991,9 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
                             : 'bg-amber-950/30 text-amber-200 border-amber-500/30 hover:bg-amber-900/40'
                         }`}
                       >
-                        <span>{folderName === '계산 문제' ? '🧮' : '🗂️'} {folderName}</span>
+                        <span>
+                          {folderName === '계산 문제' ? '🧮' : '🗂️'} {folderName}
+                        </span>
                         <span
                           className={`px-1.5 py-0.2 rounded-full text-[10px] ${
                             isSelected
@@ -1269,33 +1185,18 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
               </div>
             )}
 
-            {/* 검색창 + 상태 필터 + 전체 정답 토글 */}
+            {/* 검색창 + 전체 정답 토글 */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {(
-                  [
-                    { id: 'all', label: `전체 (${filteredQuestions.length})` },
-                    { id: 'unsolved', label: '미풀이' },
-                    { id: 'wrong', label: '틀린 문제' },
-                    { id: 'correct', label: '맞힌 문제' },
-                  ] as const
-                ).map((st) => (
-                  <button
-                    key={st.id}
-                    onClick={() => setStatusFilter(st.id)}
-                    className={`px-2.5 py-1 rounded text-xs font-bold border ${
-                      statusFilter === st.id
-                        ? isLightMode
-                          ? 'bg-slate-800 text-white border-slate-900'
-                          : 'bg-white/20 text-white border-white/40'
-                        : isLightMode
-                        ? 'bg-slate-100 text-slate-700 border-slate-300'
-                        : 'bg-white/5 text-zinc-400 border-white/10'
-                    }`}
-                  >
-                    {st.label}
-                  </button>
-                ))}
+              <div className="flex items-center gap-2 flex-wrap">
+                <span
+                  className={`text-xs font-extrabold px-2.5 py-1 rounded border ${
+                    isLightMode
+                      ? 'bg-slate-100 text-slate-800 border-slate-300'
+                      : 'bg-white/5 text-zinc-300 border-white/10'
+                  }`}
+                >
+                  현재 목록 {filteredQuestions.length}문항
+                </span>
 
                 <button
                   onClick={handleToggleAllAnswers}
@@ -1336,7 +1237,7 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
           </div>
 
           {/* ===================================================================== */}
-          {/* 📋 3. 문항 리스트 (조항 클릭 -> 오른쪽 빨간 동그라미 정답 배지 & 폴더 이동) */}
+          {/* 📋 3. 문항 리스트 (조항 클릭 -> 빨간 동그라미 정답만 표시 / [상세 해설] 버튼 분리) */}
           {/* ===================================================================== */}
           <div className="space-y-2.5">
             {filteredQuestions.length === 0 ? (
@@ -1351,8 +1252,8 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
               </div>
             ) : (
               filteredQuestions.map((q, idx) => {
-                const isExpanded = expandedOxIds.has(q.id);
-                const userAns = oxUserAnswers[q.id];
+                const isAnswerShown = expandedAnswerIds.has(q.id);
+                const isDetailShown = expandedDetailIds.has(q.id);
                 const isChecked = selectedQuestionIds.has(q.id);
 
                 return (
@@ -1421,82 +1322,30 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
                             )}
                           </div>
 
-                          {/* 조항 텍스트 영역 (클릭 시 오른쪽 빨간 원형 배지 + 하단 해설 토글) */}
+                          {/* 조항 텍스트 영역 (클릭 시 오른쪽 빨간 원형 배지만 토글!) */}
                           <div
-                            onClick={() => toggleOxExp(q.id)}
+                            onClick={() => toggleInlineAnswer(q.id)}
                             className="cursor-pointer select-text text-sm sm:text-[15px] leading-relaxed break-keep"
-                            title="조항을 클릭하면 오른쪽에 정답이 표시됩니다"
+                            title="조항을 클릭하면 오른쪽에 간략 정답이 표시됩니다"
                           >
-                            {renderClauseWithRightAnswerBadge(q, isExpanded)}
+                            {renderClauseWithRightAnswerBadge(q, isAnswerShown)}
                           </div>
                         </div>
                       </div>
 
-                      {/* 우측 컨트롤: 개별 폴더 지정 드롭다운 + 정답 토글 + O / X + 삭제 */}
-                      <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
-                        <select
-                          value={q.folder || ''}
-                          onChange={(e) => handleAssignSingleQuestionFolder(q.id, e.target.value)}
-                          title="이 문항을 넣을 학습 폴더 선택"
-                          className={`px-2 py-1 rounded text-[11px] font-bold border outline-none cursor-pointer ${
-                            q.folder
-                              ? isLightMode
-                                ? 'bg-amber-50 text-amber-900 border-amber-400'
-                                : 'bg-amber-950/50 text-amber-300 border-amber-500/40'
-                              : isLightMode
-                              ? 'bg-slate-100 text-slate-700 border-slate-300'
-                              : 'bg-white/5 text-zinc-400 border-white/10'
-                          }`}
-                        >
-                          <option value="">📁 폴더지정</option>
-                          {oxFolders.map((f) => (
-                            <option key={f} value={f}>
-                              🗂️ {f}
-                            </option>
-                          ))}
-                        </select>
-
+                      {/* 우측 컨트롤: [상세 해설] 버튼 + 삭제(✕) 버튼만 깔끔하게 유지 */}
+                      <div className="flex items-center gap-1.5 shrink-0">
                         <button
-                          onClick={() => toggleOxExp(q.id)}
+                          onClick={() => toggleDetailExplanation(q.id)}
                           className={`px-2.5 py-1 rounded text-xs font-extrabold border transition-all ${
-                            isExpanded
-                              ? 'bg-amber-600 text-white border-amber-500'
+                            isDetailShown
+                              ? 'bg-amber-600 text-white border-amber-500 shadow-sm'
                               : isLightMode
-                              ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
-                              : 'bg-amber-950/40 text-amber-400 border-amber-500/30 hover:bg-amber-900/50'
+                              ? 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+                              : 'bg-white/5 text-zinc-300 border-white/15 hover:bg-white/10'
                           }`}
                         >
-                          {isExpanded ? '정답숨김' : '👉정답'}
-                        </button>
-
-                        <button
-                          onClick={() =>
-                            setOxUserAnswers((prev) => ({ ...prev, [q.id]: 'O' }))
-                          }
-                          className={`w-7 h-7 rounded font-extrabold text-xs border transition-all ${
-                            userAns === 'O'
-                              ? 'bg-teal-600 text-white border-teal-500 shadow'
-                              : isLightMode
-                              ? 'bg-slate-100 text-teal-800 border-slate-300 hover:bg-teal-50'
-                              : 'bg-white/5 text-teal-400 border-white/10 hover:bg-teal-950/50'
-                          }`}
-                        >
-                          O
-                        </button>
-
-                        <button
-                          onClick={() =>
-                            setOxUserAnswers((prev) => ({ ...prev, [q.id]: 'X' }))
-                          }
-                          className={`w-7 h-7 rounded font-extrabold text-xs border transition-all ${
-                            userAns === 'X'
-                              ? 'bg-rose-600 text-white border-rose-500 shadow'
-                              : isLightMode
-                              ? 'bg-slate-100 text-rose-800 border-slate-300 hover:bg-rose-50'
-                              : 'bg-white/5 text-rose-400 border-white/10 hover:bg-rose-950/50'
-                          }`}
-                        >
-                          X
+                          {isDetailShown ? '해설닫기' : '상세 해설'}
                         </button>
 
                         <button
@@ -1517,8 +1366,8 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
                       </div>
                     </div>
 
-                    {/* 하단 상세 해설 박스 */}
-                    {isExpanded && (
+                    {/* 하단 상세 해설 박스 ([상세 해설] 버튼을 눌렀을 때만 표시됨) */}
+                    {isDetailShown && (
                       <div
                         className={`mt-3 p-3 rounded-lg border text-xs sm:text-[13px] space-y-1.5 leading-relaxed ${
                           isLightMode
@@ -1528,7 +1377,7 @@ export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme 
                       >
                         <div className="flex items-center gap-2 flex-wrap font-extrabold">
                           <span className={isLightMode ? 'text-amber-900' : 'text-amber-400'}>
-                            💡 오답 수정 · 정답 확인 (정답: {q.answer})
+                            💡 오답 수정 · 상세 해설 (정답: {q.answer})
                           </span>
                           {q.correctAnswer && (
                             <span
