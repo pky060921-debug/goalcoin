@@ -1090,30 +1090,39 @@ def save_card():
         conn = get_db_connection()
         cursor = conn.cursor()
         
+        force_overwrite = bool(data.get('force_overwrite', False))
         if card_id:
-            cursor.execute("SELECT memo FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
+            cursor.execute("SELECT memo, answer_text FROM cards WHERE id = ? AND wallet_address = ?", (card_id, wallet_address))
             row = cursor.fetchone()
             final_memo_str = memo
+            final_answer_text = answer_text if (answer_text is not None and str(answer_text).strip() != '') else (row[1] if row and len(row) > 1 and row[1] else '')
             
             if row and row[0]:
                 try:
                     db_memo = json.loads(row[0])
                     client_memo = json.loads(memo)
+                    is_forced = force_overwrite or bool(client_memo.pop('_forceReps', False))
                     
-                    # 반복 횟수(filled)와 정답 수(totalCorrect)를 최대값으로 덮어쓰기
-                    client_memo['filled'] = max(int(db_memo.get('filled', 0)), int(client_memo.get('filled', 0)))
+                    if is_forced:
+                        client_memo['filled'] = int(client_memo.get('filled', 0))
+                    else:
+                        client_memo['filled'] = max(int(db_memo.get('filled', 0)), int(client_memo.get('filled', 0)))
                     client_memo['totalCorrect'] = max(int(db_memo.get('totalCorrect', 0)), int(client_memo.get('totalCorrect', 0)))
                     
-                    # 💡 [수정] 무한 누적되던 히스토리 병합 로직 제거. 
-                    # 프론트엔드에서 보낸 가장 최근 오답 기록(1건)만 유지하도록 그대로 덮어씁니다.
-                    
+                    final_memo_str = json.dumps(client_memo, ensure_ascii=False)
+                except Exception:
+                    pass
+            else:
+                try:
+                    client_memo = json.loads(memo)
+                    client_memo.pop('_forceReps', None)
                     final_memo_str = json.dumps(client_memo, ensure_ascii=False)
                 except Exception:
                     pass
 
             cursor.execute('''UPDATE cards SET card_content=?, answer_text=?, folder_name=?, memo=? 
                               WHERE id=? AND wallet_address=?''', 
-                              (card_content, answer_text, folder_name, final_memo_str, card_id, wallet_address))
+                              (card_content, final_answer_text, folder_name, final_memo_str, card_id, wallet_address))
         else:
             cursor.execute('''INSERT INTO cards (wallet_address, category_id, card_content, answer_text, options_json, level, next_review_time, status, best_time, folder_name, memo) 
                               VALUES (?, 0, ?, ?, '[]', 0, ?, 'OWNED', NULL, ?, ?)''', 
@@ -1215,8 +1224,11 @@ def sync_batch():
                     db_memo = json.loads(db_memo_str)
                     client_memo = json.loads(client_memo_str)
                     
-                    # 1. 반복 횟수(filled)와 정답 수(totalCorrect)를 최대값으로 덮어쓰기
-                    client_memo['filled'] = max(int(db_memo.get('filled', 0)), int(client_memo.get('filled', 0)))
+                    is_forced = bool(m.get('force_overwrite', False)) or bool(client_memo.pop('_forceReps', False))
+                    if is_forced:
+                        client_memo['filled'] = int(client_memo.get('filled', 0))
+                    else:
+                        client_memo['filled'] = max(int(db_memo.get('filled', 0)), int(client_memo.get('filled', 0)))
                     client_memo['totalCorrect'] = max(int(db_memo.get('totalCorrect', 0)), int(client_memo.get('totalCorrect', 0)))
                     
                     # 💡 2. [수정] 무한 누적되던 오답 히스토리 병합 로직 제거. (최신 1건만 덮어쓰기)
@@ -2180,5 +2192,63 @@ def buy_market_card_batch():
         conn.commit()
         conn.close()
         return jsonify({"message": f"총 {inserted}개의 조항 구매가 완료되었습니다. 내 카드함에서 확인하세요!"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route('/update-folder-reps', methods=['POST', 'OPTIONS'])
+def update_folder_reps():
+    if request.method == 'OPTIONS':
+        return jsonify({}), 200
+    try:
+        data = request.json or {}
+        wallet_address = data.get('wallet_address')
+        folder_name = data.get('folder_name')
+        target_reps = int(data.get('target_reps', 0))
+        from_reps = data.get('from_reps', None)
+
+        if not wallet_address or not folder_name:
+            return jsonify({"error": "필수 정보가 누락되었습니다."}), 400
+
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        if folder_name == '__ALL__':
+            cursor.execute("SELECT id, memo FROM cards WHERE wallet_address = ?", (wallet_address,))
+        else:
+            cursor.execute("SELECT id, memo FROM cards WHERE wallet_address = ? AND folder_name = ?", (wallet_address, folder_name))
+
+        rows = cursor.fetchall()
+        updated_count = 0
+
+        for card_id, memo_str in rows:
+            memo_obj = {"text": "", "filled": 0, "wrongIndices": []}
+            current_filled = 0
+            if memo_str:
+                try:
+                    if memo_str.strip().startswith('{'):
+                        parsed = json.loads(memo_str)
+                        memo_obj.update(parsed)
+                        current_filled = int(parsed.get('filled', 0) or 0)
+                    else:
+                        parts = memo_str.split('|')
+                        current_filled = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+                        memo_obj = {"text": parts[1] if len(parts) > 1 else "", "filled": current_filled, "wrongIndices": []}
+                except Exception:
+                    pass
+
+            if from_reps is not None and str(from_reps).strip() != '':
+                if current_filled != int(from_reps):
+                    continue
+
+            memo_obj['filled'] = target_reps
+            memo_obj.pop('_forceReps', None)
+            new_memo_str = json.dumps(memo_obj, ensure_ascii=False)
+            cursor.execute("UPDATE cards SET memo = ? WHERE id = ? AND wallet_address = ?", (new_memo_str, card_id, wallet_address))
+            updated_count += 1
+
+        conn.commit()
+        conn.close()
+        return jsonify({"message": f"{updated_count}개 조항의 반복 횟수가 {target_reps}회로 일괄 변경되었습니다.", "updated_count": updated_count}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
