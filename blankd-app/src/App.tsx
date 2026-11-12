@@ -1612,7 +1612,7 @@ function MainApp() {
     return () => window.removeEventListener("targetRepsUpdated", calculatePassProbability);
   }, [savedCards, safeAddress]);
 
-  const minFilledCount = savedCards.length > 0 ? Math.min(...savedCards.map((card: any) => getExtendedStats(card.memo || "").filled || 0)) : 0;
+  const maxFilledCount = savedCards.length > 0 ? Math.max(...savedCards.map((card: any) => getExtendedStats(card.memo || "").filled || 0)) : 0;
 
   // 💡 [누락 복원] 이어하기 버튼 표시용 useMemo 블록
   const { nextCatToCraft, nextStudyCard } = useMemo(() => {
@@ -3295,7 +3295,7 @@ function MainApp() {
                   </span>
                 )}
                 
-                <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">누적 회독수</span><span className="text-[10px] sm:text-xs font-bold text-amber-400">{minFilledCount} 회독</span></div>
+                <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">누적 회독수</span><span className="text-[10px] sm:text-xs font-bold text-amber-400">{maxFilledCount} 회독</span></div>
                 <div className="h-5 sm:h-6 w-px bg-white/10"></div>
                 <div className="text-right"><span className="text-[8px] sm:text-[9px] text-white/40 block tracking-widest">예상 합격률</span><span className="text-[10px] sm:text-xs font-bold text-indigo-400">{passProbability}%</span></div>
                 <div className="h-5 sm:h-6 w-px bg-white/10 hidden sm:block"></div>
