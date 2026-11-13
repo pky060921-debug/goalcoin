@@ -1,1424 +1,1201 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 
-export interface OxQuestion {
+export interface ExamQuestionItem {
   id: number;
   category: string;
   subCategory?: string;
   folder?: string;
   question: string;
-  answer: string; // 'O' | 'X'
-  correctAnswer?: string;
+  answer: string; // 'O' | 'X' | calculation answer
+  correctAnswer: string;
   explanation: string;
   source?: string;
 }
 
-interface ExamTabProps {
+export interface ExamTabProps {
   walletAddress?: string;
   address?: string;
-  theme?: string;
 }
 
-const DEFAULT_OX_SAMPLE: OxQuestion[] = [
-  {
-    id: 1,
-    category: '법령 1장 총칙',
-    subCategory: '1. 목적·관장·정의 및 사용자인 기관장 (법 제1조~제3조, 시행령 제2조·별표1)',
-    folder: '',
-    question:
-      '사용자인 기관장으로 잘못 기술된 것은?\n(1) 헌법재판소 : 사무총장 (2) 사법부 : 법원사무처장 (3) 선거관리위원회 : 중앙선거관리위원회 위원장',
-    answer: 'X',
-    correctAnswer: '(1) 사무처장 / (2) 법원행정처장 / (3) 중앙선거관리위원회 사무총장',
-    explanation:
-      '[원래 문제] 사용자인 기관장으로 잘못 기술된 것은?\n[정답·수정] (1) 사무처장 / (2) 법원행정처장 / (3) 중앙선거관리위원회 사무총장\n[분류] 1. 목적·관장·정의 및 사용자인 기관장 (법 제1조~제3조, 시행령 제2조·별표1)\n[출처] 2021년 하반기 제1차(시행령 별표) 1번 (박스형(틀린보기))',
-    source: '2021년 하반기 제1차(시행령 별표) 1번 (박스형(틀린보기))',
-  },
-  {
-    id: 2,
-    category: '계산 문제',
-    subCategory: '01. 별표2·요양급여 본인일부부담금 계산',
-    folder: '계산 문제',
-    question:
-      '희귀난치성질환자등이 아닌 일반 가입자가 상급종합병원에서 외래진료를 받고 진찰료 총액 20,000원, 진찰료를 제외한 요양급여비용 총액 100,000원이 발생한 경우 본인이 부담해야 할 금액은 80,000원이다.',
-    answer: 'O',
-    correctAnswer:
-      'O (맞는 계산/지문) — 상급종합병원 일반 외래 본인부담금은 진찰료 총액의 100%(20,000원)와 나머지 요양급여비용 총액의 60%(60,000원)를 합산하여 총 80,000원이 됩니다.',
-    explanation:
-      '[정답·해설] (O) 상급종합병원 일반 외래 본인부담금은 진찰료 총액의 100%(20,000원)와 나머지 요양급여비용 총액의 60%(60,000원)를 합산하여 총 80,000원이 됩니다.\n[분류] 별표2·요양급여본인부담률\n[출처] 계산문제 (별표2·요양급여본인부담률) #2',
-    source: '계산문제 (별표2·요양급여본인부담률) #2',
-  },
+interface BoxSubItem {
+  label: string; // 가, 나, 다, 라, 마, 바, 사
+  originItem: ExamQuestionItem;
+  displayQuestion: string;
+  effectiveAnswer: 'O' | 'X';
+  shortCorrection: string;
+  isSynthesizedTrue: boolean;
+}
+
+interface GeneratedBoxQuestion {
+  id: string;
+  boxNo: number;
+  targetType: 'WRONG_COUNT' | 'CORRECT_COUNT'; // 틀린 개수 vs 맞는 개수
+  subItems: BoxSubItem[];
+  correctCount: number;
+  choices: number[]; // 4지선다 보기 (예: [2, 3, 4, 5])
+}
+
+const DEFAULT_CATEGORIES = [
+  '법령 1장 총칙',
+  '법령 2장 가입자',
+  '법령 3장 공단',
+  '법령 4장 보험급여',
+  '법령 5장 심평원',
+  '법령 6장 보험료',
+  '법령 7장 이의신청',
+  '법령 8장 보칙',
+  '법령 9장 벌칙',
+  '정관',
+  '인사규정',
+  '직제규정',
+  '사무관리규정',
+  '계산문제',
 ];
 
-// 문항이 계산 문제인지 판별하는 헬퍼
-const isCalculationQuestion = (q: OxQuestion): boolean => {
-  if (q.category === '계산 문제' || q.folder === '계산 문제') return true;
-  if ((q.source || '').startsWith('계산문제')) return true;
-  return false;
-};
+const KOR_LABELS = ['가', '나', '다', '라', '마', '바', '사'];
+const CIRCLED_NUMS = ['①', '②', '③', '④'];
 
-export const ExamTab: React.FC<ExamTabProps> = ({ walletAddress, address, theme }) => {
-  const safeAddress = walletAddress || address || 'default';
-  const storageKeyOx = `blankd_ox_questions_${safeAddress}`;
-  const storageKeyOxFolders = `blankd_ox_folders_${safeAddress}`;
+const QUESTION_STORAGE_KEYS = [
+  'blankd_exam_questions_v3',
+  'blankd_exam_questions_v2',
+  'blankd_exam_questions_v1',
+  'blankd_exam_questions',
+  'blankd_exam_items',
+  'exam_questions',
+];
 
-  // 화이트 모드(라이트 테마) 실시간 감지
-  const [isLightMode, setIsLightMode] = useState<boolean>(() => {
-    if (theme === 'white' || theme === 'light') return true;
-    if (typeof window !== 'undefined') {
-      const savedTheme = localStorage.getItem('blankd_theme');
-      return savedTheme === 'white' || savedTheme === 'light';
-    }
-    return false;
-  });
+const FOLDER_STORAGE_KEYS = [
+  'blankd_exam_custom_folders_v1',
+  'blankd_exam_custom_folders',
+  'blankd_exam_folders',
+  'exam_folders',
+];
 
-  useEffect(() => {
-    const checkTheme = () => {
-      if (theme === 'white' || theme === 'light') {
-        setIsLightMode(true);
-        return;
-      }
-      if (theme === 'black' || theme === 'green' || theme === 'dark') {
-        setIsLightMode(false);
-        return;
-      }
-      const savedTheme = localStorage.getItem('blankd_theme');
-      setIsLightMode(savedTheme === 'white' || savedTheme === 'light');
+const PRIMARY_QUESTION_KEY = 'blankd_exam_questions_v3';
+const PRIMARY_FOLDER_KEY = 'blankd_exam_custom_folders_v1';
+
+/**
+ * X 지문의 correctAnswer("잘못된표현(X) → 바른표현")를 분석하여
+ * 실전 박스형 문제에서 정답 개수가 0~N개로 다양하게 분포하도록
+ * 현행 법령 기준 옳은(O) 지문으로 자연스럽게 치환하는 헬퍼 함수
+ */
+function trySynthesizeTrueStatement(item: ExamQuestionItem): {
+  success: boolean;
+  text: string;
+  note: string;
+} {
+  if (item.answer === 'O') {
+    return {
+      success: true,
+      text: item.question,
+      note: item.correctAnswer || '옳은 지문 (원문 그대로 출제)',
     };
-    checkTheme();
-    const interval = setInterval(checkTheme, 600);
-    window.addEventListener('storage', checkTheme);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener('storage', checkTheme);
-    };
-  }, [theme]);
+  }
 
-  // 상단 탭 모드: 'ox' (일반 법령·정관 오답노트) | 'calc' (계산 문제 전용) | 'subjective' (단답·요약)
-  const [examSubTab, setExamSubTab] = useState<'ox' | 'calc' | 'subjective'>('ox');
+  // (1)(2) 복수 항목형 문제는 단일 문장 자동 치환에서 제외
+  if (item.question.includes('\n(1)') || item.question.includes('(1)')) {
+    return { success: false, text: item.question, note: item.correctAnswer };
+  }
 
-  // 문제 목록 상태
-  const [oxQuestions, setOxQuestions] = useState<OxQuestion[]>(() => {
-    try {
-      const saved =
-        localStorage.getItem(storageKeyOx) || localStorage.getItem('blankd_ox_questions_default');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+  const ca = (item.correctAnswer || '').trim();
+  const arrowMatch = ca.match(/^([^→/]+?)(?:\(X\))?\s*→\s*([^(/]+)/);
+  if (arrowMatch) {
+    const wrongPart = arrowMatch[1].trim().replace(/^['"‘“]|['"’”]$/g, '');
+    let rightPart = arrowMatch[2].trim().replace(/^['"‘“]|['"’”]$/g, '');
+    rightPart = rightPart.replace(/\s*(?:임|으로\s*틀림|이므로\s*틀림).*$/, '').trim();
+
+    if (
+      wrongPart.length >= 2 &&
+      wrongPart.length <= 28 &&
+      rightPart.length >= 2 &&
+      rightPart.length <= 40 &&
+      !wrongPart.includes('·') &&
+      item.question.includes(wrongPart)
+    ) {
+      const replaced = item.question.replace(wrongPart, rightPart);
+      if (replaced !== item.question) {
+        return {
+          success: true,
+          text: replaced,
+          note: `옳은 지문 ('${wrongPart}' → '${rightPart}' 바른 표현 반영)`,
+        };
       }
-    } catch (e) {
-      console.error('OX 데이터 로드 오류:', e);
     }
-    return DEFAULT_OX_SAMPLE;
-  });
+  }
 
-  // 사용자 정의 학습 폴더 목록 상태
-  const [oxFolders, setOxFolders] = useState<string[]>(() => {
-    try {
-      const saved =
-        localStorage.getItem(storageKeyOxFolders) ||
-        localStorage.getItem('blankd_ox_folders_default');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {}
-    return ['계산 문제', '자주 틀리는 조항', '시험 직전 필수암기'];
-  });
+  return { success: false, text: item.question, note: item.correctAnswer };
+}
 
-  // 필터 상태
-  const [activeFolder, setActiveFolder] = useState<string>('전체');
-  const [activeCategory, setActiveCategory] = useState<string>('전체');
-  const [activeSubCategory, setActiveSubCategory] = useState<string>('전체');
+export const ExamTab: React.FC<ExamTabProps> = () => {
+  const [questions, setQuestions] = useState<ExamQuestionItem[]>([]);
+  const [customFolders, setCustomFolders] = useState<string[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>('전체');
+  const [selectedSubCategory, setSelectedSubCategory] = useState<string>('전체');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // 💡 1) 조항 클릭 시 우측 빨간 동그라미(간략 정답 배지)만 표시하는 상태
-  const [expandedAnswerIds, setExpandedAnswerIds] = useState<Set<number>>(new Set());
-  // 💡 2) [상세 해설] 버튼을 눌렀을 때만 하단 상세 해설 박스를 여는 상태
-  const [expandedDetailIds, setExpandedDetailIds] = useState<Set<number>>(new Set());
+  // 화면 모드: 'list'(기존 단문 리스트 모드) | 'box'(실전 박스형 훈련 모드)
+  const [viewMode, setViewMode] = useState<'list' | 'box'>('list');
+
+  // 단문 리스트 모드 상태
+  const [revealedAnswers, setRevealedAnswers] = useState<Record<number, boolean>>({});
+  const [expandedExplanations, setExpandedExplanations] = useState<Record<number, boolean>>({});
   const [showAllAnswers, setShowAllAnswers] = useState<boolean>(false);
 
-  // 폴더 생성 및 일괄 분류/선택 모드 상태
+  // 폴더 추가 상태
   const [newFolderName, setNewFolderName] = useState<string>('');
-  const [isCreatingFolder, setIsCreatingFolder] = useState<boolean>(false);
-  const [isSelectMode, setIsSelectMode] = useState<boolean>(false);
-  const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<number>>(new Set());
-  const [targetMoveFolder, setTargetMoveFolder] = useState<string>('');
+  const [isAddingFolder, setIsAddingFolder] = useState<boolean>(false);
 
-  // 신규 문항 직접 추가 모달/패널 상태
-  const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
-  const [newQCategory, setNewQCategory] = useState<string>('법령 1장 총칙');
-  const [newQSubCategory, setNewQSubCategory] = useState<string>('');
-  const [newQFolder, setNewQFolder] = useState<string>('');
-  const [newQText, setNewQText] = useState<string>('');
-  const [newQAnswer, setNewQAnswer] = useState<'O' | 'X'>('X');
-  const [newQCorrectAnswer, setNewQCorrectAnswer] = useState<string>('');
-  const [newQExplanation, setNewQExplanation] = useState<string>('');
+  // ==========================================
+  // 박스형 훈련 모드 전용 상태
+  // ==========================================
+  const [boxSizeSetting, setBoxSizeSetting] = useState<number | 'random'>(5); // 5, 6, 7, 'random'
+  const [boxBatchCount, setBoxBatchCount] = useState<1 | 5 | 10>(1); // 1문제씩 집중 vs 5/10문제 시험지 모드
+  const [boxTargetSetting, setBoxTargetSetting] = useState<'WRONG_COUNT' | 'CORRECT_COUNT' | 'RANDOM'>('WRONG_COUNT');
+  const [autoMixTrueStatements, setAutoMixTrueStatements] = useState<boolean>(true);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [boxList, setBoxList] = useState<GeneratedBoxQuestion[]>([]);
+  // key: `${boxId}-${subIdx}` -> 'O' | 'X' | null
+  const [userMarks, setUserMarks] = useState<Record<string, 'O' | 'X' | null>>({});
+  // key: boxId -> selected choice number
+  const [selectedChoices, setSelectedChoices] = useState<Record<string, number>>({});
+  // key: `${boxId}-${subIdx}` -> boolean (상세 해설 토글)
+  const [boxExpandedExp, setBoxExpandedExp] = useState<Record<string, boolean>>({});
+  // key: `${boxId}-${subIdx}` -> boolean (채점 전 개별 지문 정답 캡슐 미리보기 토글)
+  const [boxSubRevealed, setBoxSubRevealed] = useState<Record<string, boolean>>({});
 
-  // 로컬스토리지 자동 저장
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
+  const [boxStats, setBoxStats] = useState<{ solved: number; correct: number }>({
+    solved: 0,
+    correct: 0,
+  });
+
+  // 초기 로드 (기존 모든 버전의 localStorage 키 호환)
   useEffect(() => {
     try {
-      const serialized = JSON.stringify(oxQuestions);
-      localStorage.setItem(storageKeyOx, serialized);
-      localStorage.setItem('blankd_ox_questions_default', serialized);
+      for (const key of QUESTION_STORAGE_KEYS) {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setQuestions(parsed);
+            localStorage.setItem(PRIMARY_QUESTION_KEY, JSON.stringify(parsed));
+            break;
+          }
+        }
+      }
+      for (const fKey of FOLDER_STORAGE_KEYS) {
+        const rawF = localStorage.getItem(fKey);
+        if (rawF) {
+          const parsedF = JSON.parse(rawF);
+          if (Array.isArray(parsedF) && parsedF.length > 0) {
+            setCustomFolders(parsedF);
+            localStorage.setItem(PRIMARY_FOLDER_KEY, JSON.stringify(parsedF));
+            break;
+          }
+        }
+      }
     } catch (e) {
-      console.error('OX 문제 저장 오류:', e);
+      console.error('Failed to load ExamTab data from localStorage:', e);
     }
-  }, [oxQuestions, storageKeyOx]);
+  }, []);
 
-  useEffect(() => {
+  const saveQuestions = useCallback((nextQuestions: ExamQuestionItem[]) => {
+    setQuestions(nextQuestions);
     try {
-      const serialized = JSON.stringify(oxFolders);
-      localStorage.setItem(storageKeyOxFolders, serialized);
-      localStorage.setItem('blankd_ox_folders_default', serialized);
-    } catch (e) {}
-  }, [oxFolders, storageKeyOxFolders]);
+      localStorage.setItem(PRIMARY_QUESTION_KEY, JSON.stringify(nextQuestions));
+    } catch (e) {
+      console.error('Failed to save questions:', e);
+    }
+  }, []);
 
-  // 문제 데이터 내의 폴더명이 oxFolders에 없으면 자동 등록
+  const saveCustomFolders = useCallback((nextFolders: string[]) => {
+    setCustomFolders(nextFolders);
+    try {
+      localStorage.setItem(PRIMARY_FOLDER_KEY, JSON.stringify(nextFolders));
+    } catch (e) {
+      console.error('Failed to save custom folders:', e);
+    }
+  }, []);
+
+  // 박스형 타이머 작동 (미채점 문제가 남아 있을 때만 작동)
   useEffect(() => {
-    const foldersInQuestions = Array.from(
-      new Set(
-        oxQuestions
-          .map((q) => (q.folder || '').trim())
-          .filter((f) => f !== '' && f !== '미분류' && f !== '전체')
-      )
-    );
-    if (foldersInQuestions.length > 0) {
-      setOxFolders((prev) => {
-        const merged = Array.from(new Set([...prev, ...foldersInQuestions]));
-        return merged.length !== prev.length ? merged : prev;
-      });
-    }
-  }, [oxQuestions]);
+    if (viewMode !== 'box' || !isTimerRunning || boxList.length === 0) return;
+    const allGraded = boxList.every((b) => selectedChoices[b.id] !== undefined);
+    if (allGraded) return;
 
-  // 간략 정답 핵심 텍스트 추출 헬퍼 (조항 클릭 시 오른쪽 빨간 동그라미 배지에만 표시)
-  const getConciseCorrectAnswer = (q: OxQuestion): string => {
-    if (q.correctAnswer && q.correctAnswer.trim()) {
-      return q.correctAnswer.trim();
-    }
-    if (q.explanation) {
-      const firstLine = q.explanation
-        .split('\n')[0]
-        .replace(/^\[정답·수정\]\s*/, '')
-        .replace(/^\[정답·해설\]\s*/, '')
-        .trim();
-      if (firstLine) return firstLine;
-    }
-    return q.answer === 'O' ? 'O (맞는 지문)' : 'X (틀린 지문)';
-  };
+    const timer = setInterval(() => {
+      setElapsedSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [viewMode, isTimerRunning, boxList, selectedChoices]);
 
-  // 조항(문장) 클릭 시 -> 오른쪽 빨간 동그라미 간략 정답만 토글
-  const toggleInlineAnswer = (id: number) => {
-    setExpandedAnswerIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
+  // JSON 파일 업로드 (병합 및 중복 제거)
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
-  // [상세 해설] 버튼 클릭 시 -> 하단 상세 해설 박스만 토글
-  const toggleDetailExplanation = (id: number) => {
-    setExpandedDetailIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const content = event.target?.result as string;
+          const parsed = JSON.parse(content);
+          const incomingList: any[] = Array.isArray(parsed)
+            ? parsed
+            : parsed.questions || parsed.items || [];
 
-  // 전체 정답 보기/숨기기 토글 (간략 정답 배지 일괄 토글)
-  const handleToggleAllAnswers = () => {
-    if (showAllAnswers) {
-      setShowAllAnswers(false);
-      setExpandedAnswerIds(new Set());
-    } else {
-      setShowAllAnswers(true);
-      setExpandedAnswerIds(new Set(filteredQuestions.map((q) => q.id)));
-    }
-  };
+          setQuestions((prev) => {
+            const existingMap = new Map<string, ExamQuestionItem>();
+            prev.forEach((q) => {
+              const key = q.question.replace(/\s+/g, '');
+              existingMap.set(key, q);
+            });
 
-  // 폴더 생성
-  const handleCreateFolder = () => {
-    const trimmed = newFolderName.trim();
-    if (!trimmed) {
-      alert('폴더 이름을 입력해 주세요.');
-      return;
-    }
-    if (trimmed === '전체' || trimmed === '미분류') {
-      alert('"전체" 또는 "미분류"는 예약된 이름입니다.');
-      return;
-    }
-    if (oxFolders.includes(trimmed)) {
-      alert('이미 존재하는 폴더 이름입니다.');
-      return;
-    }
-    setOxFolders((prev) => [...prev, trimmed]);
-    setTargetMoveFolder(trimmed);
-    setNewFolderName('');
-    setIsCreatingFolder(false);
-  };
+            let maxId = prev.reduce((max, q) => Math.max(max, q.id || 0), 0);
 
-  // 폴더 이름 변경
-  const handleRenameFolder = (oldName: string) => {
-    const nextName = prompt(`"${oldName}" 폴더의 새 이름을 입력하세요:`, oldName);
-    if (!nextName) return;
-    const trimmed = nextName.trim();
-    if (!trimmed || trimmed === oldName) return;
-    if (trimmed === '전체' || trimmed === '미분류' || oxFolders.includes(trimmed)) {
-      alert('사용할 수 없거나 이미 존재하는 폴더 이름입니다.');
-      return;
-    }
-    setOxFolders((prev) => prev.map((f) => (f === oldName ? trimmed : f)));
-    setOxQuestions((prev) =>
-      prev.map((q) => ((q.folder || '').trim() === oldName ? { ...q, folder: trimmed } : q))
-    );
-    if (activeFolder === oldName) setActiveFolder(trimmed);
-  };
+            incomingList.forEach((raw) => {
+              const qText = (raw.question || '').trim();
+              if (!qText) return;
+              const normKey = qText.replace(/\s+/g, '');
+              maxId += 1;
+              const item: ExamQuestionItem = {
+                id: raw.id || maxId,
+                category: raw.category || '모의고사/기타',
+                subCategory: raw.subCategory || '',
+                folder: raw.folder || '',
+                question: qText,
+                answer: raw.answer || 'X',
+                correctAnswer: raw.correctAnswer || raw.explanation || '',
+                explanation: raw.explanation || raw.correctAnswer || '',
+                source: raw.source || '',
+              };
+              existingMap.set(normKey, item);
+            });
 
-  // 폴더 삭제
-  const handleDeleteFolder = (folderName: string) => {
-    if (
-      !confirm(
-        `"${folderName}" 폴더를 삭제하시겠습니까?\n(폴더 안의 문제들은 삭제되지 않고 '미분류' 상태로 유지됩니다.)`
-      )
-    ) {
-      return;
-    }
-    setOxFolders((prev) => prev.filter((f) => f !== folderName));
-    setOxQuestions((prev) =>
-      prev.map((q) => ((q.folder || '').trim() === folderName ? { ...q, folder: '' } : q))
-    );
-    if (activeFolder === folderName) setActiveFolder('전체');
-  };
-
-  // 선택된 문항들을 특정 폴더로 일괄 이동
-  const handleBulkMoveToFolder = (destinationFolder: string) => {
-    if (selectedQuestionIds.size === 0) {
-      alert('먼저 폴더에 넣을 문항을 체크해 주세요.');
-      return;
-    }
-    const cleanDest = destinationFolder === '미분류' ? '' : destinationFolder.trim();
-    setOxQuestions((prev) =>
-      prev.map((q) => (selectedQuestionIds.has(q.id) ? { ...q, folder: cleanDest } : q))
-    );
-    setSelectedQuestionIds(new Set());
-  };
-
-  // 선택된 문항 일괄 삭제
-  const handleBulkDeleteQuestions = () => {
-    if (selectedQuestionIds.size === 0) {
-      alert('삭제할 문항을 먼저 선택해 주세요.');
-      return;
-    }
-    if (!confirm(`선택한 ${selectedQuestionIds.size}개 문항을 삭제하시겠습니까?`)) return;
-    setOxQuestions((prev) => prev.filter((q) => !selectedQuestionIds.has(q.id)));
-    setSelectedQuestionIds(new Set());
-  };
-
-  // JSON 파일 업로드
-  const handleUploadJson = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const raw = event.target?.result as string;
-        const parsed = JSON.parse(raw);
-        const list: any[] = Array.isArray(parsed)
-          ? parsed
-          : Array.isArray(parsed.questions)
-          ? parsed.questions
-          : [];
-
-        if (list.length === 0) {
-          alert('유효한 문항 배열이 없는 JSON 파일입니다.');
-          return;
-        }
-
-        const normalizedLoaded: OxQuestion[] = list.map((item, idx) => ({
-          id: Number(item.id) || idx + 1,
-          category: String(item.category || '기타').trim(),
-          subCategory: item.subCategory ? String(item.subCategory).trim() : '',
-          folder: item.folder ? String(item.folder).trim() : '',
-          question: String(item.question || '').trim(),
-          answer: String(item.answer || 'X').toUpperCase() === 'O' ? 'O' : 'X',
-          correctAnswer: item.correctAnswer ? String(item.correctAnswer).trim() : '',
-          explanation: String(item.explanation || '').trim(),
-          source: item.source ? String(item.source).trim() : '',
-        }));
-
-        const shouldMerge =
-          oxQuestions.length > 5 &&
-          confirm(
-            `불러온 파일(${normalizedLoaded.length}문항)을 현재 목록(${oxQuestions.length}문항)과 합치시겠습니까?\n\n[확인] = 중복 제외하고 합치기 (기존 폴더 분류 유지)\n[취소] = 새 파일로 전체 교체하기`
-          );
-
-        const normKey = (s: string) =>
-          s
-            .replace(/\s+/g, '')
-            .replace(/[.,·ㆍ•"“”'‘’()\[\]\-—]/g, '')
-            .toLowerCase();
-
-        if (shouldMerge) {
-          const seen = new Map<string, OxQuestion>();
-          oxQuestions.forEach((q) => {
-            seen.set(normKey(q.question), q);
+            const merged = Array.from(existingMap.values()).map((item, idx) => ({
+              ...item,
+              id: idx + 1,
+            }));
+            localStorage.setItem(PRIMARY_QUESTION_KEY, JSON.stringify(merged));
+            return merged;
           });
-          normalizedLoaded.forEach((q) => {
-            const k = normKey(q.question);
-            if (!seen.has(k)) {
-              seen.set(k, q);
-            } else {
-              const existing = seen.get(k)!;
-              if (!existing.folder && q.folder) {
-                seen.set(k, { ...existing, folder: q.folder, category: q.category });
-              }
-            }
-          });
-          const merged = Array.from(seen.values()).map((q, i) => ({ ...q, id: i + 1 }));
-          setOxQuestions(merged);
-          alert(`중복을 제외하고 총 ${merged.length}문항으로 통합되었습니다.`);
-        } else {
-          const seen = new Set<string>();
-          const deduped: OxQuestion[] = [];
-          normalizedLoaded.forEach((q) => {
-            const k = normKey(q.question);
-            if (!seen.has(k)) {
-              seen.add(k);
-              deduped.push({ ...q, id: deduped.length + 1 });
-            }
-          });
-          setOxQuestions(deduped);
-          setExpandedAnswerIds(new Set());
-          setExpandedDetailIds(new Set());
-          setActiveFolder('전체');
-          setActiveCategory('전체');
-          setActiveSubCategory('전체');
-          alert(`총 ${deduped.length}문항을 성공적으로 불러왔습니다.`);
+        } catch (err) {
+          alert(`파일 파싱 오류가 발생했습니다: ${file.name}`);
         }
-      } catch (err) {
-        alert('JSON 파일 파싱에 실패했습니다. 올바른 JSON 형식인지 확인해 주세요.');
-      }
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    };
-    reader.readAsText(file, 'utf-8');
-  };
-
-  // 현재 오답정리 목록(폴더 분류 포함)을 JSON 파일로 다운로드
-  const handleExportJson = () => {
-    const dataStr = JSON.stringify(oxQuestions, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `국민건강보험공단_오답정리_폴더분류포함_${oxQuestions.length}문항.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  // 일반 법령·정관 문항 vs 계산 문제 분리 카운트
-  const nonCalcQuestions = useMemo(
-    () => oxQuestions.filter((q) => !isCalculationQuestion(q)),
-    [oxQuestions]
-  );
-  const calcQuestions = useMemo(
-    () => oxQuestions.filter((q) => isCalculationQuestion(q)),
-    [oxQuestions]
-  );
-
-  // 현재 탭('ox' vs 'calc')의 베이스 문항 풀
-  const baseModeQuestions = useMemo(() => {
-    if (examSubTab === 'calc') return calcQuestions;
-    if (activeFolder === '계산 문제' || activeCategory === '계산 문제') return calcQuestions;
-    return nonCalcQuestions;
-  }, [examSubTab, nonCalcQuestions, calcQuestions, activeFolder, activeCategory]);
-
-  // 폴더별 문항 수 계산
-  const folderCounts = useMemo(() => {
-    const counts: Record<string, number> = {
-      전체: nonCalcQuestions.length,
-      미분류: 0,
-    };
-    oxFolders.forEach((f) => {
-      counts[f] = 0;
+      };
+      reader.readAsText(file);
     });
-    oxQuestions.forEach((q) => {
-      const f = (q.folder || '').trim();
-      if (!f) {
-        if (!isCalculationQuestion(q)) {
-          counts['미분류'] = (counts['미분류'] || 0) + 1;
-        }
-      } else {
-        counts[f] = (counts[f] || 0) + 1;
+    e.target.value = '';
+  };
+
+  // 전체 카테고리 목록
+  const allCategories = useMemo(() => {
+    const dynamicCats = new Set<string>(DEFAULT_CATEGORIES);
+    questions.forEach((q) => {
+      if (q.category) dynamicCats.add(q.category);
+      if (q.folder) dynamicCats.add(q.folder);
+    });
+    customFolders.forEach((f) => dynamicCats.add(f));
+    return ['전체', ...Array.from(dynamicCats)];
+  }, [questions, customFolders]);
+
+  // 현재 선택된 카테고리의 세부 분류(subCategory) 목록
+  const subCategories = useMemo(() => {
+    if (selectedCategory === '전체') return [];
+    const subs = new Set<string>();
+    questions.forEach((q) => {
+      const matchCat = q.category === selectedCategory || q.folder === selectedCategory;
+      if (matchCat && q.subCategory) {
+        subs.add(q.subCategory);
       }
     });
-    return counts;
-  }, [oxQuestions, nonCalcQuestions, oxFolders]);
+    return Array.from(subs).sort((a, b) => a.localeCompare(b, 'ko', { numeric: true }));
+  }, [questions, selectedCategory]);
 
-  // 현재 선택된 폴더 내의 문항 목록
-  const folderFilteredQuestions = useMemo(() => {
-    if (examSubTab === 'calc') return calcQuestions;
-    return baseModeQuestions.filter((q) => {
-      const f = (q.folder || '').trim();
-      if (activeFolder === '전체') return true;
-      if (activeFolder === '미분류') return !f;
-      return f === activeFolder;
-    });
-  }, [examSubTab, calcQuestions, baseModeQuestions, activeFolder]);
+  useEffect(() => {
+    setSelectedSubCategory('전체');
+  }, [selectedCategory]);
 
-  const categoriesList = useMemo(() => {
-    const cats = Array.from(new Set(folderFilteredQuestions.map((q) => q.category)));
-    return ['전체', ...cats];
-  }, [folderFilteredQuestions]);
-
-  const subCategoriesList = useMemo(() => {
-    if (examSubTab === 'calc') {
-      const subs = Array.from(
-        new Set(calcQuestions.map((q) => (q.subCategory || '').trim()).filter(Boolean))
-      );
-      return ['전체', ...subs];
-    }
-    if (activeCategory === '전체') return ['전체'];
-    const subs = Array.from(
-      new Set(
-        folderFilteredQuestions
-          .filter((q) => q.category === activeCategory)
-          .map((q) => (q.subCategory || '').trim())
-          .filter(Boolean)
-      )
-    );
-    return ['전체', ...subs];
-  }, [examSubTab, calcQuestions, folderFilteredQuestions, activeCategory]);
-
-  // 최종 필터링된 문항 목록
+  // 필터링된 문항 목록
   const filteredQuestions = useMemo(() => {
-    return folderFilteredQuestions.filter((q) => {
-      if (examSubTab !== 'calc' && activeCategory !== '전체' && q.category !== activeCategory)
-        return false;
-      if (activeSubCategory !== '전체' && (q.subCategory || '').trim() !== activeSubCategory)
-        return false;
+    return questions.filter((q) => {
+      const matchCat =
+        selectedCategory === '전체' ||
+        q.category === selectedCategory ||
+        q.folder === selectedCategory;
+      if (!matchCat) return false;
+
+      const matchSub =
+        selectedSubCategory === '전체' || q.subCategory === selectedSubCategory;
+      if (!matchSub) return false;
 
       if (searchQuery.trim()) {
         const kw = searchQuery.trim().toLowerCase();
         const inQ = q.question.toLowerCase().includes(kw);
-        const inAns = (q.correctAnswer || '').toLowerCase().includes(kw);
+        const inCA = (q.correctAnswer || '').toLowerCase().includes(kw);
         const inExp = (q.explanation || '').toLowerCase().includes(kw);
-        const inSub = (q.subCategory || '').toLowerCase().includes(kw);
-        const inFolder = (q.folder || '').toLowerCase().includes(kw);
-        if (!inQ && !inAns && !inExp && !inSub && !inFolder) return false;
+        return inQ || inCA || inExp;
       }
       return true;
     });
-  }, [
-    examSubTab,
-    folderFilteredQuestions,
-    activeCategory,
-    activeSubCategory,
-    searchQuery,
-  ]);
+  }, [questions, selectedCategory, selectedSubCategory, searchQuery]);
 
-  // 현재 필터 목록 전체 선택/해제
-  const handleToggleSelectAllFiltered = () => {
-    const filteredIds = filteredQuestions.map((q) => q.id);
-    const allSelected =
-      filteredIds.length > 0 && filteredIds.every((id) => selectedQuestionIds.has(id));
-    if (allSelected) {
-      setSelectedQuestionIds((prev) => {
-        const next = new Set(prev);
-        filteredIds.forEach((id) => next.delete(id));
-        return next;
+  // ==========================================
+  // 박스형 문제 세트 생성 함수 (1문제 또는 5/10문제 시험지 생성)
+  // ==========================================
+  const generateBoxQuestions = useCallback(() => {
+    const singleLinePool = filteredQuestions.filter(
+      (q) => !q.question.includes('\n(1)') && (q.answer === 'O' || q.answer === 'X')
+    );
+    const pool = singleLinePool.length >= 5 ? singleLinePool : filteredQuestions;
+
+    if (pool.length === 0) {
+      setBoxList([]);
+      return;
+    }
+
+    const generated: GeneratedBoxQuestion[] = [];
+    const shuffledMaster = [...pool].sort(() => Math.random() - 0.5);
+    let cursor = 0;
+
+    for (let bIdx = 0; bIdx < boxBatchCount; bIdx++) {
+      const count =
+        boxSizeSetting === 'random'
+          ? [5, 6, 7][Math.floor(Math.random() * 3)]
+          : boxSizeSetting;
+      const actualCount = Math.min(count, pool.length, 7);
+
+      const picked: ExamQuestionItem[] = [];
+      for (let i = 0; i < actualCount; i++) {
+        picked.push(shuffledMaster[(cursor + i) % shuffledMaster.length]);
+      }
+      cursor += actualCount;
+
+      const targetType: 'WRONG_COUNT' | 'CORRECT_COUNT' =
+        boxTargetSetting === 'RANDOM'
+          ? Math.random() < 0.7
+            ? 'WRONG_COUNT'
+            : 'CORRECT_COUNT'
+          : boxTargetSetting;
+
+      const subItems: BoxSubItem[] = picked.map((item, idx) => {
+        const label = KOR_LABELS[idx] || String(idx + 1);
+        if (item.answer === 'O') {
+          return {
+            label,
+            originItem: item,
+            displayQuestion: item.question,
+            effectiveAnswer: 'O',
+            shortCorrection: item.correctAnswer || '옳은 지문입니다.',
+            isSynthesizedTrue: false,
+          };
+        }
+
+        if (autoMixTrueStatements && Math.random() < 0.45) {
+          const syn = trySynthesizeTrueStatement(item);
+          if (syn.success) {
+            return {
+              label,
+              originItem: item,
+              displayQuestion: syn.text,
+              effectiveAnswer: 'O',
+              shortCorrection: syn.note,
+              isSynthesizedTrue: true,
+            };
+          }
+        }
+
+        return {
+          label,
+          originItem: item,
+          displayQuestion: item.question,
+          effectiveAnswer: 'X',
+          shortCorrection: item.correctAnswer,
+          isSynthesizedTrue: false,
+        };
       });
-    } else {
-      setSelectedQuestionIds((prev) => {
-        const next = new Set(prev);
-        filteredIds.forEach((id) => next.add(id));
-        return next;
+
+      const wrongCount = subItems.filter((s) => s.effectiveAnswer === 'X').length;
+      const rightCount = subItems.filter((s) => s.effectiveAnswer === 'O').length;
+      const answerNum = targetType === 'WRONG_COUNT' ? wrongCount : rightCount;
+
+      let startNum = Math.max(0, answerNum - Math.floor(Math.random() * 3));
+      if (startNum + 3 > actualCount) {
+        startNum = Math.max(0, actualCount - 3);
+      }
+      const choices: number[] = [];
+      for (let i = 0; i < 4; i++) {
+        if (startNum + i <= actualCount) {
+          choices.push(startNum + i);
+        }
+      }
+      if (!choices.includes(answerNum)) {
+        choices[0] = answerNum;
+        choices.sort((a, b) => a - b);
+      }
+
+      generated.push({
+        id: `box-${Date.now()}-${bIdx}-${Math.random().toString(36).slice(2, 7)}`,
+        boxNo: bIdx + 1,
+        targetType,
+        subItems,
+        correctCount: answerNum,
+        choices,
       });
     }
+
+    setBoxList(generated);
+    setUserMarks({});
+    setSelectedChoices({});
+    setBoxExpandedExp({});
+    setBoxSubRevealed({});
+    setElapsedSeconds(0);
+    setIsTimerRunning(true);
+  }, [
+    filteredQuestions,
+    boxSizeSetting,
+    boxBatchCount,
+    boxTargetSetting,
+    autoMixTrueStatements,
+  ]);
+
+  useEffect(() => {
+    if (viewMode === 'box') {
+      generateBoxQuestions();
+    }
+  }, [
+    viewMode,
+    selectedCategory,
+    selectedSubCategory,
+    boxSizeSetting,
+    boxBatchCount,
+    boxTargetSetting,
+  ]);
+
+  // 단문 정답 캡슐 토글
+  const toggleRevealAnswer = (id: number) => {
+    setRevealedAnswers((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  // 신규 문항 수동 추가
-  const handleAddSingleQuestion = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newQText.trim()) return;
-    const nextId = oxQuestions.length > 0 ? Math.max(...oxQuestions.map((q) => q.id)) + 1 : 1;
-    const item: OxQuestion = {
-      id: nextId,
-      category: newQCategory.trim() || '기타',
-      subCategory: newQSubCategory.trim(),
-      folder: newQFolder.trim(),
-      question: newQText.trim(),
-      answer: newQAnswer,
-      correctAnswer: newQCorrectAnswer.trim(),
-      explanation:
-        newQExplanation.trim() || `[정답·수정] ${newQCorrectAnswer.trim() || newQAnswer}`,
-      source: '직접 추가',
-    };
-    setOxQuestions((prev) => [item, ...prev]);
-    setNewQText('');
-    setNewQCorrectAnswer('');
-    setNewQExplanation('');
-    setIsAddModalOpen(false);
+  // 상세 해설 토글
+  const toggleExplanation = (id: number) => {
+    setExpandedExplanations((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  /**
-   * 조항 렌더링 함수:
-   * - 조항 클릭 시 오른쪽에 빨간색 동그라미 형태(간략한 해설/정답)만 표시
-   * - 하단 상세 해설 박스는 [상세 해설] 버튼을 눌렀을 때만 별도로 표시
-   */
-  const renderClauseWithRightAnswerBadge = (q: OxQuestion, isAnswerVisible: boolean) => {
-    const ansText = getConciseCorrectAnswer(q);
-    const hasStemAndItems = q.question.includes('\n(1)');
-    let stemPart = '';
-    let itemsPart = q.question;
+  // 개별 문항 삭제
+  const handleDeleteQuestion = (id: number) => {
+    const next = questions.filter((q) => q.id !== id);
+    saveQuestions(next);
+  };
 
-    if (hasStemAndItems) {
-      const splitIdx = q.question.indexOf('\n(1)');
-      stemPart = q.question.slice(0, splitIdx).trim();
-      itemsPart = q.question.slice(splitIdx + 1).trim();
+  // 새 폴더 생성
+  const handleCreateFolder = () => {
+    const trimmed = newFolderName.trim();
+    if (!trimmed) return;
+    if (!customFolders.includes(trimmed)) {
+      saveCustomFolders([...customFolders, trimmed]);
+    }
+    setNewFolderName('');
+    setIsAddingFolder(false);
+    setSelectedCategory(trimmed);
+  };
+
+  // 박스형 지문 마킹 (O / X 연필 메모)
+  const toggleUserMark = (boxId: string, subIdx: number, mark: 'O' | 'X') => {
+    if (selectedChoices[boxId] !== undefined) return;
+    const key = `${boxId}-${subIdx}`;
+    setUserMarks((prev) => ({
+      ...prev,
+      [key]: prev[key] === mark ? null : mark,
+    }));
+  };
+
+  // 박스형 객관식 보기 선택 (채점)
+  const handleSelectBoxChoice = (box: GeneratedBoxQuestion, choiceNum: number) => {
+    if (selectedChoices[box.id] !== undefined) return;
+    setSelectedChoices((prev) => ({ ...prev, [box.id]: choiceNum }));
+    const isCorrect = choiceNum === box.correctCount;
+    setBoxStats((prev) => ({
+      solved: prev.solved + 1,
+      correct: prev.correct + (isCorrect ? 1 : 0),
+    }));
+  };
+
+  // 문장 포맷터: 상단 질문 + (1)(2)(3) 항목 분리 표시
+  const renderFormattedQuestion = (qText: string) => {
+    if (!qText.includes('(1)')) {
+      return <span>{qText}</span>;
+    }
+    const parts = qText.split(/(?=\(\d+\))/g);
+    const firstPart = parts[0]?.trim();
+    const subParts = parts.slice(1);
+
+    if (subParts.length === 0) {
+      return <span>{qText}</span>;
     }
 
     return (
-      <span className="inline leading-relaxed">
-        {hasStemAndItems ? (
-          <>
-            <span
-              className={`block font-extrabold mb-1 text-[13px] sm:text-[14px] ${
-                isLightMode ? 'text-indigo-950' : 'text-amber-300'
-              }`}
-            >
-              📌 {stemPart}
-            </span>
-            <span
-              className={`whitespace-pre-line font-medium ${
-                isLightMode ? 'text-slate-900 font-semibold' : 'text-zinc-100'
-              }`}
-            >
-              {itemsPart}
-            </span>
-          </>
-        ) : (
-          <span
-            className={`whitespace-pre-line ${
-              isLightMode ? 'text-slate-900 font-semibold' : 'text-zinc-100'
-            }`}
-          >
-            {q.question}
+      <span className="inline-block w-full">
+        {firstPart && (
+          <span className="block font-semibold text-slate-900 mb-1.5">
+            📌 {firstPart}
           </span>
         )}
-
-        {isAnswerVisible && ansText && (
-          <span
-            className={`inline-flex items-center gap-1 ml-2.5 px-3 py-0.5 rounded-full text-xs sm:text-[13px] font-extrabold align-middle shadow-sm border-2 transition-all ${
-              isLightMode
-                ? 'bg-rose-50 text-rose-700 border-rose-500 shadow-rose-100'
-                : 'bg-rose-950/90 text-rose-200 border-rose-500 shadow-[0_0_12px_rgba(244,63,94,0.35)]'
-            }`}
-          >
-            <span>👉 정답:</span>
-            <span>{ansText}</span>
-          </span>
-        )}
+        <span className="block space-y-1 pl-1">
+          {subParts.map((sp, i) => (
+            <span key={i} className="block text-slate-800 leading-relaxed">
+              {sp.trim()}
+            </span>
+          ))}
+        </span>
       </span>
     );
   };
 
+  const formatTime = (sec: number) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}분 ${s < 10 ? `0${s}` : s}초`;
+  };
+
   return (
-    <div
-      className={`w-full space-y-4 transition-colors ${
-        isLightMode ? 'text-slate-900' : 'text-zinc-100'
-      }`}
-    >
-      {/* 상단 헤더 & 모드 분리 탭 */}
-      <div
-        className={`p-4 rounded-xl border flex flex-col lg:flex-row lg:items-center justify-between gap-3 shadow-sm ${
-          isLightMode ? 'bg-white border-slate-300' : 'bg-[#0a0a0c] border-white/10'
-        }`}
-      >
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex rounded-lg p-1 border bg-opacity-50 gap-1 flex-wrap">
-            <button
-              onClick={() => {
-                setExamSubTab('ox');
-                if (activeFolder === '계산 문제') setActiveFolder('전체');
-                if (activeCategory === '계산 문제') setActiveCategory('전체');
-                setActiveSubCategory('전체');
-              }}
-              className={`px-3 py-1.5 rounded-md text-xs sm:text-sm font-extrabold transition-all ${
-                examSubTab === 'ox'
-                  ? 'bg-teal-600 text-white shadow'
-                  : isLightMode
-                  ? 'text-slate-700 hover:bg-slate-200'
-                  : 'text-zinc-400 hover:text-white'
-              }`}
-            >
-              📋 법령·정관 오답노트 ({nonCalcQuestions.length})
-            </button>
-
-            <button
-              onClick={() => {
-                setExamSubTab('calc');
-                setActiveSubCategory('전체');
-              }}
-              className={`px-3 py-1.5 rounded-md text-xs sm:text-sm font-extrabold transition-all ${
-                examSubTab === 'calc'
-                  ? 'bg-rose-600 text-white shadow'
-                  : isLightMode
-                  ? 'text-rose-800 bg-rose-50 hover:bg-rose-100'
-                  : 'text-rose-300 hover:text-white'
-              }`}
-            >
-              🧮 계산 문제 ({calcQuestions.length})
-            </button>
-
-            <button
-              onClick={() => setExamSubTab('subjective')}
-              className={`px-3 py-1.5 rounded-md text-xs sm:text-sm font-extrabold transition-all ${
-                examSubTab === 'subjective'
-                  ? 'bg-indigo-600 text-white shadow'
-                  : isLightMode
-                  ? 'text-slate-700 hover:bg-slate-200'
-                  : 'text-zinc-400 hover:text-white'
-              }`}
-            >
-              ✍️ 나만의 단답·요약 노트
-            </button>
-          </div>
+    <div className="w-full max-w-6xl mx-auto p-3 sm:p-4 space-y-4 text-slate-900 bg-slate-50 min-h-screen rounded-xl">
+      {/* 상단 모드 전환 & 파일 업로드 헤더 */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3.5 sm:p-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setViewMode('list')}
+            className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-extrabold transition-all ${
+              viewMode === 'list'
+                ? 'bg-teal-600 text-white shadow-sm'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            📋 단문 OX 리스트 ({filteredQuestions.length}문항)
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('box')}
+            className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-extrabold transition-all ${
+              viewMode === 'box'
+                ? 'bg-indigo-600 text-white shadow-sm'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            📦 실전 박스형 훈련 모드 (5~7지문 개수 찾기)
+          </button>
         </div>
 
-        {/* 우측 액션 버튼들 */}
         <div className="flex items-center gap-2 flex-wrap">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            onChange={handleUploadJson}
-            className="hidden"
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border transition-all flex items-center gap-1.5 shadow-sm ${
-              isLightMode
-                ? 'bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700'
-                : 'bg-indigo-600/80 text-white border-indigo-400 hover:bg-indigo-500'
-            }`}
-          >
-            📂 JSON 파일 불러오기
-          </button>
-
-          <button
-            onClick={handleExportJson}
-            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border transition-all flex items-center gap-1.5 shadow-sm ${
-              isLightMode
-                ? 'bg-emerald-600 text-white border-emerald-700 hover:bg-emerald-700'
-                : 'bg-emerald-700/80 text-white border-emerald-500 hover:bg-emerald-600'
-            }`}
-          >
-            💾 JSON 백업 저장 (폴더포함)
-          </button>
-
-          <button
-            onClick={() => setIsAddModalOpen((prev) => !prev)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border transition-all ${
-              isLightMode
-                ? 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200'
-                : 'bg-white/5 text-zinc-200 border-white/15 hover:bg-white/10'
-            }`}
-          >
-            ➕ 문항 추가
-          </button>
+          <label className="cursor-pointer px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition">
+            📂 JSON 문제집 불러오기
+            <input
+              type="file"
+              accept=".json"
+              multiple
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+          </label>
+          {isAddingFolder ? (
+            <div className="flex items-center gap-1">
+              <input
+                type="text"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCreateFolder();
+                }}
+                placeholder="새 폴더명"
+                className="px-2.5 py-1 text-xs border border-slate-300 rounded-md bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+              <button
+                type="button"
+                onClick={handleCreateFolder}
+                className="px-2.5 py-1 text-xs font-bold bg-teal-600 text-white rounded-md"
+              >
+                추가
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsAddingFolder(false)}
+                className="px-2 py-1 text-xs text-slate-500 hover:text-slate-700"
+              >
+                취소
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsAddingFolder(true)}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 transition"
+            >
+              + 새 폴더 만들기
+            </button>
+          )}
         </div>
       </div>
 
-      {/* 수동 문항 추가 패널 */}
-      {isAddModalOpen && (
-        <form
-          onSubmit={handleAddSingleQuestion}
-          className={`p-4 rounded-xl border space-y-3 shadow-md ${
-            isLightMode ? 'bg-white border-slate-300' : 'bg-[#101014] border-teal-500/40'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-extrabold">➕ 새 오답 문항 직접 등록</h4>
-            <button
-              type="button"
-              onClick={() => setIsAddModalOpen(false)}
-              className="text-xs font-bold opacity-70 hover:opacity-100"
-            >
-              ✕ 닫기
-            </button>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <input
-              type="text"
-              value={newQCategory}
-              onChange={(e) => setNewQCategory(e.target.value)}
-              placeholder="대분류 (예: 법령 1장 총칙 또는 계산 문제)"
-              className={`px-3 py-1.5 rounded border text-xs font-bold ${
-                isLightMode
-                  ? 'bg-slate-50 border-slate-300 text-slate-900'
-                  : 'bg-black/50 border-white/20 text-white'
-              }`}
-            />
-            <input
-              type="text"
-              value={newQSubCategory}
-              onChange={(e) => setNewQSubCategory(e.target.value)}
-              placeholder="세부분류 (선택)"
-              className={`px-3 py-1.5 rounded border text-xs font-bold ${
-                isLightMode
-                  ? 'bg-slate-50 border-slate-300 text-slate-900'
-                  : 'bg-black/50 border-white/20 text-white'
-              }`}
-            />
-            <select
-              value={newQFolder}
-              onChange={(e) => setNewQFolder(e.target.value)}
-              className={`px-3 py-1.5 rounded border text-xs font-bold ${
-                isLightMode
-                  ? 'bg-slate-50 border-slate-300 text-slate-900'
-                  : 'bg-black/50 border-white/20 text-white'
-              }`}
-            >
-              <option value="">📂 폴더 미지정 (미분류)</option>
-              {oxFolders.map((f) => (
-                <option key={f} value={f}>
-                  🗂️ {f}
-                </option>
-              ))}
-            </select>
-          </div>
-          <textarea
-            rows={2}
-            value={newQText}
-            onChange={(e) => setNewQText(e.target.value)}
-            placeholder="문제 지문을 입력하세요 (항목형인 경우 첫 줄에 문제를 적고 줄바꿈 후 (1) 항목1 (2) 항목2 형태로 입력)"
-            className={`w-full px-3 py-2 rounded border text-xs font-medium ${
-              isLightMode
-                ? 'bg-slate-50 border-slate-300 text-slate-900'
-                : 'bg-black/50 border-white/20 text-white'
-            }`}
-            required
-          />
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            <select
-              value={newQAnswer}
-              onChange={(e) => setNewQAnswer(e.target.value as 'O' | 'X')}
-              className={`px-3 py-1.5 rounded border text-xs font-bold ${
-                isLightMode
-                  ? 'bg-slate-50 border-slate-300 text-slate-900'
-                  : 'bg-black/50 border-white/20 text-white'
-              }`}
-            >
-              <option value="X">정답: X (틀린 지문)</option>
-              <option value="O">정답: O (맞는 지문)</option>
-            </select>
-            <input
-              type="text"
-              value={newQCorrectAnswer}
-              onChange={(e) => setNewQCorrectAnswer(e.target.value)}
-              placeholder="조항 클릭 시 오른쪽에 표시할 핵심 정답 (예: 지체 없이 → 즉시)"
-              className={`sm:col-span-2 px-3 py-1.5 rounded border text-xs font-bold ${
-                isLightMode
-                  ? 'bg-slate-50 border-slate-300 text-slate-900'
-                  : 'bg-black/50 border-white/20 text-white'
-              }`}
-            />
-          </div>
-          <div className="flex justify-end gap-2">
-            <button
-              type="submit"
-              className="px-4 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded text-xs font-extrabold shadow"
-            >
-              등록하기
-            </button>
-          </div>
-        </form>
-      )}
-
-      {examSubTab !== 'subjective' ? (
-        <>
-          {/* ===================================================================== */}
-          {/* 📁 1. 나만의 학습 폴더 바 (폴더 생성 / 이름변경 / 삭제 / 다중선택 이동) */}
-          {/* ===================================================================== */}
-          {examSubTab === 'ox' && (
-            <div
-              className={`p-3.5 rounded-xl border space-y-2.5 shadow-sm ${
-                isLightMode ? 'bg-white border-slate-300' : 'bg-[#0a0a0c] border-white/10'
-              }`}
-            >
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`text-xs sm:text-sm font-extrabold flex items-center gap-1.5 ${
-                      isLightMode ? 'text-slate-900' : 'text-amber-300'
-                    }`}
-                  >
-                    📁 내 학습 폴더 분류
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {!isCreatingFolder ? (
-                    <button
-                      onClick={() => setIsCreatingFolder(true)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-extrabold border transition-all ${
-                        isLightMode
-                          ? 'bg-amber-50 text-amber-900 border-amber-400 hover:bg-amber-100'
-                          : 'bg-amber-950/60 text-amber-300 border-amber-500/50 hover:bg-amber-900/60'
-                      }`}
-                    >
-                      ➕ 새 폴더 만들기
-                    </button>
-                  ) : (
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="text"
-                        value={newFolderName}
-                        onChange={(e) => setNewFolderName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleCreateFolder();
-                          }
-                        }}
-                        placeholder="새 폴더 이름 입력..."
-                        autoFocus
-                        className={`px-2.5 py-1 rounded-lg text-xs font-bold border outline-none ${
-                          isLightMode
-                            ? 'bg-white border-amber-500 text-slate-900'
-                            : 'bg-black border-amber-400 text-white'
-                        }`}
-                      />
-                      <button
-                        onClick={handleCreateFolder}
-                        className="px-2.5 py-1 rounded-lg text-xs font-extrabold bg-amber-500 text-black hover:bg-amber-400"
-                      >
-                        생성
-                      </button>
-                      <button
-                        onClick={() => {
-                          setIsCreatingFolder(false);
-                          setNewFolderName('');
-                        }}
-                        className="px-2 py-1 rounded-lg text-xs font-bold opacity-70 hover:opacity-100"
-                      >
-                        취소
-                      </button>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={() => {
-                      setIsSelectMode((prev) => !prev);
-                      setSelectedQuestionIds(new Set());
-                    }}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-extrabold border transition-all ${
-                      isSelectMode
-                        ? 'bg-teal-600 text-white border-teal-500 shadow'
-                        : isLightMode
-                        ? 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200'
-                        : 'bg-white/5 text-zinc-200 border-white/15 hover:bg-white/10'
-                    }`}
-                  >
-                    {isSelectMode ? '☑️ 선택 분류 모드 닫기' : '☑️ 문항 선택 · 폴더 이동'}
-                  </button>
-                </div>
-              </div>
-
-              {/* 폴더 탭 버튼 리스트 */}
-              <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                <button
-                  onClick={() => {
-                    setActiveFolder('전체');
-                    setActiveCategory('전체');
-                    setActiveSubCategory('전체');
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border transition-all ${
-                    activeFolder === '전체'
-                      ? 'bg-amber-500 text-black border-amber-600 shadow-sm'
-                      : isLightMode
-                      ? 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200'
-                      : 'bg-white/5 text-zinc-300 border-white/10 hover:bg-white/10'
-                  }`}
-                >
-                  📁 법령·정관 전체 ({folderCounts['전체'] || 0})
-                </button>
-
-                <button
-                  onClick={() => {
-                    setActiveFolder('미분류');
-                    setActiveCategory('전체');
-                    setActiveSubCategory('전체');
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border transition-all ${
-                    activeFolder === '미분류'
-                      ? 'bg-amber-500 text-black border-amber-600 shadow-sm'
-                      : isLightMode
-                      ? 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200'
-                      : 'bg-white/5 text-zinc-300 border-white/10 hover:bg-white/10'
-                  }`}
-                >
-                  📂 미분류 ({folderCounts['미분류'] || 0})
-                </button>
-
-                {oxFolders.map((folderName) => {
-                  const isSelected = activeFolder === folderName;
-                  return (
-                    <div key={folderName} className="inline-flex items-center">
-                      <button
-                        onClick={() => {
-                          if (folderName === '계산 문제') {
-                            setExamSubTab('calc');
-                            setActiveSubCategory('전체');
-                          } else {
-                            setActiveFolder(folderName);
-                            setActiveCategory('전체');
-                            setActiveSubCategory('전체');
-                          }
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border transition-all flex items-center gap-1.5 ${
-                          isSelected
-                            ? 'bg-amber-500 text-black border-amber-600 shadow-sm'
-                            : folderName === '계산 문제'
-                            ? isLightMode
-                              ? 'bg-rose-50 text-rose-900 border-rose-300 hover:bg-rose-100'
-                              : 'bg-rose-950/40 text-rose-200 border-rose-500/40 hover:bg-rose-900/50'
-                            : isLightMode
-                            ? 'bg-amber-50/70 text-amber-950 border-amber-300 hover:bg-amber-100'
-                            : 'bg-amber-950/30 text-amber-200 border-amber-500/30 hover:bg-amber-900/40'
-                        }`}
-                      >
-                        <span>
-                          {folderName === '계산 문제' ? '🧮' : '🗂️'} {folderName}
-                        </span>
-                        <span
-                          className={`px-1.5 py-0.2 rounded-full text-[10px] ${
-                            isSelected
-                              ? 'bg-black/20 text-black'
-                              : isLightMode
-                              ? 'bg-amber-200 text-amber-950'
-                              : 'bg-black/40 text-amber-300'
-                          }`}
-                        >
-                          {folderCounts[folderName] || 0}
-                        </span>
-                      </button>
-                    </div>
-                  );
-                })}
-
-                {activeFolder !== '전체' && activeFolder !== '미분류' && (
-                  <div className="inline-flex items-center gap-1 ml-2 pl-2 border-l border-slate-400/30">
-                    <button
-                      onClick={() => handleRenameFolder(activeFolder)}
-                      className={`px-2 py-1 rounded text-[11px] font-bold border ${
-                        isLightMode
-                          ? 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
-                          : 'bg-white/5 text-zinc-300 border-white/10 hover:bg-white/15'
-                      }`}
-                    >
-                      ✏️ 폴더명 변경
-                    </button>
-                    <button
-                      onClick={() => handleDeleteFolder(activeFolder)}
-                      className={`px-2 py-1 rounded text-[11px] font-bold border ${
-                        isLightMode
-                          ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
-                          : 'bg-rose-950/40 text-rose-300 border-rose-500/30 hover:bg-rose-900/60'
-                      }`}
-                    >
-                      🗑️ 폴더 삭제
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* 다중 선택 모드 액션 바 */}
-              {isSelectMode && (
-                <div
-                  className={`mt-2 p-2.5 rounded-lg border flex flex-wrap items-center justify-between gap-2 ${
-                    isLightMode
-                      ? 'bg-teal-50 border-teal-300 text-slate-900'
-                      : 'bg-teal-950/30 border-teal-500/40 text-teal-100'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      onClick={handleToggleSelectAllFiltered}
-                      className={`px-2.5 py-1 rounded text-xs font-extrabold border ${
-                        isLightMode
-                          ? 'bg-white text-slate-900 border-slate-300 hover:bg-slate-100'
-                          : 'bg-black/50 text-white border-white/20 hover:bg-black/70'
-                      }`}
-                    >
-                      ✅ 현재 목록 전체선택/해제 ({selectedQuestionIds.size}개 선택됨)
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <select
-                      value={targetMoveFolder}
-                      onChange={(e) => setTargetMoveFolder(e.target.value)}
-                      className={`px-2.5 py-1 rounded text-xs font-extrabold border ${
-                        isLightMode
-                          ? 'bg-white border-slate-400 text-slate-900'
-                          : 'bg-black border-white/20 text-white'
-                      }`}
-                    >
-                      <option value="">-- 이동할 폴더 선택 --</option>
-                      {oxFolders.map((f) => (
-                        <option key={f} value={f}>
-                          🗂️ {f}
-                        </option>
-                      ))}
-                      <option value="미분류">📂 미분류 (폴더에서 빼기)</option>
-                    </select>
-
-                    <button
-                      onClick={() => {
-                        if (!targetMoveFolder) {
-                          alert('이동할 대상 폴더를 선택해 주세요.');
-                          return;
-                        }
-                        handleBulkMoveToFolder(targetMoveFolder);
-                      }}
-                      className="px-3 py-1 rounded text-xs font-extrabold bg-teal-600 hover:bg-teal-700 text-white shadow"
-                    >
-                      📥 선택 문항 폴더로 이동
-                    </button>
-
-                    <button
-                      onClick={handleBulkDeleteQuestions}
-                      className="px-2.5 py-1 rounded text-xs font-extrabold bg-rose-600 hover:bg-rose-700 text-white shadow"
-                    >
-                      🗑️ 선택 삭제
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ===================================================================== */}
-          {/* 🔍 2. 법령 장별 카테고리 / 계산문제 유형별 필터 · 검색어 · 전체 정답 토글 바 */}
-          {/* ===================================================================== */}
-          <div
-            className={`p-3.5 rounded-xl border space-y-3 shadow-sm ${
-              isLightMode ? 'bg-white border-slate-300' : 'bg-[#0a0a0c] border-white/10'
-            }`}
-          >
-            {examSubTab === 'calc' ? (
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`text-xs sm:text-sm font-extrabold ${
-                      isLightMode ? 'text-rose-800' : 'text-rose-300'
-                    }`}
-                  >
-                    🧮 계산 문제 전용 모음 (별표 2~7 · 인사규정 재직연수/특별휴가 · 영 제52조 과오납금 가산이자)
-                  </span>
-                </div>
-                <button
-                  onClick={() => setExamSubTab('ox')}
-                  className={`px-2.5 py-1 rounded text-xs font-extrabold border ${
-                    isLightMode
-                      ? 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200'
-                      : 'bg-white/5 text-zinc-200 border-white/15 hover:bg-white/10'
-                  }`}
-                >
-                  ◀ 일반 법령·정관 오답노트로 돌아가기
-                </button>
-              </div>
-            ) : (
-              /* 일반 탭 대분류 버튼 */
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {categoriesList.map((cat) => {
-                  const active = activeCategory === cat;
-                  return (
-                    <button
-                      key={cat}
-                      onClick={() => {
-                        setActiveCategory(cat);
-                        setActiveSubCategory('전체');
-                      }}
-                      className={`px-2.5 py-1 rounded-md text-xs font-extrabold border transition-all ${
-                        active
-                          ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
-                          : isLightMode
-                          ? 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200'
-                          : 'bg-white/5 text-zinc-300 border-white/10 hover:bg-white/10'
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* 중분류(조문 범위 또는 계산 문제 10대 유형) 버튼 */}
-            {subCategoriesList.length > 1 && (
-              <div className="flex items-center gap-1.5 flex-wrap pt-1 border-t border-slate-400/20">
-                {subCategoriesList.map((sub) => {
-                  const active = activeSubCategory === sub;
-                  return (
-                    <button
-                      key={sub}
-                      onClick={() => setActiveSubCategory(sub)}
-                      className={`px-2.5 py-1 rounded text-[11px] font-bold border transition-all ${
-                        active
-                          ? examSubTab === 'calc'
-                            ? 'bg-rose-600 text-white border-rose-600'
-                            : 'bg-indigo-600 text-white border-indigo-600'
-                          : isLightMode
-                          ? 'bg-slate-50 text-slate-700 border-slate-300 hover:bg-slate-100'
-                          : 'bg-black/40 text-zinc-300 border-white/10 hover:text-white'
-                      }`}
-                    >
-                      {sub}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* 검색창 + 전체 정답 토글 */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span
-                  className={`text-xs font-extrabold px-2.5 py-1 rounded border ${
-                    isLightMode
-                      ? 'bg-slate-100 text-slate-800 border-slate-300'
-                      : 'bg-white/5 text-zinc-300 border-white/10'
-                  }`}
-                >
-                  현재 목록 {filteredQuestions.length}문항
-                </span>
-
-                <button
-                  onClick={handleToggleAllAnswers}
-                  className={`px-3 py-1 rounded text-xs font-extrabold border transition-all ${
-                    showAllAnswers
-                      ? 'bg-amber-600 text-white border-amber-500'
-                      : isLightMode
-                      ? 'bg-amber-50 text-amber-900 border-amber-400 hover:bg-amber-100'
-                      : 'bg-amber-950/50 text-amber-300 border-amber-500/40 hover:bg-amber-900/50'
-                  }`}
-                >
-                  {showAllAnswers ? '🙈 전체 정답 숨기기' : '👀 전체 정답 한번에 보기'}
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2 flex-1 sm:max-w-xs">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="조문·단어·숫자·정답 검색..."
-                  className={`w-full px-3 py-1.5 rounded-lg text-xs font-bold border outline-none ${
-                    isLightMode
-                      ? 'bg-slate-50 border-slate-300 text-slate-900 placeholder-slate-400 focus:border-teal-600'
-                      : 'bg-black/50 border-white/15 text-white placeholder-zinc-500 focus:border-teal-400'
-                  }`}
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="text-xs font-bold opacity-60 hover:opacity-100"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* ===================================================================== */}
-          {/* 📋 3. 문항 리스트 (조항 클릭 -> 빨간 동그라미 정답만 표시 / [상세 해설] 버튼 분리) */}
-          {/* ===================================================================== */}
-          <div className="space-y-2.5">
-            {filteredQuestions.length === 0 ? (
-              <div
-                className={`p-10 text-center rounded-xl border font-bold text-sm ${
-                  isLightMode
-                    ? 'bg-white border-slate-300 text-slate-600'
-                    : 'bg-[#0a0a0c] border-white/10 text-zinc-400'
+      {/* 1단 폴더(카테고리) 선택 탭 */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 space-y-3">
+        <div className="flex flex-wrap gap-1.5">
+          {allCategories.map((cat) => {
+            const isSelected = selectedCategory === cat;
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                  isSelected
+                    ? 'bg-teal-600 text-white shadow-sm'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
-                조건에 맞는 문항이 없습니다. 폴더나 검색 필터를 변경해 보세요.
+                {cat}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 2단 조항별 세부 분류(subCategory) 필터 칩 */}
+        {subCategories.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setSelectedSubCategory('전체')}
+              className={`px-2.5 py-1 rounded-md text-xs font-bold transition ${
+                selectedSubCategory === '전체'
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              전체
+            </button>
+            {subCategories.map((sub) => (
+              <button
+                key={sub}
+                type="button"
+                onClick={() => setSelectedSubCategory(sub)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                  selectedSubCategory === sub
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {sub}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* 검색 및 전체 정답 토글 바 */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-slate-100 text-slate-700">
+              현재 목록 {filteredQuestions.length}문항
+            </span>
+
+            {viewMode === 'list' && (
+              <button
+                type="button"
+                onClick={() => setShowAllAnswers((prev) => !prev)}
+                className={`px-3 py-1 rounded-md text-xs font-bold border transition ${
+                  showAllAnswers
+                    ? 'bg-amber-500 text-white border-amber-600'
+                    : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                }`}
+              >
+                👀 {showAllAnswers ? '전체 정답 숨기기' : '전체 정답 한번에 보기'}
+              </button>
+            )}
+          </div>
+
+          {/* 우측 검색창 */}
+          <div className="relative w-full sm:w-72">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="조문, 키워드, 숫자 검색..."
+              className="w-full pl-3 pr-8 py-1.5 text-xs rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ========================================== */}
+      {/* MODE 1: 실전 박스형 훈련 모드 (5~7지문 개수형) */}
+      {/* ========================================== */}
+      {viewMode === 'box' ? (
+        <div className="space-y-4">
+          {/* 박스형 옵션 설정 바 */}
+          <div className="bg-white rounded-xl shadow-sm border border-indigo-200 p-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              {/* 지문 수 선택 */}
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-bold text-slate-600 mr-1">지문 수:</span>
+                {([5, 6, 7, 'random'] as const).map((sz) => (
+                  <button
+                    key={String(sz)}
+                    type="button"
+                    onClick={() => setBoxSizeSetting(sz)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition ${
+                      boxSizeSetting === sz
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    {sz === 'random' ? '5~7 랜덤' : `${sz}지문`}
+                  </button>
+                ))}
               </div>
-            ) : (
-              filteredQuestions.map((q, idx) => {
-                const isAnswerShown = expandedAnswerIds.has(q.id);
-                const isDetailShown = expandedDetailIds.has(q.id);
-                const isChecked = selectedQuestionIds.has(q.id);
+
+              {/* 출제 문항 수(1문제 집중 vs 5/10문제 시험지) */}
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-bold text-slate-600 mr-1">출제 단위:</span>
+                {([1, 5, 10] as const).map((cnt) => (
+                  <button
+                    key={cnt}
+                    type="button"
+                    onClick={() => setBoxBatchCount(cnt)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition ${
+                      boxBatchCount === cnt
+                        ? 'bg-teal-600 text-white'
+                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    {cnt === 1 ? '1문제 집중' : `${cnt}문제 연속`}
+                  </button>
+                ))}
+              </div>
+
+              {/* 질문 유형 선택 */}
+              <div className="flex items-center gap-1">
+                <span className="text-xs font-bold text-slate-600 mr-1">유형:</span>
+                <button
+                  type="button"
+                  onClick={() => setBoxTargetSetting('WRONG_COUNT')}
+                  className={`px-2.5 py-1 rounded-md text-xs font-bold transition ${
+                    boxTargetSetting === 'WRONG_COUNT'
+                      ? 'bg-rose-600 text-white'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  틀린 개수
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBoxTargetSetting('CORRECT_COUNT')}
+                  className={`px-2.5 py-1 rounded-md text-xs font-bold transition ${
+                    boxTargetSetting === 'CORRECT_COUNT'
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  옳은 개수
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBoxTargetSetting('RANDOM')}
+                  className={`px-2.5 py-1 rounded-md text-xs font-bold transition ${
+                    boxTargetSetting === 'RANDOM'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  혼합
+                </button>
+              </div>
+
+              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={autoMixTrueStatements}
+                  onChange={(e) => setAutoMixTrueStatements(e.target.checked)}
+                  className="rounded text-indigo-600 focus:ring-indigo-500"
+                />
+                옳은(O) 지문 자동 배합
+              </label>
+            </div>
+
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-slate-100 text-slate-800 border border-slate-300">
+                ⏱ {formatTime(elapsedSeconds)}
+              </span>
+              <span className="text-xs font-bold text-slate-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100">
+                정답률: {boxStats.solved}문제 중 {boxStats.correct}정답 (
+                {boxStats.solved > 0
+                  ? Math.round((boxStats.correct / boxStats.solved) * 100)
+                  : 0}
+                %)
+              </span>
+              <button
+                type="button"
+                onClick={generateBoxQuestions}
+                className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm transition"
+              >
+                🔄 새 박스 문제 세트 뽑기
+              </button>
+            </div>
+          </div>
+
+          {/* 실전 박스형 문제 리스트 렌더링 */}
+          {boxList.length === 0 ? (
+            <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-sm text-slate-500">
+              현재 선택한 폴더/검색 조건에 해당하는 문항이 없습니다. 먼저 상단의 [📂 JSON 문제집 불러오기]로 파일을 추가하거나 다른 폴더를 선택해 주세요.
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {boxList.map((box) => {
+                const chosen = selectedChoices[box.id];
+                const isGraded = chosen !== undefined;
+                const targetMark =
+                  box.targetType === 'WRONG_COUNT' ? 'X' : 'O';
+                const userCounted = box.subItems.filter(
+                  (_, sIdx) => userMarks[`${box.id}-${sIdx}`] === targetMark
+                ).length;
 
                 return (
                   <div
-                    key={q.id}
-                    className={`p-3.5 sm:p-4 rounded-xl border transition-all ${
-                      isLightMode
-                        ? 'bg-white border-slate-300 hover:border-slate-400 shadow-sm'
-                        : 'bg-[#0a0a0c] border-white/10 hover:border-white/20'
-                    }`}
+                    key={box.id}
+                    className="bg-white rounded-xl shadow-sm border-2 border-slate-800 p-4 sm:p-5 space-y-4"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-2.5 flex-1 min-w-0">
-                        {isSelectMode && (
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => {
-                              setSelectedQuestionIds((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(q.id)) next.delete(q.id);
-                                else next.add(q.id);
-                                return next;
-                              });
-                            }}
-                            className="mt-1.5 h-4 w-4 accent-teal-600 cursor-pointer shrink-0"
-                          />
-                        )}
-
+                    {/* 문제 번호 및 질문 타이틀 */}
+                    <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                      <div className="text-base sm:text-lg font-extrabold text-slate-900">
+                        {box.boxNo}. 다음 설명 중{' '}
                         <span
-                          className={`font-mono text-xs font-extrabold mt-0.5 shrink-0 ${
-                            isLightMode ? 'text-slate-500' : 'text-zinc-500'
-                          }`}
+                          className={
+                            box.targetType === 'WRONG_COUNT'
+                              ? 'text-rose-600 underline decoration-2'
+                              : 'text-emerald-600 underline decoration-2'
+                          }
                         >
-                          {String(idx + 1).padStart(2, '0')}.
+                          {box.targetType === 'WRONG_COUNT'
+                            ? '틀린 것은 모두 몇 개인가?'
+                            : '옳은 것은 모두 몇 개인가?'}
                         </span>
-
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-extrabold border ${
-                                q.category === '계산 문제'
-                                  ? isLightMode
-                                    ? 'bg-rose-50 text-rose-800 border-rose-300'
-                                    : 'bg-rose-950/60 text-rose-300 border-rose-500/40'
-                                  : isLightMode
-                                  ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
-                                  : 'bg-indigo-950/60 text-indigo-300 border-indigo-500/30'
-                              }`}
-                            >
-                              {q.category === '계산 문제' && q.subCategory
-                                ? `🧮 ${q.subCategory}`
-                                : q.category}
-                            </span>
-
-                            {q.folder && q.folder !== '계산 문제' && (
-                              <span
-                                className={`px-2 py-0.5 rounded text-[10px] font-extrabold border ${
-                                  isLightMode
-                                    ? 'bg-amber-100 text-amber-900 border-amber-300'
-                                    : 'bg-amber-950/60 text-amber-300 border-amber-500/40'
-                                }`}
-                              >
-                                🗂️ {q.folder}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* 조항 텍스트 영역 (클릭 시 오른쪽 빨간 원형 배지만 토글!) */}
-                          <div
-                            onClick={() => toggleInlineAnswer(q.id)}
-                            className="cursor-pointer select-text text-sm sm:text-[15px] leading-relaxed break-keep"
-                            title="조항을 클릭하면 오른쪽에 간략 정답이 표시됩니다"
-                          >
-                            {renderClauseWithRightAnswerBadge(q, isAnswerShown)}
-                          </div>
-                        </div>
                       </div>
-
-                      {/* 우측 컨트롤: [상세 해설] 버튼 + 삭제(✕) 버튼만 깔끔하게 유지 */}
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          onClick={() => toggleDetailExplanation(q.id)}
-                          className={`px-2.5 py-1 rounded text-xs font-extrabold border transition-all ${
-                            isDetailShown
-                              ? 'bg-amber-600 text-white border-amber-500 shadow-sm'
-                              : isLightMode
-                              ? 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
-                              : 'bg-white/5 text-zinc-300 border-white/15 hover:bg-white/10'
-                          }`}
-                        >
-                          {isDetailShown ? '해설닫기' : '상세 해설'}
-                        </button>
-
-                        <button
-                          onClick={() => {
-                            if (confirm('이 문항을 목록에서 삭제하시겠습니까?')) {
-                              setOxQuestions((prev) => prev.filter((item) => item.id !== q.id));
-                            }
-                          }}
-                          className={`px-1.5 py-1 text-xs font-bold opacity-50 hover:opacity-100 ${
-                            isLightMode
-                              ? 'text-slate-600 hover:text-rose-600'
-                              : 'text-zinc-400 hover:text-rose-400'
-                          }`}
-                          title="문항 삭제"
-                        >
-                          ✕
-                        </button>
-                      </div>
+                      <span className="text-xs font-bold text-slate-500">
+                        {selectedCategory} ({box.subItems.length}지문)
+                      </span>
                     </div>
 
-                    {/* 하단 상세 해설 박스 ([상세 해설] 버튼을 눌렀을 때만 표시됨) */}
-                    {isDetailShown && (
-                      <div
-                        className={`mt-3 p-3 rounded-lg border text-xs sm:text-[13px] space-y-1.5 leading-relaxed ${
-                          isLightMode
-                            ? 'bg-amber-50/70 border-amber-300 text-slate-900'
-                            : 'bg-amber-950/20 border-amber-500/30 text-zinc-200'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 flex-wrap font-extrabold">
-                          <span className={isLightMode ? 'text-amber-900' : 'text-amber-400'}>
-                            💡 오답 수정 · 상세 해설 (정답: {q.answer})
-                          </span>
-                          {q.correctAnswer && (
-                            <span
-                              className={`px-2 py-0.5 rounded text-xs font-extrabold border ${
-                                isLightMode
-                                  ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                                  : 'bg-teal-950/80 text-teal-300 border-teal-500/40'
-                              }`}
+                    {/* 박스 내부 지문 (가, 나, 다, 라, 마...) */}
+                    <div className="border-2 border-slate-700 rounded-lg p-3.5 sm:p-4 bg-white space-y-2.5">
+                      {box.subItems.map((sub, idx) => {
+                        const itemKey = `${box.id}-${idx}`;
+                        const userMark = userMarks[itemKey];
+                        const isExpOpen = !!boxExpandedExp[itemKey];
+                        const isSubRevealed =
+                          isGraded || !!boxSubRevealed[itemKey];
+
+                        return (
+                          <div
+                            key={itemKey}
+                            className={`p-2.5 rounded-lg border transition ${
+                              isGraded
+                                ? sub.effectiveAnswer === 'X'
+                                  ? 'bg-rose-50/40 border-rose-200'
+                                  : 'bg-emerald-50/40 border-emerald-200'
+                                : userMark === 'X'
+                                ? 'bg-rose-50/30 border-rose-200'
+                                : userMark === 'O'
+                                ? 'bg-sky-50/30 border-sky-200'
+                                : 'border-transparent hover:bg-slate-50'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              {/* 지문 텍스트: 클릭 시 개별 정답 캡슐 확인 가능 */}
+                              <div
+                                onClick={() =>
+                                  setBoxSubRevealed((prev) => ({
+                                    ...prev,
+                                    [itemKey]: !prev[itemKey],
+                                  }))
+                                }
+                                className="flex-1 text-sm sm:text-[15px] leading-relaxed text-slate-900 cursor-pointer"
+                              >
+                                <span className="font-extrabold text-slate-900 mr-1.5">
+                                  {sub.label}.
+                                </span>
+                                <span>{sub.displayQuestion}</span>
+
+                                {/* 지문 클릭 또는 채점 완료 시 우측에 빨간색 동그라미(캡슐) 표시 */}
+                                {isSubRevealed && (
+                                  <span
+                                    className={`inline-flex items-center ml-2 mt-1 px-3 py-0.5 rounded-full text-xs font-extrabold border-2 align-middle ${
+                                      sub.effectiveAnswer === 'X'
+                                        ? 'bg-rose-50 text-rose-600 border-rose-500'
+                                        : 'bg-emerald-50 text-emerald-700 border-emerald-500'
+                                    }`}
+                                  >
+                                    {sub.effectiveAnswer === 'X'
+                                      ? `👉 정답(X): ${sub.shortCorrection}`
+                                      : `👉 정답(O): ${sub.shortCorrection}`}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* 우측: 풀이 중 O/X 메모 버튼 + 상세 해설 버튼 */}
+                              <div className="flex items-center gap-1 shrink-0">
+                                {!isGraded && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        toggleUserMark(box.id, idx, 'O')
+                                      }
+                                      className={`w-7 h-7 rounded-md text-xs font-extrabold border transition ${
+                                        userMark === 'O'
+                                          ? 'bg-sky-600 text-white border-sky-600'
+                                          : 'bg-white text-slate-500 border-slate-300 hover:bg-slate-100'
+                                      }`}
+                                      title="맞는 지문으로 체크"
+                                    >
+                                      O
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        toggleUserMark(box.id, idx, 'X')
+                                      }
+                                      className={`w-7 h-7 rounded-md text-xs font-extrabold border transition ${
+                                        userMark === 'X'
+                                          ? 'bg-rose-600 text-white border-rose-600'
+                                          : 'bg-white text-slate-500 border-slate-300 hover:bg-slate-100'
+                                      }`}
+                                      title="틀린 지문으로 체크"
+                                    >
+                                      X
+                                    </button>
+                                  </>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setBoxExpandedExp((prev) => ({
+                                      ...prev,
+                                      [itemKey]: !prev[itemKey],
+                                    }))
+                                  }
+                                  className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition ${
+                                    isExpOpen
+                                      ? 'bg-slate-800 text-white border-slate-800'
+                                      : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+                                  }`}
+                                >
+                                  상세 해설
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* 상세 해설 펼침 영역 */}
+                            {isExpOpen && (
+                              <div className="mt-2.5 p-3 rounded-lg bg-amber-50/70 border border-amber-200 text-xs text-slate-800 space-y-1">
+                                <div className="font-bold text-amber-900">
+                                  💡 오답 수정 · 정답 확인 (판정:{' '}
+                                  {sub.effectiveAnswer}) —{' '}
+                                  {sub.originItem.correctAnswer}
+                                </div>
+                                {sub.originItem.subCategory && (
+                                  <div className="text-slate-600">
+                                    [분류] {sub.originItem.category} &gt;{' '}
+                                    {sub.originItem.subCategory}
+                                  </div>
+                                )}
+                                {sub.originItem.source && (
+                                  <div className="text-slate-500">
+                                    [출처] {sub.originItem.source}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* 하단 4지선다 보기 & 채점 결과 */}
+                    <div className="flex flex-wrap items-center justify-between gap-4 pt-1">
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        {box.choices.map((choiceNum, cIdx) => {
+                          const isThisSelected = chosen === choiceNum;
+                          const isCorrectChoice =
+                            choiceNum === box.correctCount;
+
+                          let btnStyle =
+                            'bg-white text-slate-900 border-slate-300 hover:border-indigo-500 hover:bg-indigo-50';
+                          if (isGraded) {
+                            if (isCorrectChoice) {
+                              btnStyle =
+                                'bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-300';
+                            } else if (isThisSelected && !isCorrectChoice) {
+                              btnStyle =
+                                'bg-rose-600 text-white border-rose-600';
+                            } else {
+                              btnStyle =
+                                'bg-slate-100 text-slate-400 border-slate-200';
+                            }
+                          }
+
+                          return (
+                            <button
+                              key={choiceNum}
+                              type="button"
+                              disabled={isGraded}
+                              onClick={() =>
+                                handleSelectBoxChoice(box, choiceNum)
+                              }
+                              className={`px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-extrabold border-2 transition-all ${btnStyle}`}
                             >
-                              바른 표현: {q.correctAnswer}
-                            </span>
-                          )}
-                        </div>
-                        <div
-                          className={`whitespace-pre-line font-medium ${
-                            isLightMode ? 'text-slate-800' : 'text-zinc-300'
-                          }`}
-                        >
-                          {q.explanation}
-                        </div>
+                              {CIRCLED_NUMS[cIdx] || `${cIdx + 1}.`}{' '}
+                              {choiceNum}개
+                            </button>
+                          );
+                        })}
                       </div>
-                    )}
+
+                      <div className="text-xs font-bold text-slate-600">
+                        {!isGraded ? (
+                          <span>
+                            내 체크 집계:{' '}
+                            <strong className="text-indigo-600">
+                              {box.targetType === 'WRONG_COUNT'
+                                ? `틀린 지문(X) ${userCounted}개`
+                                : `옳은 지문(O) ${userCounted}개`}
+                            </strong>
+                          </span>
+                        ) : chosen === box.correctCount ? (
+                          <span className="text-emerald-600 text-sm font-extrabold">
+                            🎉 정답입니다! ({box.correctCount}개)
+                          </span>
+                        ) : (
+                          <span className="text-rose-600 text-sm font-extrabold">
+                            ❗ 오답입니다! (선택: {chosen}개 → 정답:{' '}
+                            {box.correctCount}개)
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 );
-              })
-            )}
-          </div>
-        </>
+              })}
+            </div>
+          )}
+        </div>
       ) : (
-        /* 단답·서술 요약 서브탭 */
-        <div
-          className={`p-6 rounded-xl border text-center space-y-2 ${
-            isLightMode
-              ? 'bg-white border-slate-300 text-slate-800'
-              : 'bg-[#0a0a0c] border-white/10 text-zinc-300'
-          }`}
-        >
-          <h3 className="text-base font-extrabold">✍️ 나만의 단답·요약 노트</h3>
-          <p className="text-xs opacity-80">
-            법령·정관 오답노트 탭과 계산 문제 탭에서 폴더별로 분류한 문항들을 집중 복습할 수 있습니다.
-          </p>
+        /* ========================================== */
+        /* MODE 2: 기존 단문 리스트 모드 (빨간 캡슐 + 상세 해설) */
+        /* ========================================== */
+        <div className="space-y-3">
+          {filteredQuestions.length === 0 ? (
+            <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-sm text-slate-500">
+              표시할 문항이 없습니다. 상단의 [📂 JSON 문제집 불러오기] 버튼을 눌러 문제집 파일을 추가해 주세요.
+            </div>
+          ) : (
+            filteredQuestions.map((item, index) => {
+              const isAnswerShown =
+                showAllAnswers || !!revealedAnswers[item.id];
+              const isExpOpen = !!expandedExplanations[item.id];
+              const numLabel =
+                index + 1 < 10 ? `0${index + 1}.` : `${index + 1}.`;
+
+              return (
+                <div
+                  key={item.id}
+                  className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 transition hover:border-slate-300"
+                >
+                  {/* 상단 메타데이터 & 우측 버튼(상세 해설 / 삭제) */}
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-extrabold text-slate-500">
+                        {numLabel}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
+                        {item.category}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => toggleExplanation(item.id)}
+                        className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition ${
+                          isExpOpen
+                            ? 'bg-slate-800 text-white border-slate-800'
+                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        상세 해설
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteQuestion(item.id)}
+                        className="px-2 py-1 rounded-md text-xs text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
+                        title="문항 삭제"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 본문 지문 (클릭 시 우측에 빨간색 캡슐 정답 토글) */}
+                  <div
+                    onClick={() => toggleRevealAnswer(item.id)}
+                    className="text-sm sm:text-[15px] leading-relaxed text-slate-900 cursor-pointer select-text"
+                  >
+                    {renderFormattedQuestion(item.question)}
+
+                    {isAnswerShown && (
+                      <span className="inline-flex items-center ml-2 mt-1 px-3 py-0.5 rounded-full text-xs font-extrabold bg-rose-50 text-rose-600 border-2 border-rose-500 shadow-xs align-middle">
+                        👉 정답: {item.correctAnswer}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* 상세 해설 영역 (`상세 해설` 버튼 클릭 시에만 표시) */}
+                  {isExpOpen && (
+                    <div className="mt-3 p-3.5 rounded-lg bg-amber-50/60 border border-amber-200 text-xs text-slate-800 space-y-1.5">
+                      <div className="flex items-center gap-2 flex-wrap font-bold text-amber-900">
+                        <span>
+                          💡 오답 수정 · 정답 확인 (정답: {item.answer})
+                        </span>
+                        <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">
+                          바른 표현: {item.correctAnswer}
+                        </span>
+                      </div>
+                      <div className="text-slate-700 whitespace-pre-line leading-relaxed">
+                        [정답·수정] {item.correctAnswer}
+                      </div>
+                      {item.subCategory && (
+                        <div className="text-slate-600">
+                          [분류] {item.subCategory}
+                        </div>
+                      )}
+                      {item.source && (
+                        <div className="text-slate-500">
+                          [출처] {item.source}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
         </div>
       )}
     </div>
