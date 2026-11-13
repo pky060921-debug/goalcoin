@@ -101,7 +101,6 @@ function trySynthesizeTrueStatement(item: ExamQuestionItem): {
     };
   }
 
-  // (1)(2) 복수 항목형 문제는 단일 문장 자동 치환에서 제외
   if (item.question.includes('\n(1)') || item.question.includes('(1)')) {
     return { success: false, text: item.question, note: item.correctAnswer };
   }
@@ -142,26 +141,23 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>('전체');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // 화면 모드: 'list'(기존 단문 리스트 모드) | 'box'(실전 박스형 훈련 모드)
-  const [viewMode, setViewMode] = useState<'list' | 'box'>('list');
+  // 화면 모드: 'single'(한 페이지 1문장 단문 시험모드) | 'box'(박스형 시험모드)
+  const [viewMode, setViewMode] = useState<'single' | 'box'>('single');
 
-  // 단문 리스트 모드 상태
+  // 상단 메뉴(필터/검색/단축키/JSON 관리) 열림 상태 — 평소에는 숨겨서 화면을 깔끔하게 유지
+  const [isMenuOpen, setIsMenuOpen] = useState<boolean>(false);
+  const [showShortcutModal, setShowShortcutModal] = useState<boolean>(false);
+
+  // 단문 1문항 페이지 인덱스 (좌/우 이동)
+  const [currentIndex, setCurrentIndex] = useState<number>(0);
+  const [jumpInput, setJumpInput] = useState<string>('');
+
+  // 단문 모드 상태: 해답 표시 여부, 사용자 O/X 선택 기록
   const [revealedAnswers, setRevealedAnswers] = useState<Record<number, boolean>>({});
-  const [expandedExplanations, setExpandedExplanations] = useState<Record<number, boolean>>({});
-  const [showAllAnswers, setShowAllAnswers] = useState<boolean>(false);
-  // 단문 모드에서 사용자가 키보드(O/X 또는 1/2)나 버튼으로 판정한 내 답안 기록
-  const [userListGuesses, setUserListGuesses] = useState<Record<number, 'O' | 'X'>>({});
+  const [userGuesses, setUserGuesses] = useState<Record<number, 'O' | 'X'>>({});
+  const [showMetaInfo, setShowMetaInfo] = useState<boolean>(false);
 
-  // 키보드 포커스 상태 (단문 모드 & 박스 모드)
-  const [focusedListIndex, setFocusedListIndex] = useState<number>(0);
-  const [focusedBoxIdx, setFocusedBoxIdx] = useState<number>(0);
-  const [focusedSubIdx, setFocusedSubIdx] = useState<number>(0);
-  const [showShortcutGuide, setShowShortcutGuide] = useState<boolean>(true);
-
-  const listCardRefs = useRef<Record<number, HTMLDivElement | null>>({});
-  const boxSubItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
-
-  // 단문 OX 해답/내용 인라인 수정 상태
+  // 해답/내용 인라인 수정 상태
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState<EditDraft>({
     question: '',
@@ -177,29 +173,25 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
   const [isAddingFolder, setIsAddingFolder] = useState<boolean>(false);
 
   // ==========================================
-  // 박스형 훈련 모드 전용 상태
+  // 박스형 시험모드 상태 (한 페이지 1박스씩 좌우 넘기기)
   // ==========================================
-  const [boxSizeSetting, setBoxSizeSetting] = useState<number | 'random'>(5); // 5, 6, 7, 'random'
-  const [boxBatchCount, setBoxBatchCount] = useState<1 | 5 | 10>(1); // 1문제씩 집중 vs 5/10문제 시험지 모드
+  const [boxSizeSetting, setBoxSizeSetting] = useState<number | 'random'>(5);
   const [boxTargetSetting, setBoxTargetSetting] = useState<'WRONG_COUNT' | 'CORRECT_COUNT' | 'RANDOM'>('WRONG_COUNT');
   const [autoMixTrueStatements, setAutoMixTrueStatements] = useState<boolean>(true);
 
   const [boxList, setBoxList] = useState<GeneratedBoxQuestion[]>([]);
+  const [currentBoxIdx, setCurrentBoxIdx] = useState<number>(0);
+  const [focusedSubIdx, setFocusedSubIdx] = useState<number>(0);
   // key: `${boxId}-${subIdx}` -> 'O' | 'X' | null
   const [userMarks, setUserMarks] = useState<Record<string, 'O' | 'X' | null>>({});
   // key: boxId -> selected choice number
   const [selectedChoices, setSelectedChoices] = useState<Record<string, number>>({});
-  // key: `${boxId}-${subIdx}` -> boolean (상세 해설 토글)
-  const [boxExpandedExp, setBoxExpandedExp] = useState<Record<string, boolean>>({});
-  // key: `${boxId}-${subIdx}` -> boolean (채점 전 개별 지문 정답 캡슐 미리보기 토글)
-  const [boxSubRevealed, setBoxSubRevealed] = useState<Record<string, boolean>>({});
+  // key: boxId -> boolean (해답/해설 표시 토글)
+  const [boxShowExplanation, setBoxShowExplanation] = useState<Record<string, boolean>>({});
 
-  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
-  const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
-  const [boxStats, setBoxStats] = useState<{ solved: number; correct: number }>({
-    solved: 0,
-    correct: 0,
-  });
+  // 터치 스와이프(태블릿/모바일 좌우 넘기기) 좌표 기록
+  const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
 
   // 초기 로드 (기존 모든 버전의 localStorage 키 호환)
   useEffect(() => {
@@ -254,18 +246,6 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
       console.error('Failed to save custom folders:', e);
     }
   }, []);
-
-  // 박스형 타이머 작동 (미채점 문제가 남아 있을 때만 작동)
-  useEffect(() => {
-    if (viewMode !== 'box' || !isTimerRunning || boxList.length === 0) return;
-    const allGraded = boxList.every((b) => selectedChoices[b.id] !== undefined);
-    if (allGraded) return;
-
-    const timer = setInterval(() => {
-      setElapsedSeconds((prev) => prev + 1);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [viewMode, isTimerRunning, boxList, selectedChoices]);
 
   // JSON 파일 업로드 (병합 및 중복 제거)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -326,7 +306,7 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
     e.target.value = '';
   };
 
-  // 수정된 문제집 JSON 파일로 내보내기 (다운로드)
+  // 수정된 문제집 JSON 파일로 내보내기
   const handleExportJson = () => {
     if (questions.length === 0) {
       alert('내보낼 문항이 없습니다.');
@@ -401,36 +381,22 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
     });
   }, [questions, selectedCategory, selectedSubCategory, searchQuery]);
 
-  // 필터 변경 시 단문 포커스 초기화
+  // 필터 변경 시 첫 문제로 이동
   useEffect(() => {
-    setFocusedListIndex(0);
+    setCurrentIndex(0);
+    setEditingId(null);
   }, [selectedCategory, selectedSubCategory, searchQuery]);
 
-  // 포커스된 단문 카드 자동 스크롤
-  useEffect(() => {
-    if (viewMode !== 'list') return;
-    const item = filteredQuestions[focusedListIndex];
-    if (!item) return;
-    const el = listCardRefs.current[item.id];
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-  }, [focusedListIndex, viewMode, filteredQuestions]);
+  // currentIndex 범위 보정
+  const safeCurrentIndex = useMemo(() => {
+    if (filteredQuestions.length === 0) return 0;
+    return Math.min(Math.max(0, currentIndex), filteredQuestions.length - 1);
+  }, [currentIndex, filteredQuestions.length]);
 
-  // 포커스된 박스 지문 자동 스크롤
-  useEffect(() => {
-    if (viewMode !== 'box') return;
-    const currentBox = boxList[focusedBoxIdx];
-    if (!currentBox) return;
-    const key = `${currentBox.id}-${focusedSubIdx}`;
-    const el = boxSubItemRefs.current[key];
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-  }, [focusedBoxIdx, focusedSubIdx, viewMode, boxList]);
+  const currentQuestion = filteredQuestions[safeCurrentIndex] || null;
 
   // ==========================================
-  // 박스형 문제 세트 생성 함수 (1문제 또는 5/10문제 시험지 생성)
+  // 박스형 문제 생성 함수 (20세트씩 생성하여 좌우로 넘기며 풀이)
   // ==========================================
   const generateBoxQuestions = useCallback(() => {
     const singleLinePool = filteredQuestions.filter(
@@ -443,11 +409,12 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
       return;
     }
 
+    const batchSize = Math.max(10, Math.ceil(pool.length / 5));
     const generated: GeneratedBoxQuestion[] = [];
     const shuffledMaster = [...pool].sort(() => Math.random() - 0.5);
     let cursor = 0;
 
-    for (let bIdx = 0; bIdx < boxBatchCount; bIdx++) {
+    for (let bIdx = 0; bIdx < batchSize; bIdx++) {
       const count =
         boxSizeSetting === 'random'
           ? [5, 6, 7][Math.floor(Math.random() * 3)]
@@ -534,54 +501,61 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
     }
 
     setBoxList(generated);
+    setCurrentBoxIdx(0);
+    setFocusedSubIdx(0);
     setUserMarks({});
     setSelectedChoices({});
-    setBoxExpandedExp({});
-    setBoxSubRevealed({});
-    setFocusedBoxIdx(0);
-    setFocusedSubIdx(0);
-    setElapsedSeconds(0);
-    setIsTimerRunning(true);
-  }, [
-    filteredQuestions,
-    boxSizeSetting,
-    boxBatchCount,
-    boxTargetSetting,
-    autoMixTrueStatements,
-  ]);
+    setBoxShowExplanation({});
+  }, [filteredQuestions, boxSizeSetting, boxTargetSetting, autoMixTrueStatements]);
 
   useEffect(() => {
     if (viewMode === 'box') {
       generateBoxQuestions();
     }
-  }, [
-    viewMode,
-    selectedCategory,
-    selectedSubCategory,
-    boxSizeSetting,
-    boxBatchCount,
-    boxTargetSetting,
-  ]);
+  }, [viewMode, selectedCategory, selectedSubCategory, boxSizeSetting, boxTargetSetting]);
 
-  // 단문 정답 캡슐 토글
+  // ==========================================
+  // 단문 이동 및 조작 함수
+  // ==========================================
+  const goPrevQuestion = useCallback(() => {
+    setEditingId(null);
+    if (viewMode === 'single') {
+      setCurrentIndex((prev) => Math.max(0, prev - 1));
+    } else {
+      setCurrentBoxIdx((prev) => Math.max(0, prev - 1));
+      setFocusedSubIdx(0);
+    }
+  }, [viewMode]);
+
+  const goNextQuestion = useCallback(() => {
+    setEditingId(null);
+    if (viewMode === 'single') {
+      setCurrentIndex((prev) =>
+        filteredQuestions.length > 0
+          ? Math.min(filteredQuestions.length - 1, prev + 1)
+          : 0
+      );
+    } else {
+      setCurrentBoxIdx((prev) =>
+        boxList.length > 0 ? Math.min(boxList.length - 1, prev + 1) : 0
+      );
+      setFocusedSubIdx(0);
+    }
+  }, [viewMode, filteredQuestions.length, boxList.length]);
+
+  // 단문 해답 토글
   const toggleRevealAnswer = useCallback((id: number) => {
     setRevealedAnswers((prev) => ({ ...prev, [id]: !prev[id] }));
   }, []);
 
-  // 단문 OX 판정 선택 (키보드 O/X 또는 버튼 클릭 시 판정 기록 + 해답 공개)
-  const handleGuessListOx = useCallback((id: number, guess: 'O' | 'X') => {
-    setUserListGuesses((prev) => ({ ...prev, [id]: guess }));
+  // 단문 O / X 선택 (선택 시 하단에 해답 표시)
+  const handleSelectSingleOx = useCallback((id: number, choice: 'O' | 'X') => {
+    setUserGuesses((prev) => ({ ...prev, [id]: choice }));
     setRevealedAnswers((prev) => ({ ...prev, [id]: true }));
   }, []);
 
-  // 상세 해설 토글
-  const toggleExplanation = useCallback((id: number) => {
-    setExpandedExplanations((prev) => ({ ...prev, [id]: !prev[id] }));
-  }, []);
-
-  // 단문 문항 해답/내용 수정 시작
-  const handleStartEdit = useCallback((item: ExamQuestionItem, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
+  // 단문 해답/내용 수정 시작
+  const handleStartEdit = useCallback((item: ExamQuestionItem) => {
     setEditingId(item.id);
     setEditDraft({
       question: item.question || '',
@@ -593,15 +567,11 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
     });
   }, []);
 
-  // 단문 문항 해답/내용 수정 취소
-  const handleCancelEdit = useCallback((e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
+  const handleCancelEdit = useCallback(() => {
     setEditingId(null);
   }, []);
 
-  // 단문 문항 해답/내용 수정 저장
-  const handleSaveEdit = (id: number, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
+  const handleSaveEdit = (id: number) => {
     const trimmedQuestion = editDraft.question.trim();
     const trimmedCorrectAnswer = editDraft.correctAnswer.trim();
     const trimmedAnswer = editDraft.answer.trim() || 'X';
@@ -644,9 +614,20 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
 
   // 개별 문항 삭제
   const handleDeleteQuestion = (id: number) => {
+    if (!window.confirm('이 문항을 삭제하시겠습니까?')) return;
     if (editingId === id) setEditingId(null);
     const next = questions.filter((q) => q.id !== id);
     saveQuestions(next);
+  };
+
+  // 번호 직접 이동
+  const handleJumpSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const num = parseInt(jumpInput, 10);
+    if (!isNaN(num) && num >= 1 && num <= filteredQuestions.length) {
+      setCurrentIndex(num - 1);
+      setJumpInput('');
+    }
   };
 
   // 새 폴더 생성
@@ -661,7 +642,7 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
     setSelectedCategory(trimmed);
   };
 
-  // 박스형 지문 마킹 (O / X 연필 메모)
+  // 박스형 지문 마킹 (O / X)
   const toggleUserMark = useCallback(
     (boxId: string, subIdx: number, mark: 'O' | 'X') => {
       if (selectedChoices[boxId] !== undefined) return;
@@ -677,19 +658,14 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
   // 박스형 객관식 보기 선택 (채점)
   const handleSelectBoxChoice = useCallback(
     (box: GeneratedBoxQuestion, choiceNum: number) => {
-      if (selectedChoices[box.id] !== undefined) return;
       setSelectedChoices((prev) => ({ ...prev, [box.id]: choiceNum }));
-      const isCorrect = choiceNum === box.correctCount;
-      setBoxStats((prev) => ({
-        solved: prev.solved + 1,
-        correct: prev.correct + (isCorrect ? 1 : 0),
-      }));
+      setBoxShowExplanation((prev) => ({ ...prev, [box.id]: true }));
     },
-    [selectedChoices]
+    []
   );
 
   // ==========================================
-  // 전역 키보드 단축키 핸들러 (단문 OX 모드 & 실전 박스형 모드)
+  // 전역 키보드 단축키 핸들러 (좌우 넘기기 & 즉시 풀이)
   // ==========================================
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -708,101 +684,75 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
 
       const key = e.key;
 
-      // 1) 단문 OX 리스트 모드 단축키
-      if (viewMode === 'list') {
-        if (filteredQuestions.length === 0) return;
-        const safeIdx = Math.min(
-          Math.max(0, focusedListIndex),
-          filteredQuestions.length - 1
-        );
-        const currentItem = filteredQuestions[safeIdx];
-        if (!currentItem) return;
+      // 공통: F키로 메뉴 열기/닫기, ?키로 단축키 안내
+      if (key === 'f' || key === 'F') {
+        e.preventDefault();
+        setIsMenuOpen((prev) => !prev);
+        return;
+      }
+      if (key === '?' || key === '/') {
+        e.preventDefault();
+        setShowShortcutModal((prev) => !prev);
+        return;
+      }
 
-        if (key === 'ArrowDown' || key === 'ArrowRight' || key === 'j' || key === 'J') {
+      // 1) 단문 시험모드 (1페이지 1문항)
+      if (viewMode === 'single') {
+        if (!currentQuestion) return;
+
+        if (key === 'ArrowRight' || key === 'd' || key === 'D' || key === 'j' || key === 'J') {
           e.preventDefault();
-          setFocusedListIndex((prev) =>
-            Math.min(filteredQuestions.length - 1, prev + 1)
-          );
-        } else if (key === 'ArrowUp' || key === 'ArrowLeft' || key === 'k' || key === 'K') {
+          goNextQuestion();
+        } else if (key === 'ArrowLeft' || key === 'a' || key === 'A' || key === 'k' || key === 'K') {
           e.preventDefault();
-          setFocusedListIndex((prev) => Math.max(0, prev - 1));
-        } else if (key === ' ' || key === 'Enter') {
+          goPrevQuestion();
+        } else if (key === ' ' || key === 'Enter' || key === 'e' || key === 'E') {
           e.preventDefault();
-          toggleRevealAnswer(currentItem.id);
+          toggleRevealAnswer(currentQuestion.id);
         } else if (key === 'o' || key === 'O' || key === '1') {
           e.preventDefault();
-          handleGuessListOx(currentItem.id, 'O');
+          handleSelectSingleOx(currentQuestion.id, 'O');
         } else if (key === 'x' || key === 'X' || key === '2') {
           e.preventDefault();
-          handleGuessListOx(currentItem.id, 'X');
-        } else if (key === 'e' || key === 'E') {
-          e.preventDefault();
-          toggleExplanation(currentItem.id);
+          handleSelectSingleOx(currentQuestion.id, 'X');
         } else if (key === 'm' || key === 'M' || key === 'u' || key === 'U') {
           e.preventDefault();
-          handleStartEdit(currentItem);
-        } else if (key === 'a' || key === 'A') {
+          handleStartEdit(currentQuestion);
+        } else if (key === 'i' || key === 'I') {
           e.preventDefault();
-          setShowAllAnswers((prev) => !prev);
+          setShowMetaInfo((prev) => !prev);
         }
         return;
       }
 
-      // 2) 실전 박스형 훈련 모드 단축키
+      // 2) 박스형 시험모드 (1페이지 1박스)
       if (viewMode === 'box') {
-        if (boxList.length === 0) return;
-        const safeBoxIdx = Math.min(Math.max(0, focusedBoxIdx), boxList.length - 1);
-        const currentBox = boxList[safeBoxIdx];
+        const currentBox = boxList[currentBoxIdx];
         if (!currentBox) return;
         const subLen = currentBox.subItems.length;
         const safeSubIdx = Math.min(Math.max(0, focusedSubIdx), subLen - 1);
         const itemKey = `${currentBox.id}-${safeSubIdx}`;
 
-        if (key === 'ArrowDown' || key === 'j' || key === 'J') {
+        if (key === 'ArrowRight') {
           e.preventDefault();
-          if (safeSubIdx < subLen - 1) {
-            setFocusedSubIdx(safeSubIdx + 1);
-          } else if (safeBoxIdx < boxList.length - 1) {
-            setFocusedBoxIdx(safeBoxIdx + 1);
-            setFocusedSubIdx(0);
-          }
+          goNextQuestion();
+        } else if (key === 'ArrowLeft') {
+          e.preventDefault();
+          goPrevQuestion();
+        } else if (key === 'ArrowDown' || key === 'j' || key === 'J') {
+          e.preventDefault();
+          setFocusedSubIdx((prev) => (prev + 1) % subLen);
         } else if (key === 'ArrowUp' || key === 'k' || key === 'K') {
           e.preventDefault();
-          if (safeSubIdx > 0) {
-            setFocusedSubIdx(safeSubIdx - 1);
-          } else if (safeBoxIdx > 0) {
-            const prevBox = boxList[safeBoxIdx - 1];
-            setFocusedBoxIdx(safeBoxIdx - 1);
-            setFocusedSubIdx(Math.max(0, prevBox.subItems.length - 1));
-          }
-        } else if (key === 'o' || key === 'O' || key === '[') {
+          setFocusedSubIdx((prev) => (prev - 1 + subLen) % subLen);
+        } else if (key === 'o' || key === 'O') {
           e.preventDefault();
-          if (selectedChoices[currentBox.id] === undefined) {
-            setUserMarks((prev) => ({ ...prev, [itemKey]: 'O' }));
-            if (safeSubIdx < subLen - 1) {
-              setFocusedSubIdx(safeSubIdx + 1);
-            }
-          }
-        } else if (key === 'x' || key === 'X' || key === ']') {
+          setUserMarks((prev) => ({ ...prev, [itemKey]: 'O' }));
+          if (safeSubIdx < subLen - 1) setFocusedSubIdx(safeSubIdx + 1);
+        } else if (key === 'x' || key === 'X') {
           e.preventDefault();
-          if (selectedChoices[currentBox.id] === undefined) {
-            setUserMarks((prev) => ({ ...prev, [itemKey]: 'X' }));
-            if (safeSubIdx < subLen - 1) {
-              setFocusedSubIdx(safeSubIdx + 1);
-            }
-          }
-        } else if (key === ' ') {
-          e.preventDefault();
-          setBoxSubRevealed((prev) => ({
-            ...prev,
-            [itemKey]: !prev[itemKey],
-          }));
-        } else if (key === 'e' || key === 'E') {
-          e.preventDefault();
-          setBoxExpandedExp((prev) => ({
-            ...prev,
-            [itemKey]: !prev[itemKey],
-          }));
+          setUserMarks((prev) => ({ ...prev, [itemKey]: 'X' }));
+          if (safeSubIdx < subLen - 1) setFocusedSubIdx(safeSubIdx + 1);
         } else if (key === '1' || key === '2' || key === '3' || key === '4') {
           e.preventDefault();
           const cIdx = Number(key) - 1;
@@ -810,13 +760,13 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
           if (choiceVal !== undefined) {
             handleSelectBoxChoice(currentBox, choiceVal);
           }
-        } else if (
-          key === 'n' ||
-          key === 'N' ||
-          key === 'r' ||
-          key === 'R' ||
-          (key === 'Enter' && selectedChoices[currentBox.id] !== undefined)
-        ) {
+        } else if (key === ' ' || key === 'Enter' || key === 'e' || key === 'E') {
+          e.preventDefault();
+          setBoxShowExplanation((prev) => ({
+            ...prev,
+            [currentBox.id]: !prev[currentBox.id],
+          }));
+        } else if (key === 'n' || key === 'N') {
           e.preventDefault();
           generateBoxQuestions();
         }
@@ -829,19 +779,47 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
     viewMode,
     editingId,
     isAddingFolder,
-    filteredQuestions,
-    focusedListIndex,
+    currentQuestion,
     boxList,
-    focusedBoxIdx,
+    currentBoxIdx,
     focusedSubIdx,
-    selectedChoices,
+    goNextQuestion,
+    goPrevQuestion,
     toggleRevealAnswer,
-    handleGuessListOx,
-    toggleExplanation,
+    handleSelectSingleOx,
     handleStartEdit,
     handleSelectBoxChoice,
     generateBoxQuestions,
   ]);
+
+  // 터치 스와이프 핸들러 (태블릿/모바일에서 좌우로 밀어서 문제 넘기기)
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (editingId !== null) return;
+    touchStartXRef.current = e.touches[0].clientX;
+    touchStartYRef.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (
+      editingId !== null ||
+      touchStartXRef.current === null ||
+      touchStartYRef.current === null
+    ) {
+      return;
+    }
+    const dx = e.changedTouches[0].clientX - touchStartXRef.current;
+    const dy = e.changedTouches[0].clientY - touchStartYRef.current;
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      if (dx < 0) {
+        goNextQuestion();
+      } else {
+        goPrevQuestion();
+      }
+    }
+  };
 
   // 문장 포맷터: 상단 질문 + (1)(2)(3) 항목 분리 표시
   const renderFormattedQuestion = (qText: string) => {
@@ -859,11 +837,11 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
     return (
       <span className="inline-block w-full">
         {firstPart && (
-          <span className="block font-semibold text-slate-900 mb-1.5">
-            📌 {firstPart}
+          <span className="block font-semibold text-slate-900 mb-2">
+            {firstPart}
           </span>
         )}
-        <span className="block space-y-1 pl-1">
+        <span className="block space-y-1.5 pl-1">
           {subParts.map((sp, i) => (
             <span key={i} className="block text-slate-800 leading-relaxed">
               {sp.trim()}
@@ -874,391 +852,334 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
     );
   };
 
-  const formatTime = (sec: number) => {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${m}분 ${s < 10 ? `0${s}` : s}초`;
-  };
+  const currentBox = boxList[currentBoxIdx] || null;
 
   return (
-    <div className="w-full max-w-6xl mx-auto p-3 sm:p-4 space-y-4 text-slate-900 bg-slate-50 min-h-screen rounded-xl">
-      {/* 상단 모드 전환 & 파일 업로드 헤더 */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-3.5 sm:p-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 flex-wrap">
+    <div className="w-full max-w-4xl mx-auto p-3 sm:p-5 space-y-3 text-slate-900 select-none">
+      {/* ================================================================= */}
+      {/* 1. 최소화된 상단 컨트롤 바 (모드 전환 + 진행 번호 + 메뉴/단축키 버튼) */}
+      {/* ================================================================= */}
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 shadow-2xs">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={() => setViewMode('list')}
-            className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-extrabold transition-all ${
-              viewMode === 'list'
-                ? 'bg-teal-600 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            onClick={() => setViewMode('single')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition ${
+              viewMode === 'single'
+                ? 'bg-slate-900 text-white'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            📋 단문 OX 리스트 ({filteredQuestions.length}문항)
+            단문 OX
           </button>
           <button
             type="button"
             onClick={() => setViewMode('box')}
-            className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-extrabold transition-all ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition ${
               viewMode === 'box'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                ? 'bg-slate-900 text-white'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
             }`}
           >
-            📦 실전 박스형 훈련 모드 (5~7지문 개수 찾기)
+            박스형 (5~7지문)
           </button>
+
+          {selectedCategory !== '전체' && (
+            <span className="ml-1 px-2 py-1 rounded-md text-xs font-bold bg-slate-100 text-slate-700">
+              {selectedCategory}
+            </span>
+          )}
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
+        {/* 가운데: 문항 진행률 & 번호 이동 */}
+        {viewMode === 'single' && filteredQuestions.length > 0 && (
+          <form onSubmit={handleJumpSubmit} className="flex items-center gap-1.5">
+            <span className="text-xs font-bold text-slate-700">
+              {safeCurrentIndex + 1} / {filteredQuestions.length}
+            </span>
+            <input
+              type="text"
+              value={jumpInput}
+              onChange={(e) => setJumpInput(e.target.value)}
+              placeholder="번호"
+              className="w-14 px-2 py-1 text-xs text-center border border-slate-300 rounded-md bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-500"
+            />
+          </form>
+        )}
+
+        {viewMode === 'box' && boxList.length > 0 && (
+          <div className="text-xs font-bold text-slate-700">
+            박스 {currentBoxIdx + 1} / {boxList.length}
+          </div>
+        )}
+
+        {/* 우측: 단축키 버튼 & 메뉴(필터/파일) 버튼 */}
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
-            onClick={() => setShowShortcutGuide((prev) => !prev)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
-              showShortcutGuide
+            onClick={() => setShowShortcutModal((prev) => !prev)}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition ${
+              showShortcutModal
                 ? 'bg-slate-800 text-white border-slate-800'
-                : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
             }`}
+            title="단축키 안내 (?)"
           >
-            ⌨️ 키보드 단축키 {showShortcutGuide ? '숨기기' : '안내'}
+            ⌨️ 단축키
           </button>
-          <label className="cursor-pointer px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition">
-            📂 JSON 문제집 불러오기
-            <input
-              type="file"
-              accept=".json"
-              multiple
-              onChange={handleFileUpload}
-              className="hidden"
-            />
-          </label>
-          {questions.length > 0 && (
-            <button
-              type="button"
-              onClick={handleExportJson}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition"
-              title="수정된 해답과 지문을 JSON 파일로 다운로드합니다"
-            >
-              💾 수정본 JSON 저장
-            </button>
-          )}
-          {isAddingFolder ? (
-            <div className="flex items-center gap-1">
-              <input
-                type="text"
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleCreateFolder();
-                }}
-                placeholder="새 폴더명"
-                className="px-2.5 py-1 text-xs border border-slate-300 rounded-md bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500"
-              />
-              <button
-                type="button"
-                onClick={handleCreateFolder}
-                className="px-2.5 py-1 text-xs font-bold bg-teal-600 text-white rounded-md"
-              >
-                추가
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsAddingFolder(false)}
-                className="px-2 py-1 text-xs text-slate-500 hover:text-slate-700"
-              >
-                취소
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setIsAddingFolder(true)}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-700 border border-slate-200 hover:bg-slate-200 transition"
-            >
-              + 새 폴더 만들기
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setIsMenuOpen((prev) => !prev)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+              isMenuOpen
+                ? 'bg-teal-600 text-white border-teal-600'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+            }`}
+            title="폴더 필터, 검색, 파일 불러오기/저장 (단축키: F)"
+          >
+            ☰ 메뉴·필터
+          </button>
         </div>
       </div>
 
-      {/* 키보드 단축키 안내 배너 */}
-      {showShortcutGuide && (
-        <div className="bg-slate-900 text-slate-100 rounded-xl px-4 py-2.5 text-xs flex flex-wrap items-center justify-between gap-2 shadow-xs">
-          {viewMode === 'list' ? (
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-              <span className="font-extrabold text-teal-300">
-                ⌨️ 단문 OX 키보드 조작:
-              </span>
-              <span>
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  ↑
-                </kbd>{' '}
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  ↓
-                </kbd>{' '}
-                또는{' '}
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  ←
-                </kbd>{' '}
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  →
-                </kbd>{' '}
-                문항 이동
-              </span>
-              <span>
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  O
-                </kbd>{' '}
+      {/* ================================================================= */}
+      {/* 2. 단축키 안내 팝오버 (`⌨️ 단축키` 버튼을 누를 때만 표시) */}
+      {/* ================================================================= */}
+      {showShortcutModal && (
+        <div className="bg-slate-900 text-slate-100 rounded-xl p-3.5 text-xs space-y-2 shadow-md">
+          <div className="flex items-center justify-between border-b border-slate-700 pb-2">
+            <span className="font-extrabold text-teal-300">
+              ⌨️ 키보드 단축키 안내
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowShortcutModal(false)}
+              className="text-slate-400 hover:text-white font-bold"
+            >
+              ✕ 닫기
+            </button>
+          </div>
+          {viewMode === 'single' ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+              <div>
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">←</kbd>{' '}
                 /{' '}
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  1
-                </kbd>{' '}
-                O 선택 ·{' '}
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  X
-                </kbd>{' '}
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">→</kbd>{' '}
+                이전 / 다음 문제
+              </div>
+              <div>
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">O</kbd>(1) ·{' '}
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">X</kbd>(2){' '}
+                O / X 선택
+              </div>
+              <div>
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">Space</kbd>{' '}
                 /{' '}
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  2
-                </kbd>{' '}
-                X 선택 (즉시 채점)
-              </span>
-              <span>
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  Space
-                </kbd>{' '}
-                /{' '}
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  Enter
-                </kbd>{' '}
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">Enter</kbd>{' '}
                 해답 보기/숨기기
-              </span>
-              <span>
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  E
-                </kbd>{' '}
-                상세 해설
-              </span>
-              <span>
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  M
-                </kbd>{' '}
-                해답 수정
-              </span>
+              </div>
+              <div>
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">M</kbd>{' '}
+                해답·지문 수정
+              </div>
+              <div>
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">I</kbd>{' '}
+                출처/분류 정보 보기
+              </div>
+              <div>
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">F</kbd>{' '}
+                메뉴·필터 열기/닫기
+              </div>
             </div>
           ) : (
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-              <span className="font-extrabold text-indigo-300">
-                ⌨️ 실전 박스형 키보드 조작:
-              </span>
-              <span>
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  ↑
-                </kbd>{' '}
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  ↓
-                </kbd>{' '}
-                지문(가~사) 이동
-              </span>
-              <span>
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  O
-                </kbd>{' '}
-                맞는 지문 체크 ·{' '}
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  X
-                </kbd>{' '}
-                틀린 지문 체크 (자동 다음 지문)
-              </span>
-              <span>
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  1
-                </kbd>
-                ~
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  4
-                </kbd>{' '}
-                객관식 ①~④번 정답 선택
-              </span>
-              <span>
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  Space
-                </kbd>{' '}
-                지문 해답 미리보기
-              </span>
-              <span>
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  N
-                </kbd>{' '}
-                (또는 채점 후{' '}
-                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded text-[11px] font-mono">
-                  Enter
-                </kbd>
-                ) 새 박스 문제 뽑기
-              </span>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+              <div>
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">←</kbd>{' '}
+                /{' '}
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">→</kbd>{' '}
+                이전 / 다음 박스
+              </div>
+              <div>
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">↑</kbd>{' '}
+                /{' '}
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">↓</kbd>{' '}
+                박스 내 지문 이동
+              </div>
+              <div>
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">O</kbd> ·{' '}
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">X</kbd>{' '}
+                현재 지문 O/X 표시
+              </div>
+              <div>
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">1</kbd>~
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">4</kbd>{' '}
+                ①~④번 보기 선택
+              </div>
+              <div>
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">Space</kbd>{' '}
+                전체 해설 보기/숨기기
+              </div>
+              <div>
+                <kbd className="px-1.5 py-0.5 bg-slate-700 rounded font-mono">N</kbd>{' '}
+                새 박스 세트 섞기
+              </div>
             </div>
           )}
         </div>
       )}
 
-      {/* 1단 폴더(카테고리) 선택 탭 */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 space-y-3">
-        <div className="flex flex-wrap gap-1.5">
-          {allCategories.map((cat) => {
-            const isSelected = selectedCategory === cat;
-            return (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                  isSelected
-                    ? 'bg-teal-600 text-white shadow-sm'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                }`}
-              >
-                {cat}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* 2단 조항별 세부 분류(subCategory) 필터 칩 */}
-        {subCategories.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 pt-2 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => setSelectedSubCategory('전체')}
-              className={`px-2.5 py-1 rounded-md text-xs font-bold transition ${
-                selectedSubCategory === '전체'
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              전체
-            </button>
-            {subCategories.map((sub) => (
-              <button
-                key={sub}
-                type="button"
-                onClick={() => setSelectedSubCategory(sub)}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
-                  selectedSubCategory === sub
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                {sub}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* 검색 및 전체 정답 토글 바 */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-slate-100 text-slate-700">
-              현재 목록 {filteredQuestions.length}문항
+      {/* ================================================================= */}
+      {/* 3. 접이식 메뉴·필터 패널 (`☰ 메뉴·필터` 버튼을 누를 때만 표시) */}
+      {/* ================================================================= */}
+      {isMenuOpen && (
+        <div className="bg-white rounded-xl shadow-md border border-slate-200 p-4 space-y-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100">
+            <span className="text-xs font-extrabold text-slate-800">
+              📂 문제집 파일 & 폴더 관리
             </span>
-
-            {viewMode === 'list' && filteredQuestions.length > 0 && (
-              <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-teal-50 text-teal-800 border border-teal-200">
-                현재 선택: {focusedListIndex + 1} / {filteredQuestions.length}번
-              </span>
-            )}
-
-            {viewMode === 'list' && (
-              <button
-                type="button"
-                onClick={() => setShowAllAnswers((prev) => !prev)}
-                className={`px-3 py-1 rounded-md text-xs font-bold border transition ${
-                  showAllAnswers
-                    ? 'bg-amber-500 text-white border-amber-600'
-                    : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
-                }`}
-              >
-                👀 {showAllAnswers ? '전체 정답 숨기기' : '전체 정답 한번에 보기'}
-              </button>
-            )}
+            <div className="flex items-center gap-2 flex-wrap">
+              <label className="cursor-pointer px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition">
+                📂 JSON 불러오기
+                <input
+                  type="file"
+                  accept=".json"
+                  multiple
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+              </label>
+              {questions.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleExportJson}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 transition"
+                >
+                  💾 수정본 JSON 저장
+                </button>
+              )}
+              {isAddingFolder ? (
+                <div className="flex items-center gap-1">
+                  <input
+                    type="text"
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleCreateFolder();
+                    }}
+                    placeholder="새 폴더명"
+                    className="px-2.5 py-1 text-xs border border-slate-300 rounded-md bg-white text-slate-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCreateFolder}
+                    className="px-2.5 py-1 text-xs font-bold bg-teal-600 text-white rounded-md"
+                  >
+                    추가
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingFolder(false)}
+                    className="px-2 py-1 text-xs text-slate-500"
+                  >
+                    취소
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsAddingFolder(true)}
+                  className="px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200"
+                >
+                  + 새 폴더
+                </button>
+              )}
+            </div>
           </div>
 
-          {/* 우측 검색창 */}
-          <div className="relative w-full sm:w-72">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="조문, 키워드, 숫자 검색..."
-              className="w-full pl-3 pr-8 py-1.5 text-xs rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
-              >
-                ✕
-              </button>
-            )}
+          {/* 1단 카테고리 선택 */}
+          <div className="space-y-1.5">
+            <div className="text-xs font-bold text-slate-600">장·규정 선택</div>
+            <div className="flex flex-wrap gap-1.5">
+              {allCategories.map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                    selectedCategory === cat
+                      ? 'bg-teal-600 text-white'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
-      </div>
 
-      {/* ========================================== */}
-      {/* MODE 1: 실전 박스형 훈련 모드 (5~7지문 개수형) */}
-      {/* ========================================== */}
-      {viewMode === 'box' ? (
-        <div className="space-y-4">
-          {/* 박스형 옵션 설정 바 */}
-          <div className="bg-white rounded-xl shadow-sm border border-indigo-200 p-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-              {/* 지문 수 선택 */}
+          {/* 2단 세부 분류 선택 */}
+          {subCategories.length > 0 && (
+            <div className="space-y-1.5 pt-2 border-t border-slate-100">
+              <div className="text-xs font-bold text-slate-600">세부 조문 필터</div>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSelectedSubCategory('전체')}
+                  className={`px-2.5 py-1 rounded-md text-xs font-bold transition ${
+                    selectedSubCategory === '전체'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  전체
+                </button>
+                {subCategories.map((sub) => (
+                  <button
+                    key={sub}
+                    type="button"
+                    onClick={() => setSelectedSubCategory(sub)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                      selectedSubCategory === sub
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {sub}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 박스형 전용 설정 (박스형 모드일 때만 표시) */}
+          {viewMode === 'box' && (
+            <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-100 text-xs">
               <div className="flex items-center gap-1">
-                <span className="text-xs font-bold text-slate-600 mr-1">지문 수:</span>
+                <span className="font-bold text-slate-600 mr-1">박스 지문 수:</span>
                 {([5, 6, 7, 'random'] as const).map((sz) => (
                   <button
                     key={String(sz)}
                     type="button"
                     onClick={() => setBoxSizeSetting(sz)}
-                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition ${
+                    className={`px-2.5 py-1 rounded-md font-bold ${
                       boxSizeSetting === sz
                         ? 'bg-indigo-600 text-white'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                        : 'bg-slate-100 text-slate-700'
                     }`}
                   >
                     {sz === 'random' ? '5~7 랜덤' : `${sz}지문`}
                   </button>
                 ))}
               </div>
-
-              {/* 출제 문항 수(1문제 집중 vs 5/10문제 시험지) */}
               <div className="flex items-center gap-1">
-                <span className="text-xs font-bold text-slate-600 mr-1">출제 단위:</span>
-                {([1, 5, 10] as const).map((cnt) => (
-                  <button
-                    key={cnt}
-                    type="button"
-                    onClick={() => setBoxBatchCount(cnt)}
-                    className={`px-2.5 py-1 rounded-md text-xs font-bold transition ${
-                      boxBatchCount === cnt
-                        ? 'bg-teal-600 text-white'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                    }`}
-                  >
-                    {cnt === 1 ? '1문제 집중' : `${cnt}문제 연속`}
-                  </button>
-                ))}
-              </div>
-
-              {/* 질문 유형 선택 */}
-              <div className="flex items-center gap-1">
-                <span className="text-xs font-bold text-slate-600 mr-1">유형:</span>
+                <span className="font-bold text-slate-600 mr-1">질문 유형:</span>
                 <button
                   type="button"
                   onClick={() => setBoxTargetSetting('WRONG_COUNT')}
-                  className={`px-2.5 py-1 rounded-md text-xs font-bold transition ${
+                  className={`px-2.5 py-1 rounded-md font-bold ${
                     boxTargetSetting === 'WRONG_COUNT'
                       ? 'bg-rose-600 text-white'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      : 'bg-slate-100 text-slate-700'
                   }`}
                 >
                   틀린 개수
@@ -1266,10 +1187,10 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
                 <button
                   type="button"
                   onClick={() => setBoxTargetSetting('CORRECT_COUNT')}
-                  className={`px-2.5 py-1 rounded-md text-xs font-bold transition ${
+                  className={`px-2.5 py-1 rounded-md font-bold ${
                     boxTargetSetting === 'CORRECT_COUNT'
                       ? 'bg-emerald-600 text-white'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      : 'bg-slate-100 text-slate-700'
                   }`}
                 >
                   옳은 개수
@@ -1277,410 +1198,480 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
                 <button
                   type="button"
                   onClick={() => setBoxTargetSetting('RANDOM')}
-                  className={`px-2.5 py-1 rounded-md text-xs font-bold transition ${
+                  className={`px-2.5 py-1 rounded-md font-bold ${
                     boxTargetSetting === 'RANDOM'
                       ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      : 'bg-slate-100 text-slate-700'
                   }`}
                 >
                   혼합
                 </button>
               </div>
-
-              <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 cursor-pointer select-none">
+              <label className="flex items-center gap-1.5 font-bold text-slate-700 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={autoMixTrueStatements}
                   onChange={(e) => setAutoMixTrueStatements(e.target.checked)}
-                  className="rounded text-indigo-600 focus:ring-indigo-500"
                 />
                 옳은(O) 지문 자동 배합
               </label>
             </div>
+          )}
 
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <span className="px-2.5 py-1 rounded-md text-xs font-bold bg-slate-100 text-slate-800 border border-slate-300">
-                ⏱ {formatTime(elapsedSeconds)}
-              </span>
-              <span className="text-xs font-bold text-slate-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100">
-                정답률: {boxStats.solved}문제 중 {boxStats.correct}정답 (
-                {boxStats.solved > 0
-                  ? Math.round((boxStats.correct / boxStats.solved) * 100)
-                  : 0}
-                %)
-              </span>
+          {/* 검색창 */}
+          <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="조문, 키워드, 숫자 검색..."
+                className="w-full pl-3 pr-8 py-1.5 text-xs rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-500"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsMenuOpen(false)}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-800 text-white"
+            >
+              메뉴 닫기
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ================================================================= */}
+      {/* 4. 메인 시험지 영역 (한 페이지에 한 문제씩 표시 & 좌/우 넘기기) */}
+      {/* ================================================================= */}
+      {viewMode === 'single' ? (
+        !currentQuestion ? (
+          <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center space-y-3">
+            <div className="text-sm text-slate-500">
+              표시할 문항이 없습니다. 우측 상단의 <strong>[☰ 메뉴·필터]</strong>를 눌러 JSON 문제집 파일을 불러와 주세요.
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsMenuOpen(true)}
+              className="px-4 py-2 rounded-lg text-xs font-bold bg-teal-600 text-white"
+            >
+              ☰ 메뉴·필터 열기
+            </button>
+          </div>
+        ) : (
+          <div
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+            className="bg-white rounded-2xl shadow-xs border-2 border-slate-800 p-5 sm:p-8 space-y-6"
+          >
+            {/* ----------------------------------------------------------- */}
+            {/* 문제 영역: 오직 [번호]와 [지문]만 깔끔하게 시험문제 형식으로 표시 */}
+            {/* ----------------------------------------------------------- */}
+            <div
+              onClick={() => {
+                if (editingId !== currentQuestion.id) {
+                  toggleRevealAnswer(currentQuestion.id);
+                }
+              }}
+              className="min-h-[130px] flex items-start cursor-pointer select-text"
+            >
+              <div className="text-base sm:text-xl leading-relaxed text-slate-900 font-medium tracking-tight">
+                <span className="font-extrabold text-slate-900 mr-2">
+                  {safeCurrentIndex + 1}.
+                </span>
+                {renderFormattedQuestion(currentQuestion.question)}
+              </div>
+            </div>
+
+            {/* ----------------------------------------------------------- */}
+            {/* 하단 컨트롤 버튼 바 (오른쪽 상단에 있던 버튼을 모두 아래로 배치) */}
+            {/* ----------------------------------------------------------- */}
+            <div className="pt-4 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+              {/* 좌측: 이전 문제 버튼 */}
               <button
                 type="button"
-                onClick={generateBoxQuestions}
-                className="px-3.5 py-1.5 rounded-lg text-xs font-extrabold bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm transition"
+                onClick={goPrevQuestion}
+                disabled={safeCurrentIndex === 0}
+                className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold border transition ${
+                  safeCurrentIndex === 0
+                    ? 'bg-slate-50 text-slate-300 border-slate-200 cursor-not-allowed'
+                    : 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100'
+                }`}
               >
-                🔄 새 박스 문제 세트 뽑기 (N)
+                ◀ 이전 (←)
+              </button>
+
+              {/* 중앙: 시험문제 형식 O / X 선택 및 해답·수정·정보 버튼 */}
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSelectSingleOx(currentQuestion.id, 'O')}
+                  className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold border-2 transition ${
+                    userGuesses[currentQuestion.id] === 'O'
+                      ? 'bg-sky-600 text-white border-sky-600'
+                      : 'bg-white text-slate-800 border-slate-300 hover:border-sky-500 hover:bg-sky-50'
+                  }`}
+                >
+                  ① O (옳음)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSelectSingleOx(currentQuestion.id, 'X')}
+                  className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold border-2 transition ${
+                    userGuesses[currentQuestion.id] === 'X'
+                      ? 'bg-rose-600 text-white border-rose-600'
+                      : 'bg-white text-slate-800 border-slate-300 hover:border-rose-500 hover:bg-rose-50'
+                  }`}
+                >
+                  ② X (틀림)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => toggleRevealAnswer(currentQuestion.id)}
+                  className={`px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold border transition ${
+                    revealedAnswers[currentQuestion.id]
+                      ? 'bg-slate-800 text-white border-slate-800'
+                      : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                  }`}
+                >
+                  {revealedAnswers[currentQuestion.id] ? '해답 숨기기' : '해답 보기'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    editingId === currentQuestion.id
+                      ? handleCancelEdit()
+                      : handleStartEdit(currentQuestion)
+                  }
+                  className={`px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold border transition ${
+                    editingId === currentQuestion.id
+                      ? 'bg-teal-600 text-white border-teal-600'
+                      : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                  }`}
+                >
+                  {editingId === currentQuestion.id ? '수정 취소' : '수정'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowMetaInfo((prev) => !prev)}
+                  className={`px-2.5 py-2.5 rounded-xl text-xs font-bold border transition ${
+                    showMetaInfo
+                      ? 'bg-slate-200 text-slate-800 border-slate-300'
+                      : 'bg-white text-slate-400 border-slate-200 hover:text-slate-700'
+                  }`}
+                  title="분류·출처·삭제 메뉴 (단축키: I)"
+                >
+                  •••
+                </button>
+              </div>
+
+              {/* 우측: 다음 문제 버튼 */}
+              <button
+                type="button"
+                onClick={goNextQuestion}
+                disabled={safeCurrentIndex >= filteredQuestions.length - 1}
+                className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold border transition ${
+                  safeCurrentIndex >= filteredQuestions.length - 1
+                    ? 'bg-slate-50 text-slate-300 border-slate-200 cursor-not-allowed'
+                    : 'bg-slate-900 text-white border-slate-900 hover:bg-slate-800'
+                }`}
+              >
+                다음 (→) ▶
               </button>
             </div>
-          </div>
 
-          {/* 실전 박스형 문제 리스트 렌더링 */}
-          {boxList.length === 0 ? (
-            <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-sm text-slate-500">
-              현재 선택한 폴더/검색 조건에 해당하는 문항이 없습니다. 먼저 상단의 [📂 JSON 문제집 불러오기]로 파일을 추가하거나 다른 폴더를 선택해 주세요.
+            {/* ----------------------------------------------------------- */}
+            {/* 부가 정보 바 (`•••` 버튼이나 I키를 눌렀을 때만 노출) */}
+            {/* ----------------------------------------------------------- */}
+            {showMetaInfo && (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold text-slate-800">
+                    [{currentQuestion.category}]
+                  </span>
+                  {currentQuestion.subCategory && (
+                    <span>{currentQuestion.subCategory}</span>
+                  )}
+                  {currentQuestion.source && (
+                    <span className="text-slate-400">
+                      ({currentQuestion.source})
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteQuestion(currentQuestion.id)}
+                  className="px-2.5 py-1 rounded-md text-xs font-bold text-rose-600 hover:bg-rose-50"
+                >
+                  문항 삭제
+                </button>
+              </div>
+            )}
+
+            {/* ----------------------------------------------------------- */}
+            {/* 하단 해답 영역 (빨간 캡슐 없이 깔끔한 하단 박스로 표시) */}
+            {/* ----------------------------------------------------------- */}
+            {revealedAnswers[currentQuestion.id] &&
+              editingId !== currentQuestion.id && (
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs sm:text-sm">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={`px-2.5 py-0.5 rounded-md font-extrabold ${
+                          currentQuestion.answer === 'O'
+                            ? 'bg-sky-100 text-sky-800'
+                            : 'bg-rose-100 text-rose-800'
+                        }`}
+                      >
+                        정답: {currentQuestion.answer}
+                      </span>
+
+                      {userGuesses[currentQuestion.id] && (
+                        <span
+                          className={`font-extrabold ${
+                            userGuesses[currentQuestion.id] ===
+                              currentQuestion.answer ||
+                            (currentQuestion.answer !== 'O' &&
+                              userGuesses[currentQuestion.id] === 'X')
+                              ? 'text-emerald-600'
+                              : 'text-rose-600'
+                          }`}
+                        >
+                          {userGuesses[currentQuestion.id] ===
+                            currentQuestion.answer ||
+                          (currentQuestion.answer !== 'O' &&
+                            userGuesses[currentQuestion.id] === 'X')
+                            ? '✓ 맞았습니다'
+                            : `✗ 틀렸습니다 (내 선택: ${
+                                userGuesses[currentQuestion.id]
+                              })`}
+                        </span>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleStartEdit(currentQuestion)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-300 hover:bg-slate-100"
+                    >
+                      수정
+                    </button>
+                  </div>
+
+                  <div className="text-slate-900 font-semibold leading-relaxed whitespace-pre-line">
+                    {currentQuestion.correctAnswer}
+                  </div>
+
+                  {currentQuestion.explanation &&
+                    currentQuestion.explanation !==
+                      currentQuestion.correctAnswer && (
+                      <div className="text-slate-600 leading-relaxed whitespace-pre-line pt-1 border-t border-slate-200">
+                        {currentQuestion.explanation}
+                      </div>
+                    )}
+                </div>
+              )}
+
+            {/* ----------------------------------------------------------- */}
+            {/* 인라인 수정 폼 (`수정` 버튼 또는 M키를 눌렀을 때만 하단에 표시) */}
+            {/* ----------------------------------------------------------- */}
+            {editingId === currentQuestion.id && (
+              <div className="p-4 rounded-xl bg-slate-50 border-2 border-teal-500 space-y-3 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-slate-900 text-sm">
+                    해답 및 지문 수정
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-slate-600 mr-1">정답:</span>
+                    {(['O', 'X'] as const).map((ox) => (
+                      <button
+                        key={ox}
+                        type="button"
+                        onClick={() =>
+                          setEditDraft((prev) => ({ ...prev, answer: ox }))
+                        }
+                        className={`px-3 py-1 rounded-md font-extrabold border ${
+                          editDraft.answer === ox
+                            ? ox === 'O'
+                              ? 'bg-sky-600 text-white border-sky-600'
+                              : 'bg-rose-600 text-white border-rose-600'
+                            : 'bg-white text-slate-600 border-slate-300'
+                        }`}
+                      >
+                        {ox}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block font-bold text-slate-700">해답</label>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={editDraft.correctAnswer}
+                    onChange={(e) =>
+                      setEditDraft((prev) => ({
+                        ...prev,
+                        correctAnswer: e.target.value,
+                      }))
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSaveEdit(currentQuestion.id);
+                      } else if (e.key === 'Escape') {
+                        handleCancelEdit();
+                      }
+                    }}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-900 text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block font-bold text-slate-700">
+                    문제 지문
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={editDraft.question}
+                    onChange={(e) =>
+                      setEditDraft((prev) => ({
+                        ...prev,
+                        question: e.target.value,
+                      }))
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') handleCancelEdit();
+                    }}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-900 text-xs sm:text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="block font-bold text-slate-700">
+                      카테고리(폴더)
+                    </label>
+                    <input
+                      type="text"
+                      value={editDraft.category}
+                      onChange={(e) =>
+                        setEditDraft((prev) => ({
+                          ...prev,
+                          category: e.target.value,
+                        }))
+                      }
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 text-xs"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block font-bold text-slate-700">
+                      세부 분류
+                    </label>
+                    <input
+                      type="text"
+                      value={editDraft.subCategory}
+                      onChange={(e) =>
+                        setEditDraft((prev) => ({
+                          ...prev,
+                          subCategory: e.target.value,
+                        }))
+                      }
+                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleCancelEdit}
+                    className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-600 border border-slate-300 hover:bg-slate-100"
+                  >
+                    취소 (Esc)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSaveEdit(currentQuestion.id)}
+                    className="px-4 py-1.5 rounded-lg text-xs font-extrabold bg-teal-600 text-white hover:bg-teal-700"
+                  >
+                    저장하기 (Enter)
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )
+      ) : (
+        /* ================================================================= */
+        /* 5. 박스형 시험문제 모드 (1페이지에 1박스씩 표시 & 좌/우 넘기기) */
+        /* ================================================================= */
+        !currentBox ? (
+          <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center text-sm text-slate-500">
+            문항이 없습니다. 우측 상단의 [☰ 메뉴·필터]에서 문제집을 불러와 주세요.
+          </div>
+        ) : (
+          <div
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+            className="bg-white rounded-2xl shadow-xs border-2 border-slate-800 p-5 sm:p-7 space-y-5"
+          >
+            {/* 박스형 문제 발문 */}
+            <div className="text-base sm:text-lg font-extrabold text-slate-900">
+              {currentBox.boxNo}. 다음 설명 중{' '}
+              <span className="underline decoration-2">
+                {currentBox.targetType === 'WRONG_COUNT'
+                  ? '틀린 것은 모두 몇 개인가?'
+                  : '옳은 것은 모두 몇 개인가?'}
+              </span>
             </div>
-          ) : (
-            <div className="space-y-5">
-              {boxList.map((box, bIdx) => {
-                const chosen = selectedChoices[box.id];
-                const isGraded = chosen !== undefined;
-                const isBoxFocused = focusedBoxIdx === bIdx;
-                const targetMark =
-                  box.targetType === 'WRONG_COUNT' ? 'X' : 'O';
-                const userCounted = box.subItems.filter(
-                  (_, sIdx) => userMarks[`${box.id}-${sIdx}`] === targetMark
-                ).length;
+
+            {/* 박스 내부 지문 (가, 나, 다, 라, 마...) — 불필요한 빨간 캡슐 제거 */}
+            <div className="border-2 border-slate-700 rounded-xl p-4 bg-white space-y-3">
+              {currentBox.subItems.map((sub, idx) => {
+                const itemKey = `${currentBox.id}-${idx}`;
+                const userMark = userMarks[itemKey];
+                const isSubFocused = focusedSubIdx === idx;
 
                 return (
                   <div
-                    key={box.id}
-                    onClick={() => setFocusedBoxIdx(bIdx)}
-                    className={`bg-white rounded-xl shadow-sm border-2 p-4 sm:p-5 space-y-4 transition ${
-                      isBoxFocused
-                        ? 'border-indigo-600 ring-2 ring-indigo-100'
-                        : 'border-slate-800'
+                    key={itemKey}
+                    onClick={() => setFocusedSubIdx(idx)}
+                    className={`flex items-start justify-between gap-3 p-2 rounded-lg transition ${
+                      isSubFocused ? 'bg-slate-100/80' : 'hover:bg-slate-50'
                     }`}
                   >
-                    {/* 문제 번호 및 질문 타이틀 */}
-                    <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-                      <div className="text-base sm:text-lg font-extrabold text-slate-900">
-                        {box.boxNo}. 다음 설명 중{' '}
-                        <span
-                          className={
-                            box.targetType === 'WRONG_COUNT'
-                              ? 'text-rose-600 underline decoration-2'
-                              : 'text-emerald-600 underline decoration-2'
-                          }
-                        >
-                          {box.targetType === 'WRONG_COUNT'
-                            ? '틀린 것은 모두 몇 개인가?'
-                            : '옳은 것은 모두 몇 개인가?'}
-                        </span>
-                      </div>
-                      <span className="text-xs font-bold text-slate-500">
-                        {selectedCategory} ({box.subItems.length}지문)
-                      </span>
+                    <div className="text-sm sm:text-base leading-relaxed text-slate-900 select-text">
+                      <span className="font-extrabold mr-1.5">{sub.label}.</span>
+                      <span>{sub.displayQuestion}</span>
                     </div>
 
-                    {/* 박스 내부 지문 (가, 나, 다, 라, 마...) */}
-                    <div className="border-2 border-slate-700 rounded-lg p-3.5 sm:p-4 bg-white space-y-2.5">
-                      {box.subItems.map((sub, idx) => {
-                        const itemKey = `${box.id}-${idx}`;
-                        const userMark = userMarks[itemKey];
-                        const isExpOpen = !!boxExpandedExp[itemKey];
-                        const isSubRevealed =
-                          isGraded || !!boxSubRevealed[itemKey];
-                        const isSubFocused =
-                          isBoxFocused && focusedSubIdx === idx;
-
-                        return (
-                          <div
-                            key={itemKey}
-                            ref={(el) => {
-                              boxSubItemRefs.current[itemKey] = el;
-                            }}
-                            onClick={() => {
-                              setFocusedBoxIdx(bIdx);
-                              setFocusedSubIdx(idx);
-                            }}
-                            className={`p-2.5 rounded-lg border transition ${
-                              isGraded
-                                ? sub.effectiveAnswer === 'X'
-                                  ? 'bg-rose-50/40 border-rose-200'
-                                  : 'bg-emerald-50/40 border-emerald-200'
-                                : isSubFocused
-                                ? 'bg-indigo-50/50 border-indigo-400 ring-2 ring-indigo-200'
-                                : userMark === 'X'
-                                ? 'bg-rose-50/30 border-rose-200'
-                                : userMark === 'O'
-                                ? 'bg-sky-50/30 border-sky-200'
-                                : 'border-transparent hover:bg-slate-50'
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              {/* 지문 텍스트: 클릭 시 개별 정답 캡슐 확인 가능 */}
-                              <div
-                                onClick={() =>
-                                  setBoxSubRevealed((prev) => ({
-                                    ...prev,
-                                    [itemKey]: !prev[itemKey],
-                                  }))
-                                }
-                                className="flex-1 text-sm sm:text-[15px] leading-relaxed text-slate-900 cursor-pointer"
-                              >
-                                <span className="font-extrabold text-slate-900 mr-1.5">
-                                  {sub.label}.
-                                </span>
-                                <span>{sub.displayQuestion}</span>
-
-                                {/* 지문 클릭 또는 채점 완료 시 우측에 빨간색 동그라미(캡슐) 표시 */}
-                                {isSubRevealed && (
-                                  <span
-                                    className={`inline-flex items-center ml-2 mt-1 px-3 py-0.5 rounded-full text-xs font-extrabold border-2 align-middle ${
-                                      sub.effectiveAnswer === 'X'
-                                        ? 'bg-rose-50 text-rose-600 border-rose-500'
-                                        : 'bg-emerald-50 text-emerald-700 border-emerald-500'
-                                    }`}
-                                  >
-                                    {sub.effectiveAnswer === 'X'
-                                      ? `👉 정답(X): ${sub.shortCorrection}`
-                                      : `👉 정답(O): ${sub.shortCorrection}`}
-                                  </span>
-                                )}
-                              </div>
-
-                              {/* 우측: 풀이 중 O/X 메모 버튼 + 상세 해설 버튼 */}
-                              <div className="flex items-center gap-1 shrink-0">
-                                {!isGraded && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setFocusedBoxIdx(bIdx);
-                                        setFocusedSubIdx(idx);
-                                        toggleUserMark(box.id, idx, 'O');
-                                      }}
-                                      className={`w-7 h-7 rounded-md text-xs font-extrabold border transition ${
-                                        userMark === 'O'
-                                          ? 'bg-sky-600 text-white border-sky-600'
-                                          : 'bg-white text-slate-500 border-slate-300 hover:bg-slate-100'
-                                      }`}
-                                      title="맞는 지문으로 체크 (단축키: O)"
-                                    >
-                                      O
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setFocusedBoxIdx(bIdx);
-                                        setFocusedSubIdx(idx);
-                                        toggleUserMark(box.id, idx, 'X');
-                                      }}
-                                      className={`w-7 h-7 rounded-md text-xs font-extrabold border transition ${
-                                        userMark === 'X'
-                                          ? 'bg-rose-600 text-white border-rose-600'
-                                          : 'bg-white text-slate-500 border-slate-300 hover:bg-slate-100'
-                                      }`}
-                                      title="틀린 지문으로 체크 (단축키: X)"
-                                    >
-                                      X
-                                    </button>
-                                  </>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setBoxExpandedExp((prev) => ({
-                                      ...prev,
-                                      [itemKey]: !prev[itemKey],
-                                    }));
-                                  }}
-                                  className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition ${
-                                    isExpOpen
-                                      ? 'bg-slate-800 text-white border-slate-800'
-                                      : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
-                                  }`}
-                                >
-                                  상세 해설
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* 상세 해설 펼침 영역 */}
-                            {isExpOpen && (
-                              <div className="mt-2.5 p-3 rounded-lg bg-amber-50/70 border border-amber-200 text-xs text-slate-800 space-y-1">
-                                <div className="font-bold text-amber-900">
-                                  💡 오답 수정 · 정답 확인 (판정:{' '}
-                                  {sub.effectiveAnswer}) —{' '}
-                                  {sub.originItem.correctAnswer}
-                                </div>
-                                {sub.originItem.subCategory && (
-                                  <div className="text-slate-600">
-                                    [분류] {sub.originItem.category} &gt;{' '}
-                                    {sub.originItem.subCategory}
-                                  </div>
-                                )}
-                                {sub.originItem.source && (
-                                  <div className="text-slate-500">
-                                    [출처] {sub.originItem.source}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* 하단 4지선다 보기 & 채점 결과 */}
-                    <div className="flex flex-wrap items-center justify-between gap-4 pt-1">
-                      <div className="flex flex-wrap items-center gap-2.5">
-                        {box.choices.map((choiceNum, cIdx) => {
-                          const isThisSelected = chosen === choiceNum;
-                          const isCorrectChoice =
-                            choiceNum === box.correctCount;
-
-                          let btnStyle =
-                            'bg-white text-slate-900 border-slate-300 hover:border-indigo-500 hover:bg-indigo-50';
-                          if (isGraded) {
-                            if (isCorrectChoice) {
-                              btnStyle =
-                                'bg-emerald-600 text-white border-emerald-600 ring-2 ring-emerald-300';
-                            } else if (isThisSelected && !isCorrectChoice) {
-                              btnStyle =
-                                'bg-rose-600 text-white border-rose-600';
-                            } else {
-                              btnStyle =
-                                'bg-slate-100 text-slate-400 border-slate-200';
-                            }
-                          }
-
-                          return (
-                            <button
-                              key={choiceNum}
-                              type="button"
-                              disabled={isGraded}
-                              onClick={() =>
-                                handleSelectBoxChoice(box, choiceNum)
-                              }
-                              className={`px-4 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-extrabold border-2 transition-all ${btnStyle}`}
-                              title={`단축키: 숫자 ${cIdx + 1}`}
-                            >
-                              {CIRCLED_NUMS[cIdx] || `${cIdx + 1}.`}{' '}
-                              {choiceNum}개
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      <div className="text-xs font-bold text-slate-600">
-                        {!isGraded ? (
-                          <span>
-                            내 체크 집계:{' '}
-                            <strong className="text-indigo-600">
-                              {box.targetType === 'WRONG_COUNT'
-                                ? `틀린 지문(X) ${userCounted}개`
-                                : `옳은 지문(O) ${userCounted}개`}
-                            </strong>
-                          </span>
-                        ) : chosen === box.correctCount ? (
-                          <span className="text-emerald-600 text-sm font-extrabold">
-                            🎉 정답입니다! ({box.correctCount}개) — Enter로 다음 세트
-                          </span>
-                        ) : (
-                          <span className="text-rose-600 text-sm font-extrabold">
-                            ❗ 오답입니다! (선택: {chosen}개 → 정답:{' '}
-                            {box.correctCount}개) — Enter로 다음 세트
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      ) : (
-        /* ========================================== */
-        /* MODE 2: 단문 OX 리스트 모드 (키보드 풀이 + 해답 캡슐 + 내용 수정) */
-        /* ========================================== */
-        <div className="space-y-3">
-          {filteredQuestions.length === 0 ? (
-            <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-sm text-slate-500">
-              표시할 문항이 없습니다. 상단의 [📂 JSON 문제집 불러오기] 버튼을 눌러 문제집 파일을 추가해 주세요.
-            </div>
-          ) : (
-            filteredQuestions.map((item, index) => {
-              const isAnswerShown =
-                showAllAnswers || !!revealedAnswers[item.id];
-              const isExpOpen = !!expandedExplanations[item.id];
-              const isEditing = editingId === item.id;
-              const isFocused = focusedListIndex === index;
-              const userGuess = userListGuesses[item.id];
-              const isGuessCorrect =
-                userGuess !== undefined &&
-                (item.answer === userGuess ||
-                  (item.answer !== 'O' && userGuess === 'X'));
-              const numLabel =
-                index + 1 < 10 ? `0${index + 1}.` : `${index + 1}.`;
-
-              return (
-                <div
-                  key={item.id}
-                  ref={(el) => {
-                    listCardRefs.current[item.id] = el;
-                  }}
-                  onClick={() => setFocusedListIndex(index)}
-                  className={`bg-white rounded-xl shadow-sm border p-4 transition ${
-                    isEditing
-                      ? 'border-teal-500 ring-2 ring-teal-100'
-                      : isFocused
-                      ? 'border-teal-500 ring-2 ring-teal-200 bg-teal-50/10'
-                      : 'border-slate-200 hover:border-slate-300'
-                  }`}
-                >
-                  {/* 상단 메타데이터 & 우측 버튼(O/X 판정 / 수정 / 상세 해설 / 삭제) */}
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span
-                        className={`text-xs font-extrabold ${
-                          isFocused ? 'text-teal-700' : 'text-slate-500'
-                        }`}
-                      >
-                        {numLabel}
-                      </span>
-                      {isFocused && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-teal-600 text-white">
-                          선택됨
-                        </span>
-                      )}
-                      <span className="px-2 py-0.5 rounded-md text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
-                        {item.category}
-                      </span>
-                      {item.subCategory && (
-                        <span className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-slate-100 text-slate-600">
-                          {item.subCategory}
-                        </span>
-                      )}
-                      {userGuess && (
-                        <span
-                          className={`px-2 py-0.5 rounded-md text-[11px] font-extrabold ${
-                            isGuessCorrect
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                              : 'bg-rose-100 text-rose-800 border border-rose-300'
-                          }`}
-                        >
-                          {isGuessCorrect
-                            ? `⭕ 정답 (내 선택: ${userGuess})`
-                            : `❌ 오답 (내 선택: ${userGuess} / 정답: ${item.answer})`}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-1.5">
-                      {/* 단문 O / X 빠른 판정 버튼 (키보드 O/X 또는 1/2와 연동) */}
+                    {/* 우측 O / X 간단 메모 버튼 */}
+                    <div className="flex items-center gap-1 shrink-0 pt-0.5">
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setFocusedListIndex(index);
-                          handleGuessListOx(item.id, 'O');
+                          setFocusedSubIdx(idx);
+                          toggleUserMark(currentBox.id, idx, 'O');
                         }}
                         className={`w-7 h-7 rounded-md text-xs font-extrabold border transition ${
-                          userGuess === 'O'
+                          userMark === 'O'
                             ? 'bg-sky-600 text-white border-sky-600'
-                            : 'bg-white text-slate-600 border-slate-200 hover:bg-sky-50 hover:text-sky-700'
+                            : 'bg-white text-slate-400 border-slate-200 hover:text-slate-700'
                         }`}
-                        title="O 선택 (단축키: O 또는 1)"
                       >
                         O
                       </button>
@@ -1688,302 +1679,133 @@ export const ExamTab: React.FC<ExamTabProps> = () => {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setFocusedListIndex(index);
-                          handleGuessListOx(item.id, 'X');
+                          setFocusedSubIdx(idx);
+                          toggleUserMark(currentBox.id, idx, 'X');
                         }}
                         className={`w-7 h-7 rounded-md text-xs font-extrabold border transition ${
-                          userGuess === 'X'
+                          userMark === 'X'
                             ? 'bg-rose-600 text-white border-rose-600'
-                            : 'bg-white text-slate-600 border-slate-200 hover:bg-rose-50 hover:text-rose-700'
+                            : 'bg-white text-slate-400 border-slate-200 hover:text-slate-700'
                         }`}
-                        title="X 선택 (단축키: X 또는 2)"
                       >
                         X
                       </button>
-
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          setFocusedListIndex(index);
-                          if (isEditing) {
-                            handleCancelEdit(e);
-                          } else {
-                            handleStartEdit(item, e);
-                          }
-                        }}
-                        className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition ${
-                          isEditing
-                            ? 'bg-teal-600 text-white border-teal-600'
-                            : 'bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100'
-                        }`}
-                        title="단축키: M"
-                      >
-                        {isEditing ? '수정 취소' : '수정'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setFocusedListIndex(index);
-                          toggleExplanation(item.id);
-                        }}
-                        className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition ${
-                          isExpOpen
-                            ? 'bg-slate-800 text-white border-slate-800'
-                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                        }`}
-                        title="단축키: E"
-                      >
-                        상세 해설
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteQuestion(item.id);
-                        }}
-                        className="px-2 py-1 rounded-md text-xs text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
-                        title="문항 삭제"
-                      >
-                        ✕
-                      </button>
                     </div>
                   </div>
+                );
+              })}
+            </div>
 
-                  {/* 본문 지문 (클릭 또는 Space/Enter 시 우측에 빨간색 캡슐 해답 토글 & 수정 버튼) */}
-                  <div
-                    onClick={() => {
-                      setFocusedListIndex(index);
-                      if (!isEditing) toggleRevealAnswer(item.id);
-                    }}
-                    className={`text-sm sm:text-[15px] leading-relaxed text-slate-900 ${
-                      isEditing ? '' : 'cursor-pointer'
-                    } select-text`}
+            {/* 4지선다 객관식 보기 버튼 */}
+            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2.5 pt-1">
+              {currentBox.choices.map((choiceNum, cIdx) => {
+                const chosen = selectedChoices[currentBox.id];
+                const isGraded = chosen !== undefined;
+                const isThisSelected = chosen === choiceNum;
+                const isCorrectChoice = choiceNum === currentBox.correctCount;
+
+                let btnStyle =
+                  'bg-white text-slate-900 border-slate-300 hover:border-slate-800';
+                if (isGraded) {
+                  if (isCorrectChoice) {
+                    btnStyle = 'bg-emerald-600 text-white border-emerald-600';
+                  } else if (isThisSelected) {
+                    btnStyle = 'bg-rose-600 text-white border-rose-600';
+                  } else {
+                    btnStyle = 'bg-slate-50 text-slate-400 border-slate-200';
+                  }
+                }
+
+                return (
+                  <button
+                    key={choiceNum}
+                    type="button"
+                    onClick={() => handleSelectBoxChoice(currentBox, choiceNum)}
+                    className={`px-5 py-2.5 rounded-xl text-xs sm:text-sm font-extrabold border-2 transition ${btnStyle}`}
                   >
-                    {renderFormattedQuestion(item.question)}
+                    {CIRCLED_NUMS[cIdx] || `${cIdx + 1}.`} {choiceNum}개
+                  </button>
+                );
+              })}
+            </div>
 
-                    {isAnswerShown && !isEditing && (
-                      <span className="inline-flex items-center gap-1.5 ml-2 mt-1 px-3 py-0.5 rounded-full text-xs font-extrabold bg-rose-50 text-rose-600 border-2 border-rose-500 shadow-xs align-middle">
-                        <span>👉 정답: {item.correctAnswer}</span>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            setFocusedListIndex(index);
-                            handleStartEdit(item, e);
-                          }}
-                          className="ml-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-white text-rose-700 border border-rose-300 hover:bg-rose-600 hover:text-white transition"
-                          title="해답 및 문항 내용 수정 (단축키: M)"
-                        >
-                          수정
-                        </button>
-                      </span>
-                    )}
-                  </div>
+            {/* 하단 네비게이션 & 해답 보기 버튼 바 */}
+            <div className="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={goPrevQuestion}
+                disabled={currentBoxIdx === 0}
+                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-extrabold border transition ${
+                  currentBoxIdx === 0
+                    ? 'bg-slate-50 text-slate-300 border-slate-200 cursor-not-allowed'
+                    : 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100'
+                }`}
+              >
+                ◀ 이전 (←)
+              </button>
 
-                  {/* 인라인 수정 폼 (`수정` 버튼 또는 M키 클릭 시 표시) */}
-                  {isEditing && (
-                    <div
-                      onClick={(e) => e.stopPropagation()}
-                      className="mt-3 p-3.5 rounded-xl bg-teal-50/60 border border-teal-300 space-y-3 text-xs"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-extrabold text-teal-900 text-xs sm:text-sm">
-                          ✏️ 해답 및 문항 내용 수정 (Enter: 저장 / Esc: 취소)
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-slate-600 mr-1">
-                            정답 판정:
-                          </span>
-                          {(['O', 'X'] as const).map((ox) => (
-                            <button
-                              key={ox}
-                              type="button"
-                              onClick={() =>
-                                setEditDraft((prev) => ({
-                                  ...prev,
-                                  answer: ox,
-                                }))
-                              }
-                              className={`px-2.5 py-1 rounded-md font-extrabold border transition ${
-                                editDraft.answer === ox
-                                  ? ox === 'O'
-                                    ? 'bg-emerald-600 text-white border-emerald-600'
-                                    : 'bg-rose-600 text-white border-rose-600'
-                                  : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
-                              }`}
-                            >
-                              {ox}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setBoxShowExplanation((prev) => ({
+                      ...prev,
+                      [currentBox.id]: !prev[currentBox.id],
+                    }))
+                  }
+                  className="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-slate-100 text-slate-700 hover:bg-slate-200"
+                >
+                  {boxShowExplanation[currentBox.id] ? '해답 숨기기' : '해답 보기'}
+                </button>
+                <button
+                  type="button"
+                  onClick={generateBoxQuestions}
+                  className="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold bg-white text-slate-700 border border-slate-300 hover:bg-slate-100"
+                >
+                  새로 섞기 (N)
+                </button>
+              </div>
 
-                      {/* 1. 해답 (빨간 캡슐에 표시되는 핵심 해답) */}
-                      <div className="space-y-1">
-                        <label className="block font-bold text-slate-700">
-                          해답 (정답 캡슐 표시 내용)
-                        </label>
-                        <input
-                          type="text"
-                          autoFocus
-                          value={editDraft.correctAnswer}
-                          onChange={(e) =>
-                            setEditDraft((prev) => ({
-                              ...prev,
-                              correctAnswer: e.target.value,
-                            }))
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && !e.shiftKey) {
-                              e.preventDefault();
-                              handleSaveEdit(item.id);
-                            } else if (e.key === 'Escape') {
-                              handleCancelEdit();
-                            }
-                          }}
-                          placeholder="예: 보건복지부장관(X) → 공단 이사장"
-                          className="w-full px-3 py-2 rounded-lg border border-teal-300 bg-white text-slate-900 text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-teal-500"
-                        />
-                      </div>
+              <button
+                type="button"
+                onClick={goNextQuestion}
+                disabled={currentBoxIdx >= boxList.length - 1}
+                className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-extrabold border transition ${
+                  currentBoxIdx >= boxList.length - 1
+                    ? 'bg-slate-50 text-slate-300 border-slate-200 cursor-not-allowed'
+                    : 'bg-slate-900 text-white border-slate-900 hover:bg-slate-800'
+                }`}
+              >
+                다음 (→) ▶
+              </button>
+            </div>
 
-                      {/* 2. 문제 지문 수정 */}
-                      <div className="space-y-1">
-                        <label className="block font-bold text-slate-700">
-                          문제 지문
-                        </label>
-                        <textarea
-                          rows={2}
-                          value={editDraft.question}
-                          onChange={(e) =>
-                            setEditDraft((prev) => ({
-                              ...prev,
-                              question: e.target.value,
-                            }))
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') handleCancelEdit();
-                          }}
-                          className="w-full px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-900 text-xs sm:text-sm leading-relaxed focus:outline-none focus:ring-2 focus:ring-teal-500"
-                        />
-                      </div>
-
-                      {/* 3. 폴더/세부분류 수정 */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <div className="space-y-1">
-                          <label className="block font-bold text-slate-700">
-                            카테고리(폴더)
-                          </label>
-                          <input
-                            type="text"
-                            value={editDraft.category}
-                            onChange={(e) =>
-                              setEditDraft((prev) => ({
-                                ...prev,
-                                category: e.target.value,
-                              }))
-                            }
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                handleSaveEdit(item.id);
-                              } else if (e.key === 'Escape') {
-                                handleCancelEdit();
-                              }
-                            }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="block font-bold text-slate-700">
-                            세부 분류 (조문/주제)
-                          </label>
-                          <input
-                            type="text"
-                            value={editDraft.subCategory}
-                            onChange={(e) =>
-                              setEditDraft((prev) => ({
-                                ...prev,
-                                subCategory: e.target.value,
-                              }))
-                            }
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                handleSaveEdit(item.id);
-                              } else if (e.key === 'Escape') {
-                                handleCancelEdit();
-                              }
-                            }}
-                            className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-end gap-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={(e) => handleCancelEdit(e)}
-                          className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-600 border border-slate-300 hover:bg-slate-100 transition"
-                        >
-                          취소 (Esc)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => handleSaveEdit(item.id, e)}
-                          className="px-4 py-1.5 rounded-lg text-xs font-extrabold bg-teal-600 text-white hover:bg-teal-700 shadow-xs transition"
-                        >
-                          저장하기 (Enter)
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 상세 해설 영역 (`상세 해설` 버튼 또는 E키 클릭 시 표시) */}
-                  {isExpOpen && !isEditing && (
-                    <div className="mt-3 p-3.5 rounded-lg bg-amber-50/60 border border-amber-200 text-xs text-slate-800 space-y-1.5">
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <div className="flex items-center gap-2 flex-wrap font-bold text-amber-900">
-                          <span>
-                            💡 오답 수정 · 정답 확인 (정답: {item.answer})
-                          </span>
-                          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">
-                            바른 표현: {item.correctAnswer}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={(e) => handleStartEdit(item, e)}
-                          className="px-2.5 py-1 rounded-md text-xs font-bold bg-white text-amber-900 border border-amber-300 hover:bg-amber-100 transition"
-                        >
-                          ✏️ 내용 수정
-                        </button>
-                      </div>
-                      <div className="text-slate-700 whitespace-pre-line leading-relaxed">
-                        [정답·수정] {item.correctAnswer}
-                      </div>
-                      {item.explanation &&
-                        item.explanation !== item.correctAnswer && (
-                          <div className="text-slate-700 whitespace-pre-line leading-relaxed">
-                            [상세해설] {item.explanation}
-                          </div>
-                        )}
-                      {item.subCategory && (
-                        <div className="text-slate-600">
-                          [분류] {item.subCategory}
-                        </div>
-                      )}
-                      {item.source && (
-                        <div className="text-slate-500">
-                          [출처] {item.source}
-                        </div>
-                      )}
-                    </div>
-                  )}
+            {/* 박스형 하단 해답 영역 */}
+            {boxShowExplanation[currentBox.id] && (
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs sm:text-sm">
+                <div className="font-extrabold text-slate-900">
+                  정답: {currentBox.correctCount}개
                 </div>
-              );
-            })
-          )}
-        </div>
+                <div className="space-y-1.5 pt-1">
+                  {currentBox.subItems.map((sub, sIdx) => (
+                    <div key={sIdx} className="text-slate-700 leading-relaxed">
+                      <span
+                        className={`font-extrabold mr-1.5 ${
+                          sub.effectiveAnswer === 'X'
+                            ? 'text-rose-600'
+                            : 'text-sky-700'
+                        }`}
+                      >
+                        {sub.label}. ({sub.effectiveAnswer})
+                      </span>
+                      <span>{sub.shortCorrection}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )
       )}
     </div>
   );
